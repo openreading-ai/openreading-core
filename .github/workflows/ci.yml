@@ -5,6 +5,11 @@ on:
     branches: [main, build]
   pull_request:
 
+# Least privilege: nothing here writes to the repo. Artifacts and the step summary need no
+# contents:write. Fork PRs get a read-only token anyway; this makes same-repo runs match.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -62,30 +67,32 @@ jobs:
 
       # Coverage is *enforced* inside `make verify` (--cov-fail-under in the Makefile) on every
       # leg above; this step only reports the measured number where people look. The README
-      # badge states the enforced floor rather than this measurement: the repo is private, so a
-      # hosted badge endpoint (gh-pages + shields, the cuttlefish pattern) cannot be fetched,
-      # and a badge that promises a number the gate does not guarantee would be a lie. When the
-      # measurement sits 2+ points above the floor the notice below says so — raise
-      # --cov-fail-under and the README badge together (tests/test_docs_policy.py pins them).
-      # One leg only: the number is not interpreter-dependent, and four copies would just race
-      # to write the same summary.
+      # badge states the enforced floor rather than this measurement, because a badge that
+      # promises a number the gate does not guarantee would be a lie; a hosted measured badge
+      # (gh-pages coverage.json + shields, the cuttlefish pattern) is a later option. The number
+      # reported is the SAME total the gate checks — coverage's combined line+branch figure via
+      # `coverage report --format=total` (pyproject sets `branch = true`; the XML's `line-rate`
+      # is line-only and would overstate headroom). When it sits 2+ points above the floor the
+      # notice below says so — raise --cov-fail-under and the README badge together
+      # (tests/test_docs_policy.py pins them). One leg only: the number is not
+      # interpreter-dependent, and four copies would just race to write the same summary.
       - name: Coverage summary (3.12 leg)
         if: matrix.python-version == '3.12'
         run: |
           uv run coverage xml -o coverage.xml
-          PCT=$(uv run python -c "import xml.etree.ElementTree as E; print(round(float(E.parse('coverage.xml').getroot().get('line-rate')) * 100, 1))")
+          PCT=$(uv run coverage report --format=total --precision=1)
           FLOOR=$(sed -nE 's/.*--cov-fail-under=([0-9]+).*/\1/p' Makefile)
           {
             echo "## Coverage"
             echo ""
-            echo "**${PCT}%** line coverage on Python 3.12 (gate: >= ${FLOOR}%, enforced by \`make verify\` on every leg)."
+            echo "**${PCT}%** coverage (lines + branches) on Python 3.12 (gate: >= ${FLOOR}%, enforced by \`make verify\` on every leg)."
           } >> "$GITHUB_STEP_SUMMARY"
           echo "coverage: ${PCT}% (floor ${FLOOR}%)"
           uv run python -c "import sys; p, f = float('${PCT}'), float('${FLOOR}'); sys.stdout.write(f'::notice title=Coverage floor can be raised::measured {p}% is {p - f:.1f} points above the {f:.0f}% floor - raise --cov-fail-under in the Makefile and the README badge together\n') if p - f >= 2 else None"
 
       - name: Upload coverage.xml
         if: matrix.python-version == '3.12'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-xml
           path: coverage.xml

@@ -6,6 +6,16 @@ name: Live
 on:
   workflow_dispatch:
 
+# Runs with real provider secrets in its environment; the repo token still needs read only.
+permissions:
+  contents: read
+
+# Two manual dispatches would hit the same real backends (and the same Textract S3 bucket)
+# at once; queue them instead.
+concurrency:
+  group: live
+  cancel-in-progress: false
+
 jobs:
   verify-live:
     runs-on: ubuntu-latest

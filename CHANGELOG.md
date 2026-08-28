@@ -52,7 +52,7 @@ had pinned an import path or a schema `$id`.
 
 ### Descriptors — non-secret config moved out of `credentials_spec`
 
-`ADDING_ADAPTERS.md` has always said endpoints, regions, and resource ids are ConfigFields, but
+the `openreading.adapters` docstring (formerly ADDING_ADAPTERS.md) has always said endpoints, regions, and resource ids are ConfigFields, but
 three adapters declared them as non-secret `CredentialField`s. They now sit in `config_spec`, so
 they resolve into `ctx.runtime` (overridable per request) instead of `ctx.credentials`, and
 `ctx.credentials` holds only true secrets. **Env var names, the readiness table's MISSING set, and

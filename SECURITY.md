@@ -23,7 +23,7 @@ those. We are especially interested in reports of:
   through a strategy construct, a fallback chain, a route, or a descriptor field that lies.
 - **Credential leakage** — a key appearing anywhere other than the outbound request to its own
   backend: logs, error messages, recorded fixtures, `backend_raw`, the ledger journal, the
-  web UI, a comparison report.
+  HTTP server's responses, a comparison report.
 - **Document exfiltration** — document bytes leaving the machine on a path the request did not
   ask for (a "local" backend that phones home, a liveness probe that submits content, a batch
   path that uploads when it should not).
