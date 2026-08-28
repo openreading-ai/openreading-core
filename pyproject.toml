@@ -60,7 +60,7 @@ dev = [
     # Pinned exactly: `ruff format` output changes between minor versions, and a company workspace
     # that resolves this package alongside others must format identically to this repo's own CI.
     # Bump deliberately, in a commit that also reformats.
-    "ruff==0.15.22",
+    "ruff==0.16.4",
     "pyright>=1.1.380",
     "mypy>=1.11",
     # adapter runtime deps needed to EXECUTE local-library adapters in tests. These are dev-only
