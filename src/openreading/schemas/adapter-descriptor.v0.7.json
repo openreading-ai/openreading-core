@@ -1,0 +1,525 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/adapter-descriptor.v0.7.json",
+  "title": "AdapterDescriptor",
+  "description": "v0.7 (Ledger T4a, AC-8) adds the optional `protocol_version` integer — the adapter-contract version this descriptor's adapter implements (1 = pre-Ledger-T4a shape, 2 = poll/resolve_webhook/cancel take ctx and cache no client on self). Optional here (unlike the pydantic AdapterDescriptor model, which requires it with no default) so this schema stays additive over v0.6: a v0.6 descriptor — in this repo or a third party's — remains valid without a code change on the wire-format side; the pydantic model is what actually enforces every in-process adapter registration declares it by name (AC-8's own registration-time requirement lives in router/registry.py's Registry.register(), not in this schema).",
+  "type": "object",
+  "required": [
+    "id",
+    "type",
+    "provisioning",
+    "wait_modes",
+    "capabilities",
+    "cost",
+    "compliance",
+    "runtime"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "registry slug, e.g. 'aws-textract'"
+    },
+    "type": {
+      "enum": [
+        "hosted_api",
+        "oss_library",
+        "framework_loader",
+        "self_hosted_model"
+      ]
+    },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "sub-ops with distinct schemas/costs: Textract Detect|Analyze[Document|Expense|ID|Lending]"
+    },
+    "adapter_impl": {
+      "enum": [
+        "http",
+        "in_process",
+        "subprocess",
+        "container"
+      ]
+    },
+    "provisioning": {
+      "type": "object",
+      "properties": {
+        "byo_mode": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "api_key",
+              "cloud_credential",
+              "pip",
+              "container",
+              "weights",
+              "endpoint"
+            ]
+          }
+        },
+        "auth": {
+          "enum": [
+            "none",
+            "api_key",
+            "sigv4",
+            "oauth2",
+            "entra",
+            "gcp_adc"
+          ]
+        },
+        "billing_target": {
+          "enum": [
+            "caller_account",
+            "openreading",
+            "caller_infra"
+          ]
+        }
+      }
+    },
+    "wait_modes": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "inline",
+          "poll",
+          "webhook"
+        ]
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "description": "each value: 'verified' | 'claimed' | false. verified = live-run/benchmark; claimed = vendor doc only.",
+      "properties": {
+        "ocr": {},
+        "handwriting": {},
+        "printed_tables": {},
+        "complex_tables": {},
+        "forms_key_value": {},
+        "layout": {},
+        "reading_order": {},
+        "multi_column": {},
+        "figures_charts": {},
+        "signatures": {},
+        "classification": {},
+        "splitting": {},
+        "custom_schema_extraction": {},
+        "vlm_based": {},
+        "human_in_the_loop": {},
+        "languages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "input_formats": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "max_pages_per_request": {
+          "type": [
+            "integer",
+            "string"
+          ]
+        },
+        "max_file_size": {
+          "type": "string"
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "properties": {
+        "paradigms": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "markdown",
+              "typed_fields",
+              "element_list",
+              "block_tree",
+              "block_graph",
+              "token_stream"
+            ]
+          }
+        },
+        "channels": {
+          "description": "per response channel: 'N' native | 'D' derivable | 'X' impossible (matrix grades, normalized_schema.md \u00a74)",
+          "type": "object",
+          "properties": {
+            "markdown": {},
+            "text": {},
+            "blocks": {},
+            "block_bbox": {},
+            "block_confidence": {},
+            "typed_fields": {},
+            "table_cells": {}
+          }
+        },
+        "block_granularity": {
+          "enum": [
+            "word",
+            "line",
+            "paragraph",
+            "section",
+            "element"
+          ],
+          "description": "Optional hint: the native granularity of this backend's blocks so consumers and compare can reason about packaging differences instead of discovering them empirically (\u00a74.3)."
+        }
+      }
+    },
+    "cost": {
+      "type": "object",
+      "properties": {
+        "native_unit": {
+          "enum": [
+            "page",
+            "credit",
+            "token",
+            "doc",
+            "gpu_second",
+            "cpu_second",
+            "subscription"
+          ]
+        },
+        "usd_per_page_equiv_low": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "usd_per_page_equiv_high": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "basis": {
+          "enum": [
+            "billed",
+            "estimated",
+            "infra_only",
+            "unknown"
+          ]
+        },
+        "lossiness": {
+          "enum": [
+            "none",
+            "page-def",
+            "per-doc",
+            "credit",
+            "subscription"
+          ]
+        }
+      }
+    },
+    "compliance": {
+      "type": "object",
+      "properties": {
+        "hipaa_baa": {
+          "enum": [
+            "yes",
+            "tier_gated",
+            "no",
+            "na_local"
+          ]
+        },
+        "soc2": {},
+        "gdpr": {},
+        "pci": {},
+        "data_region_options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "data_retention": {
+          "type": "string"
+        },
+        "trains_on_customer_data": {
+          "enum": [
+            "yes",
+            "no",
+            "opt_out",
+            "na_local",
+            "unverified"
+          ]
+        },
+        "runs_fully_local": {
+          "type": "boolean"
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "offline_capable": {
+          "type": "boolean"
+        },
+        "license": {
+          "type": "string"
+        },
+        "system_deps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "version_pin": {
+          "type": "string"
+        },
+        "hardware": {
+          "enum": [
+            "cpu",
+            "gpu_small",
+            "gpu_mid",
+            "gpu_large",
+            "managed"
+          ]
+        },
+        "vram_class": {
+          "enum": [
+            "cpu",
+            "le8",
+            "le28",
+            "ge40",
+            "na"
+          ]
+        },
+        "cold_start_s": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "serving": {
+          "enum": [
+            "transformers",
+            "vllm",
+            "ollama",
+            "sglang",
+            "remote_endpoint",
+            "na"
+          ]
+        },
+        "sandbox": {
+          "enum": [
+            "in_process",
+            "subprocess",
+            "container"
+          ]
+        }
+      }
+    },
+    "router": {
+      "type": "object",
+      "properties": {
+        "normalization_difficulty": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "integration_priority": {
+          "enum": [
+            "P0",
+            "P1",
+            "P2"
+          ]
+        },
+        "priority_reason": {
+          "type": "string"
+        }
+      }
+    },
+    "credentials_spec": {
+      "type": "array",
+      "description": "v0.2 \u2014 secrets/credentials the adapter reads from ctx.credentials.values. The env broker resolves each from `env` in precedence order.",
+      "items": {
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "secret": {
+            "type": "boolean"
+          },
+          "env": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": {
+            "type": "string"
+          },
+          "example": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "config_spec": {
+      "type": "array",
+      "description": "v0.2 \u2014 non-secret config the adapter reads from ctx.runtime (endpoint, model, processor id, region).",
+      "items": {
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "env": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": {
+            "type": "string"
+          },
+          "example": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "signup_url": {
+      "type": "string",
+      "description": "v0.2 \u2014 where a user provisions credentials for this backend."
+    },
+    "accepts_url": {
+      "type": "boolean",
+      "description": "v0.2 \u2014 backend natively ingests document.url (else the caller downloads it first)."
+    },
+    "live_gate_env": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "v0.2 \u2014 env vars whose presence gates the live test (explicit for ambient-chain backends)."
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "accessed": {
+            "type": "string"
+          },
+          "supports": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "batch": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "v0.4 \u2014 native batch intake. Absent => platform batching (the runner fans out single-document runs). Present with native truthy => the adapter accepts a whole item list via submit_many/normalize_many.",
+      "properties": {
+        "native": {
+          "enum": [
+            "verified",
+            "claimed",
+            false
+          ],
+          "description": "Grade of native multi-document submission. false (or absent) => platform batching only."
+        },
+        "max_items": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "description": "Provider's per-batch cap."
+        },
+        "max_concurrency": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "description": "Platform-batching concurrency cap when native is false (e.g. CPU-bound locals)."
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Transport constraints (GCS/blob staging, completion windows)."
+        }
+      }
+    },
+    "liveness": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "v0.5 \u2014 liveness-probe declaration. Absent (or probe='none') => this backend implements no liveness probe, and the platform infers a status from configuration instead (configured_unverified / not_configured). Present with probe != 'none' => the adapter implements the optional LivenessProbeAdapter method and it may be called. Statically readable with no call, so a UI can say 'cannot be tested' \u2014 or 'checking this leaves your network' \u2014 before probing anything.",
+      "properties": {
+        "probe": {
+          "enum": [
+            "none",
+            "local",
+            "endpoint",
+            "vendor"
+          ],
+          "description": "What performing the probe actually does. 'none' (default) = no probe. 'local' = in-process/subprocess, no network. 'endpoint' = network, to infrastructure the CALLER operates (self-hosted container / model server) \u2014 does not leave their network. 'vendor' = network, to a third party \u2014 it does, and may count against a rate limit. A probe is NEVER a billed request in any kind: a vendor with no free liveness call declares 'none' and takes the inferred status instead."
+        },
+        "method": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "What the probe does, for humans and logs: 'GET /health', 'GET /v1/models', 'import fitz'."
+        },
+        "timeout_s": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0,
+          "description": "The adapter's own recommended bound. The caller still applies its own ceiling."
+        },
+        "notes": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Caveats worth stating: rate-limit interaction, cold-start behaviour, what a healthy answer proves."
+        }
+      }
+    },
+    "idempotency_supported": {
+      "type": "boolean",
+      "default": true,
+      "description": "v0.6 (BL-166) — true iff this adapter forwards a caller/OpenReading-supplied idempotency key to the vendor in a form the vendor actually honors on a retried submit. false is an honest declaration for a vendor with no such mechanism — OpenReading never invents a token the vendor would silently ignore."
+    },
+    "cancel_supported": {
+      "type": "boolean",
+      "default": true,
+      "description": "v0.6 (BL-164) — true iff this adapter's cancel() actually stops the job at the vendor, not merely locally. false is an honest declaration so `on_win: cancel` prices its effect truthfully instead of implying a stop it cannot produce."
+    },
+    "protocol_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "v0.7 (Ledger T4a, AC-8) — the adapter-contract version this descriptor's adapter implements. 1 = pre-Ledger-T4a shape (poll/resolve_webhook/cancel take no ctx; an adapter MAY cache a client on self). 2 = Ledger T4a shape (poll/resolve_webhook/cancel take ctx: RunContext; no built-in client is ever cached on self). Not in `required` here — this schema stays additive over v0.6 — but the pydantic AdapterDescriptor model requires it with no default, and router/registry.py's Registry.register() refuses to register a descriptor declaring a version below the router's own current floor."
+    }
+  }
+}

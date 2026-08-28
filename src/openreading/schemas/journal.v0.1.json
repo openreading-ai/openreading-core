@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/journal.v0.1.json",
+  "title": "OpenReading Journal Record v0.1",
+  "description": "One line of a run's JSONL journal (internal/design/ledger.md §6, §11). T1's JsonlJournal writes exactly one JournalRecord per Journal.append call, and a leaf's full history under one step_id is [attempted, <terminal>] in append order (§8, resolving Phase A round-2 F1 — Journal.get(key) returns every record at a key, never a single value). Self-contained (does not $ref step.v0.1.json) per this repo's existing per-family schema convention — the shape mirrors StepResult deliberately, since T1 journals a StepResult verbatim with no separate envelope.",
+  "$defs": {
+    "BlobRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "digest", "size_bytes", "media_type"],
+      "properties": {
+        "run_id": { "type": "string" },
+        "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "media_type": { "type": "string" },
+        "store": { "type": ["string", "null"] }
+      }
+    },
+    "StepError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "taxonomy"],
+      "properties": {
+        "code": { "type": "string" },
+        "taxonomy": { "type": "string" },
+        "detail": { "type": ["string", "null"] }
+      }
+    },
+    "StepCost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["usd"],
+      "properties": {
+        "usd": { "type": "number", "minimum": 0 },
+        "basis": { "type": ["string", "null"] }
+      }
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["step_id", "status", "attempt"],
+  "properties": {
+    "step_id": { "type": "string" },
+    "status": { "enum": ["attempted", "ok", "skipped", "retryable", "failed", "cancelled", "replayed"] },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "run_id": { "type": ["string", "null"] },
+    "step_path": { "type": ["string", "null"] },
+    "step_seq": { "type": ["integer", "null"] },
+    "backend_id": { "type": ["string", "null"] },
+    "idempotency_key": { "type": ["string", "null"] },
+    "content_key": { "type": ["string", "null"] },
+    "payload": {
+      "anyOf": [
+        { "$ref": "#/$defs/BlobRef" },
+        { "type": ["object", "array", "string", "number", "boolean", "null"] }
+      ]
+    },
+    "error": { "anyOf": [{ "$ref": "#/$defs/StepError" }, { "type": "null" }] },
+    "cost": { "anyOf": [{ "$ref": "#/$defs/StepCost" }, { "type": "null" }] },
+    "started_epoch_ms": { "type": ["integer", "null"] },
+    "ended_epoch_ms": { "type": ["integer", "null"] },
+    "resolved_version": { "type": ["string", "null"] },
+    "journal_seq": { "type": ["integer", "null"], "description": "Ledger T3 (§4.1/§7.4): a per-run monotonic append count, assigned by Journal.append — the record's own replay-stable completion order." }
+  }
+}

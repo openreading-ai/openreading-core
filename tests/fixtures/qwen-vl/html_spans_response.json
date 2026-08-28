@@ -1,0 +1,20 @@
+{
+  "id": "chatcmpl-spans",
+  "object": "chat.completion",
+  "model": "Qwen/Qwen3-VL-8B-Instruct",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "<html><body><div class=\"table\" data-bbox=\"100 100 500 400\"><table><tr><th>Region</th><th>Q1</th><th>Q2</th></tr><tr><td rowspan=\"2\">North</td><td>100</td><td>200</td></tr><tr><td>150</td><td>250</td></tr></table></div></body></html>"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1100,
+    "completion_tokens": 140,
+    "total_tokens": 1240
+  }
+}

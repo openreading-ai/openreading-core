@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/batch-result.v0.1.json",
+  "title": "OpenReading Batch Result v0.1",
+  "description": "The output of a batch run (Manifest v0.6): one envelope covering many documents. Composes the single-document contract — each succeeded item's `response` is a full response.v0.3 envelope (validated independently, M9) — without changing it. Items appear in input order; skips/failures are recorded honestly per item, never silently dropped (deliver-or-warn, M6). schema_version is a per-version const (Canon §8 response-family rule).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "items", "summary"],
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": {
+        "state": {
+          "enum": ["succeeded", "partial", "failed"],
+          "description": "CLOSED enum. succeeded = zero failed items and >=1 succeeded; partial = some succeeded, some failed; failed = zero succeeded (all failed, or everything skipped)."
+        }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Echo of the batch-level ask, for provenance/replay.",
+      "properties": {
+        "backend": { "type": "string", "description": "'reducto' | 'auto' | 'strategy:<name>'." },
+        "strategy": { "type": ["string", "null"] },
+        "jobs": { "type": "integer", "minimum": 1 },
+        "source_args": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "items": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/BatchItem" }
+    },
+    "summary": { "$ref": "#/$defs/BatchSummary" },
+    "warnings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/BatchWarning" }
+    }
+  },
+  "$defs": {
+    "BatchItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "state"],
+      "properties": {
+        "source": { "$ref": "#/$defs/SourceRef" },
+        "state": {
+          "enum": ["succeeded", "failed", "skipped"],
+          "description": "CLOSED enum. succeeded → `response` populated; failed → `error` populated; skipped → `skip_reason` populated."
+        },
+        "response": {
+          "type": ["object", "null"],
+          "description": "A full response.v0.3 envelope when state=succeeded (validated independently per M9); null otherwise. Opaque here to keep the batch schema self-contained (no cross-file $ref)."
+        },
+        "error": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "code": { "type": "string" },
+            "message": { "type": "string" }
+          }
+        },
+        "skip_reason": {
+          "enum": ["unsupported_format", "unknown_format", null],
+          "description": "CLOSED enum (+null). Why an intake file was not processed (M3)."
+        },
+        "transport": {
+          "enum": ["platform", "native", null],
+          "description": "CLOSED enum (+null). How the item was executed — platform fan-out or native batch (M10)."
+        }
+      }
+    },
+    "SourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["filename", "format"],
+      "description": "Identity of one intake source. `relpath` (path relative to an expanded directory root) is the stable cross-run pairing key for corpus compare; `sha256` is the content-hash identity fallback.",
+      "properties": {
+        "path": { "type": ["string", "null"] },
+        "url": { "type": ["string", "null"] },
+        "relpath": { "type": ["string", "null"] },
+        "filename": { "type": "string" },
+        "format": { "type": "string", "description": "Extension-derived, lowercased." },
+        "mime_type": { "type": ["string", "null"] },
+        "size_bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "sha256": { "type": ["string", "null"] }
+      }
+    },
+    "BatchSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "succeeded", "failed", "skipped"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "succeeded": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 },
+        "duration_ms": { "type": ["number", "null"], "minimum": 0 },
+        "cost_usd": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "Sum over items that reported a cost; absent (null) if none did (M8 — no fake precision)."
+        },
+        "cost_bases": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Distinct cost bases observed across items (e.g. ['estimated','metered'])."
+        },
+        "pages_processed": { "type": ["integer", "null"], "minimum": 0 },
+        "backends": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 },
+          "description": "Per-item backend tally (matters for `auto` batches with heterogeneous routing)."
+        }
+      }
+    },
+    "BatchWarning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code"],
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

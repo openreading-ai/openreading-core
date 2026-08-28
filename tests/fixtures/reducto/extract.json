@@ -1,0 +1,28 @@
+{
+  "job_id": "job_extract_1",
+  "usage": {
+    "num_pages": 1,
+    "credits": 2.0
+  },
+  "result": {
+    "data": {
+      "invoice_total": "128.50",
+      "vendor": "Acme Supplies"
+    },
+    "citations": {
+      "invoice_total": [
+        {
+          "page": 1,
+          "content": "$128.50",
+          "bbox": {
+            "left": 0.6,
+            "top": 0.8,
+            "width": 0.1,
+            "height": 0.02,
+            "page": 1
+          }
+        }
+      ]
+    }
+  }
+}

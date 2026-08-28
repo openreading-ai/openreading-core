@@ -1,0 +1,49 @@
+name: Live
+
+# Manual-only: exercises the REAL backends. Each live test skips cleanly unless its backend's
+# secrets are present (skip_unless_creds), so this is safe to run even with no secrets configured —
+# it will simply skip everything. Never runs on push/PR (that's the offline `CI` workflow).
+on:
+  workflow_dispatch:
+
+jobs:
+  verify-live:
+    runs-on: ubuntu-latest
+    # More generous than the offline jobs since this fans out across nine live backends serially,
+    # but still bounded well short of GitHub's 360-minute default (BL-56) — a hung provider call or
+    # stuck poll/retry loop shouldn't sit on a runner indefinitely with real secrets live.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Sync (all extras + dev)
+        run: uv sync --locked --all-extras --dev
+
+      - name: make verify-live (keyed; skips backends whose secrets are absent)
+        run: make verify-live
+        env:
+          REDUCTO_API_KEY: ${{ secrets.REDUCTO_API_KEY }}
+          CHUNKR_API_KEY: ${{ secrets.CHUNKR_API_KEY }}
+          PULSE_API_KEY: ${{ secrets.PULSE_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          NUEXTRACT_API_KEY: ${{ secrets.NUEXTRACT_API_KEY }}
+          OPENOCR_API_KEY: ${{ secrets.OPENOCR_API_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          OPENREADING_TEXTRACT_S3_BUCKET: ${{ secrets.OPENREADING_TEXTRACT_S3_BUCKET }}
+          AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT: ${{ secrets.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT }}
+          AZURE_DOCUMENT_INTELLIGENCE_KEY: ${{ secrets.AZURE_DOCUMENT_INTELLIGENCE_KEY }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_PROCESSOR_ID: ${{ secrets.GCP_PROCESSOR_ID }}
+          # google-document-ai also needs GOOGLE_APPLICATION_CREDENTIALS pointing at a service-account
+          # JSON file; write it from a secret in a real deployment (skipped cleanly if unset).

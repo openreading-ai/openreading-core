@@ -1,0 +1,576 @@
+"""World-consistency validation for a strategy config (spec.md §9).
+
+The JSON Schema (checked in the loader) owns the grammar — bare-number durations, missing route
+`default`, `decide` `among` < 2, `with:` outside its allow-list, `on_error` naming `compliance`,
+thresholds out of domain, unknown predicate/fact keys. This module owns everything the schema
+*cannot* express: cross-references (unknown backends and `use`/`extends` targets), cycles,
+`decide` `otherwise` membership, per-backend gate bindability, parallel same-backend collisions,
+and the warning set (shadowing, deadline/timeout clamps, race-gate mismatches, policy-unreachable
+steps).
+
+Location is by file + node **path** (e.g. `strategies.cheap.steps[0].escalate_if`). Line-precise
+location is a documented follow-up (D-v3-8): it needs a mark-preserving YAML loader, and the node
+path already satisfies the Elm-doctrine "locate" requirement.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from typing import Any
+
+from openreading.adapters.registry import BUILTIN_ADAPTERS, make_adapter
+from openreading.router import compliance as comp
+from openreading.router.compliance import RouterConfig
+from openreading.strategies.model import RawNode, StrategyConfig
+from openreading.strategies.normalize import (
+    NormalizeError,
+    build_library,
+    normalize_strategy,
+)
+from openreading.strategies.plain import ADVANCED_TO_PLAIN, PlainInfo
+from openreading.types.enums import ChannelGrade
+from openreading.types.request import Compliance
+
+_COMPLIANCE_KEYS = (
+    "require_baa",
+    "no_train_on_data",
+    "data_region",
+    "require_local",
+    "max_retention",
+)
+
+_SECRET_KEY_RE = re.compile(
+    r"(?i)(api[_-]?key|secret|token|password|passwd|access[_-]?key|credential|private[_-]?key)"
+)
+_DURATION_RE = re.compile(r"^([0-9]+)(ms|s|m|h)$")
+_DURATION_UNIT_MS = {"ms": 1, "s": 1000, "m": 60_000, "h": 3_600_000}
+
+# gate predicate keys, grouped by what makes them (un)bindable.
+_CONFIDENCE_KEYS = {"confidence_below", "page_confidence_below"}
+_FIELD_CONF_KEY = "field_confidence_below"
+# predicates that are ALWAYS available (Tier-1 + absence-fires) — a gate containing any of these
+# can always fire, so it is never "all-unbindable".
+_ALWAYS_AVAILABLE = {
+    "chars_per_page_below",
+    "empty_pages_over",
+    "garbled",
+    "garble_score_over",
+    "scanned_pages_detected",
+    "text_source",
+    "table_sanity_below",
+    "zero_blocks",
+    "matches_regex",
+    "sample_percent",
+    "warning_code",
+    "fields_required",
+    "doc_type_confidence_below",  # conservative: treat as bindable (classification is fuzzy)
+}
+
+
+@dataclass(frozen=True)
+class ValidationIssue:
+    level: str  # "error" | "warning"
+    path: str
+    message: str  # explains + suggests
+
+    def render(self, source: str) -> str:
+        return f"{self.level.upper()} {source}:{self.path}: {self.message}"
+
+
+class _Ctx:
+    def __init__(
+        self,
+        config: StrategyConfig,
+        library: dict[str, RawNode],
+        policy: dict[str, Any] | None,
+        plain_info: dict[str, PlainInfo] | None = None,
+    ) -> None:
+        self.config = config
+        self.library = library
+        self.policy = policy
+        self.plain_info = plain_info or {}
+        # dialect of the strategy currently being walked (set per-strategy in validate_config); lets
+        # a re-usable check phrase its message in Plain vocabulary only for Plain-dialect strategies.
+        self.current_dialect: str | None = None
+        self.decider_configured = config.decider is not None and config.decider.llm is not None
+        self.issues: list[ValidationIssue] = []
+        # compliance context for the steps-unreachable check (built once).
+        self._compliance: Compliance | None = None
+        self._router_config: RouterConfig | None = None
+        if policy and any(k in policy for k in _COMPLIANCE_KEYS):
+            self._compliance = Compliance(**{k: policy[k] for k in _COMPLIANCE_KEYS if k in policy})
+            self._router_config = RouterConfig(
+                allow_unverified_compliance=bool(policy.get("allow_unverified_compliance", False)),
+                train_optout_confirmed=frozenset(policy.get("train_optout_confirmed", [])),
+                baa_tier_confirmed=frozenset(policy.get("baa_tier_confirmed", [])),
+            )
+
+    def policy_drop(self, desc) -> str | None:
+        """Return a drop reason if the effective policy would filter this backend out, else None."""
+        if self._compliance is None or self._router_config is None:
+            return None
+        dr = comp.evaluate(self._compliance, desc, self._router_config)
+        return dr.code if dr is not None else None
+
+    def err(self, path: str, message: str) -> None:
+        self.issues.append(ValidationIssue("error", path, message))
+
+    def warn(self, path: str, message: str) -> None:
+        self.issues.append(ValidationIssue("warning", path, message))
+
+
+def validate_config(
+    config: StrategyConfig,
+    *,
+    policy: dict[str, Any] | None = None,
+    raw: dict[str, Any] | None = None,
+    plain_info: dict[str, PlainInfo] | None = None,
+) -> list[ValidationIssue]:
+    """Return every world-consistency issue (errors + warnings) for `config`. `policy` is an
+    optional extra compliance context (from `--policy`); `raw` is the pre-model dict, scanned for
+    secret-pattern keys the schema's open sub-trees (`policy`, `with.*`) don't lock down.
+    `plain_info` (from the loader) tags each strategy's dialect so §8 issues on a Plain body are
+    phrased in Plain vocabulary, and surfaces the desugar-computed Plain warnings."""
+    library: dict[str, RawNode]
+    try:
+        library = build_library(config)  # raises on preset-name collision
+    except NormalizeError as e:
+        return [ValidationIssue("error", "strategies", str(e))]
+
+    ctx = _Ctx(config, library, _merged_policy(config, policy), plain_info)
+
+    if raw is not None:
+        _scan_secrets(raw, "", ctx)
+
+    for name in config.strategies:
+        try:
+            tree = normalize_strategy(name, config)  # resolves extends (cycles, unknown base)
+        except NormalizeError as e:
+            ctx.err(f"strategies.{name}", str(e))
+            continue
+        info = ctx.plain_info.get(name)
+        ctx.current_dialect = info.dialect if info else None
+        _check_use_cycles(name, library, (), f"strategies.{name}", ctx)
+        _walk(
+            tree,
+            f"strategies.{name}",
+            ctx,
+            ancestor_deadline_ms=None,
+            ancestor_max_attempts=None,
+        )
+        if info is not None:  # desugar-computed Plain warnings (§8 rows needing the original body)
+            for rel, message in info.warnings:
+                ctx.warn(f"strategies.{name}.{rel}", message)
+
+    return ctx.issues
+
+
+# --------------------------------------------------------------------------- helpers
+
+
+def _merged_policy(config: StrategyConfig, extra: dict[str, Any] | None) -> dict[str, Any] | None:
+    base = dict(config.policy) if config.policy else {}
+    if extra:
+        base.update(extra)  # --policy adds / tightens
+    return base or None
+
+
+def _descriptor(slug: str):
+    if slug not in BUILTIN_ADAPTERS:
+        return None
+    return make_adapter(slug).descriptor
+
+
+def _parse_duration_ms(value: Any) -> int | None:
+    if not isinstance(value, str):
+        return None
+    m = _DURATION_RE.match(value)
+    if not m:
+        return None
+    return int(m.group(1)) * _DURATION_UNIT_MS[m.group(2)]
+
+
+def _scan_secrets(obj: Any, path: str, ctx: _Ctx) -> None:
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(k, str) and _SECRET_KEY_RE.search(k):
+                ctx.err(
+                    f"{path}.{k}" if path else k,
+                    f"key {k!r} looks like a secret; strategy configs never carry credentials — "
+                    "backends resolve keys from the environment (see the openreading.credentials docstring)",
+                )
+            _scan_secrets(v, f"{path}.{k}" if path else str(k), ctx)
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            _scan_secrets(v, f"{path}[{i}]", ctx)
+
+
+# --------------------------------------------------------------------------- reference graph
+
+
+def _check_use_cycles(
+    name: str, library: dict[str, RawNode], seen: tuple[str, ...], path: str, ctx: _Ctx
+) -> None:
+    """Detect `use:` reference cycles (extends cycles are caught by normalize)."""
+    if name in seen:
+        ctx.err(path, f"use reference cycle: {' -> '.join([*seen, name])}")
+        return
+    if name not in library:
+        return
+    for ref in _use_targets(library[name]):
+        if ref == "none":
+            ctx.err(
+                path,
+                "strategy:none is the reserved escape hatch (force the legacy path), "
+                "not a usable strategy node",
+            )
+        elif ref not in library:
+            ctx.err(path, f"unknown strategy reference {ref!r}; define it or fix the name")
+        else:
+            _check_use_cycles(ref, library, (*seen, name), path, ctx)
+
+
+def _use_targets(node: RawNode) -> list[str]:
+    """Strategy names a node references. Distinguishes a reference node `{use: <name>}` (a string
+    and no `when`) from a route rule `{when, use: <node>}`, whose `use` holds a node — a bare
+    backend id there is NOT a strategy reference."""
+    out: list[str] = []
+
+    def walk(n: Any) -> None:
+        if isinstance(n, str):
+            if n.startswith("strategy:"):
+                out.append(n[len("strategy:") :])
+        elif isinstance(n, list):
+            for x in n:
+                walk(x)
+        elif isinstance(n, dict):
+            if "route" in n and isinstance(n["route"], dict):
+                for rule in n["route"].get("rules", []):
+                    walk(rule.get("use"))
+                walk(n["route"].get("default"))
+                for k, v in n.items():
+                    if k != "route":
+                        walk(v)
+                return
+            if "decide" in n and isinstance(n["decide"], dict):
+                for m in n["decide"].get("among", []):
+                    walk(m)
+                walk(n["decide"].get("otherwise"))
+                for k, v in n.items():
+                    if k != "decide":
+                        walk(v)
+                return
+            if isinstance(n.get("use"), str) and "when" not in n:
+                out.append(n["use"])  # reference node (no nested nodes to recurse)
+                return
+            for v in n.values():
+                walk(v)
+
+    walk(node)
+    return out
+
+
+def _dispatchable(node: Any, library: dict[str, RawNode], seen: frozenset[str]) -> set[str]:
+    """Concrete backend ids a node's subtree can dispatch (`auto` excluded; use refs resolved)."""
+    if isinstance(node, str):
+        if node == "auto" or node.startswith("strategy:"):
+            name = node[len("strategy:") :] if node.startswith("strategy:") else None
+            return _dispatchable_ref(name, library, seen) if name else set()
+        return {node}
+    if isinstance(node, list):
+        return set().union(*(_dispatchable(x, library, seen) for x in node)) if node else set()
+    if not isinstance(node, dict):
+        return set()
+    if "backend" in node:
+        b = node["backend"]
+        return set() if b == "auto" else {b}
+    if "use" in node:
+        return _dispatchable_ref(node["use"], library, seen)
+    out: set[str] = set()
+    for key in ("steps", "parallel", "among"):
+        for child in node.get(key, []):
+            out |= _dispatchable(child, library, seen)
+    if "route" in node:
+        for rule in node["route"].get("rules", []):
+            out |= _dispatchable(rule.get("use"), library, seen)
+        out |= _dispatchable(node["route"].get("default"), library, seen)
+    if "decide" in node:
+        for m in node["decide"].get("among", []):
+            out |= _dispatchable(m, library, seen)
+        out |= _dispatchable(node["decide"].get("otherwise"), library, seen)
+    return out
+
+
+def _dispatchable_ref(
+    name: str | None, library: dict[str, RawNode], seen: frozenset[str]
+) -> set[str]:
+    if name is None or name in seen or name not in library:
+        return set()
+    return _dispatchable(library[name], library, seen | {name})
+
+
+# --------------------------------------------------------------------------- tree walk
+
+
+def _walk(
+    node: dict[str, Any],
+    path: str,
+    ctx: _Ctx,
+    *,
+    ancestor_deadline_ms: int | None,
+    ancestor_max_attempts: int | None,
+) -> None:
+    # disagreement_over compares parallel branches (§11) — valid only on a pick:best parallel step.
+    is_best_parallel = "parallel" in node and node.get("pick") == "best"
+    for gk in ("escalate_if", "review_if"):
+        g = node.get(gk)
+        has_disagree = isinstance(g, dict) and any(
+            k == "disagreement_over" for k, _ in _gate_predicate_keys(g)
+        )
+        if has_disagree and not is_best_parallel:
+            ctx.err(
+                f"{path}.{gk}",
+                "disagreement_over compares parallel branches — it only works on a `pick: best`"
+                " parallel step",
+            )
+
+    budget = node.get("budget") or {}
+    node_dur_ms = _parse_duration_ms(budget.get("max_duration"))
+    node_max_attempts = budget.get("max_attempts")
+
+    # child-budget-exceeds-parent warning (clamped at run time)
+    if (
+        node_max_attempts is not None
+        and ancestor_max_attempts is not None
+        and node_max_attempts > ancestor_max_attempts
+    ):
+        ctx.warn(
+            f"{path}.budget",
+            f"max_attempts {node_max_attempts} exceeds the enclosing "
+            f"{ancestor_max_attempts} — it will be clamped down",
+        )
+
+    eff_deadline = _min_opt(node_dur_ms, ancestor_deadline_ms)
+    eff_attempts = _min_opt(node_max_attempts, ancestor_max_attempts)
+    child_kw = dict(
+        ancestor_deadline_ms=eff_deadline,
+        ancestor_max_attempts=eff_attempts,
+    )
+
+    if "backend" in node:
+        _check_leaf(node, path, ctx, eff_deadline)
+    elif "use" in node:
+        pass  # existence + cycles handled by the reference graph
+    elif "steps" in node:
+        _check_cascade(node, path, ctx, child_kw)
+    elif "parallel" in node:
+        _check_parallel(node, path, ctx, child_kw)
+    elif "route" in node:
+        for i, rule in enumerate(node["route"]["rules"]):
+            _walk(rule["use"], f"{path}.route.rules[{i}].use", ctx, **child_kw)
+        _walk(node["route"]["default"], f"{path}.route.default", ctx, **child_kw)
+        _check_shadowed_rules(node["route"]["rules"], path, ctx)
+    elif "decide" in node:
+        _check_decide(node, path, ctx, child_kw)
+
+
+def _min_opt(a: Any, b: Any) -> Any:
+    vals = [x for x in (a, b) if x is not None]
+    return min(vals) if vals else None
+
+
+def _check_leaf(node: dict[str, Any], path: str, ctx: _Ctx, eff_deadline_ms: Any) -> None:
+    slug = node["backend"]
+    if slug == "auto":
+        return
+    desc = _descriptor(slug)
+    if desc is None:
+        ctx.err(
+            f"{path}.backend",
+            f"unknown backend {slug!r}; known: {', '.join(sorted(BUILTIN_ADAPTERS))} (or 'auto')",
+        )
+        return
+    # leaf timeout larger than the effective deadline (clamped)
+    t_ms = _parse_duration_ms(node.get("timeout"))
+    if t_ms is not None and eff_deadline_ms is not None and t_ms > eff_deadline_ms:
+        ctx.warn(
+            f"{path}.timeout",
+            f"per-attempt timeout {node['timeout']} exceeds the effective "
+            "deadline — it will be clamped",
+        )
+    # steps unreachable under the file's own policy (or --policy)
+    drop = ctx.policy_drop(desc)
+    if drop is not None:
+        ctx.warn(
+            f"{path}.backend",
+            f"{slug!r} is filtered out by the policy ({drop}); this step "
+            "can never run in that compliance context — remove it or relax the policy",
+        )
+    # step-position gate bindability + `missing:` on a backend that cannot produce typed fields
+    for gate_key in ("escalate_if", "review_if"):
+        gate = node.get(gate_key)
+        if isinstance(gate, dict):
+            _check_gate_bindable(gate, desc, slug, f"{path}.{gate_key}", ctx)
+            keys = {k for k, _ in _gate_predicate_keys(gate)}
+            if (
+                "fields_required" in keys
+                and desc.output.channels.typed_fields == ChannelGrade.IMPOSSIBLE
+            ):
+                word = "missing" if ctx.current_dialect == "plain" else "fields_required"
+                ctx.warn(
+                    f"{path}.{gate_key}",
+                    f"{word}: {slug!r} cannot produce typed fields, so this criterion fires on "
+                    "every document — this rung will always escalate",
+                )
+    if "review_if" in node and not ctx.decider_configured:
+        ctx.warn(
+            f"{path}.review_if",
+            "review_if is set but no decider is configured; it will "
+            "resolve to review_default. Configure `decider:` + OPENREADING_LLM_DECIDER to use an LLM",
+        )
+
+
+def _gate_predicate_keys(gate: dict[str, Any]) -> list[tuple[str, Any]]:
+    """Flatten a gate's leaf predicates (through one level of any_of/all_of)."""
+    out: list[tuple[str, Any]] = []
+    for k, v in gate.items():
+        if k in ("any_of", "all_of"):
+            for sub in v:
+                out.extend(_gate_predicate_keys(sub))
+        else:
+            out.append((k, v))
+    return out
+
+
+def _predicate_binds(key: str, value: Any, desc) -> bool:
+    """True if a predicate could ever fire on this backend."""
+    if key in _ALWAYS_AVAILABLE:
+        return True
+    # a wrapper with on_missing: escalate fires on absence -> always bindable
+    if isinstance(value, dict) and value.get("on_missing") == "escalate":
+        return True
+    if key in _CONFIDENCE_KEYS:
+        return desc.output.channels.block_confidence != ChannelGrade.IMPOSSIBLE
+    if key == _FIELD_CONF_KEY:
+        if isinstance(value, dict) and value.get("on_missing") == "escalate":
+            return True
+        return desc.output.channels.typed_fields != ChannelGrade.IMPOSSIBLE
+    return True  # unknown / conservative: assume bindable
+
+
+def _check_gate_bindable(gate: dict[str, Any], desc, slug: str, path: str, ctx: _Ctx) -> None:
+    preds = _gate_predicate_keys(gate)
+    if not preds:
+        return
+    # the `default` bundle always contains binding Tier-1 signals, so it is never all-unbindable —
+    # the exemption falls out naturally; still short-circuit an exact-bundle match for clarity.
+    if all(not _predicate_binds(k, v, desc) for k, v in preds):
+        if ctx.current_dialect == "plain":  # re-phrase in the four-word vocabulary (§8)
+            words = ", ".join(sorted({ADVANCED_TO_PLAIN.get(k, k) for k, _ in preds}))
+            ctx.err(
+                path,
+                f"the {words} check can never fire on {slug!r} — it reports no confidence; add a "
+                "criterion that works everywhere, e.g. `looks_bad: true`",
+            )
+            return
+        keys = ", ".join(sorted({k for k, _ in preds}))
+        ctx.err(
+            path,
+            f"gate can never fire on {slug!r}: none of its predicates ({keys}) bind — "
+            f"{slug} emits no confidence. Add an always-available signal such as "
+            "chars_per_page_below or garbled, or set on_missing: escalate",
+        )
+
+
+def _check_cascade(node: dict[str, Any], path: str, ctx: _Ctx, child_kw: dict) -> None:
+    steps = node["steps"]
+    last = len(steps) - 1
+    paged = node.get("granularity") == "page"
+    for i, step in enumerate(steps):
+        spath = f"{path}.steps[{i}]"
+        # granularity:page — a non-first rung whose backend lacks native page-range selection runs
+        # document granularity for that rung (spec §2.7); warn so the author knows the escalation
+        # re-parses the WHOLE doc, not just the failing pages.
+        if paged and i > 0 and isinstance(step, dict) and isinstance(step.get("backend"), str):
+            desc = _descriptor(step["backend"])
+            if desc is not None and not getattr(desc.capabilities, "page_range_selection", False):
+                ctx.warn(
+                    spath,
+                    f"granularity: page but backend {step['backend']!r} lacks native page-range "
+                    "selection — this rung runs document granularity (re-parses the whole doc)",
+                )
+        # a raced final rung whose branches carry their own gates: those branch gates won't run
+        if i == last and step.get("pick") == "fastest":
+            for j, br in enumerate(step.get("parallel", [])):
+                if isinstance(br, dict) and ("escalate_if" in br or "review_if" in br):
+                    ctx.warn(
+                        f"{spath}.parallel[{j}]",
+                        "branch gates are not evaluated under "
+                        "pick: fastest; gate the enclosing cascade step instead",
+                    )
+        _walk(step, spath, ctx, **child_kw)
+
+
+def _check_parallel(node: dict[str, Any], path: str, ctx: _Ctx, child_kw: dict) -> None:
+    branches = node["parallel"]
+    # sibling subtrees that can dispatch the same backend
+    sets = [_dispatchable(br, ctx.library, frozenset()) for br in branches]
+    for a in range(len(sets)):
+        for b in range(a + 1, len(sets)):
+            overlap = sets[a] & sets[b]
+            if overlap:
+                ctx.err(
+                    f"{path}.parallel",
+                    f"branches {a} and {b} can both dispatch "
+                    f"{sorted(overlap)}; duplicate concurrent dispatch is a no-op — remove one",
+                )
+
+    # judged with >3 candidates: the pairwise sweep is 2·(n−1) LLM calls — slow, not cheap
+    if (
+        node.get("judge")
+        and len([b for b in branches if not (isinstance(b, dict) and b.get("shadow"))]) > 3
+    ):
+        ctx.warn(
+            f"{path}",
+            "judged comparison over >3 candidates makes many pairwise LLM calls (single-"
+            "elimination) — it will be slow; consider fewer branches",
+        )
+
+    for i, br in enumerate(branches):
+        _walk(br, f"{path}.parallel[{i}]", ctx, **child_kw)
+
+
+def _check_decide(node: dict[str, Any], path: str, ctx: _Ctx, child_kw: dict) -> None:
+    d = node["decide"]
+    among = d.get("among", [])
+    otherwise = d.get("otherwise")
+    if otherwise is not None and otherwise not in among:
+        ctx.err(
+            f"{path}.decide.otherwise",
+            "otherwise must be one of the among candidates so the "
+            "engine default is always a choice the decider could also make",
+        )
+    if not ctx.decider_configured:
+        ctx.warn(
+            f"{path}.decide",
+            "decide node with no decider configured; it will always take "
+            "otherwise. Configure `decider:` + OPENREADING_LLM_DECIDER to let an LLM choose",
+        )
+    for i, m in enumerate(among):
+        _walk(m, f"{path}.decide.among[{i}]", ctx, **child_kw)
+    if otherwise is not None:
+        _walk(otherwise, f"{path}.decide.otherwise", ctx, **child_kw)
+
+
+def _check_shadowed_rules(rules: list[dict[str, Any]], path: str, ctx: _Ctx) -> None:
+    seen: list[Any] = []
+    for i, rule in enumerate(rules):
+        when = rule.get("when")
+        if any(when == prev for prev in seen):
+            ctx.warn(
+                f"{path}.route.rules[{i}]",
+                "this rule's `when` duplicates an earlier rule "
+                "and can never fire (first match wins); remove or reorder it",
+            )
+        seen.append(when)

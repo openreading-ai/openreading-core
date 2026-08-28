@@ -1,0 +1,1280 @@
+"""Public one-call API — the Python surface contract. The submit→drive→normalize pipeline is
+exposed as `openreading.run()` / `run_batch()` / `route()` / `resume()` and is the single path
+the CLI (`cmd_parse`, `cmd_resume`) and the server (`/v1/parse`, `/v1/batch`, `/v1/jobs`)
+collapse onto, so the three surfaces cannot drift.
+
+    import openreading
+    doc = openreading.run("loan.pdf", backend="reducto")          # named backend
+    doc = openreading.run("loan.pdf", backend="auto", policy=p)   # route + execute the chain
+    doc = openreading.run("loan.pdf", strategy="main")            # == backend="strategy:main"
+    plan = openreading.route("loan.pdf", policy=p)                 # plan only, no execution
+    env = openreading.run_batch(["invoices/"], backend="pymupdf", jobs=4)
+    doc = openreading.resume("r_01J8QK")                          # from the ledger alone
+
+Exports and return shapes
+-------------------------
+- `run(source, backend="auto", *, strategy, config, operation, policy, env_file, mime_type,
+  broker, transport, keep_candidates, deadline_ms, on_run_armed, **request_overrides) -> dict`
+  — a `response.v0.3` envelope. `**request_overrides` are top-level request fields
+  (`outputs`, `extraction_schema`, `features`, `pages`, `idempotency_key`, ...); `document`
+  and `backend` are refused there (`ValueError`, BL-105) because a stray forwarded kwarg once
+  silently ran a request against the wrong document.
+- `run_batch(sources, backend="auto", *, strategy, config, jobs=1, max_jobs=32, max_items=200,
+  deadline_ms, env_file, policy, broker, transport, idempotency_key, keep_candidates,
+  on_progress, on_preflight, **request_overrides) -> dict` — a `batch-result.v0.1` envelope.
+- `route(source, *, policy, operation, mime_type) -> RoutePlan` — `chosen`, `fallbacks`,
+  `dropped` ({backend_id: DropReason}), `terminal_reason`, `chain`, `eligible_ids`.
+- `resume_run(run_id) -> dict` (exported as `openreading.resume`).
+- Lower seams shared with the CLI/server, public by name: `build_request`, `run_request`,
+  `prepare_named_backend`, `materialize_document`, `router_config`.
+
+`source` is a path, an http(s):// URL, or raw bytes — never a request dict. A path's MIME type is
+inferred from its extension (pdf/png/jpg/jpeg/tif/tiff/docx/xlsx/pptx), default
+`application/pdf`; bytes default to PDF unless `mime_type=` says otherwise (D-v2-9). A missing
+path raises `SourceNotFoundError` (an `OSError` with errno ENOENT, so callers format it like a
+real `FileNotFoundError`). URL inputs pass through untouched to backends that ingest URLs
+natively (`descriptor.accepts_url`) and are downloaded to bytes for the rest
+(`materialize_document`, D-v2-13: httpx, 60 s timeout, 100 MB cap, HTTP errors through the
+shared status mapping); offline tests inject an httpx `transport`, and no default path performs
+network I/O.
+
+Backend resolution
+------------------
+`backend` is a registry slug, `"auto"`, or `"strategy:<name>"` — a reserved prefix on the free-
+string `backend.id`, not a wire-schema change (D-v3-2); `strategy=` is sugar for it and
+`"strategy:none"` is the escape hatch to the plain router. `"auto"` runs the compliance-first
+router and executes the resulting chain (`router.executor.execute_plan`); an empty plan raises
+`ComplianceRefused` (the router eliminated every backend — a refusal, not a runtime failure;
+`PlanExhaustedError` is reserved for a non-empty plan whose backends all failed). An
+`openreading.yaml` is discovered ONLY for `auto` / `strategy:` requests (explicit `config=` ->
+`OPENREADING_CONFIG` -> `./openreading.yaml`, first hit wins); `auto` + `defaults.strategy` in
+that file engages the strategy. A plain named-backend run never imports the strategy package at
+all (guardrail T10), so no config file and no strategy means byte-identical legacy behavior. The
+four presets (`cost_saver`, `max_accuracy`, `fast`, `offline_first`) work with no file.
+
+A directly-named backend is still compliance-gated against the request (`Router.check_eligible`
+-> `ComplianceRefused`), then credential-gated (`MissingCredentialsError` naming the exact vars
+plus the descriptor's signup URL) — naming a backend never bypasses the request's own
+constraints, on the single, native-batch, or server path alike.
+
+`policy` dict: compliance keys `require_baa`, `no_train_on_data`, `data_region`,
+`require_local`, `max_retention` become `request.compliance`; `optimize_for`, `doc_type_hint`
+become `request.routing`; `allow_unverified_compliance` (default False = fail closed),
+`train_optout_confirmed`, `baa_tier_confirmed` (lists of backend ids) become the deployment-level
+`RouterConfig` (D7/D7a: the request schema is `extra="forbid"` and these assert an account-level
+fact — an opt-out applied, a tier-gated BAA signed — not a property of one document; a
+confirmation that carried eligibility is echoed as a `baa_tier_confirmed` warning). The
+server-only `OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE` / `OPENREADING_TRAIN_OPTOUT_CONFIRMED` /
+`OPENREADING_BAA_TIER_CONFIRMED` env vars are NOT consulted here; `policy=` is the Python API's
+only spelling of them.
+
+Exceptions
+----------
+`KeyError` unknown backend slug · `ValueError` reserved override · `SourceNotFoundError` ·
+`UnknownStrategyError` (server 400 / CLI exit 2) · `ComplianceRefused` (403 / exit 3) ·
+`MissingCredentialsError` (424 / exit 3) · `PlanExhaustedError` (`auto` only: every rung failed;
+carries the attempt trail) · `TerminalError` (any adapter failure, INCLUDING an unexpected
+exception out of `submit()`/`poll()`/`normalize()`, wrapped after `auth_hinted` redaction so a
+plain KeyError never escapes as an undocumented crash — BL-99/BL-106) · `RetryableError` (a
+directly-named backend's rate-limit exhaustion or a poll loop past its deadline — it has no next
+rung, so it surfaces under its own type; the `auto` path folds the same condition into
+`PlanExhaustedError` via D-v2-7.2) · `batch.runner.JobsLimitError` (`jobs > max_jobs`) ·
+`LookupError` / `ledger.header.HeaderMismatch` / `PayloadExpired` (resume, below).
+
+Time budgets
+------------
+`deadline_ms` on `run()` applies to a DIRECTLY-NAMED backend only (default
+`credentials.DEFAULT_DEADLINE_MS`, 2 minutes — too short for some hosted async flows such as
+Textract's; the CLI's `parse --deadline` is the same knob). `auto` and strategy dispatch manage
+their own per-node budgets. `run_batch(deadline_ms=)` overrides the native-batch budget only
+(default `DEFAULT_NATIVE_BATCH_DEADLINE_MS`, 1 hour — the one dispatch shape that submits one job
+and polls a vendor-side batch documented as "most <1h"). An explicit `0` is honoured as
+"fail fast": resolved values are compared with `is not None`, never `or`, because truthiness once
+silently turned `0` back into the default (BL-138).
+
+No idempotency cache in library calls (D-v3-3): `run()` / the CLI pass `cache=None` so a library
+call always does the work; the server owns the only `BoundedResultCache` and passes it to
+`run_request` for the `auto` chain. Silent 15-minute memoization inside a library call is a
+footgun, and a replayed response would carry the original run's `cost_usd` into a batch total
+nobody was billed for.
+
+Batch semantics (`run_batch`)
+-----------------------------
+Intake is by FORM: files, directories, globs and URLs are resolved (`batch.sources`) against the
+effective format set — a named backend's own `input_formats`, or the union across every READY
+backend for `auto` / `strategy:` — and an unsupported file becomes a `skipped` item with a
+reason, never a crash. `jobs` is bounded BEFORE intake: `<= 0` clamps to 1 (echoed as the
+corrected value), `> max_jobs` raises `JobsLimitError` rather than reaching an unbounded thread
+pool; a named backend may cap it further via `descriptor.batch.max_concurrency` (CPU-bound
+tesseract). `max_items` caps expansion. Dispatch is native iff the whole batch resolved to one
+named backend whose descriptor declares `batch.native`, which implements `NativeBatchAdapter`,
+with >= 1 live item and no more than `batch.max_items`; otherwise platform fan-out composes
+`run()` per item. The envelope is observationally equivalent either way (M10), with
+`items[].transport` saying which. On the platform path a per-item failure is isolated into that
+item's `error` and never raised (M6); on the native path a batch-level failure out of
+`submit_many` / `run_to_completion` / `normalize_many` propagates like a single `run()` error,
+because a named backend has no next rung. `policy` is enforced on the native path too (BL-98):
+every item shares identical compliance, so checking the first stands for the batch.
+
+Environment variables read by this module
+-----------------------------------------
+- `OPENREADING_LEDGER` — a DIRECTORY path. Set: arms the Ledger execution plane
+  (`_arm_ledger` builds an `InlineExecutor` over `<dir>/<run_id>.jsonl` + `blobs/` + `keys/`),
+  which is what makes `resume` possible. Unset: `_arm_ledger` returns `None` and the run takes
+  the zero-delta path (`NullJournal`, no blob store) — byte-identical stdout/stderr/exit code to
+  a build from before the Ledger existed, asserted by test. Deliberately no CLI flag: arming is
+  env and config only (`internal/design/ledger.md` §10). Coverage — `_arm_ledger` has exactly
+  two call sites, `_run_strategy_request` and `resume_run`, so ONLY strategy dispatch journals:
+  `--strategy X`, `auto` + `defaults.strategy`, `/v1/parse` resolving to a strategy, and a
+  `--strategy` batch (one run per item via `run()`). A named backend, `auto` without
+  `defaults.strategy`, `strategy:none`, the `/v1/jobs` store and a NATIVE batch journal nothing
+  while appearing armed — know which row you are on before relying on a run being resumable.
+  Back up `*.jsonl` and `blobs/`, never `keys/` alongside them: erasure works by destroying the
+  per-run key, and holds only to the degree no other copy survives.
+- `OPENREADING_LEDGER_RETENTION_HOURS` — float hours a run's payloads live before the reaper
+  crypto-shreds the key. Default `ledger.retention.DEFAULT_RETENTION_HOURS` (24.0, a
+  placeholder pending a founder decision). Read once at arm time and stamped as an absolute
+  epoch; it is only the STARTING ceiling — `InlineExecutor` tightens it per step from each
+  DISPATCHED backend's own `max_retention_hours` and never widens it (a merely-eligible backend
+  that never dispatches has zero effect; earlier it could collapse the whole run's ceiling to its
+  own strict limit). A ZDR backend on the path suppresses blobs entirely. Raise it BEFORE the
+  run: after the key is reaped, replay reports `payload_expired` and nothing brings the content
+  back. A fresh run also sweeps the whole ledger root at arm time, so stale runs are collected by
+  ordinary use.
+- `env_file=` -> `credentials.load_dotenv`: loads `KEY=VALUE` lines WITHOUT overriding an
+  already-set process variable (an exported shell var always beats the file); a missing file is
+  a no-op. Loaded ONLY when the argument is given (`if env_file:` in `run()` / `run_batch()`):
+  with `env_file=None` — the default — this module reads no file at all, and only the exported
+  environment applies. The `./.env` default belongs to the CLI (`--env-file`) and the company web UI,
+  which call `load_dotenv` themselves; a library call never picks up a cwd file implicitly, so
+  importing openreading from an unrelated project cannot silently adopt that project's keys.
+  There is no key argument anywhere — credentials never travel on the command line or in a call.
+- Read indirectly: backend credentials via `EnvCredentialBroker` (`OPENREADING_<SLUG>_<KEY>`
+  beats the service-native name; `OPENREADING_CREDENTIALS_REF_ALIASES` allow-lists
+  `credentials_ref: "env:<alias>"`, unset = no alias accepted — see `openreading.credentials`);
+  `OPENREADING_CONFIG` via `strategies.loader`; `OPENREADING_LLM_DECIDER` via
+  `strategies.decider` (the second key of the decider's two-key gate).
+
+Resume contract (`resume_run`)
+------------------------------
+Takes ONLY the run id — every other option comes from the recorded run, never the call
+(`internal/design/ledger.md` §10). Re-derives the run's identity from the LIVE
+`openreading.yaml` + registry, compares it with the header written at first arm
+(`ledger.header.compare_header`), and on any hard-field mismatch raises `HeaderMismatch` BEFORE
+touching the journal — refusing by name rather than silently re-driving under a fresher config.
+On a match, the same compiled strategy re-runs against the existing journal: every step already
+terminal replays byte-identical with zero network; anything unreached executes for real. The
+request is rebuilt from the header's encrypted `document` blob + plaintext `slim_request`
+(`document.url` is treated as a secret — routinely a presigned URL — and lives in the blob store,
+never the sidecar; `document.password` / `async.webhook_url` are never persisted). `LookupError`
+when `OPENREADING_LEDGER` is unset or no header exists (CLI exit 3 for both); `PayloadExpired`
+propagates once the run's key is shredded.
+
+Decisions recorded for this module (durable, one line each)
+------------------------------------------------------------
+- D-v2-9: `run()` takes a path/bytes/URL and returns a schema dict; the CLI collapses onto it
+  with zero flag changes — one execution path, so surfaces cannot disagree.
+- D-v2-13: one shared `materialize_document` helper; URL passthrough only where the descriptor
+  declares `accepts_url` — avoids every adapter re-implementing (and mis-implementing) download.
+- D-v3-2: `strategy:` is a reserved `backend.id` prefix, recognized before any registry lookup —
+  no request-schema bump, and `make_adapter("strategy:x")` can never be attempted.
+- D-v3-3: no idempotency cache outside the server (footgun + phantom batch cost, above).
+- D-v2-7.2: a `RetryableError` reaching the executor means "backend exhausted" -> next rung;
+  retry policy lives in one place (`router.driver`), not duplicated per caller.
+- D7 / D7a: `allow_unverified_compliance` / `train_optout_confirmed` / `baa_tier_confirmed` are
+  router config, not request fields, and `tier_gated` BAAs fail closed until confirmed — so the
+  compliance-eligible set only ever narrows.
+- Guardrail T10: no strategy import on the named-backend path (verified in a subprocess test).
+"""
+
+from __future__ import annotations
+
+import base64
+import dataclasses
+import errno
+import hashlib
+import os
+import uuid
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+from openreading.adapters._http import error_for_status
+from openreading.adapters.registry import build_registry, make_adapter
+from openreading.batch.runner import MAX_BATCH_JOBS
+from openreading.batch.sources import DEFAULT_MAX_ITEMS
+from openreading.credentials import (
+    DEFAULT_NATIVE_BATCH_DEADLINE_MS,
+    EnvCredentialBroker,
+    build_run_context,
+    load_dotenv,
+    secret_values,
+)
+from openreading.ledger.header import (
+    DOCUMENT_URL_MEDIA_TYPE,
+    JOURNAL_VERSION,
+    HeaderMismatch,
+    RunHeader,
+    compare_header,
+    read_header,
+    registry_fingerprint,
+    slim_request,
+    slim_request_dict,
+    write_header,
+)
+from openreading.ledger.header import (
+    plan_hash as compute_plan_hash,
+)
+from openreading.ledger.inline import InlineExecutor, descriptor_digest
+from openreading.ledger.jsonl import JsonlJournal
+from openreading.ledger.localfs import LocalFsBlobStore, LocalFsKeyStore
+from openreading.ledger.ports import Executor
+from openreading.ledger.retention import (
+    DEFAULT_RETENTION_HOURS,
+    reap,
+    stamp_run,
+)
+from openreading.ledger.sanitizer import Sanitizer
+from openreading.readiness import auth_hinted, missing_required
+from openreading.router.clock import RealClock
+from openreading.router.compliance import BAA_TIER_CONFIRMED_WARNING, baa_tier_confirmation
+from openreading.router.cost import apply_cost_report
+from openreading.router.driver import run_to_completion
+from openreading.router.executor import BoundedResultCache, execute_plan
+from openreading.router.router import RoutePlan, Router, RouterConfig
+from openreading.types.errors import (
+    AdapterError,
+    ComplianceRefused,
+    MissingCredentialsError,
+    SourceNotFoundError,
+    TerminalError,
+    UnknownStrategyError,
+)
+from openreading.types.request import OpenReadingRequest
+
+# Reserved `backend.id` prefix for a strategy reference (spec §1.3 / loader.STRATEGY_PREFIX).
+# Inlined here so a plain named-backend run never imports the strategy package (guardrail T10).
+_STRATEGY_PREFIX = "strategy:"
+
+_MIME_BY_EXT = {
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
+_COMPLIANCE_KEYS = (
+    "require_baa",
+    "no_train_on_data",
+    "data_region",
+    "require_local",
+    "max_retention",
+)
+_MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
+
+
+def _document_dict(source: str | bytes, mime_type: str | None) -> dict[str, Any]:
+    if isinstance(source, bytes | bytearray):
+        # bytes with no explicit mime default to PDF (documented; D-v2-9).
+        return {
+            "bytes_base64": base64.b64encode(bytes(source)).decode(),
+            "mime_type": mime_type or "application/pdf",
+        }
+    s = str(source)
+    if s.startswith(("http://", "https://")):
+        return {"url": s}
+    p = Path(s)
+    if not p.exists():
+        # BL-133: every direct Python-API caller (route()/build_request()/run()/run_batch()) gets
+        # this guard for free — previously `read_bytes()` let the stdlib FileNotFoundError
+        # propagate unguarded, which the CLI's own callers had no consistent handling for either.
+        # BL-141: constructed via the stdlib's own errno-style OSError.__init__(errno, strerror,
+        # filename) rather than one pre-formatted string, so `.strerror` is populated the same way
+        # a real FileNotFoundError's is — letting cli/app.py's _describe_read_error helper treat
+        # this uniformly with a genuine OSError instead of needing a special case for it.
+        # BL-143: `errno.ENOENT`, not `None` — a real errno so `str(e)` renders "[Errno 2] ..." the
+        # same way a genuine FileNotFoundError does, instead of the literal "[Errno None] ..." that
+        # BL-141's placeholder `None` produced at cmd_parse/_cmd_parse_batch's two direct-`str(e)`
+        # sites (the ones BL-141 deliberately left outside its own eight `_describe_read_error`
+        # target sites, since `.strerror` alone never surfaced the errno anyway).
+        raise SourceNotFoundError(errno.ENOENT, "no such file or directory", s)
+    mime = mime_type or _MIME_BY_EXT.get(p.suffix.lower(), "application/pdf")
+    return {
+        "bytes_base64": base64.b64encode(p.read_bytes()).decode(),
+        "mime_type": mime,
+        "filename": p.name,
+    }
+
+
+def _apply_policy(body: dict[str, Any], policy: dict | None) -> None:
+    if not policy:
+        return
+    compliance = {k: policy[k] for k in _COMPLIANCE_KEYS if k in policy}
+    if compliance:
+        body["compliance"] = compliance
+    routing = {k: policy[k] for k in ("optimize_for", "doc_type_hint") if k in policy}
+    if routing:
+        body["routing"] = routing
+
+
+def router_config(policy: dict | None) -> RouterConfig:
+    policy = policy or {}
+    return RouterConfig(
+        allow_unverified_compliance=bool(policy.get("allow_unverified_compliance", False)),
+        train_optout_confirmed=frozenset(policy.get("train_optout_confirmed", [])),
+        baa_tier_confirmed=frozenset(policy.get("baa_tier_confirmed", [])),
+    )
+
+
+def build_request(
+    source: str | bytes,
+    backend: str = "auto",
+    *,
+    operation: str | None = None,
+    mime_type: str | None = None,
+    policy: dict | None = None,
+    **overrides: Any,
+) -> OpenReadingRequest:
+    # BL-105: document/backend are derived from source=/backend=, the named parameters above —
+    # never from the passthrough overrides bag. Before this guard, the override loop below (an
+    # ordinary `body[k] = v` merge) let a caller-supplied document=/backend= override — e.g. a
+    # stray kwarg forwarded through run()'s or run_batch()'s own **overrides passthrough — silently
+    # win over the request's real document, with no error of any kind: the Python-API-level twin of
+    # the /v1/batch server-side bug this same item fixes (server/app.py's `shared` merge). Reject
+    # explicitly, naming the field(s), rather than silently drop them, so a caller who made this
+    # mistake sees it immediately instead of a request that quietly ran against the wrong document.
+    reserved = sorted(set(overrides) & {"document", "backend"})
+    if reserved:
+        raise ValueError(
+            f"build_request() overrides cannot set {', '.join(reserved)} — document/backend come "
+            "from source=/backend=, never the overrides bag"
+        )
+    body: dict[str, Any] = {
+        "document": _document_dict(source, mime_type),
+        "backend": {"id": backend},
+    }
+    # A `strategy:<name>` id is a reserved prefix, not a registry slug — never make_adapter it (T1).
+    if backend != "auto" and not backend.startswith("strategy:"):
+        body["backend"]["type"] = make_adapter(backend).descriptor.type.value
+    if operation:
+        body["backend"]["operation"] = operation
+    _apply_policy(body, policy)
+    for k, v in overrides.items():
+        if v is not None:
+            body[k] = v
+    return OpenReadingRequest.model_validate(body)
+
+
+def _download(url: str, *, transport=None) -> bytes:
+    import httpx  # lazy — only when a URL is actually materialized
+
+    client = (
+        httpx.Client(transport=transport, timeout=60.0) if transport else httpx.Client(timeout=60.0)
+    )
+    with client:
+        r = client.get(url)
+        if r.status_code >= 400:
+            raise error_for_status(r.status_code, r.headers, message=f"fetch {url}")
+        data = r.content
+    if len(data) > _MAX_DOWNLOAD_BYTES:
+        raise TerminalError(
+            f"document at {url} exceeds {_MAX_DOWNLOAD_BYTES} bytes", backend_code="doc_too_large"
+        )
+    return data
+
+
+def materialize_document(req: OpenReadingRequest, descriptor=None, *, transport=None):
+    """If the document is a URL and the target backend can't ingest URLs natively (accepts_url),
+    download it to bytes so the backend can run. Backends that accept URLs get the URL untouched.
+    `descriptor=None` forces materialization (used for the auto path when any chain member needs
+    bytes). Offline tests inject an httpx transport; no default path performs network I/O."""
+    d = req.document
+    if not d.url:
+        return req
+    if descriptor is not None and descriptor.accepts_url:
+        return req
+    data = _download(d.url, transport=transport)
+    new_doc = d.model_copy(
+        update={
+            "url": None,
+            "bytes_base64": base64.b64encode(data).decode(),
+            "mime_type": d.mime_type or "application/pdf",
+        }
+    )
+    return req.model_copy(update={"document": new_doc})
+
+
+def route(
+    source: str | bytes,
+    *,
+    policy: dict | None = None,
+    operation: str | None = None,
+    mime_type: str | None = None,
+) -> RoutePlan:
+    """The compliance-first routing plan for a document (no execution)."""
+    req = build_request(source, "auto", operation=operation, mime_type=mime_type, policy=policy)
+    return Router(build_registry(), router_config(policy)).route(req)
+
+
+def _arm_ledger(
+    run_id: str,
+    req,
+    registry,
+    broker,
+    clock,
+    eligible: list[str],
+    *,
+    config_hash: str = "",
+    plan_tree: dict[str, Any] | None = None,
+    strategy_name: str = "",
+    resume: bool = False,
+) -> Executor | None:
+    """Constructs T1's real `InlineExecutor` when `OPENREADING_LEDGER` is set (a directory path;
+    no flag, per L1). Unset ⇒ `None`, and `run_strategy`'s own default (an unarmed InlineExecutor,
+    `NullJournal` + `blobs=None`) applies — the L1 zero-delta path (internal/design/ledger.md, plan §6).
+
+    Also runs the at-run-start reaper sweep and stamps this run's own retention ceiling (Open
+    Questions §9 item 2's recommendation (a); plan §7). `OPENREADING_LEDGER_RETENTION_HOURS`
+    overrides the T1 placeholder default — see FOUNDER-INBOX.md for why the real default is an
+    open founder decision, not settled here.
+
+    Ledger T3 round-2 (sophia Finding 8 / jay Finding 6): a FRESH run's stamp is the operator
+    default ALONE — nothing has dispatched yet, so nothing narrows it. Earlier, this stamped
+    `compute_retention_ceiling_hours` over `eligible` (the request's WHOLE registry-wide
+    compliance/capability survivor set, `Router.route`'s own stage-1/2 output — correct and
+    appropriately broad for the `Sanitizer` arming below, where over-inclusion is harmless, but not
+    for this) — so a backend merely eligible for the document type, never named by the compiled
+    strategy nor dispatched, could collapse the ceiling (and force `zdr`) to its own strict limit
+    for a run that never went near it. `InlineExecutor` now tightens (never widens) this stamp
+    itself, per step, from each backend's own descriptor, ONLY as it actually dispatches
+    (`ledger/retention.py`'s `tighten_retention`, called from `ledger/inline.py`'s live "ok"
+    branch) — a backend that stays merely eligible has zero effect on the stamp. The same rescoping
+    applies to ZDR blob suppression (`InlineExecutor._is_zdr_backend`, a per-step registry lookup
+    replacing the old whole-run `zdr=` boolean this function used to compute and pass in).
+
+    The `Sanitizer` backstop (§9.3) is still armed with every ELIGIBLE descriptor's
+    actually-resolved secret values (unchanged, unaffected by the above) — a static, no-value
+    `Sanitizer()` never has anything to scrub against (Phase C round-1, ann High).
+
+    Ledger T3 (plan §4.2/§4.4): a FRESH run (`resume=False`, the default — every pre-existing
+    caller) writes the run's header once, at this first arm, and does NOT pass `pinned_eligible=`
+    to `InlineExecutor` (T1's own framing stands for a fresh run: "the gate is inert... there is no
+    second worker to disagree with the pinned set"). A RESUME (`resume=True`, `openreading resume
+    <RUN_ID>`'s own call) instead reads that header, compares it against a freshly-recomputed one
+    from the LIVE `openreading.yaml`/registry, raises `HeaderMismatch` on any hard-field
+    disagreement (AC-4) — before touching the journal further — and, on a match, arms the resumed
+    `InlineExecutor` WITH `pinned_eligible=` sourced from the header (round-1 F6: the one
+    production line item that actually gives AC-14's gate teeth)."""
+    root = os.environ.get("OPENREADING_LEDGER")
+    if not root:
+        return None
+    ledger_root = Path(root)
+    keys = LocalFsKeyStore(ledger_root / "keys")
+    blobs = LocalFsBlobStore(ledger_root / "blobs", keys)
+    journal = JsonlJournal(ledger_root / f"{run_id}.jsonl")
+
+    now_ms = int(clock.now_ms())
+    if not resume:
+        reap(ledger_root, keys, ledger_root / "blobs", now_epoch_ms=now_ms)
+    descriptors = [
+        registry.get(bid).descriptor for bid in eligible if registry.get(bid) is not None
+    ]
+    default_hours = float(
+        os.environ.get("OPENREADING_LEDGER_RETENTION_HOURS", DEFAULT_RETENTION_HOURS)
+    )
+    if not resume:
+        # Nothing has dispatched yet — the sane, un-narrowed starting point (see this function's
+        # own docstring). `InlineExecutor` tightens this per step, per backend, as the walk
+        # actually runs; a merely-eligible backend that never dispatches never touches it.
+        stamp_run(
+            ledger_root, run_id, expires_epoch_ms=now_ms + int(default_hours * 3600_000), zdr=False
+        )
+
+    secrets_seen: set[str] = set()
+    for desc in descriptors:
+        secrets_seen |= secret_values(desc, broker.resolve(desc, req))
+    sanitizer = Sanitizer(frozenset(secrets_seen))
+
+    pinned_map = {
+        bid: descriptor_digest(registry.get(bid).descriptor)
+        for bid in eligible
+        if registry.get(bid) is not None
+    }
+    fresh_header = RunHeader(
+        run_id=run_id,
+        config_hash=config_hash,
+        plan_hash=compute_plan_hash(plan_tree or {}),
+        registry_fingerprint=registry_fingerprint(),
+        journal_version=JOURNAL_VERSION,
+        pinned_eligible=pinned_map,
+        strategy_name=strategy_name,
+    )
+
+    pinned_eligible = None  # T1's own inert-by-default framing — armed only on resume (AC-14)
+    if resume:
+        old_header = read_header(ledger_root, run_id)
+        if old_header is None:
+            raise HeaderMismatch(run_id, [("header", "present", "missing")])
+        mismatches = compare_header(old_header, fresh_header)
+        if mismatches:
+            raise HeaderMismatch(run_id, mismatches)
+        pinned_eligible = old_header.pinned_eligible
+    else:
+        document_ref = None
+        document_is_url = False
+        if req.document.bytes_base64 is not None:
+            raw = base64.b64decode(req.document.bytes_base64)
+            digest = "sha256:" + hashlib.sha256(raw).hexdigest()
+            document_ref = blobs.put(
+                run_id, digest, raw, req.document.mime_type or "application/octet-stream"
+            )
+        elif req.document.url is not None:
+            # Finding 3 (Phase C round-1, jay): `document.url` is a secret-class field (§9.3 —
+            # "routinely a presigned URL, forwarded verbatim," unconditionally, not by size) that
+            # must never land in the plaintext `slim_request` sidecar (`slim_request_dict` already
+            # strips it). Routed through the SAME per-run encrypted blob store a `bytes_base64`
+            # document's own bytes already use, so it earns the identical shred/erasure guarantee
+            # instead of persisting forever in a file `reap()` never touches.
+            raw = req.document.url.encode("utf-8")
+            digest = "sha256:" + hashlib.sha256(raw).hexdigest()
+            document_ref = blobs.put(run_id, digest, raw, DOCUMENT_URL_MEDIA_TYPE)
+            document_is_url = True
+        write_header(
+            ledger_root,
+            dataclasses.replace(
+                fresh_header,
+                document=document_ref,
+                document_is_url=document_is_url,
+                slim_request=slim_request_dict(req),
+            ),
+            sanitizer=sanitizer,
+        )
+
+    return InlineExecutor(
+        journal=journal,
+        blobs=blobs,
+        registry=registry,
+        clock=clock,
+        pinned_eligible=pinned_eligible,
+        sanitizer=sanitizer,
+        ledger_root=ledger_root,
+    )
+
+
+def _run_strategy_request(
+    req: OpenReadingRequest,
+    name: str,
+    strategy_config,
+    *,
+    broker: EnvCredentialBroker,
+    config: RouterConfig,
+    transport,
+    keep_candidates: bool = False,
+    plain_info=None,
+    on_run_armed: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """Compile + run a named strategy, embedding the orchestration block into the response.
+    Raises UnknownStrategyError (→ 400 / exit 2) when the name is absent. `plain_info` (from the
+    loader) lets a Plain strategy's gate records carry their source word for `explain` (§9)."""
+    from openreading.strategies import compile_strategy, run_strategy
+    from openreading.strategies.model import StrategyConfig
+    from openreading.strategies.presets import PRESET_NAMES
+
+    known = (set(strategy_config.strategies) if strategy_config else set()) | PRESET_NAMES
+    if name not in known:
+        raise UnknownStrategyError(
+            f"unknown strategy {name!r}; defined: {', '.join(sorted(known))}",
+            name=name,
+        )
+    if strategy_config is None:
+        # No openreading.yaml anywhere — the presets alone are the library (spec §2.8: presets
+        # are normative and available configless, exactly as the Strategies page and
+        # `strategy list` already treat them). An empty v1 config carries no policy/limits/
+        # defaults, so compilation sees only the request's own compliance.
+        strategy_config = StrategyConfig(version=1)
+    registry = build_registry()
+    compiled = compile_strategy(req, name, strategy_config, registry, config, plain_info=plain_info)
+    # materialize a URL to bytes if any eligible backend can't ingest URLs (mirrors the auto arm)
+    if any(
+        not (a := registry.get(bid)) or not a.descriptor.accepts_url for bid in compiled.eligible
+    ):
+        req = materialize_document(req, transport=transport)
+    run_id = str(uuid.uuid4())
+    clock = RealClock()
+    executor = _arm_ledger(
+        run_id,
+        req,
+        registry,
+        broker,
+        clock,
+        compiled.eligible,
+        config_hash=compiled.config_hash,
+        plan_tree=compiled.root,
+        strategy_name=name,
+    )
+    if executor is not None and on_run_armed is not None:
+        # Ledger T3 (plan §4.4, round-2 F8's own "Narrowest fix"): fired once, immediately after
+        # arming succeeds, so a caller (the CLI's `cmd_parse`) can capture the run id into a local
+        # variable BEFORE the walk proceeds — the only way its own `except KeyboardInterrupt:`
+        # handler can name a real, resumable run id if the walk is interrupted mid-flight.
+        on_run_armed(run_id)
+    result = run_strategy(
+        compiled,
+        req,
+        registry=registry,
+        broker=broker,
+        clock=clock,
+        keep_candidates=keep_candidates,
+        run_id=run_id,
+        executor=executor,
+    )
+    result.response.orchestration = result.orchestration
+    return result.response.to_schema_dict()
+
+
+def prepare_named_backend(
+    req: OpenReadingRequest,
+    backend: str,
+    *,
+    broker: EnvCredentialBroker | None = None,
+    config: RouterConfig | None = None,
+    transport=None,
+    deadline_ms: int | None = None,
+):
+    """Resolve a directly-named backend (not `auto`, not `strategy:<name>`) for execution:
+    construct its adapter, compliance-gate it against the request exactly as the `auto` router
+    would (a named backend does not get to skip the request's own compliance constraints —
+    GAP-1), materialize the document, build the RunContext, and credential-gate it. Shared by
+    `run_request`'s named-backend branch (below) and the server's `submit_job` handler so the two
+    call sites can't drift out of parity by hand-copying again (BL-91) — every caller gets the
+    identical compliance verdict and the identical `signup_url`-bearing credentials message for
+    the identical failure.
+
+    `deadline_ms` (BL-153): forwarded to `build_run_context` so a caller holding its own real,
+    already-resolved time budget can have it reach `ctx.deadline_ms` here too — the field an
+    adapter's own code actually reads (e.g. TesseractAdapter.submit()'s subprocess timeout) — the
+    same way BL-146 already wired `execute_plan` and the strategy engine's leaf dispatch. Defaults
+    to None (build_run_context's own DEFAULT_DEADLINE_MS fallback applies, still 2 minutes — too
+    short for some hosted async backends' ordinary workload, e.g. Textract's async flow). BL-169
+    wires a real caller for the `run_request` named-backend path specifically: `run()`'s own
+    `deadline_ms` parameter and `parse`'s `--deadline` CLI flag now originate one. `submit_job`
+    (the server's own caller of this function) still doesn't — a caller that omits `deadline_ms`
+    still resolves to the same default as before, unchanged.
+
+    Raises KeyError (unknown backend), ComplianceRefused, or MissingCredentialsError — callers
+    map each the same way they map any other adapter-invocation error. On success, returns
+    (adapter, req, ctx) ready for `adapter.submit(req, ctx)`."""
+    broker = broker or EnvCredentialBroker()
+    config = config or RouterConfig()
+    adapter = make_adapter(backend)  # KeyError → caller maps to 404
+    # A directly-named backend is still subject to the request's compliance constraints — raise
+    # ComplianceRefused (→ 403) rather than silently ignoring them.
+    if req.compliance is not None:
+        Router(build_registry(), config).check_eligible(req, backend)
+    req = materialize_document(req, adapter.descriptor, transport=transport)
+    ctx = build_run_context(req, adapter.descriptor, broker=broker, deadline_ms=deadline_ms)
+    missing = missing_required(adapter.descriptor, ctx)
+    if missing:
+        signup = (
+            f" Sign up / configure: {adapter.descriptor.signup_url}"
+            if adapter.descriptor.signup_url
+            else ""
+        )
+        raise MissingCredentialsError(
+            f"missing required credentials/config: {', '.join(missing)}.{signup}", missing=missing
+        )
+    return adapter, req, ctx
+
+
+def run_request(
+    req: OpenReadingRequest,
+    *,
+    broker: EnvCredentialBroker | None = None,
+    config: RouterConfig | None = None,
+    transport=None,
+    strategy_config=None,
+    keep_candidates: bool = False,
+    plain_info=None,
+    cache: BoundedResultCache | None = None,
+    deadline_ms: int | None = None,
+    on_run_armed: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """Execute a fully-built request (backend.id names a backend, 'auto', or 'strategy:<name>').
+    The server calls this with the RouterConfig + strategy config from its env; `run()` calls it
+    with the config from a policy + a discovered openreading.yaml. `plain_info` (from the loader)
+    carries Plain-dialect gate provenance for `explain` (§9); absent, gates render flat. `cache` is
+    the caller's idempotency cache for the `auto` chain; the server owns one per app, the CLI and
+    `run()` pass none so a library call always does the work (D-v3-3). `deadline_ms` (BL-153,
+    wired to a real caller in BL-169) is forwarded to `prepare_named_backend` for the named-backend
+    branch only — `run()`'s own `deadline_ms` parameter and the CLI's `--deadline` flag on `parse`
+    now originate a real one; `auto`/strategy dispatch is untouched, it manages its own per-node
+    time budget instead. Raises KeyError (unknown
+    backend), UnknownStrategyError, PlanExhaustedError, ComplianceRefused, TerminalError, or
+    RetryableError (a directly-named backend's rate-limit exhaustion, or router.driver's poll loop
+    past its deadline/MAX_CONSECUTIVE_FAULTS — the `auto` path folds this into PlanExhaustedError via
+    execute_plan/D-v2-7.2 instead, since it can fall back to the next backend; a named backend has
+    no next rung, so it surfaces here under its own type)."""
+    broker = broker or EnvCredentialBroker()
+    config = config or RouterConfig()
+    backend = req.backend.id
+
+    # `strategy:<name>` — run the strategy; `strategy:none` forces the legacy path (ignore any
+    # defaults.strategy); otherwise `auto` + defaults.strategy engages that strategy (spec §1.3).
+    strat = backend[len(_STRATEGY_PREFIX) :] if backend.startswith(_STRATEGY_PREFIX) else None
+    if strat is not None and strat != "none":
+        return _run_strategy_request(
+            req,
+            strat,
+            strategy_config,
+            broker=broker,
+            config=config,
+            transport=transport,
+            keep_candidates=keep_candidates,
+            plain_info=plain_info,
+            on_run_armed=on_run_armed,
+        )
+    if strat == "none":
+        backend = "auto"  # escape hatch: plain router, no defaults.strategy
+    elif (
+        backend == "auto"
+        and strategy_config
+        and strategy_config.defaults
+        and strategy_config.defaults.strategy
+    ):
+        return _run_strategy_request(
+            req,
+            strategy_config.defaults.strategy,
+            strategy_config,
+            broker=broker,
+            config=config,
+            transport=transport,
+            keep_candidates=keep_candidates,
+            plain_info=plain_info,
+            on_run_armed=on_run_armed,
+        )
+
+    if backend == "auto":
+        plan = Router(build_registry(), config).route(req)
+        if plan.chosen is None:
+            # the router eliminated every backend on compliance/capability → refused, NOT a
+            # runtime failure (PlanExhaustedError is for a non-empty plan whose backends all fail).
+            dropped = ", ".join(f"{i}:{dr.code}" for i, dr in sorted(plan.dropped.items()))
+            raise ComplianceRefused(
+                f"no eligible backend for the request (dropped: {dropped})",
+                constraint=plan.terminal_reason or "no_compliant_backend",
+            )
+        if any(not a.descriptor.accepts_url for a in plan.chain):
+            req = materialize_document(req, transport=transport)
+        return execute_plan(plan, req, broker=broker, cache=cache).to_schema_dict()
+
+    adapter, req, ctx = prepare_named_backend(
+        req, backend, broker=broker, config=config, transport=transport, deadline_ms=deadline_ms
+    )
+    # build_run_context (inside prepare_named_backend) always resolves deadline_ms to a concrete
+    # int (`deadline_ms if deadline_ms is not None else DEFAULT_DEADLINE_MS`) — the field itself
+    # stays `int | None` in RunContext's type only because build_run_context is the sole caller
+    # required to honor that contract. Asserted, not just typed, so a future caller of
+    # run_to_completion below can't silently reintroduce the `or`-truthiness bug this item fixes.
+    assert ctx.deadline_ms is not None
+    clock = RealClock()
+    try:
+        with auth_hinted(adapter.descriptor, ctx.credentials):
+            job = adapter.submit(req, ctx)
+            job = run_to_completion(
+                adapter,
+                job,
+                ctx=ctx,
+                # BL-138: mirrors _run_native's fix below — `ctx.deadline_ms` is already fully
+                # resolved by build_run_context (`deadline_ms if deadline_ms is not None else
+                # DEFAULT_DEADLINE_MS`), so re-deriving it with `or` here is both redundant and
+                # would silently discard an explicit `deadline_ms=0` via truthiness the day a
+                # caller can reach this branch with one (no such caller exists yet — every
+                # build_run_context call site on this path passes deadline_ms=None today — but
+                # the identical bug on the native-batch path shows the `or` form isn't safe to
+                # leave in place preemptively).
+                deadline_ms=clock.now_ms() + ctx.deadline_ms,
+                clock=clock,
+            )
+            slim_req = slim_request(req)
+            resp = apply_cost_report(
+                adapter, job, adapter.normalize(job, ctx, slim_req), ctx.credentials
+            )
+            note = baa_tier_confirmation(req.compliance, adapter.descriptor, config)
+            if note is not None:
+                resp.add_warning(BAA_TIER_CONFIRMED_WARNING, note, adapter.descriptor.id)
+            return resp.to_schema_dict()
+    except AdapterError:
+        raise  # the five _ADAPTER_ERRORS taxonomy types keep their own specific handling downstream
+    except Exception as e:
+        # BL-99: adapter.normalize() is ordinary adapter code, not one of the five taxonomy types —
+        # a plain KeyError/IndexError/ValueError/AttributeError out of it (or submit()/poll()) used
+        # to propagate straight out of run_request, past every caller's typed except clauses
+        # (server's _ADAPTER_ERRORS catch, the CLI's own (TerminalError, ComplianceRefused) catch),
+        # to a bare, undocumented crash. auth_hinted (widened above) has already redacted e's
+        # message by the time it reaches here; converting it into a TerminalError — already one of
+        # run_request's documented raises — gives it the identical structured, non-500 handling
+        # BL-85 already gives the three async-job sinks, with no caller-side change required.
+        raise TerminalError(str(e)) from e
+
+
+def run(
+    source: str | bytes,
+    backend: str = "auto",
+    *,
+    strategy: str | None = None,
+    config: str | None = None,
+    operation: str | None = None,
+    policy: dict | None = None,
+    env_file: str | None = None,
+    mime_type: str | None = None,
+    broker: EnvCredentialBroker | None = None,
+    transport=None,
+    keep_candidates: bool = False,
+    deadline_ms: int | None = None,
+    on_run_armed: Callable[[str], None] | None = None,
+    **request_overrides: Any,
+) -> dict[str, Any]:
+    """Run a document (path / URL / bytes) through one backend (named), the compliance-first
+    router (`backend="auto"`), or a strategy (`strategy="<name>"` — sugar for
+    `backend="strategy:<name>"`). `config` points at an openreading.yaml (else `./openreading
+    .yaml` is discovered). Raises TerminalError / UnknownStrategyError / PlanExhaustedError /
+    RetryableError — this is a thin wrapper over `run_request` (via `build_request`) and propagates
+    whatever it raises, RetryableError included (see `run_request`'s own docstring).
+
+    `deadline_ms` (BL-169): the caller's own absolute time budget for a DIRECTLY-NAMED backend
+    only — forwarded to `run_request`'s named-backend branch (`prepare_named_backend`, BL-153's own
+    plumbing). Omitted (the default), a named backend keeps resolving to
+    `credentials.DEFAULT_DEADLINE_MS` (2 minutes) as before — too short for some hosted async
+    backends' ordinary workload (`the openreading.cli docstring`'s `--deadline` flag is now the CLI surface for
+    this). Has no effect on `backend="auto"` or `strategy="..."` dispatch, which manage their own
+    per-node time budget instead.
+
+    `on_run_armed` (Ledger T3, plan §4.4): invoked once, with the run id, immediately after the
+    ledger successfully arms — only on a strategy-dispatch path (the only one that arms one at
+    all). Mirrors `run_batch`'s own `on_progress`/`on_preflight` optional-hook shape; a plain
+    named-backend or `auto` run never touches the ledger, so this never fires for either."""
+    if env_file:
+        load_dotenv(env_file)
+    if strategy is not None:
+        backend = f"strategy:{strategy}"
+    # Discover the openreading.yaml ONLY when it could matter — an `auto` request (defaults.strategy)
+    # or a `strategy:` id. A plain named backend never engages a strategy, so the strategy package is
+    # not imported at all (guardrail T10: no file / no strategy ⇒ no strategy-module import).
+    loaded = None
+    if backend == "auto" or backend.startswith(_STRATEGY_PREFIX):
+        from openreading.strategies.loader import load_config
+
+        loaded = load_config(config)  # CLI/Python discover cwd; None → legacy path
+    req = build_request(
+        source,
+        backend,
+        operation=operation,
+        mime_type=mime_type,
+        policy=policy,
+        **request_overrides,
+    )
+    return run_request(
+        req,
+        broker=broker,
+        config=router_config(policy),
+        transport=transport,
+        strategy_config=loaded.config if loaded else None,
+        plain_info=loaded.plain_info if loaded else None,
+        keep_candidates=keep_candidates,
+        deadline_ms=deadline_ms,
+        on_run_armed=on_run_armed,
+    )
+
+
+def _request_from_header(header: RunHeader, blobs: LocalFsBlobStore) -> OpenReadingRequest:
+    """Reconstructs the `OpenReadingRequest` a resumed strategy walk needs from the header's own
+    `slim_request` + `document` (see `ledger/header.py`'s module docstring for what's deliberately
+    NOT recoverable this way — `document.password`/`async.webhook_url`, never persisted).
+
+    `header.document` holds EITHER a `bytes_base64` document's own bytes OR (Finding 3, Phase C
+    round-1, jay) a URL-sourced document's `document.url` string — both routed through the same
+    encrypted blob store rather than the plaintext `slim_request` echo. `header.document_is_url`
+    tells the two apart (Phase C round-2, jay Finding 7 — NOT `media_type`, which for the bytes
+    case is a caller-supplied, unvalidated `mime_type` that could collide with a sentinel value)."""
+    body: dict[str, Any] = dict(header.slim_request)
+    doc = dict(body.get("document") or {})
+    if header.document is not None:
+        # BlobStore.get raises PayloadExpired once the run's key is shredded — left to propagate
+        # uncaught: the whole-run analog of AC-10's "resume reports expired" per-step signal.
+        raw = blobs.get(header.document)
+        if header.document_is_url:
+            doc["url"] = raw.decode("utf-8")
+        else:
+            doc["bytes_base64"] = base64.b64encode(raw).decode()
+    body["document"] = doc
+    return OpenReadingRequest.model_validate(body)
+
+
+def resume_run(run_id: str) -> dict[str, Any]:
+    """`openreading resume <RUN_ID>` (internal/design/ledger.md §10, plan §4.4): re-derive the run's
+    identity from the LIVE openreading.yaml + registry, compare it against the header written at
+    the run's first arm, and — on a match — re-drive the SAME compiled strategy against the
+    EXISTING journal: every step already terminal there replays byte-identical (§4.3, zero network,
+    AC-3); anything genuinely unreached executes for real. No other input is taken — "every option
+    comes from the ledger" (§10) — the original request is reconstructed from the header's own
+    `document`/`slim_request` fields via `_request_from_header`.
+
+    Raises `LookupError` when `OPENREADING_LEDGER` is unset or no header exists for `run_id`, or
+    `ledger.header.HeaderMismatch` when the live config/plan/journal-version identity no longer
+    matches the run's original header (AC-4) — the CLI maps each to its own printed refusal."""
+    root = os.environ.get("OPENREADING_LEDGER")
+    if not root:
+        raise LookupError("OPENREADING_LEDGER is not set — there is no run to resume from")
+    ledger_root = Path(root)
+    header = read_header(ledger_root, run_id)
+    if header is None:
+        raise LookupError(f"no recorded run {run_id!r} under {ledger_root}")
+
+    from openreading.strategies import compile_strategy, run_strategy
+    from openreading.strategies.loader import load_config
+    from openreading.strategies.model import StrategyConfig
+
+    keys = LocalFsKeyStore(ledger_root / "keys")
+    blobs = LocalFsBlobStore(ledger_root / "blobs", keys)
+    req = _request_from_header(header, blobs)
+
+    loaded = load_config(None)
+    strategy_config = loaded.config if loaded else StrategyConfig(version=1)
+    registry = build_registry()
+    broker = EnvCredentialBroker()
+    config = router_config(None)  # §10: "no other flags" — a resume never takes its own --policy
+    compiled = compile_strategy(req, header.strategy_name, strategy_config, registry, config)
+    clock = RealClock()
+    executor = _arm_ledger(
+        run_id,
+        req,
+        registry,
+        broker,
+        clock,
+        compiled.eligible,
+        config_hash=compiled.config_hash,
+        plan_tree=compiled.root,
+        strategy_name=header.strategy_name,
+        resume=True,
+    )
+    assert executor is not None  # OPENREADING_LEDGER was already confirmed set above
+    result = run_strategy(
+        compiled,
+        req,
+        registry=registry,
+        broker=broker,
+        clock=clock,
+        run_id=run_id,
+        executor=executor,
+    )
+    result.response.orchestration = result.orchestration
+    return result.response.to_schema_dict()
+
+
+def _effective_formats(backend: str, broker: EnvCredentialBroker) -> set[str]:
+    """The M3 supported-format set for a batch (internal/design/batch-intake.md §4): a directly named
+    backend contributes its own input_formats; `auto` / a `strategy:` id contributes the union
+    across every READY backend (an unready backend can't take anything). Normalized tokens."""
+    from openreading.adapters.registry import BUILTIN_ADAPTERS
+    from openreading.batch.sources import normalize_input_format
+    from openreading.readiness import backend_readiness
+
+    def _fmts(desc) -> set[str]:
+        return {normalize_input_format(f) for f in desc.capabilities.input_formats}
+
+    if backend == "auto" or backend.startswith(_STRATEGY_PREFIX):
+        out: set[str] = set()
+        for slug in BUILTIN_ADAPTERS:
+            adapter = make_adapter(slug)
+            if backend_readiness(adapter, broker=broker).ready:
+                out |= _fmts(adapter.descriptor)
+        return {f for f in out if f}
+    return {f for f in _fmts(make_adapter(backend).descriptor) if f}
+
+
+def run_batch(
+    sources: list[str],
+    backend: str = "auto",
+    *,
+    strategy: str | None = None,
+    config: str | None = None,
+    jobs: int = 1,
+    max_jobs: int = MAX_BATCH_JOBS,
+    max_items: int = DEFAULT_MAX_ITEMS,
+    deadline_ms: int | None = None,
+    env_file: str | None = None,
+    policy: dict | None = None,
+    broker: EnvCredentialBroker | None = None,
+    transport=None,
+    idempotency_key: str | None = None,
+    keep_candidates: bool = False,
+    on_progress=None,
+    on_preflight=None,
+    **request_overrides: Any,
+) -> dict[str, Any]:
+    """Run many documents (a mix of files / dirs / globs / http(s) URLs) as ONE batch, returning a
+    batch-result envelope (internal/design/batch-intake.md §6). Composes the single-document `run()`
+    per item via the platform runner — the single-document contract is untouched. `on_progress`
+    (done, total, item) and `on_preflight` (resolved, backend) are optional CLI hooks.
+    `keep_candidates` is a named parameter, not a request override: it is a per-run execution
+    choice `run()` consumes, and the native path would otherwise hand it to `build_request`.
+
+    `jobs` is bounds-checked by the shared `batch.runner.bound_jobs` helper (BL-84) BEFORE intake
+    is even resolved: `jobs<=0` clamps to 1 (echoed as the corrected value, never the raw input);
+    `jobs` over `max_jobs` raises `batch.runner.JobsLimitError`, a catchable exception, rather than
+    silently returning a schema-invalid envelope or reaching a real, unbounded
+    `ThreadPoolExecutor`. `max_jobs` (default `MAX_BATCH_JOBS`) is this surface's own escape hatch
+    past the default ceiling — the same "sane default + override" shape `max_items` already has.
+
+    `deadline_ms` (BL-135) is the one override for native-batch dispatch's own time budget
+    (`_run_native`'s `build_run_context` call — §7): None (the default) lets `_run_native` fall
+    back to `DEFAULT_NATIVE_BATCH_DEADLINE_MS`, already a longer, native-batch-appropriate budget
+    reflecting the one real adapter's own documented "most <1h" timing rather than the generic
+    two-minute `DEFAULT_DEADLINE_MS` every synchronous-feeling path uses; pass an explicit value
+    (larger for a bigger batch, smaller to fail fast) to override that default too. Has no effect
+    when `backend` resolves to the platform fan-out path instead of native dispatch — the platform
+    path composes `run()` per item exactly as before, each on its own unrelated default budget.
+
+    A per-item failure on the platform fan-out path is isolated into that item's `BatchItem.error`
+    and never raised (M6) — but when `backend` resolves to ONE native-batch-capable adapter (§7),
+    a batch-level failure out of that adapter's `submit_many`/`run_to_completion`/`normalize_many`
+    propagates out of this call like any single `run()` error: TerminalError, ComplianceRefused, or
+    RetryableError (a directly-named backend has no next rung to fall back to, exactly like
+    `run_request`'s own named-backend branch — see its docstring). `_run_native`'s own docstring
+    already makes this promise; it is repeated here because this is the function most callers
+    actually read (BL-128)."""
+    from openreading.batch import runner as _batch_runner
+    from openreading.batch.sources import resolve_intake
+    from openreading.types.batch import BatchRequestEcho
+
+    jobs = _batch_runner.bound_jobs(jobs, max_jobs=max_jobs)
+
+    if env_file:
+        load_dotenv(env_file)
+    if strategy is not None:
+        backend = f"{_STRATEGY_PREFIX}{strategy}"
+    broker = broker or EnvCredentialBroker()
+
+    resolved = resolve_intake(
+        list(sources), supported_formats=_effective_formats(backend, broker), max_items=max_items
+    )
+    if on_preflight is not None:
+        on_preflight(resolved, backend)
+
+    # §6: a named backend may cap platform concurrency (e.g. CPU-bound tesseract) via
+    # descriptor.batch.max_concurrency — the runner takes min(requested, cap).
+    if backend != "auto" and not backend.startswith(_STRATEGY_PREFIX):
+        try:
+            bi = make_adapter(backend).descriptor.batch
+        except KeyError:
+            bi = None
+        if bi and bi.max_concurrency:
+            jobs = min(jobs, bi.max_concurrency)
+
+    echo = BatchRequestEcho(
+        backend=backend, strategy=strategy, jobs=jobs, source_args=list(sources)
+    )
+
+    # §7 dispatch: native path iff the whole batch resolved to one named backend whose descriptor
+    # declares batch.native and which implements the protocol; else platform fan-out (M10: the
+    # envelope is observationally equivalent either way).
+    native = _native_adapter(backend, resolved, broker)
+    if native is not None:
+        return _run_native(
+            native,
+            resolved,
+            backend,
+            broker=broker,
+            transport=transport,
+            idempotency_key=idempotency_key,
+            request_echo=echo,
+            on_progress=on_progress,
+            policy=policy,
+            deadline_ms=deadline_ms,
+            **request_overrides,
+        )
+
+    def run_one(src, idem):
+        source = src.ref.path or src.ref.url
+        return run(
+            source,
+            backend=backend,
+            config=config,
+            policy=policy,
+            broker=broker,
+            transport=transport,
+            idempotency_key=idem,
+            keep_candidates=keep_candidates,
+            **request_overrides,
+        )
+
+    result = _batch_runner.run_batch(
+        resolved,
+        run_one=run_one,
+        jobs=jobs,
+        idempotency_key=idempotency_key,
+        request_echo=echo,
+        on_progress=on_progress,
+    )
+    return result.to_schema_dict()
+
+
+def _native_adapter(backend: str, resolved: list, broker: EnvCredentialBroker):
+    """§7 dispatch rule → the adapter to use for a native batch, or None for platform fan-out.
+    Native iff: a directly named backend (not auto/strategy), its descriptor declares `batch.native`
+    truthy, it implements the NativeBatchAdapter protocol, there is >=1 non-skipped item, and the
+    count is within `batch.max_items`."""
+    from openreading.adapters.base import NativeBatchAdapter
+
+    if backend == "auto" or backend.startswith(_STRATEGY_PREFIX):
+        return None
+    try:
+        adapter = make_adapter(backend)
+    except KeyError:
+        return None
+    bi = adapter.descriptor.batch
+    if not bi or not bi.native or not isinstance(adapter, NativeBatchAdapter):
+        return None
+    live = [r for r in resolved if r.skip_reason is None]
+    if not live:
+        return None
+    if bi.max_items is not None and len(live) > bi.max_items:
+        return None  # too many for one native batch → fall back to platform
+    return adapter
+
+
+def _run_native(
+    adapter,
+    resolved: list,
+    backend: str,
+    *,
+    broker: EnvCredentialBroker,
+    transport,
+    idempotency_key: str | None,
+    request_echo,
+    on_progress,
+    policy: dict | None = None,
+    deadline_ms: int | None = None,
+    **request_overrides: Any,
+) -> dict[str, Any]:
+    """Execute a whole batch through an adapter's native submit_many/normalize_many (§7). Per-item
+    results (NormalizedResponse | BatchItemError) map to succeeded/failed items with
+    transport="native"; skipped items are merged back in input order. A batch-level failure (e.g.
+    submit_many raising) propagates like any run() error. Envelope-equivalent to platform (M10).
+
+    A directly-named backend does not get to skip the request's own compliance constraints on this
+    path either (BL-98): `policy` is applied per item via `build_request` exactly like the platform
+    path's `run()` already does — closing a structural no-op, since `policy` is `run_batch`'s own
+    named parameter and previously could never reach here at all — and the resulting
+    `req.compliance` (from either the `policy=` or the raw `compliance=` override spelling) is
+    enforced with the same `Router.check_eligible` call `run_request`'s named-backend branch uses,
+    before `adapter.submit_many` ever sees a document. Every item in a batch shares identical
+    policy/overrides, so `req.compliance` is identical across `reqs` — checking the first stands in
+    for the whole batch.
+
+    `deadline_ms` (BL-135): `run_batch`'s own override, forwarded here. None (the default) means
+    `build_run_context` falls back to `DEFAULT_NATIVE_BATCH_DEADLINE_MS` rather than the generic,
+    two-minute `DEFAULT_DEADLINE_MS` every other, synchronous-feeling path uses — this is the ONE
+    dispatch shape in the whole codebase where a caller submits one job and then polls a
+    vendor-side batch that the adapter's own descriptor documents as routinely taking up to an
+    hour, so it gets its own, larger, still-overridable default rather than inheriting the generic
+    constant every other path also reuses."""
+    import time
+
+    from openreading.batch import runner as _batch_runner
+    from openreading.batch.runner import item_idempotency_key
+    from openreading.types.batch import BatchItem, BatchItemError
+
+    started = time.perf_counter()
+    live = [r for r in resolved if r.skip_reason is None]
+    reqs = []
+    for src in live:
+        source = src.ref.path or src.ref.url
+        idem = item_idempotency_key(idempotency_key, src.ref.sha256)
+        overrides = {k: v for k, v in request_overrides.items() if v is not None}
+        req = build_request(source, backend, idempotency_key=idem, policy=policy, **overrides)
+        req = materialize_document(req, adapter.descriptor, transport=transport)
+        reqs.append(req)
+
+    if reqs[0].compliance is not None:
+        Router(build_registry(), router_config(policy)).check_eligible(reqs[0], backend)
+
+    ctx = build_run_context(
+        reqs[0],
+        adapter.descriptor,
+        broker=broker,
+        deadline_ms=deadline_ms if deadline_ms is not None else DEFAULT_NATIVE_BATCH_DEADLINE_MS,
+    )
+    # build_run_context always resolves deadline_ms to a concrete int (its own `is not None`
+    # check above, or the explicit fallback passed in here) — the field itself stays `int | None`
+    # in RunContext's type only because build_run_context is the sole caller required to honor
+    # that contract. Asserted, not just typed, so a future edit here can't silently reintroduce
+    # the `or`-truthiness bug this item fixes (BL-138).
+    assert ctx.deadline_ms is not None
+    clock = RealClock()
+    try:
+        with auth_hinted(adapter.descriptor, ctx.credentials):
+            job = adapter.submit_many(reqs, ctx)
+            job = run_to_completion(
+                adapter,
+                job,
+                ctx=ctx,
+                # BL-138: `ctx.deadline_ms` is already fully resolved by build_run_context (above)
+                # — `deadline_ms if deadline_ms is not None else DEFAULT_NATIVE_BATCH_DEADLINE_MS`.
+                # Re-deriving it here with `ctx.deadline_ms or DEFAULT_NATIVE_BATCH_DEADLINE_MS`
+                # silently discarded an explicit `deadline_ms=0` ("fail fast") back to the 1h
+                # default via Python truthiness (0 is falsy). Use the resolved value directly.
+                deadline_ms=clock.now_ms() + ctx.deadline_ms,
+                clock=clock,
+            )
+            # BL-108: forwarded so a report_cost() failure inside normalize_many's own
+            # apply_cost_report call gets the same redaction every other call site's warning does.
+            results = adapter.normalize_many(job, reqs, credentials=ctx.credentials)
+    except AdapterError:
+        raise  # the five _ADAPTER_ERRORS taxonomy types keep their own specific handling downstream
+    except Exception as e:
+        # BL-106: the sixth BL-99-class call site — this block had no try/except of any kind, so a
+        # plain KeyError/IndexError/ValueError/AttributeError out of normalize_many (the concrete
+        # trigger: AnthropicClaudeAdapter.normalize_many's per-item self.normalize(synth, req) call)
+        # or out of submit_many/run_to_completion propagated straight out of run_batch(), discarding
+        # the ENTIRE native batch's results — not just the offending item's — contradicting
+        # internal/design/batch-intake.md's M6 per-item-isolation invariant. auth_hinted (already
+        # passed ctx.credentials above) has already redacted e's message by the time it reaches
+        # here; converting it into a TerminalError gives it the identical structured handling
+        # run_request's own BL-99 fix gives the single-document path, with no caller-side change
+        # required.
+        raise TerminalError(str(e)) from e
+
+    items: list[BatchItem] = []
+    total = len(resolved)
+    li = 0
+    for src in resolved:
+        if src.skip_reason is not None:
+            items.append(BatchItem(source=src.ref, state="skipped", skip_reason=src.skip_reason))
+        else:
+            res = results[li] if li < len(results) else BatchItemError(code="missing_result")
+            li += 1
+            if isinstance(res, BatchItemError):
+                items.append(
+                    BatchItem(source=src.ref, state="failed", error=res, transport="native")
+                )
+            else:
+                items.append(
+                    BatchItem(
+                        source=src.ref,
+                        state="succeeded",
+                        response=res.to_schema_dict(),
+                        transport="native",
+                    )
+                )
+        if on_progress is not None:
+            on_progress(len(items), total, items[-1])
+
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    return _batch_runner.assemble_result(
+        items, request_echo=request_echo, duration_ms=duration_ms
+    ).to_schema_dict()

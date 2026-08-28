@@ -1,0 +1,12 @@
+# Binary fixtures must survive checkout byte for byte.
+#
+# Without this, git's line-ending conversion can rewrite LF to CRLF on Windows, which corrupts any
+# file whose format counts bytes: a PDF stores byte offsets in its xref table, so a converted
+# checkout yields "this PDF has no pages" on one platform only, pointing nowhere near the cause.
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.woff2 binary

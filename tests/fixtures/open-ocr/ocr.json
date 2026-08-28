@@ -1,0 +1,12 @@
+{
+  "request_id": "req_fix_1",
+  "status": "succeeded",
+  "engine": "openocr/tesseract",
+  "extracted_text": "Loan Application\nApplicant: Jane Doe\nACCT 001-42\nTotal: $4,400.00",
+  "extracted_text_preview": "Loan Application...",
+  "pages": 2,
+  "cost_debited": 0.001,
+  "provider_latency_ms": 148,
+  "confidence": 0.94,
+  "applied_settings": { "language": "en" }
+}

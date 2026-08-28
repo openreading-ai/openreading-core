@@ -1,0 +1,19 @@
+{
+  "task_id": "task_extract_1",
+  "status": "Succeeded",
+  "output": {
+    "results": { "total": "$4,400.00", "region": "North" },
+    "citations": {
+      "total": {
+        "citation_id": "cit_0",
+        "page_number": 1,
+        "bboxes": [{ "left": 72, "top": 140, "width": 100, "height": 16 }]
+      }
+    },
+    "metrics": {
+      "total": { "confidence": "High" },
+      "region": { "confidence": "Medium" }
+    }
+  },
+  "output_usage": { "page_count": 1 }
+}

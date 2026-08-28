@@ -1,0 +1,23 @@
+{
+  "id": "msg_02",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-4-8",
+  "stop_reason": "tool_use",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_01",
+      "name": "extract_fields",
+      "input": {
+        "borrower_name": "Jane Doe",
+        "gross_pay": "4400.00",
+        "pay_period_end": "2026-06-30"
+      }
+    }
+  ],
+  "usage": {
+    "input_tokens": 2600,
+    "output_tokens": 60
+  }
+}

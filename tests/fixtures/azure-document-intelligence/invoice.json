@@ -1,0 +1,27 @@
+{
+  "status": "succeeded",
+  "analyzeResult": {
+    "apiVersion": "2024-11-30",
+    "modelId": "prebuilt-invoice",
+    "content": "Invoice\nTotal $128.50\nDate 06/30/2026",
+    "pages": [ { "pageNumber": 1, "width": 8.5, "height": 11.0, "unit": "inch", "angle": 0.0, "words": [], "lines": [] } ],
+    "paragraphs": [],
+    "tables": [],
+    "styles": [],
+    "documents": [
+      { "docType": "invoice", "confidence": 0.97,
+        "fields": {
+          "InvoiceTotal": { "type": "currency", "valueCurrency": { "amount": 128.5, "currencyCode": "USD" }, "content": "$128.50", "confidence": 0.95 },
+          "InvoiceDate": { "type": "date", "valueDate": "2026-06-30", "content": "06/30/2026", "confidence": 0.93 },
+          "VendorName": { "type": "string", "valueString": "Acme Supplies", "content": "Acme Supplies", "confidence": 0.9,
+            "boundingRegions": [ { "pageNumber": 1, "polygon": [1.0,2.0,3.0,2.0,3.0,2.3,1.0,2.3] } ] },
+          "Items": { "type": "array", "valueArray": [
+            { "type": "object", "valueObject": {
+              "Description": { "type": "string", "valueString": "Widget A", "content": "Widget A", "confidence": 0.9 },
+              "Amount": { "type": "currency", "valueCurrency": { "amount": 100.0, "currencyCode": "USD" }, "content": "$100.00", "confidence": 0.9 }
+            } }
+          ] }
+        } }
+    ]
+  }
+}

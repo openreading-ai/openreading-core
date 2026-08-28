@@ -1,0 +1,97 @@
+{
+  "response_type": "url",
+  "job_id": "job_parse_1",
+  "duration": 1.2,
+  "studio_link": "https://studio.reducto.ai/job_parse_1",
+  "usage": {
+    "num_pages": 1,
+    "credits": 1.0,
+    "page_billing_breakdown": [
+      {
+        "page": 1,
+        "credits": 1.0
+      }
+    ]
+  },
+  "result": {
+    "type": "full",
+    "chunks": [
+      {
+        "content": "# Loan Application\n\nApplicant income summary.",
+        "blocks": [
+          {
+            "type": "Title",
+            "content": "Loan Application",
+            "bbox": {
+              "left": 0.1,
+              "top": 0.05,
+              "width": 0.5,
+              "height": 0.04,
+              "page": 1,
+              "original_page": 1
+            }
+          },
+          {
+            "type": "Text",
+            "content": "Applicant income summary.",
+            "bbox": {
+              "left": 0.1,
+              "top": 0.12,
+              "width": 0.7,
+              "height": 0.03,
+              "page": 1,
+              "original_page": 1
+            }
+          }
+        ]
+      },
+      {
+        "content": "| Region | Revenue |\n| --- | --- |\n| North | 4400 |",
+        "blocks": [
+          {
+            "type": "Table",
+            "content": "| Region | Revenue |\n| --- | --- |\n| North | 4400 |",
+            "bbox": {
+              "left": 0.1,
+              "top": 0.3,
+              "width": 0.6,
+              "height": 0.2,
+              "page": 1,
+              "original_page": 1
+            }
+          },
+          {
+            "type": "Signature",
+            "content": "",
+            "bbox": {
+              "left": 0.1,
+              "top": 0.6,
+              "width": 0.2,
+              "height": 0.05,
+              "page": 1,
+              "original_page": 1
+            }
+          }
+        ]
+      }
+    ],
+    "ocr": {
+      "words": [
+        {
+          "text": "Loan",
+          "bbox": {
+            "left": 0.1,
+            "top": 0.05,
+            "width": 0.1,
+            "height": 0.04,
+            "page": 1
+          },
+          "confidence": 0.991,
+          "chunk_index": 0,
+          "rotation": 0
+        }
+      ],
+      "lines": []
+    }
+  }
+}

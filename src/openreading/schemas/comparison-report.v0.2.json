@@ -1,0 +1,453 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/comparison-report.v0.2.json",
+  "title": "OpenReading Comparison Report v0.2",
+  "description": "The read-only, deterministic output of openreading.compare(): a versioned diff over N schema-valid response envelopes. Semantics: the openreading.comparison docstring. Sections text/blocks/alignment arrive at M2; consensus/baseline/truth are stance-dependent. v0.2 (Canon tranche 2): content-first `headline` over the guaranteed channels; the new `structure` finding code demotes block-granularity/packaging differences (content present in the other subject's text) out of content-miss severity; non-deterministic (generative) subjects are compared with similarity only and their content findings cap at informational.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "mode",
+    "subjects",
+    "fields",
+    "findings",
+    "warnings"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "0.2"
+    },
+    "mode": {
+      "enum": [
+        "pairwise",
+        "nway"
+      ],
+      "description": "pairwise iff exactly 2 subjects, else nway."
+    },
+    "subjects": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "$ref": "#/$defs/Subject"
+      }
+    },
+    "alignment": {
+      "$ref": "#/$defs/Alignment"
+    },
+    "fields": {
+      "$ref": "#/$defs/FieldSection"
+    },
+    "text": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "blocks": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "consensus": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "truth": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Finding"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ReportWarning"
+      }
+    },
+    "headline": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Content-first summary (§9 tranche 2): equivalence on the guaranteed channels, attributable to the engines because C1/C2 removed OpenReading-introduced text divergence.",
+      "required": [
+        "verdict",
+        "channels"
+      ],
+      "properties": {
+        "verdict": {
+          "enum": [
+            "equivalent",
+            "mixed",
+            "divergent"
+          ],
+          "description": "equivalent = all compared content channels agree; divergent = none; mixed = some."
+        },
+        "channels": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Per-guaranteed-channel content agreement. A channel is omitted when no subject produced it.",
+          "properties": {
+            "text": {
+              "$ref": "#/$defs/HeadlineChannel"
+            },
+            "typed_fields": {
+              "$ref": "#/$defs/HeadlineChannel"
+            },
+            "table_cells": {
+              "$ref": "#/$defs/HeadlineChannel"
+            }
+          }
+        },
+        "nondeterministic_subjects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Subjects compared by similarity only (generative backends); their content findings cap at informational."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "Subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "backend",
+        "source",
+        "facts"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "backend": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "output_paradigm": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "source": {
+          "enum": [
+            "file",
+            "fanout",
+            "candidate"
+          ]
+        },
+        "facts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "pages",
+            "blocks",
+            "chars",
+            "fields",
+            "warning_codes"
+          ],
+          "properties": {
+            "state": {
+              "type": "string"
+            },
+            "duration_ms": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "cost_usd": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "cost_basis": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pages": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "blocks": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "chars": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "fields": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "warning_codes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "Alignment": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "method"
+      ],
+      "properties": {
+        "method": {
+          "type": "string"
+        },
+        "tau_text": {
+          "type": "number"
+        },
+        "iou_min": {
+          "type": "number"
+        },
+        "merge_lookahead": {
+          "type": "integer"
+        },
+        "unaligned_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "FieldSection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rows"
+      ],
+      "properties": {
+        "rows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FieldRow"
+          }
+        }
+      }
+    },
+    "FieldRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "verdict",
+        "by_subject"
+      ],
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "verdict": {
+          "enum": [
+            "agree",
+            "disagree",
+            "partial",
+            "unique",
+            "not_capable"
+          ]
+        },
+        "by_subject": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "present"
+            ],
+            "properties": {
+              "present": {
+                "type": "boolean"
+              },
+              "value": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "confidence": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "equivalence": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Tier at which this subject's value matched EVERY other present subject's value (complete-linkage, not just one arbitrary reference): exact|normalized|money|number|date|null. Caveat: a subject's own match here can still sit inside a row-level `disagree` verdict — null is per-subject, for whichever subject(s) broke agreement, not a signal about the whole row."
+              },
+              "capable": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    "Finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "severity",
+        "subjects",
+        "detail"
+      ],
+      "properties": {
+        "code": {
+          "enum": [
+            "page_count_mismatch",
+            "block_missed",
+            "block_unique",
+            "type_conflict",
+            "position_conflict",
+            "text_divergence",
+            "table_shape_mismatch",
+            "field_missed",
+            "field_value_conflict",
+            "confidence_gap",
+            "cost_outlier",
+            "empty_output",
+            "structure"
+          ]
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "warn",
+            "major"
+          ]
+        },
+        "page": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "field": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bbox": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "subjects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "detail": {
+          "type": "string"
+        },
+        "snippet": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "A short text excerpt of the block(s) this finding is about, so the report is self-explanatory without cross-referencing the source responses. Present on structural (block-level) findings."
+        }
+      }
+    },
+    "ReportWarning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code"
+      ],
+      "properties": {
+        "code": {
+          "enum": [
+            "blocks_unavailable",
+            "descriptor_unavailable",
+            "confidence_unavailable",
+            "subjects_identical"
+          ]
+        },
+        "subject": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "detail": {
+          "type": "string"
+        }
+      }
+    },
+    "HeadlineChannel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agreement",
+        "score"
+      ],
+      "properties": {
+        "agreement": {
+          "enum": [
+            "agree",
+            "partial",
+            "diverge"
+          ]
+        },
+        "score": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1,
+          "description": "The headline metric for this channel in [0,1] (min pairwise text similarity; field agreement fraction; table-cell agreement fraction)."
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}

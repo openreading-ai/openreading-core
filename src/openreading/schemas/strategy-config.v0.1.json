@@ -1,0 +1,495 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/strategy-config/v0.1.json",
+  "title": "OpenReadingStrategyConfig",
+  "description": "The optional openreading.yaml orchestration file. Absent this file, behavior is byte-identical to today. Grammar authority: docs/strategies/spec.md. This schema encodes the COMPLETE v0.1 grammar; the engine implements node types incrementally per milestone (an unimplemented construct is a clean runtime error, never a silent no-op).",
+  "type": "object",
+  "required": ["version"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1, "description": "config format version (additive evolution)" },
+    "policy": {
+      "type": "object",
+      "description": "Superset of the --policy JSON: compliance keys union into request.compliance (most-restrictive-wins), deployment keys map to RouterConfig.",
+      "additionalProperties": true
+    },
+    "limits": {
+      "type": "object",
+      "description": "Operator ceilings on every strategy-engaged run (never on direct-named requests).",
+      "additionalProperties": false,
+      "properties": {
+        "max_cost_usd_per_doc": { "type": "number", "exclusiveMinimum": 0 },
+        "max_duration_per_doc": { "$ref": "#/$defs/duration" }
+      }
+    },
+    "decider": {
+      "type": "object",
+      "description": "LLM-decider configuration. Inert unless OPENREADING_LLM_DECIDER is set in the environment (decider.md §1).",
+      "additionalProperties": false,
+      "properties": {
+        "llm": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["backend"],
+          "properties": {
+            "backend": { "type": "string", "description": "registry slug of the decider model" },
+            "timeout": { "$ref": "#/$defs/duration", "description": "per-decision deadline; expiry -> engine default" },
+            "send_document_content": { "type": "boolean", "default": false },
+            "mask_fields": { "type": "array", "items": { "type": "string" },
+              "description": "typed_field names stripped from signals before send AND before logging" }
+          }
+        }
+      }
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "strategy": { "type": "string", "description": "applied only when backend.id == 'auto' and no strategy is named" },
+        "advanced": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "circuit_breaker": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "max_fails": { "type": "integer", "minimum": 1 },
+                "cooldown": { "$ref": "#/$defs/duration" }
+              }
+            },
+            "assumed_pages": { "type": "integer", "minimum": 1 },
+            "assumed_rate": { "type": "number", "minimum": 0 },
+            "attempt_timeout": { "$ref": "#/$defs/duration" }
+          }
+        }
+      }
+    },
+    "strategies": {
+      "type": "object",
+      "description": "The named strategy library. Each value is a node (spec.md §2).",
+      "additionalProperties": { "$ref": "#/$defs/node" }
+    }
+  },
+
+  "$defs": {
+    "duration": {
+      "type": "string",
+      "pattern": "^[0-9]+(ms|s|m|h)$",
+      "description": "A duration with an explicit unit, e.g. '250ms', '90s', '5m', '2h'. A bare number is a load-time error."
+    },
+
+    "reference": {
+      "type": "string",
+      "pattern": "^strategy:[A-Za-z0-9_-]+$",
+      "description": "A 'strategy:<name>' reference to another named strategy."
+    },
+
+    "node": {
+      "description": "A strategy node: a shorthand (string or list) or one of the five map forms.",
+      "oneOf": [
+        { "type": "string", "title": "backend-or-reference shorthand",
+          "description": "A bare backend id, 'auto', or 'strategy:<name>'." },
+        { "type": "array", "title": "cascade shorthand",
+          "description": "A list is a cascade with default (error-advance only) gates.",
+          "items": { "$ref": "#/$defs/node" }, "minItems": 1 },
+        { "$ref": "#/$defs/leaf" },
+        { "$ref": "#/$defs/cascade" },
+        { "$ref": "#/$defs/parallel" },
+        { "$ref": "#/$defs/route" },
+        { "$ref": "#/$defs/decide" },
+        { "$ref": "#/$defs/use_ref" }
+      ]
+    },
+
+    "common": {
+      "description": "Fields valid on any map-form node.",
+      "properties": {
+        "intent": { "type": "string", "maxLength": 200,
+          "description": "Prose for humans/UIs/the LLM decider. The engine ignores it; it can never relax a hard field." },
+        "label": { "type": "string", "description": "Stable node identity for UIs and traces." },
+        "budget": { "$ref": "#/$defs/budget" },
+        "on_error": { "$ref": "#/$defs/on_error" }
+      }
+    },
+
+    "leaf": {
+      "type": "object",
+      "title": "leaf (backend:)",
+      "additionalProperties": false,
+      "required": ["backend"],
+      "properties": {
+        "backend": { "type": "string", "description": "registry slug or 'auto'" },
+        "operation": { "type": "string" },
+        "version": { "type": "string" },
+        "timeout": { "$ref": "#/$defs/duration", "description": "per-attempt timeout; clamped to the remaining deadline" },
+        "with": {
+          "type": "object",
+          "description": "Per-leaf request overrides. Closed allow-list; compliance/document/backend are forbidden.",
+          "additionalProperties": false,
+          "properties": {
+            "features": { "type": "object" },
+            "outputs": { "type": "object" },
+            "pages": { "type": "object" },
+            "extraction_schema": { "type": "object" }
+          }
+        },
+        "intent": { "$ref": "#/$defs/common/properties/intent" },
+        "label": { "$ref": "#/$defs/common/properties/label" },
+        "budget": { "$ref": "#/$defs/budget" },
+        "on_error": { "$ref": "#/$defs/on_error" }
+      }
+    },
+
+    "use_ref": {
+      "type": "object",
+      "title": "reference (use:)",
+      "additionalProperties": false,
+      "required": ["use"],
+      "properties": {
+        "use": { "type": "string", "description": "name of another strategy in the library" },
+        "intent": { "$ref": "#/$defs/common/properties/intent" },
+        "label": { "$ref": "#/$defs/common/properties/label" },
+        "budget": { "$ref": "#/$defs/budget" },
+        "on_error": { "$ref": "#/$defs/on_error" }
+      }
+    },
+
+    "cascade": {
+      "type": "object",
+      "title": "cascade (steps:)",
+      "additionalProperties": false,
+      "required": ["steps"],
+      "properties": {
+        "steps": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/step" } },
+        "escalate_if": { "$ref": "#/$defs/cascade_gate" },
+        "granularity": { "enum": ["document", "page"], "default": "document" },
+        "on_quality_exhausted": { "enum": ["best_effort", "fail"], "default": "best_effort" },
+        "intent": { "$ref": "#/$defs/common/properties/intent" },
+        "label": { "$ref": "#/$defs/common/properties/label" },
+        "budget": { "$ref": "#/$defs/budget" },
+        "on_error": { "$ref": "#/$defs/on_error" }
+      }
+    },
+
+    "step": {
+      "description": "A cascade step: any node, plus optional per-step gates.",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "$ref": "#/$defs/node" }, "minItems": 1 },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "backend": { "type": "string" },
+            "operation": { "type": "string" },
+            "version": { "type": "string" },
+            "timeout": { "$ref": "#/$defs/duration" },
+            "with": { "$ref": "#/$defs/leaf/properties/with" },
+            "use": { "type": "string" },
+            "steps": { "type": "array", "items": { "$ref": "#/$defs/step" }, "minItems": 1 },
+            "parallel": { "type": "array", "items": { "$ref": "#/$defs/branch" }, "minItems": 2 },
+            "route": { "$ref": "#/$defs/route/properties/route" },
+            "decide": { "$ref": "#/$defs/decide/properties/decide" },
+            "pick": { "enum": ["fastest", "best", "merge"] },
+            "judge": { "$ref": "#/$defs/judge" },
+            "on_win": { "enum": ["cancel", "drain"] },
+            "require": { "$ref": "#/$defs/require" },
+            "granularity": { "enum": ["document", "page"] },
+            "on_quality_exhausted": { "enum": ["best_effort", "fail"] },
+            "default": { "$ref": "#/$defs/node" },
+            "otherwise": { "type": "string" },
+            "among": { "type": "array", "items": { "$ref": "#/$defs/node" }, "minItems": 2 },
+            "escalate_if": { "$ref": "#/$defs/gate" },
+            "review_if": { "$ref": "#/$defs/gate" },
+            "review_default": { "enum": ["accept", "escalate"], "default": "escalate" },
+            "merge": { "type": "object" },
+            "intent": { "$ref": "#/$defs/common/properties/intent" },
+            "label": { "$ref": "#/$defs/common/properties/label" },
+            "budget": { "$ref": "#/$defs/budget" },
+            "on_error": { "$ref": "#/$defs/on_error" }
+          }
+        }
+      ]
+    },
+
+    "parallel": {
+      "type": "object",
+      "title": "parallel (parallel:)",
+      "additionalProperties": false,
+      "required": ["parallel", "pick"],
+      "properties": {
+        "parallel": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/branch" } },
+        "pick": { "enum": ["fastest", "best", "merge"] },
+        "judge": { "$ref": "#/$defs/judge" },
+        "on_win": { "enum": ["cancel", "drain"], "default": "cancel" },
+        "require": { "$ref": "#/$defs/require" },
+        "merge": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "typed_fields": { "enum": ["vote"] },
+            "text": { "enum": ["best"] }
+          }
+        },
+        "intent": { "$ref": "#/$defs/common/properties/intent" },
+        "label": { "$ref": "#/$defs/common/properties/label" },
+        "budget": { "$ref": "#/$defs/budget" },
+        "on_error": { "$ref": "#/$defs/on_error" }
+      }
+    },
+
+    "branch": {
+      "description": "A parallel branch: any node, plus optional start_after/shadow.",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "$ref": "#/$defs/node" }, "minItems": 1 },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "backend": { "type": "string" },
+            "operation": { "type": "string" },
+            "version": { "type": "string" },
+            "timeout": { "$ref": "#/$defs/duration" },
+            "with": { "$ref": "#/$defs/leaf/properties/with" },
+            "use": { "type": "string" },
+            "steps": { "type": "array", "items": { "$ref": "#/$defs/step" }, "minItems": 1 },
+            "parallel": { "type": "array", "items": { "$ref": "#/$defs/branch" }, "minItems": 2 },
+            "route": { "$ref": "#/$defs/route/properties/route" },
+            "decide": { "$ref": "#/$defs/decide/properties/decide" },
+            "pick": { "enum": ["fastest", "best", "merge"] },
+            "judge": { "$ref": "#/$defs/judge" },
+            "on_win": { "enum": ["cancel", "drain"] },
+            "require": { "$ref": "#/$defs/require" },
+            "escalate_if": { "$ref": "#/$defs/cascade_gate" },
+            "granularity": { "enum": ["document", "page"] },
+            "start_after": { "$ref": "#/$defs/duration", "description": "hedged/delayed start" },
+            "shadow": { "type": "boolean", "default": false,
+              "description": "runs and is recorded but can never win" },
+            "intent": { "$ref": "#/$defs/common/properties/intent" },
+            "label": { "$ref": "#/$defs/common/properties/label" },
+            "budget": { "$ref": "#/$defs/budget" },
+            "on_error": { "$ref": "#/$defs/on_error" }
+          }
+        }
+      ]
+    },
+
+    "route": {
+      "type": "object",
+      "title": "route (route:)",
+      "additionalProperties": false,
+      "required": ["route"],
+      "properties": {
+        "route": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["rules", "default"],
+          "properties": {
+            "rules": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["when", "use"],
+                "properties": {
+                  "when": { "$ref": "#/$defs/when" },
+                  "use": { "$ref": "#/$defs/node" }
+                }
+              }
+            },
+            "default": { "$ref": "#/$defs/node" }
+          }
+        },
+        "intent": { "$ref": "#/$defs/common/properties/intent" },
+        "label": { "$ref": "#/$defs/common/properties/label" },
+        "budget": { "$ref": "#/$defs/budget" },
+        "on_error": { "$ref": "#/$defs/on_error" }
+      }
+    },
+
+    "decide": {
+      "type": "object",
+      "title": "decide (decide:)",
+      "additionalProperties": false,
+      "required": ["decide"],
+      "properties": {
+        "decide": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["among", "otherwise"],
+          "properties": {
+            "among": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/node" } },
+            "otherwise": { "$ref": "#/$defs/node",
+              "description": "the engine default; must be structurally equal to a member of among" }
+          }
+        },
+        "intent": { "$ref": "#/$defs/common/properties/intent" },
+        "label": { "$ref": "#/$defs/common/properties/label" },
+        "budget": { "$ref": "#/$defs/budget" },
+        "on_error": { "$ref": "#/$defs/on_error" }
+      }
+    },
+
+    "judge": {
+      "type": "object",
+      "description": "LLM-as-judge for pick: best. Requires the env gate at run time.",
+      "additionalProperties": false,
+      "required": ["backend"],
+      "properties": {
+        "backend": { "type": "string" },
+        "intent": { "type": "string", "maxLength": 200 },
+        "excerpt_chars": { "type": "integer", "minimum": 1, "default": 4000 },
+        "timeout": { "$ref": "#/$defs/duration" }
+      }
+    },
+
+    "require": {
+      "oneOf": [
+        { "type": "integer", "minimum": 1 },
+        { "const": "all" }
+      ],
+      "default": "all"
+    },
+
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_cost_usd": { "type": "number", "exclusiveMinimum": 0 },
+        "max_duration": { "$ref": "#/$defs/duration" },
+        "max_attempts": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "on_error": {
+      "type": "object",
+      "description": "Flat map of error class -> action. Classes: timeout, rate_limited, auth, provider_error, unsupported_feature, invalid_input, exhausted, budget_exhausted, transient, any. compliance and missing_credentials are NOT valid keys.",
+      "additionalProperties": false,
+      "properties": {
+        "timeout": { "$ref": "#/$defs/on_error_action" },
+        "rate_limited": { "$ref": "#/$defs/on_error_action" },
+        "auth": { "$ref": "#/$defs/on_error_action" },
+        "provider_error": { "$ref": "#/$defs/on_error_action" },
+        "unsupported_feature": { "$ref": "#/$defs/on_error_action" },
+        "invalid_input": { "$ref": "#/$defs/on_error_action" },
+        "exhausted": { "$ref": "#/$defs/on_error_action" },
+        "budget_exhausted": { "$ref": "#/$defs/on_error_action" },
+        "transient": { "$ref": "#/$defs/on_error_action" },
+        "any": { "$ref": "#/$defs/on_error_action" }
+      }
+    },
+
+    "on_error_action": { "enum": ["next", "fail"] },
+
+    "cascade_gate": {
+      "description": "A cascade-level escalate_if: the 'default' bundle, 'off' (or the boolean false — YAML coerces an unquoted off/no/false to a boolean), or a gate map.",
+      "oneOf": [
+        { "const": "default" },
+        { "const": "off" },
+        { "const": false },
+        { "$ref": "#/$defs/gate" }
+      ]
+    },
+
+    "gate": {
+      "type": "object",
+      "description": "A gate map: keys OR (any fires). Predicates are flat, enum-keyed, primitive-valued; one level of any_of/all_of. Signal catalog: docs/strategies/signals.md.",
+      "additionalProperties": false,
+      "properties": {
+        "any_of": { "type": "array", "items": { "$ref": "#/$defs/gate" } },
+        "all_of": { "type": "array", "items": { "$ref": "#/$defs/gate" } },
+
+        "chars_per_page_below": { "$ref": "#/$defs/threshold_int" },
+        "empty_pages_over": { "$ref": "#/$defs/threshold_frac" },
+        "garbled": { "$ref": "#/$defs/threshold_bool" },
+        "garble_score_over": { "$ref": "#/$defs/threshold_frac" },
+        "scanned_pages_detected": { "$ref": "#/$defs/threshold_bool" },
+        "text_source": { "enum": ["prior_ocr", "none"] },
+        "table_sanity_below": { "$ref": "#/$defs/threshold_frac" },
+        "zero_blocks": { "$ref": "#/$defs/threshold_bool" },
+        "matches_regex": { "type": "string" },
+        "sample_percent": { "type": "number", "minimum": 0, "maximum": 100 },
+
+        "confidence_below": { "$ref": "#/$defs/threshold_frac" },
+        "page_confidence_below": { "$ref": "#/$defs/threshold_frac" },
+        "field_confidence_below": { "$ref": "#/$defs/field_confidence" },
+        "fields_required": { "type": "array", "items": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "object", "additionalProperties": false, "required": ["name"],
+              "properties": { "name": { "type": "string" },
+                "aliases": { "type": "array", "items": { "type": "string" } } } }
+          ] } },
+        "doc_type_confidence_below": { "$ref": "#/$defs/threshold_frac" },
+        "warning_code": { "type": "string" }
+      }
+    },
+
+    "threshold_int": {
+      "oneOf": [
+        { "type": "integer" },
+        { "$ref": "#/$defs/on_missing_wrapper" }
+      ]
+    },
+    "threshold_frac": {
+      "oneOf": [
+        { "type": "number", "minimum": 0, "maximum": 1 },
+        { "$ref": "#/$defs/on_missing_wrapper" }
+      ]
+    },
+    "threshold_bool": {
+      "oneOf": [
+        { "type": "boolean" },
+        { "$ref": "#/$defs/on_missing_wrapper" }
+      ]
+    },
+    "on_missing_wrapper": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value"],
+      "properties": {
+        "value": {},
+        "on_missing": { "enum": ["skip", "escalate"], "default": "skip" }
+      }
+    },
+    "field_confidence": {
+      "oneOf": [
+        { "type": "number", "minimum": 0, "maximum": 1 },
+        { "type": "object", "additionalProperties": false, "required": ["fields"],
+          "properties": {
+            "fields": { "type": "object", "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 } },
+            "on_missing": { "enum": ["skip", "escalate"] }
+          } }
+      ]
+    },
+
+    "when": {
+      "type": "object",
+      "description": "A route predicate map: keys AND (all must match). Pre-parse facts only (signals.md §2).",
+      "additionalProperties": false,
+      "properties": {
+        "any_of": { "type": "array", "items": { "$ref": "#/$defs/when" } },
+        "doc_type": { "$ref": "#/$defs/str_or_list" },
+        "mime": { "$ref": "#/$defs/str_or_list" },
+        "pages_over": { "type": "integer" },
+        "pages_under": { "type": "integer" },
+        "size_over_mb": { "type": "number" },
+        "size_under_mb": { "type": "number" },
+        "filename_matches": { "type": "string" },
+        "sample_percent": { "type": "number", "minimum": 0, "maximum": 100 },
+        "compliance": { "type": "object",
+          "description": "route on the request's post-union effective compliance block",
+          "additionalProperties": true }
+      }
+    },
+
+    "str_or_list": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" } }
+      ]
+    }
+  }
+}

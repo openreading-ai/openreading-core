@@ -1,0 +1,29 @@
+{
+  "result": {
+    "invoice_number": "INV-042",
+    "total": 4400.0,
+    "currency": "USD",
+    "line_items": [
+      { "description": "Underwriting fee", "amount": 400.0 },
+      { "description": "Principal", "amount": 4000.0 }
+    ]
+  },
+  "thinkingTrace": null,
+  "rawModelOutput": "{\"invoice_number\": \"INV-042\", \"total\": 4400.0, \"currency\": \"USD\"}",
+  "error": null,
+  "documentInfo": {
+    "type": "image",
+    "documentId": "doc_1",
+    "fileId": "file_1",
+    "fileName": "loan.pdf",
+    "dpi": 150,
+    "partCount": 2
+  },
+  "outputTokens": 96,
+  "inputTokens": 1834,
+  "totalTokens": 1930,
+  "logprobs": -0.084,
+  "outputTokenProbability": 0.92,
+  "selectedExamples": [],
+  "randomSeed": 1234
+}

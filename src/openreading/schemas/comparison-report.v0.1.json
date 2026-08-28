@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/comparison-report.v0.1.json",
+  "title": "OpenReading Comparison Report v0.1",
+  "description": "The read-only, deterministic output of openreading.compare(): a versioned diff over N schema-valid response envelopes. Semantics: docs/compare/DESIGN.md. Sections text/blocks/alignment arrive at M2; consensus/baseline/truth are stance-dependent.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "mode", "subjects", "fields", "findings", "warnings"],
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "mode": {
+      "enum": ["pairwise", "nway"],
+      "description": "pairwise iff exactly 2 subjects, else nway."
+    },
+    "subjects": {
+      "type": "array",
+      "minItems": 2,
+      "items": { "$ref": "#/$defs/Subject" }
+    },
+    "alignment": { "$ref": "#/$defs/Alignment" },
+    "fields": { "$ref": "#/$defs/FieldSection" },
+    "text": { "type": "object", "additionalProperties": true },
+    "blocks": { "type": "object", "additionalProperties": true },
+    "consensus": { "type": "object", "additionalProperties": true },
+    "baseline": { "type": "object", "additionalProperties": true },
+    "truth": { "type": "object", "additionalProperties": true },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Finding" }
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ReportWarning" }
+    }
+  },
+  "$defs": {
+    "Subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "backend", "source", "facts"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "backend": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["id"],
+          "properties": {
+            "id": { "type": "string" },
+            "type": { "type": ["string", "null"] },
+            "output_paradigm": { "type": ["array", "null"], "items": { "type": "string" } }
+          }
+        },
+        "source": { "enum": ["file", "fanout", "candidate"] },
+        "facts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "pages", "blocks", "chars", "fields", "warning_codes"],
+          "properties": {
+            "state": { "type": "string" },
+            "duration_ms": { "type": ["number", "null"] },
+            "cost_usd": { "type": ["number", "null"] },
+            "cost_basis": { "type": ["string", "null"] },
+            "pages": { "type": "integer", "minimum": 0 },
+            "blocks": { "type": "integer", "minimum": 0 },
+            "chars": { "type": "integer", "minimum": 0 },
+            "fields": { "type": "integer", "minimum": 0 },
+            "warning_codes": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "Alignment": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["method"],
+      "properties": {
+        "method": { "type": "string" },
+        "tau_text": { "type": "number" },
+        "iou_min": { "type": "number" },
+        "merge_lookahead": { "type": "integer" },
+        "unaligned_ratio": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "FieldSection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rows"],
+      "properties": {
+        "rows": { "type": "array", "items": { "$ref": "#/$defs/FieldRow" } }
+      }
+    },
+    "FieldRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "verdict", "by_subject"],
+      "properties": {
+        "key": { "type": "string" },
+        "verdict": { "enum": ["agree", "disagree", "partial", "unique", "not_capable"] },
+        "by_subject": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["present"],
+            "properties": {
+              "present": { "type": "boolean" },
+              "value": { "type": ["string", "null"] },
+              "confidence": { "type": ["number", "null"] },
+              "equivalence": {
+                "type": ["string", "null"],
+                "description": "Tier at which this subject's value matched the row's reference value: exact|normalized|money|number|date|null."
+              },
+              "capable": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "Finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "severity", "subjects", "detail"],
+      "properties": {
+        "code": {
+          "enum": [
+            "page_count_mismatch",
+            "block_missed",
+            "block_unique",
+            "type_conflict",
+            "position_conflict",
+            "text_divergence",
+            "table_shape_mismatch",
+            "field_missed",
+            "field_value_conflict",
+            "confidence_gap",
+            "cost_outlier",
+            "empty_output"
+          ]
+        },
+        "severity": { "enum": ["info", "warn", "major"] },
+        "page": { "type": ["integer", "null"] },
+        "field": { "type": ["string", "null"] },
+        "bbox": { "type": ["object", "null"] },
+        "subjects": { "type": "array", "items": { "type": "string" } },
+        "detail": { "type": "string" },
+        "snippet": {
+          "type": ["string", "null"],
+          "description": "A short text excerpt of the block(s) this finding is about, so the report is self-explanatory without cross-referencing the source responses. Present on structural (block-level) findings."
+        }
+      }
+    },
+    "ReportWarning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code"],
+      "properties": {
+        "code": {
+          "enum": [
+            "blocks_unavailable",
+            "descriptor_unavailable",
+            "confidence_unavailable",
+            "subjects_identical"
+          ]
+        },
+        "subject": { "type": ["string", "null"] },
+        "detail": { "type": "string" }
+      }
+    }
+  }
+}

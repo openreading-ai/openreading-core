@@ -1,0 +1,33 @@
+{
+  "DocumentMetadata": { "Pages": 2 },
+  "ExpenseDocuments": [
+    { "ExpenseIndex": 1,
+      "SummaryFields": [
+        { "Type": { "Text": "TOTAL", "Confidence": 99.1 },
+          "ValueDetection": { "Text": "128.50", "Confidence": 99.0,
+            "Geometry": { "BoundingBox": { "Left": 0.6, "Top": 0.8, "Width": 0.1, "Height": 0.02 } } },
+          "Currency": { "Code": "USD" }, "PageNumber": 1 },
+        { "Type": { "Text": "VENDOR_NAME", "Confidence": 97.5 },
+          "ValueDetection": { "Text": "Acme Supplies", "Confidence": 97.4 }, "PageNumber": 1 }
+      ],
+      "LineItemGroups": [
+        { "LineItemGroupIndex": 1,
+          "LineItems": [
+            { "LineItemExpenseFields": [
+                { "Type": { "Text": "ITEM", "Confidence": 98.0 },
+                  "ValueDetection": { "Text": "Widget A", "Confidence": 98.0,
+                    "Geometry": { "BoundingBox": { "Left": 0.1, "Top": 0.5, "Width": 0.2, "Height": 0.02 } } },
+                  "PageNumber": 1 },
+                { "Type": { "Text": "PRICE", "Confidence": 97.0 },
+                  "ValueDetection": { "Text": "100.00", "Confidence": 97.0 }, "PageNumber": 1 }
+            ] },
+            { "LineItemExpenseFields": [
+                { "Type": { "Text": "ITEM", "Confidence": 96.0 },
+                  "ValueDetection": { "Text": "Widget B", "Confidence": 96.0 }, "PageNumber": 1 },
+                { "Type": { "Text": "PRICE", "Confidence": 95.0 },
+                  "ValueDetection": { "Text": "50.00", "Confidence": 95.0 }, "PageNumber": 1 }
+            ] }
+          ] }
+      ] }
+  ]
+}

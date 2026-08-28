@@ -1,0 +1,124 @@
+{
+  "schema_version": "0.1",
+  "status": {
+    "state": "succeeded"
+  },
+  "backend": {
+    "id": "pymupdf",
+    "type": "oss_library",
+    "version": "1.24.0"
+  },
+  "document": {
+    "text": "Account Summary\nRegion\tRevenue\nNorth\t4400",
+    "markdown": "# Account Summary",
+    "page_count": 1,
+    "language": [
+      "en"
+    ],
+    "doc_type": {
+      "label": "statement",
+      "confidence": 0.88
+    },
+    "pages": [
+      {
+        "page_number": 1,
+        "width": 612,
+        "height": 792,
+        "unit": "pdf_point",
+        "text": "Account Summary",
+        "confidence": 0.9,
+        "blocks": [
+          {
+            "type": "title",
+            "text": "Account Summary",
+            "bbox": {
+              "x": 0.1,
+              "y": 0.1,
+              "w": 0.5,
+              "h": 0.05,
+              "page": 1,
+              "bbox_native": {
+                "coords": [
+                  61,
+                  79,
+                  306,
+                  119
+                ],
+                "origin": "top_left",
+                "unit": "pdf_point"
+              }
+            },
+            "confidence": 0.99
+          },
+          {
+            "type": "table",
+            "text": "Region\tRevenue\nNorth\t4400",
+            "table": {
+              "n_rows": 2,
+              "n_cols": 2,
+              "cells": [
+                {
+                  "row": 0,
+                  "col": 0,
+                  "text": "Region",
+                  "is_header": true,
+                  "confidence": 0.9
+                },
+                {
+                  "row": 0,
+                  "col": 1,
+                  "text": "Revenue",
+                  "is_header": true,
+                  "confidence": 0.9
+                },
+                {
+                  "row": 1,
+                  "col": 0,
+                  "text": "North",
+                  "confidence": 0.8
+                },
+                {
+                  "row": 1,
+                  "col": 1,
+                  "text": "4400",
+                  "confidence": 0.8
+                }
+              ],
+              "rows": [
+                [
+                  "Region",
+                  "Revenue"
+                ],
+                [
+                  "North",
+                  "4400"
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "typed_fields": {
+    "total": {
+      "value": 4400,
+      "type": "number",
+      "confidence": 0.95,
+      "citations": [
+        {
+          "page": 1,
+          "text": "4400",
+          "confidence": 0.8
+        }
+      ]
+    }
+  },
+  "warnings": [
+    {
+      "code": "confidence_unavailable",
+      "message": "n/a",
+      "field": "block_confidence"
+    }
+  ]
+}

@@ -1,0 +1,285 @@
+{
+  "status": "success",
+  "confidence": {
+    "mean_grade": "GOOD",
+    "low_grade": "FAIR",
+    "ocr_score": 0.95,
+    "parse_score": 0.90,
+    "layout_score": 0.93,
+    "table_score": 0.88,
+    "pages": {
+      "1": {
+        "mean_grade": "GOOD",
+        "ocr_score": 0.96,
+        "parse_score": 0.92,
+        "layout_score": 0.94,
+        "table_score": 0.90
+      }
+    }
+  },
+  "document": {
+    "json_content": {
+      "schema_name": "DoclingDocument",
+      "version": "1.0.0",
+      "name": "test",
+      "pages": {
+        "1": {
+          "page_no": 1,
+          "size": {
+            "width": 612.0,
+            "height": 792.0
+          }
+        }
+      },
+      "body": {
+        "self_ref": "#/body",
+        "children": [
+          {
+            "$ref": "#/texts/0"
+          },
+          {
+            "$ref": "#/groups/0"
+          },
+          {
+            "$ref": "#/tables/0"
+          },
+          {
+            "$ref": "#/pictures/0"
+          },
+          {
+            "$ref": "#/texts/3"
+          }
+        ]
+      },
+      "groups": [
+        {
+          "self_ref": "#/groups/0",
+          "label": "list",
+          "children": [
+            {
+              "$ref": "#/texts/1"
+            }
+          ]
+        }
+      ],
+      "texts": [
+        {
+          "self_ref": "#/texts/0",
+          "label": "title",
+          "text": "Loan Application",
+          "prov": [
+            {
+              "page_no": 1,
+              "bbox": {
+                "l": 72.0,
+                "t": 727.86,
+                "r": 300.0,
+                "b": 707.86,
+                "coord_origin": "BOTTOMLEFT"
+              },
+              "charspan": [
+                0,
+                16
+              ]
+            }
+          ]
+        },
+        {
+          "self_ref": "#/texts/1",
+          "label": "list_item",
+          "text": "Applicant income summary.",
+          "prov": [
+            {
+              "page_no": 1,
+              "bbox": {
+                "l": 72.0,
+                "t": 680.0,
+                "r": 400.0,
+                "b": 665.0,
+                "coord_origin": "BOTTOMLEFT"
+              }
+            }
+          ]
+        },
+        {
+          "self_ref": "#/texts/2",
+          "label": "caption",
+          "text": "Regional revenue chart.",
+          "prov": [
+            {
+              "page_no": 1,
+              "bbox": {
+                "l": 60.0,
+                "t": 420.0,
+                "r": 300.0,
+                "b": 408.0,
+                "coord_origin": "BOTTOMLEFT"
+              }
+            }
+          ]
+        },
+        {
+          "self_ref": "#/texts/3",
+          "label": "formula",
+          "text": "\\frac{P \\times R}{100}",
+          "prov": [
+            {
+              "page_no": 1,
+              "bbox": {
+                "l": 72.0,
+                "t": 360.0,
+                "r": 220.0,
+                "b": 345.0,
+                "coord_origin": "BOTTOMLEFT"
+              }
+            }
+          ]
+        }
+      ],
+      "tables": [
+        {
+          "self_ref": "#/tables/0",
+          "label": "table",
+          "prov": [
+            {
+              "page_no": 1,
+              "bbox": {
+                "l": 72.0,
+                "t": 512.0,
+                "r": 432.0,
+                "b": 400.0,
+                "coord_origin": "BOTTOMLEFT"
+              }
+            }
+          ],
+          "data": {
+            "num_rows": 2,
+            "num_cols": 2,
+            "table_cells": [
+              {
+                "start_row_offset_idx": 0,
+                "end_row_offset_idx": 1,
+                "start_col_offset_idx": 0,
+                "end_col_offset_idx": 1,
+                "text": "Region",
+                "column_header": true,
+                "row_header": false
+              },
+              {
+                "start_row_offset_idx": 0,
+                "end_row_offset_idx": 1,
+                "start_col_offset_idx": 1,
+                "end_col_offset_idx": 2,
+                "text": "Revenue",
+                "column_header": true,
+                "row_header": false
+              },
+              {
+                "start_row_offset_idx": 1,
+                "end_row_offset_idx": 2,
+                "start_col_offset_idx": 0,
+                "end_col_offset_idx": 1,
+                "text": "North",
+                "column_header": false,
+                "row_header": true
+              },
+              {
+                "start_row_offset_idx": 1,
+                "end_row_offset_idx": 2,
+                "start_col_offset_idx": 1,
+                "end_col_offset_idx": 2,
+                "text": "4400",
+                "column_header": false,
+                "row_header": false
+              }
+            ]
+          }
+        }
+      ],
+      "pictures": [
+        {
+          "self_ref": "#/pictures/0",
+          "label": "picture",
+          "captions": [
+            {
+              "$ref": "#/texts/2"
+            }
+          ],
+          "prov": [
+            {
+              "page_no": 1,
+              "bbox": {
+                "l": 60.0,
+                "t": 492.0,
+                "r": 124.0,
+                "b": 428.0,
+                "coord_origin": "BOTTOMLEFT"
+              }
+            }
+          ]
+        }
+      ],
+      "key_value_items": [
+        {
+          "self_ref": "#/key_value_items/0",
+          "label": "key_value_region",
+          "prov": [
+            {
+              "page_no": 1,
+              "bbox": {
+                "l": 72.0,
+                "t": 330.0,
+                "r": 400.0,
+                "b": 310.0,
+                "coord_origin": "BOTTOMLEFT"
+              }
+            }
+          ],
+          "graph": {
+            "cells": [
+              {
+                "cell_id": 0,
+                "label": "key",
+                "text": "Applicant Name",
+                "prov": {
+                  "page_no": 1,
+                  "bbox": {
+                    "l": 72.0,
+                    "t": 330.0,
+                    "r": 180.0,
+                    "b": 318.0,
+                    "coord_origin": "BOTTOMLEFT"
+                  }
+                }
+              },
+              {
+                "cell_id": 1,
+                "label": "value",
+                "text": "Jane Q. Public",
+                "prov": {
+                  "page_no": 1,
+                  "bbox": {
+                    "l": 190.0,
+                    "t": 330.0,
+                    "r": 330.0,
+                    "b": 318.0,
+                    "coord_origin": "BOTTOMLEFT"
+                  }
+                }
+              }
+            ],
+            "links": [
+              {
+                "label": "to_value",
+                "source_cell_id": 0,
+                "target_cell_id": 1
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "md_content": "# Loan Application\n\n- Applicant income summary.\n\n| Region | Revenue |\n| --- | --- |\n| North | 4400 |",
+    "text_content": "Loan Application\n\nApplicant income summary.\n\nRegion\tRevenue\nNorth\t4400\n\nRegional revenue chart.\n\nP × R / 100"
+  }
+}

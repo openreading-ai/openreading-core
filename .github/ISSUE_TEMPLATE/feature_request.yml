@@ -1,0 +1,21 @@
+name: Feature request
+description: A backend, a signal, a verdict, a surface
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do that you cannot today?
+      description: The job, not the feature. "Compare two backends on my scanned invoices" beats "add flag X".
+    validations: { required: true }
+  - type: dropdown
+    id: cell
+    attributes:
+      label: Which cell of the grid does it deepen?
+      description: The product grows by deepening cells, not by adding beside them.
+      options: [parse (a backend), compare (a verdict/dimension), strategy (a signal/construct), a surface (CLI/API/agent), not sure]
+    validations: { required: true }
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What have you tried, and why was it not enough?

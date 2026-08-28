@@ -1,0 +1,32 @@
+{
+  "id": "msg_04",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-4-8",
+  "stop_reason": "tool_use",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_02",
+      "name": "extract_fields",
+      "input": {
+        "borrower_name": "Jane Doe",
+        "gross_pay": "4400.00"
+      },
+      "citations": [
+        {
+          "type": "page_location",
+          "cited_text": "Jane Doe",
+          "document_index": 0,
+          "document_title": "doc.pdf",
+          "start_page_number": 2,
+          "end_page_number": 2
+        }
+      ]
+    }
+  ],
+  "usage": {
+    "input_tokens": 2600,
+    "output_tokens": 60
+  }
+}

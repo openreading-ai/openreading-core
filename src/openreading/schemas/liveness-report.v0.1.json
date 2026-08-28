@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/liveness-report.v0.1.json",
+  "title": "LivenessReport",
+  "description": "v0.1 — new family. One backend's liveness answer: is it configured, and if it can be probed at all, did it actually answer? Distinguishes an INFERRED state (read from local configuration, no round trip) from a MEASURED one (we contacted the backend), which is the whole point of the family — 'configured' must never render as 'responding'. Produced by openreading.liveness.check_liveness and returned by POST /v1/backends/{backend_id}/liveness. Design: internal/design/liveness.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "backend", "status", "measured", "probe", "checked_at"],
+  "properties": {
+    "schema_version": {
+      "const": "0.1",
+      "description": "In-band family version (Canon §8 C12)."
+    },
+    "backend": {
+      "type": "string",
+      "description": "Registry slug, e.g. 'docling'."
+    },
+    "status": {
+      "enum": [
+        "not_supported",
+        "not_configured",
+        "configured_unverified",
+        "live",
+        "unreachable",
+        "unauthorized",
+        "error"
+      ],
+      "description": "The seven-state ladder (design §2), ascending in what is known: not_configured -> configured_unverified -> live, with unreachable/unauthorized/error as the MEASURED negatives and not_supported as the floor. 'not_supported' = the adapter declares no probe AND declares no credential/config field, so there is nothing to infer from either. 'not_configured' = a required credential/config var is missing; it is a known negative and always beats an optimistic inference, and it short-circuits the probe rather than spending a call. 'configured_unverified' = no probe is available, but every declared requirement resolves — an INFERENCE from local configuration, never a measurement. 'live' = we called it and it answered healthy. 'unreachable' = nothing answered (refused/DNS/timeout). 'unauthorized' = it answered and rejected the credential. 'error' = it answered but not in a way that proves health, or the probe itself raised."
+    },
+    "measured": {
+      "type": "boolean",
+      "description": "Did a real round trip to the backend happen? True for live/unreachable/unauthorized/error; false for not_supported/not_configured/configured_unverified. Derivable from `status`, and carried explicitly so a third-party consumer can tell a measurement from an inference without encoding this enum's semantics — and so it stays correct if the ladder grows a state."
+    },
+    "probe": {
+      "enum": ["none", "local", "endpoint", "vendor"],
+      "description": "The backend's STATIC probe declaration (descriptor.liveness.probe), echoed so a consumer needs no second lookup. 'none' = not probeable. 'local' = in-process/subprocess, no network. 'endpoint' = network, to infrastructure the CALLER operates (a self-hosted container or model server) — does not leave their network. 'vendor' = network, to a third party — it does. A probe is NEVER a billed request in any kind."
+    },
+    "checked_at": {
+      "type": "string",
+      "description": "When THIS report was produced, ISO-8601 UTC (e.g. '2026-08-17T09:41:07Z'). For a measured report that is when the backend was contacted; for an inferred one it is when the environment was read — it never implies a round trip that did not happen."
+    },
+    "latency_ms": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "description": "Round-trip time of the probe. ALWAYS null when `measured` is false — fabricating a latency for an inferred state would imply a call that was never made."
+    },
+    "detail": {
+      "type": "string",
+      "description": "One short human sentence: what was concluded and what to do about it. NEVER carries a secret (redacted on the way out), never a provider's raw response body (providers have been seen echoing a rejected key back inside one), and never an endpoint URL (a URL can embed credentials) — env var NAMES only, matching the openreading.credentials docstring's posture."
+    },
+    "version": {
+      "type": ["string", "null"],
+      "description": "Any version or model identifier the probe learned (e.g. the served model id from an OpenAI-compatible /v1/models). Null when the probe yields none."
+    }
+  }
+}

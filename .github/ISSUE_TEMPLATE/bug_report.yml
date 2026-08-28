@@ -1,0 +1,32 @@
+name: Bug report
+description: Something behaves differently than documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security vulnerabilities do not belong here — please follow
+        [SECURITY.md](../blob/main/SECURITY.md) instead.
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations: { required: true }
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead?
+      description: Paste exact output (the JSON envelope, the `warnings[]`, the exit code) rather than paraphrasing it.
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes:
+      label: Smallest reproduction
+      description: The command or Python call, the backend id, the policy/strategy file if any, and a document that shows it (or its shape if you cannot share it).
+    validations: { required: true }
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: "Output of `uv run openreading backends` (redact nothing — it prints readiness, not keys), `python --version`, and your OS."
+    validations: { required: true }

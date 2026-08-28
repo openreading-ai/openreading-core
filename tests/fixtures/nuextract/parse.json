@@ -1,0 +1,11 @@
+{
+  "result": "# Loan Application\n\n**Applicant:** [Jane Doe](mailto:jane@example.com)\n\n```\nACCT 001-42\n```\n\n| Item | Amount |\n| --- | --- |\n| Underwriting fee | $400.00 |\n| Total | $4,400.00 |\n",
+  "thinkingTrace": null,
+  "rawModelOutput": "# Loan Application ...",
+  "outputTokens": 132,
+  "inputTokens": 908,
+  "totalTokens": 1040,
+  "logprobs": -0.21,
+  "outputTokenProbability": 0.88,
+  "randomSeed": 99
+}

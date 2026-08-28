@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # `uv`, not `pip`: the pip updater only edits pyproject lower bounds and leaves uv.lock — what
+  # CI and `make sync` actually install — untouched.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # One PR for routine patch/minor bumps; majors still arrive separately because those are
+      # the ones that need a human to read a changelog. `make verify` in CI is the gate either way.
+      minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

@@ -1,0 +1,17 @@
+{
+  "DocumentMetadata": { "Pages": 1 },
+  "Results": [
+    { "Page": 1,
+      "PageClassification": { "PageType": [ { "Value": "PAYSLIPS", "Confidence": 98.7 } ], "PageNumber": [ { "Value": "1" } ] },
+      "Extractions": [
+        { "LendingDocument": {
+            "LendingFields": [
+              { "Type": "GROSS_PAY", "ValueDetections": [ { "Text": "4400.00", "Confidence": 97.9,
+                  "Geometry": { "BoundingBox": { "Left": 0.5, "Top": 0.4, "Width": 0.1, "Height": 0.02 } } } ] },
+              { "Type": "PAY_PERIOD_END_DATE", "ValueDetections": [ { "Text": "2026-06-30", "Confidence": 96.1 } ] }
+            ],
+            "SignatureDetections": [ { "Confidence": 90.0,
+              "Geometry": { "BoundingBox": { "Left": 0.1, "Top": 0.9, "Width": 0.2, "Height": 0.04 } } } ] } }
+      ] }
+  ]
+}

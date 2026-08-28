@@ -1,0 +1,57 @@
+{
+  "task_id": "task_parse_1",
+  "status": "Succeeded",
+  "created_at": "2026-07-21T00:00:00Z",
+  "file_name": "loan.pdf",
+  "output": {
+    "chunks": [
+      {
+        "chunk_id": "chunk_0",
+        "content": "# Loan Application\n\nApplicant income summary follows.",
+        "segments": [
+          {
+            "segment_id": "seg_0",
+            "segment_type": "Title",
+            "content": "# Loan Application",
+            "text": "Loan Application",
+            "confidence": 0.98,
+            "page_number": 1,
+            "page_width": 612,
+            "page_height": 792,
+            "bbox": { "left": 72, "top": 58, "width": 260, "height": 24 }
+          },
+          {
+            "segment_id": "seg_1",
+            "segment_type": "Text",
+            "content": "Applicant income summary follows.",
+            "text": "Applicant income summary follows.",
+            "confidence": 0.97,
+            "page_number": 1,
+            "page_width": 612,
+            "page_height": 792,
+            "bbox": { "left": 72, "top": 96, "width": 300, "height": 16 }
+          }
+        ]
+      },
+      {
+        "chunk_id": "chunk_1",
+        "content": "<table><tr><td>Region</td><td>Revenue</td></tr><tr><td>North</td><td>4400</td></tr></table>",
+        "segments": [
+          {
+            "segment_id": "seg_2",
+            "segment_type": "Table",
+            "content": "<table><tr><td>Region</td><td>Revenue</td></tr><tr><td>North</td><td>4400</td></tr></table>",
+            "text": "Region Revenue North 4400",
+            "confidence": 0.95,
+            "page_number": 1,
+            "page_width": 612,
+            "page_height": 792,
+            "bbox": { "left": 72, "top": 140, "width": 400, "height": 60 }
+          }
+        ]
+      }
+    ],
+    "pages": [{ "page_number": 1, "page_width": 612, "page_height": 792, "dpi": 72 }]
+  },
+  "output_usage": { "page_count": 1 }
+}

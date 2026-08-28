@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/corpus-report.v0.1.json",
+  "title": "OpenReading Corpus Report v0.1",
+  "description": "The output of comparing two or more batch-result envelopes (Manifest v0.6): documents pair across runs by identity (relpath → filename → sha256), each paired document runs the existing comparison-report v0.2, and a rollup summarizes verdicts. A separate family (not a comparison-report `mode`) because that mode enum is CLOSED — adding a value would be MAJOR (Canon §8). schema_version is a per-version const.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "subjects", "documents", "rollup"],
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "subjects": {
+      "type": "array",
+      "description": "The batch runs being compared, in argument order.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label"],
+        "properties": {
+          "label": { "type": "string" },
+          "source": { "type": ["string", "null"], "description": "The batch-result file path." },
+          "backend_tally": {
+            "type": "object",
+            "additionalProperties": { "type": "integer", "minimum": 0 },
+            "description": "Per-backend item counts from this run's summary.backends."
+          }
+        }
+      }
+    },
+    "documents": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/CorpusDocument" }
+    },
+    "rollup": { "$ref": "#/$defs/CorpusRollup" }
+  },
+  "$defs": {
+    "CorpusDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "verdict"],
+      "properties": {
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "relpath": { "type": ["string", "null"] },
+            "filename": { "type": ["string", "null"] },
+            "sha256": { "type": ["string", "null"] }
+          }
+        },
+        "verdict": {
+          "enum": ["equivalent", "divergent", "mixed", "unpaired"],
+          "description": "CLOSED enum. equivalent/divergent/mixed from the per-document comparison headline; unpaired = the document is present in some runs but not all."
+        },
+        "report": {
+          "type": ["object", "null"],
+          "description": "The full comparison-report v0.2 for this document (validated independently); null when unpaired."
+        }
+      }
+    },
+    "CorpusRollup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["documents"],
+      "properties": {
+        "documents": { "type": "integer", "minimum": 0 },
+        "equivalent": { "type": "integer", "minimum": 0 },
+        "divergent": { "type": "integer", "minimum": 0 },
+        "mixed": { "type": "integer", "minimum": 0 },
+        "unpaired": { "type": "integer", "minimum": 0 },
+        "by_finding_code": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 },
+          "description": "Total finding counts by code across all paired documents."
+        }
+      }
+    }
+  }
+}

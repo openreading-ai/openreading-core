@@ -1,0 +1,7 @@
+{
+  "is_url": true,
+  "url": "https://pulse-results.s3.amazonaws.com/ext_big123?sig=single-use",
+  "extraction_id": "ext_big123",
+  "page_count": 84,
+  "plan_info": { "tier": "standard", "pages_used": 84 }
+}

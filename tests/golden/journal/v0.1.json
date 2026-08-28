@@ -1,0 +1,33 @@
+[
+  {
+    "step_id": "267bf1fcb2110fa9c7a6348781ae1068132b0d3c4c1464d994d725ab498eae06",
+    "status": "attempted",
+    "attempt": 1,
+    "run_id": "run_01977c1e6b8e",
+    "step_path": "root",
+    "step_seq": 0,
+    "backend_id": "aws-textract",
+    "idempotency_key": "om_3f2b6e1a9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f",
+    "content_key": "om_3f2b6e1a9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f",
+    "started_epoch_ms": 1755878400123
+  },
+  {
+    "step_id": "267bf1fcb2110fa9c7a6348781ae1068132b0d3c4c1464d994d725ab498eae06",
+    "status": "ok",
+    "attempt": 1,
+    "run_id": "run_01977c1e6b8e",
+    "step_path": "root",
+    "step_seq": 0,
+    "backend_id": "aws-textract",
+    "idempotency_key": "om_3f2b6e1a9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f",
+    "content_key": "om_3f2b6e1a9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f",
+    "payload": {
+      "run_id": "run_01977c1e6b8e",
+      "digest": "sha256:4f6c9a2b1e8d7c6b5a4938271605f4e3d2c1b0a9f8e7d6c5b4a392817263544",
+      "size_bytes": 48213,
+      "media_type": "application/json",
+      "store": "localfs"
+    },
+    "ended_epoch_ms": 1755878401842
+  }
+]

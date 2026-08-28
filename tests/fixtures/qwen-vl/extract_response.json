@@ -1,0 +1,11 @@
+{
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "```json\n{\"borrower_name\": \"Jane Doe\", \"gross_pay\": \"4400.00\"}\n```"
+      },
+      "finish_reason": "stop"
+    }
+  ]
+}

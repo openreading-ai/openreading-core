@@ -1,0 +1,45 @@
+{
+  "status": "succeeded",
+  "createdDateTime": "2026-07-21T00:00:00Z",
+  "analyzeResult": {
+    "apiVersion": "2024-11-30",
+    "modelId": "prebuilt-layout",
+    "content": "# Loan Application\n\nApplicant income summary.\n\n| Region | Revenue |\n| --- | --- |\n| North | 4400 |\n\nSigned by applicant.",
+    "pages": [
+      { "pageNumber": 1, "width": 8.5, "height": 11.0, "unit": "inch", "angle": 0.0,
+        "words": [ { "content": "Loan", "polygon": [1.0,1.0,1.6,1.0,1.6,1.4,1.0,1.4], "confidence": 0.995, "span": {"offset":2,"length":4} } ],
+        "lines": [ { "content": "Loan Application", "polygon": [1.0,1.0,4.0,1.0,4.0,1.4,1.0,1.4], "spans": [{"offset":2,"length":16}] } ],
+        "selectionMarks": [ { "state": "selected", "polygon": [1.0,5.0,1.2,5.0,1.2,5.2,1.0,5.2], "confidence": 0.98, "span": {"offset":80,"length":1} } ] }
+    ],
+    "paragraphs": [
+      { "content": "Loan Application", "role": "title", "spans": [{"offset":2,"length":16}],
+        "boundingRegions": [ { "pageNumber": 1, "polygon": [1.0,1.0,4.0,1.0,4.0,1.4,1.0,1.4] } ] },
+      { "content": "Applicant income summary.", "spans": [{"offset":20,"length":25}],
+        "boundingRegions": [ { "pageNumber": 1, "polygon": [1.0,1.6,6.0,1.6,6.0,1.9,1.0,1.9] } ] },
+      { "content": "Signed by applicant.", "spans": [{"offset":100,"length":20}],
+        "boundingRegions": [ { "pageNumber": 1, "polygon": [1.0,6.0,4.0,6.0,4.0,6.3,1.0,6.3] } ] }
+    ],
+    "tables": [
+      { "rowCount": 2, "columnCount": 2, "spans": [{"offset":47,"length":51}],
+        "cells": [
+          { "kind": "columnHeader", "rowIndex": 0, "columnIndex": 0, "content": "Region",
+            "boundingRegions": [ { "pageNumber": 1, "polygon": [1.0,3.0,3.0,3.0,3.0,3.5,1.0,3.5] } ], "spans": [] },
+          { "kind": "columnHeader", "rowIndex": 0, "columnIndex": 1, "content": "Revenue",
+            "boundingRegions": [ { "pageNumber": 1, "polygon": [3.0,3.0,5.0,3.0,5.0,3.5,3.0,3.5] } ], "spans": [] },
+          { "kind": "rowHeader", "rowIndex": 1, "columnIndex": 0, "content": "North",
+            "boundingRegions": [ { "pageNumber": 1, "polygon": [1.0,3.5,3.0,3.5,3.0,4.0,1.0,4.0] } ], "spans": [] },
+          { "rowIndex": 1, "columnIndex": 1, "content": "4400",
+            "boundingRegions": [ { "pageNumber": 1, "polygon": [3.0,3.5,5.0,3.5,5.0,4.0,3.0,4.0] } ], "spans": [] }
+        ] }
+    ],
+    "keyValuePairs": [
+      { "key": { "content": "Applicant Name", "spans": [{"offset":0,"length":14}],
+          "boundingRegions": [ { "pageNumber": 1, "polygon": [1.0,6.5,2.5,6.5,2.5,6.7,1.0,6.7] } ] },
+        "value": { "content": "Jane Doe", "spans": [{"offset":15,"length":8}],
+          "boundingRegions": [ { "pageNumber": 1, "polygon": [2.6,6.5,4.0,6.5,4.0,6.7,2.6,6.7] } ] },
+        "confidence": 0.92 }
+    ],
+    "styles": [ { "isHandwritten": true, "confidence": 0.9, "spans": [ {"offset":20,"length":25} ] } ],
+    "documents": []
+  }
+}

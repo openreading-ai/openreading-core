@@ -1,0 +1,43 @@
+{
+  "name": "loan_page1",
+  "input": {
+    "builtin_sample": true,
+    "pages": [
+      1
+    ]
+  },
+  "expected": {
+    "text_contains": [
+      "OpenReading Test Document",
+      "twelve points"
+    ],
+    "tables": [
+      [
+        [
+          "Region",
+          "Units",
+          "Revenue"
+        ],
+        [
+          "North",
+          "120",
+          "4400"
+        ],
+        [
+          "South",
+          "85",
+          "3100"
+        ],
+        [
+          "West",
+          "42",
+          "1650"
+        ]
+      ]
+    ]
+  },
+  "meta": {
+    "doc_type": "generic",
+    "note": "built-in sample PDF page 1; born-digital text + 3x4 table"
+  }
+}

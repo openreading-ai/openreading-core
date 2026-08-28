@@ -1,0 +1,20 @@
+{
+  "id": "chatcmpl-trunc",
+  "object": "chat.completion",
+  "model": "Qwen/Qwen3-VL-8B-Instruct",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "<html><body><div class=\"title\" data-bbox=\"153 100 700 180\">Loan Application</div><div class=\"text\" data-bbox=\"153 250 900 300\">Applicant income</div></body></html>"
+      },
+      "finish_reason": "length"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1200,
+    "completion_tokens": 8192,
+    "total_tokens": 9392
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "IdentityDocuments": [
+    { "DocumentIndex": 1,
+      "IdentityDocumentFields": [
+        { "Type": { "Text": "FIRST_NAME" }, "ValueDetection": { "Text": "JANE", "Confidence": 99.8 } },
+        { "Type": { "Text": "DATE_OF_BIRTH" },
+          "ValueDetection": { "Text": "01/15/1985",
+            "NormalizedValue": { "Value": "1985-01-15T00:00:00", "ValueType": "Date" }, "Confidence": 99.2 } }
+      ] }
+  ]
+}

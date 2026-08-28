@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/step.v0.1.json",
+  "title": "OpenReading Step v0.1",
+  "description": "The one call every executor implements (internal/design/ledger.md §5.3/§5.4): a StepRequest in, a StepResult out. T1 ships InlineExecutor's non-replaying, non-decomposed form — one step per leaf (kind=submit only; drive/emit/translate are closed-enum members reserved for T3's full _exec_leaf decomposition, not dispatched by any T1 executor). StepResult's status enum includes 'attempted' (additive over the design doc's own list), the pre-vendor-call record InlineExecutor.exec writes before dispatch (AC-13, resolving Phase A round-1 F1).",
+  "$defs": {
+    "BlobRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "digest", "size_bytes", "media_type"],
+      "properties": {
+        "run_id": { "type": "string", "description": "Blobs are addressed per run, never globally (§5.4) — cross-run access is refused." },
+        "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "sha256 of the PLAINTEXT, streamed." },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "media_type": { "type": "string" },
+        "store": { "type": ["string", "null"], "description": "The BlobStore implementation id that holds this blob, e.g. 'localfs'. Null for an in-memory-only ref (ledger unarmed, L1)." }
+      }
+    },
+    "StepError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "taxonomy"],
+      "properties": {
+        "code": { "type": "string" },
+        "taxonomy": { "type": "string" },
+        "detail": { "type": ["string", "null"] }
+      }
+    },
+    "StepCost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["usd"],
+      "properties": {
+        "usd": { "type": "number", "minimum": 0 },
+        "basis": { "type": ["string", "null"] }
+      }
+    },
+    "StepRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["step_id", "run_id", "kind", "step_path", "step_seq", "attempt"],
+      "properties": {
+        "step_id": { "type": "string" },
+        "run_id": { "type": "string" },
+        "kind": { "enum": ["intake", "submit", "drive", "emit", "translate"] },
+        "step_path": { "type": "string", "description": "Structural node path — never a config digest." },
+        "step_seq": { "type": "integer", "minimum": 0, "description": "Per-path counter (§6). T1's non-decomposed leaf always dispatches step_seq=0 — a real per-drive sequence is T3's." },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "idempotency_key": { "type": ["string", "null"] },
+        "content_key": { "type": ["string", "null"], "description": "A pure function of content + backend + resolved version + options (§5.5) — distinct from idempotency_key, which a caller may override; content_key never can." },
+        "backend_id": { "type": ["string", "null"] },
+        "credentials_ref": { "type": "array", "items": { "type": "string" }, "description": "Key NAMES only — never resolved values." },
+        "document": { "anyOf": [{ "$ref": "#/$defs/BlobRef" }, { "type": "null" }] },
+        "options": { "type": "object", "description": "Slim projection: outputs, pages, mime, page_count. Never document.password/url, async_.webhook_url, or a credentials_spec secret field (§9.3)." },
+        "absolute_deadline_epoch_ms": { "type": ["integer", "null"] },
+        "parent_step_id": { "type": ["string", "null"] },
+        "missing_credentials": { "type": "array", "items": { "type": "string" }, "description": "Ledger T3 (§4.3b): the primary env var of every required credential/config field the caller already found missing — additive, empty by default. A non-empty list makes exec() journal a skipped/missing_credentials terminal record without ever calling run()." }
+      }
+    },
+    "StepResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["step_id", "status", "attempt"],
+      "properties": {
+        "step_id": { "type": "string" },
+        "status": {
+          "enum": ["attempted", "ok", "skipped", "retryable", "failed", "cancelled", "replayed"],
+          "description": "'attempted' is additive over the design doc's own ok|skipped|retryable|failed|cancelled|replayed — free to add since this family is not yet vendored (T1 is its first ship)."
+        },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "run_id": { "type": ["string", "null"] },
+        "step_path": { "type": ["string", "null"] },
+        "step_seq": { "type": ["integer", "null"] },
+        "backend_id": { "type": ["string", "null"] },
+        "idempotency_key": { "type": ["string", "null"] },
+        "content_key": { "type": ["string", "null"] },
+        "payload": {
+          "description": "BlobRef | JsonValue, never Any (§5.4) — a non-serializable payload must raise before this is constructed, never after.",
+          "anyOf": [
+            { "$ref": "#/$defs/BlobRef" },
+            { "type": ["object", "array", "string", "number", "boolean", "null"] }
+          ]
+        },
+        "error": { "anyOf": [{ "$ref": "#/$defs/StepError" }, { "type": "null" }] },
+        "cost": { "anyOf": [{ "$ref": "#/$defs/StepCost" }, { "type": "null" }] },
+        "started_epoch_ms": { "type": ["integer", "null"] },
+        "ended_epoch_ms": { "type": ["integer", "null"] },
+        "resolved_version": { "type": ["string", "null"] },
+        "journal_seq": { "type": ["integer", "null"], "description": "Ledger T3 (§4.1/§7.4): a per-run monotonic append count, assigned by Journal.append — the record's own replay-stable completion order." }
+      }
+    }
+  },
+  "type": "object",
+  "oneOf": [{ "$ref": "#/$defs/StepRequest" }, { "$ref": "#/$defs/StepResult" }]
+}

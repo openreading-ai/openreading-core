@@ -1,0 +1,230 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/response/v0.1.json",
+  "title": "OpenReadingResponse",
+  "type": "object",
+  "required": ["schema_version", "status", "backend", "document"],
+  "additionalProperties": false,
+
+  "$defs": {
+    "BBox": {
+      "type": "object",
+      "description": "CANONICAL geometry: top-left origin, y increases downward, normalized to [0,1] relative to the containing page's width/height. This is the ONE convention the normalizer emits (see §6.1). Absolute coordinates are recoverable via page.width/page.height/page.unit. Raw source geometry is preserved in bbox_native.",
+      "required": ["x", "y", "w", "h", "page"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 1 },
+        "y": { "type": "number", "minimum": 0, "maximum": 1 },
+        "w": { "type": "number", "minimum": 0, "maximum": 1 },
+        "h": { "type": "number", "minimum": 0, "maximum": 1 },
+        "page": { "type": "integer", "minimum": 1, "description": "1-based page number." },
+        "polygon": { "type": "array", "items": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+          "description": "Optional 4+ corner points, same normalized top-left space. Present when source gives a polygon (Textract, Azure, DocAI, unstructured, Marker/Surya)." },
+        "bbox_native": { "type": "object", "description": "Raw source geometry, untouched, for round-trip fidelity.",
+          "properties": {
+            "coords": { "type": "array", "items": { "type": "number" } },
+            "origin": { "enum": ["top_left", "bottom_left"] },
+            "unit": { "enum": ["normalized", "pdf_point", "pixel", "inch"] },
+            "dpi": { "type": "number", "description": "Set when unit=pixel and geometry is dpi-dependent (pytesseract, Mistral, rasterized OCR)." }
+          }
+        }
+      }
+    },
+
+    "Block": {
+      "type": "object",
+      "description": "One reading-order element. `type` is the normalized enum; `native_type` preserves the backend's own label.",
+      "required": ["type"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": {
+          "enum": ["title", "section_header", "header", "footer", "page_number",
+                   "text", "list", "list_item", "table", "table_cell", "figure",
+                   "image", "caption", "formula", "code", "key_value", "form_field",
+                   "signature", "selection_mark", "barcode", "table_of_contents", "other"],
+          "description": "Normalized down from each backend's own vocabulary; unmapped types → 'other' with native_type retained."
+        },
+        "native_type": { "type": "string",
+          "description": "Backend's own label, verbatim: Textract 'KEY_VALUE_SET', unstructured 'NarrativeText', dots-ocr 'Section-header', Chunkr segment_type, Docling label." },
+        "text": { "type": "string", "description": "Plain text of the element (assembled if the backend only gives sub-word units)." },
+        "markdown": { "type": "string", "description": "Per-element markdown/HTML when the backend renders it (Chunkr segment.content, Reducto block content, LlamaParse item.md, MinerU table_body HTML)." },
+        "html": { "type": "string", "description": "Table HTML when provided (unstructured text_as_html, Azure, MinerU, Marker, dots-ocr Table text)." },
+        "bbox": { "$ref": "#/$defs/BBox" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1,
+          "description": "Normalized to [0,1]. Textract 0-100 → /100. Absent for deterministic parsers (pymupdf/pdfplumber/pdfminer), markdown-only outputs, and token-stream LLMs (see §6.4)." },
+        "reading_order": { "type": "integer", "description": "0-based index in reading order when the backend establishes one." },
+        "table": {
+          "type": "object",
+          "description": "Populated only when type=table.",
+          "properties": {
+            "n_rows": { "type": "integer" },
+            "n_cols": { "type": "integer" },
+            "cells": { "type": "array", "items": {
+              "type": "object",
+              "properties": {
+                "row": { "type": "integer" }, "col": { "type": "integer" },
+                "row_span": { "type": "integer", "default": 1 }, "col_span": { "type": "integer", "default": 1 },
+                "text": { "type": "string" }, "is_header": { "type": "boolean" },
+                "bbox": { "$ref": "#/$defs/BBox" }, "confidence": { "type": "number" }
+              }
+            } },
+            "rows": { "type": "array", "items": { "type": "array", "items": { "type": ["string", "null"] } },
+              "description": "Lowest-common-denominator list-of-lists (pymupdf Table.extract(), pdfplumber, camelot). Nulls for empty cells." }
+          }
+        },
+        "children": { "type": "array", "items": { "type": "string" },
+          "description": "Ids of child blocks when a hierarchy is preserved (Textract CHILD relationships, Docling groups, DocAI). Flattened output keeps this optional edge list; consumers who only want the flat list ignore it." },
+        "text_type": { "enum": ["printed", "handwriting", "unknown"],
+          "description": "Textract TextType; Azure styles[].isHandwritten. Unknown for backends that don't distinguish." }
+      }
+    }
+  },
+
+  "properties": {
+    "schema_version": { "type": "string", "const": "0.1" },
+
+    "status": {
+      "type": "object",
+      "required": ["state"],
+      "properties": {
+        "state": { "enum": ["succeeded", "partial", "failed", "processing"] },
+        "error": { "type": "object", "properties": {
+          "code": { "type": "string" }, "message": { "type": "string" },
+          "backend_code": { "type": "string", "description": "Original backend error code/status." } } }
+      }
+    },
+
+    "backend": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "enum": ["hosted_api", "oss_library", "framework_loader", "self_hosted_model"] },
+        "operation": { "type": "string" },
+        "version": { "type": "string", "description": "Resolved backend/model/library version actually run." },
+        "output_paradigm": { "type": "array", "items": { "enum": ["markdown", "typed_fields", "element_list", "block_tree", "block_graph", "token_stream"] },
+          "description": "Which paradigm(s) the raw output was, before normalization. Lets consumers reason about what is native vs derived." }
+      }
+    },
+
+    "document": {
+      "type": "object",
+      "description": "Doc-level results. At least one of {markdown, text, typed_fields, pages[].blocks} MUST be populated (see anyOf below) — that is the honest common denominator across P1..P6.",
+      "properties": {
+        "markdown": { "type": "string", "description": "Full-document markdown export. Native for P1/P4; assembled from blocks for P3/P5; from tokens for P6; IMPOSSIBLE for pure P2 extractors with no text (Sensible) → absent." },
+        "text": { "type": "string", "description": "Full-document plain text in reading order. Same availability as markdown." },
+        "page_count": { "type": "integer", "minimum": 0 },
+        "language": { "type": "array", "items": { "type": "string" } },
+        "doc_type": { "type": "object", "properties": {
+          "label": { "type": "string" }, "confidence": { "type": "number" },
+          "description": { "type": "string", "description": "e.g. Textract Lending PageType '1005', DocAI classifier label." } } },
+
+        "pages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["page_number"],
+            "properties": {
+              "page_number": { "type": "integer", "minimum": 1 },
+              "width": { "type": "number", "description": "In page.unit; needed to de-normalize bbox." },
+              "height": { "type": "number" },
+              "unit": { "enum": ["pdf_point", "pixel", "inch"], "description": "The unit width/height are in. Azure reports inch (PDF) or pixel (image); pdf libs report pdf_point; OCR reports pixel@dpi." },
+              "dpi": { "type": "number" },
+              "rotation": { "type": "number" },
+              "markdown": { "type": "string", "description": "Per-page markdown (LlamaParse, Mistral, MinerU)." },
+              "text": { "type": "string" },
+              "blocks": { "type": "array", "items": { "$ref": "#/$defs/Block" },
+                "description": "THE COMMON SPINE. Reading-order typed blocks. Empty [] for pure typed-field APIs and un-prompted token-stream LLMs (honest: not a failure, a structural absence)." },
+              "confidence": { "type": "number", "description": "Page-level confidence when the backend gives one (Mistral page granularity, Docling page confidence report, camelot per-table)." },
+              "image_base64": { "type": "string", "description": "Rendered page image when requested/returned (Chunkr pages[].image is a presigned URL → normalizer MAY inline or keep url)." },
+              "image_url": { "type": "string", "format": "uri" }
+            }
+          }
+        }
+      }
+    },
+
+    "typed_fields": {
+      "type": "object",
+      "description": "Optional. Present for P2 extractors and P6 user-schema extraction. A map keyed by field name; each value normalized to a common Field shape. Absent for pure parsers (pymupdf, docling, unstructured, marker, OCR engines) — they extract structure, not fields.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "value": { "description": "string | number | boolean | null | nested object | array (Mindee SimpleField/ObjectField/ListField collapse into this)." },
+          "type": { "type": "string", "description": "Source-declared value type: string|number|integer|date|currency|address|phone|boolean." },
+          "normalized_value": { "description": "Backend's normalized form where present (Textract AnalyzeID NormalizedValue, DocAI normalizedValue{dateValue,moneyValue})." },
+          "confidence": { "type": ["number", "string"], "description": "Numeric [0,1] where numeric (Chunkr/Reducto/DocAI); qualitative enum preserved as string where the backend is qualitative (Mindee Certain/High/Medium; Sensible confident_answer/...)." },
+          "citations": { "type": "array", "items": { "type": "object", "properties": {
+            "page": { "type": "integer" }, "bbox": { "$ref": "#/$defs/BBox" },
+            "text": { "type": "string" }, "confidence": { "type": "number" } } },
+            "description": "Per-field source grounding (Reducto /extract citations, Chunkr Citation leaves, Claude page_location)." }
+        }
+      }
+    },
+
+    "chunks": {
+      "type": "array",
+      "description": "Optional. RAG chunks when requested and supported natively (Reducto chunks, Chunkr chunks, unstructured CompositeElement, LlamaIndex nodes, Docling chunker). Otherwise the router may derive from blocks.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "text": { "type": "string" },
+          "markdown": { "type": "string" },
+          "block_ids": { "type": "array", "items": { "type": "string" } },
+          "page_span": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 },
+          "embedding": { "type": "array", "items": { "type": "number" } }
+        }
+      }
+    },
+
+    "usage": {
+      "type": "object",
+      "description": "Normalized cost/usage. Fields are per-backend-natural; the router computes cost_usd via the pricing model, filling what the backend reports.",
+      "properties": {
+        "pages_processed": { "type": "integer" },
+        "credits": { "type": "number", "description": "Reducto credits, LlamaParse credits (native unit)." },
+        "input_tokens": { "type": "integer" }, "output_tokens": { "type": "integer" },
+        "cost_usd": { "type": "number", "description": "Router-computed cost-per-page-equivalent, or backend-billed cost. Null for local backends (infra cost modeled separately)." },
+        "cost_basis": { "enum": ["billed", "estimated", "infra_only", "unknown"] },
+        "duration_ms": { "type": "integer" }
+      }
+    },
+
+    "job": {
+      "type": "object",
+      "description": "Async job handle when applicable (Textract JobId, LlamaParse pjb-..., Chunkr task_id, Reducto job_id).",
+      "properties": {
+        "id": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "finished_at": { "type": "string", "format": "date-time" },
+        "poll_url": { "type": "string" }, "studio_url": { "type": "string", "description": "Reducto studio_link / Chunkr viewer." }
+      }
+    },
+
+    "warnings": {
+      "type": "array",
+      "description": "Requested-but-unsupported outputs/features, degradations, coordinate-conversion notes. E.g. 'typed_fields requested but backend is a parser; empty', 'confidence unavailable for deterministic parser', 'bbox omitted: markdown-only tier'.",
+      "items": { "type": "object", "properties": {
+        "code": { "type": "string" }, "message": { "type": "string" }, "field": { "type": "string" } } }
+    },
+
+    "backend_raw": {
+      "type": "object",
+      "description": "The untouched native payload (hosted JSON) or the serialized native object (library) — see §5. Present when outputs.include_backend_raw=true. This is the escape hatch that makes lossy normalization safe: nothing the backend produced is ever destroyed.",
+      "properties": {
+        "encoding": { "enum": ["json", "json_serialized_object", "text", "base64", "reference"] },
+        "media_type": { "type": "string", "description": "e.g. application/json, text/markdown, application/vnd.docling+json, text/vnd.doctags." },
+        "payload": { "description": "The raw value, or a reference handle when too large to inline." },
+        "object_class": { "type": "string", "description": "For serialized native objects: fully-qualified class, e.g. 'fitz.Page.get_text.dict', 'docling_core.types.doc.DoclingDocument', 'unstructured...Element'." },
+        "truncated": { "type": "boolean" }
+      }
+    }
+  },
+
+  "anyOf": [
+    { "properties": { "document": { "required": ["markdown"] } } },
+    { "properties": { "document": { "required": ["text"] } } },
+    { "properties": { "document": { "required": ["pages"] } } },
+    { "required": ["typed_fields"] }
+  ]
+}

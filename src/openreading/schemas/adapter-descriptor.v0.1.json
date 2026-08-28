@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/adapter-descriptor/v0.1.json",
+  "title": "AdapterDescriptor",
+  "type": "object",
+  "required": ["id", "type", "provisioning", "wait_modes", "capabilities", "cost", "compliance", "runtime"],
+  "properties": {
+    "id":   { "type": "string", "description": "registry slug, e.g. 'aws-textract'" },
+    "type": { "enum": ["hosted_api", "oss_library", "framework_loader", "self_hosted_model"] },
+    "operations": { "type": "array", "items": { "type": "string" },
+      "description": "sub-ops with distinct schemas/costs: Textract Detect|Analyze[Document|Expense|ID|Lending]" },
+    "adapter_impl": { "enum": ["http", "in_process", "subprocess", "container"] },
+
+    "provisioning": {
+      "type": "object",
+      "properties": {
+        "byo_mode": { "type": "array", "items": { "enum": ["api_key", "pip", "container", "weights", "endpoint"] } },
+        "auth": { "enum": ["none", "api_key", "sigv4", "oauth2", "entra", "gcp_adc"] },
+        "billing_target": { "enum": ["caller_account", "openreading", "caller_infra"] }
+      }
+    },
+
+    "wait_modes": { "type": "array", "items": { "enum": ["inline", "poll", "webhook"] } },
+
+    "capabilities": {
+      "type": "object",
+      "description": "each value: 'verified' | 'claimed' | false. verified = live-run/benchmark; claimed = vendor doc only.",
+      "properties": {
+        "ocr": {}, "handwriting": {}, "printed_tables": {}, "complex_tables": {},
+        "forms_key_value": {}, "layout": {}, "reading_order": {}, "multi_column": {},
+        "figures_charts": {}, "signatures": {}, "classification": {}, "splitting": {},
+        "custom_schema_extraction": {}, "vlm_based": {}, "human_in_the_loop": {},
+        "languages": { "type": "array", "items": { "type": "string" } },
+        "input_formats": { "type": "array", "items": { "type": "string" } },
+        "max_pages_per_request": { "type": ["integer", "string"] },
+        "max_file_size": { "type": "string" }
+      }
+    },
+
+    "output": {
+      "type": "object",
+      "properties": {
+        "paradigms": { "type": "array", "items": { "enum": ["markdown","typed_fields","element_list","block_tree","block_graph","token_stream"] } },
+        "channels": {
+          "description": "per response channel: 'N' native | 'D' derivable | 'X' impossible (matrix grades, normalized_schema.md §4)",
+          "type": "object",
+          "properties": { "markdown": {}, "text": {}, "blocks": {}, "block_bbox": {}, "block_confidence": {}, "typed_fields": {}, "table_cells": {} }
+        }
+      }
+    },
+
+    "cost": {
+      "type": "object",
+      "properties": {
+        "native_unit": { "enum": ["page","credit","token","doc","gpu_second","cpu_second","subscription"] },
+        "usd_per_page_equiv_low":  { "type": ["number","null"] },
+        "usd_per_page_equiv_high": { "type": ["number","null"] },
+        "basis": { "enum": ["billed","estimated","infra_only","unknown"] },
+        "lossiness": { "enum": ["none","page-def","per-doc","credit","subscription"] }
+      }
+    },
+
+    "compliance": {
+      "type": "object",
+      "properties": {
+        "hipaa_baa": { "enum": ["yes","tier_gated","no","na_local"] },
+        "soc2": {}, "gdpr": {}, "pci": {},
+        "data_region_options": { "type": "array", "items": { "type": "string" } },
+        "data_retention": { "type": "string" },
+        "trains_on_customer_data": { "enum": ["yes","no","opt_out","na_local"] },
+        "runs_fully_local": { "type": "boolean" }
+      }
+    },
+
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "offline_capable": { "type": "boolean" },
+        "license": { "type": "string" },
+        "system_deps": { "type": "array", "items": { "type": "string" } },
+        "version_pin": { "type": "string" },
+        "hardware": { "enum": ["cpu","gpu_small","gpu_mid","gpu_large","managed"] },
+        "vram_class": { "enum": ["cpu","le8","le28","ge40","na"] },
+        "cold_start_s": { "type": ["number","null"] },
+        "serving": { "enum": ["transformers","vllm","ollama","sglang","remote_endpoint","na"] },
+        "sandbox": { "enum": ["in_process","subprocess","container"] }
+      }
+    },
+
+    "router": {
+      "type": "object",
+      "properties": {
+        "normalization_difficulty": { "enum": ["low","medium","high"] },
+        "integration_priority": { "enum": ["P0","P1","P2"] },
+        "priority_reason": { "type": "string" }
+      }
+    },
+
+    "sources": { "type": "array", "items": { "type": "object",
+      "properties": { "url": {"type":"string"}, "accessed": {"type":"string"}, "supports": {"type":"string"} } } }
+  }
+}

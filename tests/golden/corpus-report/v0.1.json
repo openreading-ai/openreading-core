@@ -1,0 +1,42 @@
+{
+  "schema_version": "0.1",
+  "subjects": [
+    { "label": "pymupdf-run", "source": "runA.json", "backend_tally": { "pymupdf": 3 } },
+    { "label": "tesseract-run", "source": "runB.json", "backend_tally": { "tesseract": 3 } }
+  ],
+  "documents": [
+    {
+      "source": { "relpath": "a.pdf", "filename": "a.pdf", "sha256": "aaaa1111" },
+      "verdict": "equivalent",
+      "report": null
+    },
+    {
+      "source": { "relpath": "b.pdf", "filename": "b.pdf", "sha256": "bbbb2222" },
+      "verdict": "divergent",
+      "report": {
+        "schema_version": "0.2",
+        "mode": "pairwise",
+        "subjects": [
+          { "label": "pymupdf", "backend": { "id": "pymupdf" }, "facts": {} },
+          { "label": "tesseract", "backend": { "id": "tesseract" }, "facts": {} }
+        ],
+        "fields": { "rows": [] },
+        "findings": [],
+        "warnings": []
+      }
+    },
+    {
+      "source": { "relpath": "c.pdf", "filename": "c.pdf", "sha256": "cccc3333" },
+      "verdict": "unpaired",
+      "report": null
+    }
+  ],
+  "rollup": {
+    "documents": 3,
+    "equivalent": 1,
+    "divergent": 1,
+    "mixed": 0,
+    "unpaired": 1,
+    "by_finding_code": { "table_shape_mismatch": 2 }
+  }
+}

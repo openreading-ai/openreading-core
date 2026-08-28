@@ -1,0 +1,20 @@
+{
+  "id": "chatcmpl-1",
+  "object": "chat.completion",
+  "model": "Qwen/Qwen3-VL-8B-Instruct",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "<html><body><div class=\"title\" data-bbox=\"153 100 700 180\">Loan Application</div><div class=\"text\" data-bbox=\"153 250 900 300\">Applicant income summary.</div><div class=\"table\" data-bbox=\"153 620 906 820\"><table><tr><td>Region</td><td>Revenue</td></tr><tr><td>North</td><td>4400</td></tr></table></div><div class=\"image\" data-bbox=\"126 630 260 764\"></div></body></html>"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1200,
+    "completion_tokens": 180,
+    "total_tokens": 1380
+  }
+}

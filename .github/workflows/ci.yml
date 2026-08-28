@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main, build]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    # Observed run time is low single-digit minutes; 30 is comfortably above that and well short
+    # of GitHub's 360-minute default (BL-56) so a stuck run doesn't sit on a runner indefinitely.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # Tesseract is the one system binary the subprocess-backend tests exercise for real. If it
+      # were absent those tests would importorskip cleanly, but we install it so CI covers the
+      # out-of-process path end to end.
+      - name: Install tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+
+      - name: Sync (all extras + dev)
+        # --locked: a lockfile that disagrees with pyproject fails the build instead of being
+        # silently re-resolved on the runner.
+        run: uv sync --locked --all-extras --dev
+
+      # The single gate: ruff (lint+format) + pyright + pytest (non-live) + JSON-Schema
+      # validation + CLI smoke. Live tests are @pytest.mark.live and skipped without provider keys.
+      - name: make verify
+        run: make verify
+
+      # BL-124: D1 keeps pyright primary / mypy fallback in `make verify` itself (the `||` in
+      # `typecheck` means mypy only ever runs when pyright fails), so mypy's own health has had no
+      # automated signal on the green path. This step runs it unconditionally, every build,
+      # non-blocking — it reports mypy's status without gating the pipeline on a mypy-only finding
+      # or touching D1's fallback semantics.
+      #
+      # BL-140: restricted to one leg. `pyproject.toml`'s own `[tool.mypy] python_version = "3.11"`
+      # pins mypy's analysis target independent of whichever interpreter hosts the process, and
+      # `ignore_missing_imports = true` suppresses the one other channel (stub resolution) by which
+      # a different host interpreter could change mypy's findings — so all four matrix legs are
+      # configured to be incapable of disagreeing here, not merely observed to agree.
+      - name: make typecheck-mypy (non-blocking signal)
+        if: matrix.python-version == '3.12'
+        continue-on-error: true
+        run: make typecheck-mypy
+
+      # Coverage is *enforced* inside `make verify` (--cov-fail-under in the Makefile) on every
+      # leg above; this step only reports the measured number where people look. The README
+      # badge states the enforced floor rather than this measurement: the repo is private, so a
+      # hosted badge endpoint (gh-pages + shields, the cuttlefish pattern) cannot be fetched,
+      # and a badge that promises a number the gate does not guarantee would be a lie. When the
+      # measurement sits 2+ points above the floor the notice below says so — raise
+      # --cov-fail-under and the README badge together (tests/test_docs_policy.py pins them).
+      # One leg only: the number is not interpreter-dependent, and four copies would just race
+      # to write the same summary.
+      - name: Coverage summary (3.12 leg)
+        if: matrix.python-version == '3.12'
+        run: |
+          uv run coverage xml -o coverage.xml
+          PCT=$(uv run python -c "import xml.etree.ElementTree as E; print(round(float(E.parse('coverage.xml').getroot().get('line-rate')) * 100, 1))")
+          FLOOR=$(sed -nE 's/.*--cov-fail-under=([0-9]+).*/\1/p' Makefile)
+          {
+            echo "## Coverage"
+            echo ""
+            echo "**${PCT}%** line coverage on Python 3.12 (gate: >= ${FLOOR}%, enforced by \`make verify\` on every leg)."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "coverage: ${PCT}% (floor ${FLOOR}%)"
+          uv run python -c "import sys; p, f = float('${PCT}'), float('${FLOOR}'); sys.stdout.write(f'::notice title=Coverage floor can be raised::measured {p}% is {p - f:.1f} points above the {f:.0f}% floor - raise --cov-fail-under in the Makefile and the README badge together\n') if p - f >= 2 else None"
+
+      - name: Upload coverage.xml
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml

@@ -1,0 +1,44 @@
+{
+  "markdown": "# Loan Application\n\nApplicant income summary follows.\n\n| Region | Revenue |\n| --- | --- |\n| North | 4400 |",
+  "page_count": 1,
+  "extraction_id": "ext_abc123",
+  "credits_used": 1,
+  "plan_info": { "tier": "free", "pages_used": 1, "total_credits_used": 1 },
+  "bounding_boxes": {
+    "markdown_with_ids": "# [t0] Loan Application",
+    "Title": [
+      {
+        "id": "t0",
+        "content": "Loan Application",
+        "page": 1,
+        "page_width": 612,
+        "page_height": 792,
+        "bbox": { "left": 72, "top": 58, "width": 260, "height": 24 }
+      }
+    ],
+    "Text": [
+      {
+        "id": "x0",
+        "content": "Applicant income summary follows.",
+        "page": 1,
+        "page_width": 612,
+        "page_height": 792,
+        "bbox": { "left": 72, "top": 96, "width": 300, "height": 16 }
+      }
+    ],
+    "Tables": [
+      {
+        "table_info": { "id": "tab0", "dimensions": [2, 2] },
+        "page_number": 1,
+        "bounding_box": [0.1176, 0.1768, 0.7712, 0.1768, 0.7712, 0.2525, 0.1176, 0.2525],
+        "cell_data": [
+          { "row": 0, "column": 0, "content": "Region", "is_header": true },
+          { "row": 0, "column": 1, "content": "Revenue", "is_header": true },
+          { "row": 1, "column": 0, "content": "North" },
+          { "row": 1, "column": 1, "content": "4400" }
+        ]
+      }
+    ]
+  },
+  "warnings": ["low-resolution scan detected on page 1"]
+}

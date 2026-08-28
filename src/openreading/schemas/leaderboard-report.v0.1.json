@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/leaderboard-report.v0.1.json",
+  "title": "OpenReading Leaderboard Report v0.1",
+  "description": "The output of `evals.leaderboard.run_leaderboard` (BL-160): the SAME evals.dataset case.json corpus run through the unchanged evals.runner.run_case path across N registered backends, ranked by measured mean score on that one dataset. Backends are ranked best-first; each row carries its measured score, per-dimension breakdown, error tally, and cost basis together (never a rank without the price that produced it). `dataset` names the exact corpus that produced this ranking (path, case count, case names) so two reports are never structurally mistakable for having run the same cases. schema_version is a per-version const.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "dataset", "backends", "cases"],
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "dataset": { "$ref": "#/$defs/LeaderboardDataset" },
+    "backends": {
+      "type": "array",
+      "description": "One row per benchmarked backend, sorted best-first (rank 1 = highest mean_score).",
+      "items": { "$ref": "#/$defs/LeaderboardBackend" }
+    },
+    "cases": {
+      "type": "array",
+      "description": "One row per dataset case, in dataset order, with every backend's score on that case and the per-case winner.",
+      "items": { "$ref": "#/$defs/LeaderboardCase" }
+    }
+  },
+  "$defs": {
+    "LeaderboardDataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "case_count", "case_names"],
+      "properties": {
+        "path": { "type": "string", "description": "The dataset directory this report ran." },
+        "case_count": { "type": "integer", "minimum": 0 },
+        "case_names": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "LeaderboardBackend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "backend_id",
+        "rank",
+        "mean_score",
+        "n_cases",
+        "n_scored",
+        "errors",
+        "cost_per_doc",
+        "non_deterministic",
+        "dimensions"
+      ],
+      "properties": {
+        "backend_id": { "type": "string" },
+        "rank": { "type": "integer", "minimum": 1 },
+        "mean_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "DatasetReport.mean_overall on this dataset — errored/unscored cases excluded from both numerator and denominator, never folded in as a fabricated 0.0 (see n_cases/n_scored/errors for provenance)."
+        },
+        "n_cases": { "type": "integer", "minimum": 0 },
+        "n_scored": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Of n_cases, how many carried a recognized `expected` dimension AND ran without error — mean_score is grounded in this subset only."
+        },
+        "errors": { "type": "integer", "minimum": 0 },
+        "cost_per_doc": {
+          "type": "number",
+          "minimum": 0,
+          "description": "The descriptor-cost proxy (strategies.calibrate._descriptor_cost) — 0 for a fully-local backend."
+        },
+        "non_deterministic": {
+          "type": "boolean",
+          "description": "True when backend_id is a member of comparison.report._NON_DETERMINISTIC — mean_score is then a single labeled sample, never trusted as exactly reproducible run-to-run."
+        },
+        "dimensions": {
+          "type": "object",
+          "description": "Per-dimension mean (the scorers.score() headline value — a dict-shaped dimension's f1, else the plain float) over the cases that exercised that dimension. Never blended into one cross-dimension number.",
+          "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "LeaderboardCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "scores"],
+      "properties": {
+        "name": { "type": "string" },
+        "winner": {
+          "type": ["string", "null"],
+          "description": "The backend_id with the highest score on this case (ties broken alphabetically); absent/null when no backend produced a real score."
+        },
+        "scores": {
+          "type": "object",
+          "description": "backend_id -> that backend's overall on this case; null when errored or unscored (never a fabricated 0.0).",
+          "additionalProperties": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "schema_version": "0.1",
+  "backend": "docling",
+  "status": "unreachable",
+  "measured": true,
+  "probe": "endpoint",
+  "checked_at": "2026-08-17T09:41:07Z",
+  "latency_ms": 2.9,
+  "detail": "no response (DOCLING_SERVE_URL) within 5s (ConnectError)",
+  "version": null
+}

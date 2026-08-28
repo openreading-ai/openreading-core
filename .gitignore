@@ -1,0 +1,59 @@
+# macOS junk
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+
+# uv
+uv.lock.bak
+
+# tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+
+# coverage (pytest-cov / coverage.py artifacts)
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# scratch
+*.tmp
+scratch/
+at.html
+
+# local compare artifacts — per-backend parse outputs (a.json, b.json, …) stay local
+/[a-z].json
+
+# local test corpus + all batch/compare outputs (samples/.runs/*.json) — never committed.
+# Add your own docs (any format) under samples/; run scripts/batch_demo.sh.
+samples/
+
+# Working documents — design specs, implementation plans, scratch notes.
+#
+# Deliberately NOT tracked. Documentation that describes the system lives in the code as module
+# docstrings, so it sits next to what it describes and goes stale loudly instead of quietly
+# (AGENTS.md). Anything here worth keeping is either distilled into a module doc or moved to the
+# private openreading-internal repo (design/, runs/, research/) — never committed as a file here.
+/docs/
+
+# Local git worktrees for isolated feature work.
+/.worktrees/

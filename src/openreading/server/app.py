@@ -1,0 +1,1218 @@
+"""The FastAPI app behind `openreading serve`. The document path (/v1/parse) speaks the vendored
+request and response schemas both directions; the control-plane endpoints (/v1/route,
+/v1/backends, /healthz, ...) return small JSON shapes. The full endpoint reference — every
+method, body/response shape, limit and the status ladder — is the `openreading.server` package
+docstring; this one covers how the app enforces it and what it reads from the environment.
+
+HTTP status mapping (D-v2-8). Exceptions raised by the router/adapters are mapped in ONE place,
+_error_envelope (wrapped by _error_response):
+  403 ComplianceRefused / no eligible backend · 424 missing credentials (named backend) or
+  `auth_rejected` · 413 doc too large · 422 unsupported feature · 400 unknown_strategy · 504
+  retryables exhausted / deadline · 502 PlanExhaustedError / other terminal · 500 anything else.
+Request-shape and lookup failures never become exceptions, so they bypass _error_envelope and are
+built by small JSONResponse helpers inside create_app: 400 bad_request (body not JSON, fails the
+request schema, bad `jobs` / `timeout_s`) via _bad_request; 404 unknown_backend via
+_unknown_backend; 404 unknown_job via _not_found. Three more statuses have a dedicated helper
+each (_bad_signature, _unauthorized_response, _scope_denied_response):
+  401 bad_signature — POST /v1/webhooks/{backend_id}: a configured webhook secret's verification
+    fails, OR the backend declares a webhook_secret field at all and none is configured (BL-50:
+    fail closed rather than trust an unsigned event as a genuine vendor result).
+  401 unauthorized (BL-159) — caller auth is configured (OPENREADING_API_KEYS non-empty) and this
+    request carries no Authorization header, or a bearer value matching no configured key.
+  403 scope_denied (BL-159) — the matched API key's backend allow-list (OPENREADING_API_KEY_SCOPES)
+    does not include the backend this request named directly, or the "auto"/"strategy:none"
+    request would otherwise have been routed to.
+One endpoint deliberately sits OUTSIDE that mapping: POST /v1/backends/{id}/liveness always
+returns 200 with a report, even when the finding is `unreachable` or `unauthorized` — "the backend
+is down" is a SUCCESSFUL diagnostic, not a failure of this API, and a 5xx would conflate the two
+(internal/design/liveness.md §6.4, DECISIONS D-v7-5). Its only non-200s — 404 unknown backend,
+403 scope denied, 400 non-numeric `timeout_s` — are all raised before any probe runs.
+
+Server posture (D-v2-8, extended BL-159): CALLER auth is opt-in and OFF by default — zero
+OPENREADING_API_KEYS configured behaves byte-for-byte like every prior release. When configured,
+every endpoint except GET /healthz and POST /v1/webhooks/{backend_id} (the two endpoints intended
+to stay reachable unauthenticated — a health check and a vendor callback carry no bearer) requires
+a valid `Authorization: Bearer <token>`; a key's optional backend allow-list is enforced upstream
+of, and independent from, the existing stage-1 compliance filter — a scope-denied request never
+reaches make_adapter/build_run_context, so no vendor credential is ever resolved for a backend the
+caller isn't scoped to (the same "gate before spend" discipline compliance itself already gets).
+Configured key values are read ONCE at process startup, from the environment ONLY — the same
+OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE-style deploy knob pattern, never a request body or a CLI
+flag, so a token never appears in `ps`, shell history, or a request the schema/compliance layer
+touches. Bind 127.0.0.1 by default; CORS off unless --cors-origin is passed (and, when both are
+configured, CORS is registered OUTERMOST — see create_app — so a browser's unauthenticated preflight
+OPTIONS still gets a CORS answer instead of a 401). RouterConfig comes from the process env
+(deploy-time knobs), never the request body. Fresh adapter instances per request
+(build_registry / make_adapter), so a credential-bound client never leaks across requests
+(D-v2-8.1, which also fixes why `api.run_request` — sync, driving the job loop via asyncio.run —
+is offloaded with run_in_threadpool, and why fastapi is imported at module level).
+
+Environment variables this module reads. Server-only (the CLI and Python API ignore them):
+OPENREADING_API_KEYS, OPENREADING_API_KEY_SCOPES and the three compliance attestation knobs.
+OPENREADING_CONFIG and the backend credential vars are shared with the CLI / Python API, which
+read them through the same strategy loader and EnvCredentialBroker.
+  OPENREADING_API_KEYS — comma-separated bearer tokens (_load_api_key_config, once at startup).
+    Unset/empty ⇒ caller auth OFF, every endpoint open. An empty ENTRY (stray/trailing comma)
+    raises ServerConfigError at startup rather than being dropped: a key is security-bearing and
+    a quietly discarded token would leave an operator believing one is configured.
+  OPENREADING_API_KEY_SCOPES — comma-separated `token=backend1|backend2` entries narrowing one
+    listed token to a backend allow-list. Unset ⇒ every token unscoped (reaches whatever
+    compliance/routing already allow). Malformed (empty entry, missing '=', empty key or list,
+    a token OPENREADING_API_KEYS never listed, two scopes for one token, or set while
+    OPENREADING_API_KEYS is empty) ⇒ ServerConfigError at startup, naming the setting and the
+    entry position, never the value.
+  OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE — `1`/`true`/`yes` lets UNVERIFIED compliance fields
+    survive the router's compliance stage. Unset (or anything else) ⇒ fail closed: unverified
+    is eliminated. The one switch that widens the eligible set; leave it off without a reason.
+  OPENREADING_TRAIN_OPTOUT_CONFIRMED — comma-separated slugs whose no-train opt-out you have
+    confirmed with the vendor (blank entries dropped). Gates `trains_on_customer_data: opt_out`
+    only: unset ⇒ an opt-out backend fails `no_train_on_data` closed. A literally `unverified`
+    posture is governed by OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE, not this var
+    (`openreading.router.compliance`).
+  OPENREADING_BAA_TIER_CONFIRMED — comma-separated slugs whose tier-gated BAA you have actually
+    signed (e.g. `reducto`). Unset ⇒ `hipaa_baa: tier_gated` fails `require_baa` (D7a).
+    Both attestation lists are read per request by _server_router_config (D7: an account-level
+    assertion the operator makes, never a per-request wire field).
+  OPENREADING_CONFIG — path to a strategy file, loaded once in create_app with allow_cwd=False.
+    Unset ⇒ no user-defined strategies: the presets (`openreading.strategies.presets`) still run
+    configless through api.run_request; any other `strategy:<name>` → 400 unknown_strategy. The
+    server never sniffs `./openreading.yaml` in its cwd (D-v3-5), so this is the only non-flag
+    way to load one; a broken file fails startup, not the first request. Also discovery step 2
+    for the CLI / Python API (`openreading.strategies.loader`).
+  Backend credential vars (REDUCTO_API_KEY, the AWS_* chain, REDUCTO_WEBHOOK_SECRET, ...) —
+    resolved per request through EnvCredentialBroker (`openreading.credentials`), never taken
+    from a body. A missing key on a named backend ⇒ 424 naming the var; a missing
+    REDUCTO_WEBHOOK_SECRET ⇒ reducto webhooks 401 (fail closed).
+  OPENREADING_LEDGER — NOT read here: arming the ledger covers CLI/Python `parse`/`resume` and a
+    /v1/parse strategy run via api.run_request, but the /v1/jobs store stays in-memory,
+    per-process, with no server-side resume (internal/design/ledger.md §10).
+"""
+
+from __future__ import annotations
+
+import contextlib
+import hmac
+import json
+import os
+import threading
+import time
+import uuid
+from dataclasses import dataclass, field
+from typing import Any
+
+# fastapi lives in the [server] extra; this module is only imported when serving/testing, so a
+# module-level import is fine (and REQUIRED — under `from __future__ import annotations`, FastAPI
+# must resolve the `Request` annotation against these module globals).
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
+
+from openreading import __version__, api, schemas
+from openreading.adapters.registry import BUILTIN_ADAPTERS, build_registry, make_adapter
+from openreading.batch.sources import DEFAULT_MAX_ITEMS
+from openreading.credentials import (
+    DEFAULT_DEADLINE_MS,
+    EnvCredentialBroker,
+    build_run_context,
+)
+from openreading.ledger.header import slim_request
+from openreading.liveness import check_liveness, probe_kind
+from openreading.readiness import (
+    BackendReadiness,
+    auth_hinted,
+    backend_readiness,
+)
+from openreading.router.clock import RealClock
+from openreading.router.cost import apply_cost_report
+from openreading.router.driver import _DriveSliceExpired, run_to_completion
+from openreading.router.executor import BoundedResultCache
+from openreading.router.router import Router, RouterConfig
+from openreading.strategies.loader import strip_strategy_prefix
+from openreading.types.enums import WaitMode
+from openreading.types.errors import (
+    ComplianceRefused,
+    MissingCredentialsError,
+    PlanExhaustedError,
+    RetryableError,
+    TerminalError,
+    UnknownStrategyError,
+    UnsupportedFeatureError,
+)
+from openreading.types.job import Job, JobState
+from openreading.types.request import OpenReadingRequest
+from openreading.types.runtime import ResolvedCredentials, RunContext
+
+_ADAPTER_ERRORS = (
+    PlanExhaustedError,
+    ComplianceRefused,
+    UnsupportedFeatureError,
+    RetryableError,
+    TerminalError,
+)
+
+# BL-84: the ceiling on POST /v1/batch's `documents[]` — an unauthenticated body otherwise has no
+# size limit beyond "is it a list". Reject, not clamp (same philosophy as the jobs ceiling below):
+# this endpoint takes no caller-facing override for either — the request body is exactly the
+# untrusted-input boundary this item is about. BL-132: sourced from batch.sources.DEFAULT_MAX_ITEMS
+# (the CLI's own directory-expansion default, M4 — internal/design/batch-intake.md:98-100) rather
+# than a second, independently-hardcoded literal, so the two limits cannot drift apart.
+MAX_BATCH_DOCUMENTS = DEFAULT_MAX_ITEMS
+
+
+@dataclass
+class JobRecord:
+    """One async job in the in-memory store. `adapter`/`job`/`req` are retained so GET can poll and
+    the webhook can resolve. The store is per-process (documented v0.2 limitation).
+
+    `drive_lock` (BL-83): `job` is one mutable object that a POLL drive hands to
+    `run_in_threadpool` — two concurrent `GET /v1/jobs/{job_id}` calls for the same still-pending
+    job must not both invoke `adapter.poll()` on it at once. A plain `threading.Lock`, not
+    `asyncio.Lock`: each concurrent request may be driven by its own event loop (e.g. under
+    `TestClient`, or any multi-worker-loop deployment), and only a thread-level primitive is safe
+    to acquire/release across that boundary."""
+
+    job_id: str
+    backend: str
+    adapter: Any
+    job: Job
+    req: OpenReadingRequest
+    created_ms: int
+    response: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
+    # BL-77/BL-88 history, corrected by BL-92: this WAS the absolute (RealClock-monotonic)
+    # drive-deadline anchor actually threaded into `_drive_job` as its per-call budget — computed
+    # once at submit time and RENEWED (never cumulatively depleted) on every slice-only expiry
+    # (see the `isinstance(e, _DriveSliceExpired)` branch in get_job below). BL-92: that anchoring
+    # was itself a bug — under any polling cadence slower than DEFAULT_DEADLINE_MS, the anchor is
+    # already stale by the time the NEXT GET arrives (driver.py's deadline check is the first
+    # thing the loop body does, so it raises before `adapter.poll()` is ever called), and rolling
+    # the anchor forward again on every such GET makes zero forward progress while still reporting
+    # "running". `get_job` no longer threads this value into `_drive_job` at all — it now always
+    # passes `None`, so every call measures its own slice from its own start (see `_drive_job`
+    # below) regardless of any gap since the last call. This field and its renewal are left in
+    # place unmodified (BL-92 is scoped to that one call site) but are no longer load-bearing for
+    # the per-call budget; the `isinstance(e, _DriveSliceExpired)` check itself — not latching a
+    # deadline-only `RetryableError` as job failure — is the piece still doing real work.
+    deadline_ms: float | None = None
+    drive_lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
+
+
+def _job_dict(rec: JobRecord) -> dict[str, Any]:
+    state = "succeeded" if rec.response is not None else ("failed" if rec.error else "running")
+    out: dict[str, Any] = {
+        "job_id": rec.job_id,
+        "state": state,
+        "backend": rec.backend,
+        "created_ms": rec.created_ms,
+    }
+    if rec.response is not None:
+        out["response"] = rec.response
+    if rec.error is not None:
+        out["error"] = rec.error
+    return out
+
+
+def _webhook_secret(backend_id: str) -> str | None:
+    """The webhook signing secret from the environment (reducto: REDUCTO_WEBHOOK_SECRET), resolved
+    spec-driven via the broker. None → no verification configured."""
+    desc = make_adapter(backend_id).descriptor
+    probe = OpenReadingRequest.model_validate(
+        {"document": {"path": "/probe"}, "backend": {"id": backend_id}}
+    )
+    return EnvCredentialBroker().resolve(desc, probe).values.get("webhook_secret")
+
+
+def _webhook_secret_required(backend_id: str) -> bool:
+    """True when the backend's own credentials_spec declares a `webhook_secret` field at all — i.e.
+    it offers signature verification (today: reducto alone). BL-50: the fail-closed gate only
+    applies here. A backend that never declares the field (chunkr, open-ocr) has no configured/
+    unconfigured distinction to fail on — their webhook events are unverified by construction
+    (documented in the openreading.server docstring); real verification for them is separate
+    follow-up scope, not a regression of this check."""
+    desc = make_adapter(backend_id).descriptor
+    return any(f.key == "webhook_secret" for f in desc.credentials_spec)
+
+
+# BL-66 Defect 2: the vendor field an inbound event carries its own job/task id under is backend-
+# specific — each adapter's own resolve_webhook already checks the correct one (chunkr: task_id,
+# open-ocr: request_id, reducto: job_id) — so the dispatcher must read the SAME field per backend
+# rather than one hardcoded name, or a genuine non-reducto callback's real id is never read at all.
+# A server/app.py-local mapping (not a new AdapterDescriptor field): the fix is scoped entirely to
+# this dispatcher — no other caller needs the value — and it keeps the fix schema-free, which a new
+# descriptor field would not (see the BL-66 implementation receipt for the full rationale).
+_WEBHOOK_EVENT_ID_FIELDS: dict[str, str] = {
+    "reducto": "job_id",
+    "chunkr": "task_id",
+    "open-ocr": "request_id",
+}
+
+
+def _webhook_event_id(backend_id: str, event: dict) -> Any:
+    """The inbound event's own job/task id, read from the field name `backend_id`'s vendor actually
+    uses. Falls back to reducto's own `job_id` name for a backend not in the map — today that can
+    only be a backend with no WEBHOOK wait mode at all, so no job record could ever match it
+    regardless of which key is read; the fallback exists so this never raises."""
+    field = _WEBHOOK_EVENT_ID_FIELDS.get(backend_id, "job_id")
+    return event.get(field)
+
+
+def _verify_svix(secret: str, raw: bytes, headers: dict[str, str]) -> None:
+    """Raise (svix WebhookVerificationError) if the signature is invalid. Authenticity ONLY: svix's
+    `verify()` also re-parses `raw` as JSON internally and would otherwise raise a JSONDecodeError
+    — mis-reported by the caller as a 401 bad_signature — for a malformed-but-genuinely-signed
+    body. That parse only ever runs AFTER the signature already matched (standardwebhooks checks
+    the HMAC first), so a JSONDecodeError here means "verified, just not JSON" and is swallowed;
+    the caller does its own json.loads(raw) right after and maps THAT failure to its own 400,
+    independent of signature validity (BL-50)."""
+    from svix.webhooks import Webhook
+
+    svix_headers = {k: v for k, v in headers.items() if k.startswith("svix-")}
+    with contextlib.suppress(json.JSONDecodeError):
+        Webhook(secret).verify(raw, svix_headers)
+
+
+def _server_router_config() -> RouterConfig:
+    """Deployment-level router knobs from the environment (never the request body — D7)."""
+    allow = os.environ.get("OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    optout = frozenset(
+        s.strip()
+        for s in os.environ.get("OPENREADING_TRAIN_OPTOUT_CONFIRMED", "").split(",")
+        if s.strip()
+    )
+    baa_tier = frozenset(
+        s.strip()
+        for s in os.environ.get("OPENREADING_BAA_TIER_CONFIRMED", "").split(",")
+        if s.strip()
+    )
+    return RouterConfig(
+        allow_unverified_compliance=allow,
+        train_optout_confirmed=optout,
+        baa_tier_confirmed=baa_tier,
+    )
+
+
+class ServerConfigError(Exception):
+    """A deployment-level OPENREADING_* setting is malformed. Raised from create_app() at process
+    startup — never mid-request — matching the existing strategy-config fail-fast precedent
+    (_load_strategy_config(None, allow_cwd=False) a few lines into create_app) so a broken
+    deployment refuses to bind a socket instead of 500ing unpredictably on the first request that
+    happens to touch the broken setting (BL-159 AC-7). Never carries a configured key's actual
+    value — every message below names the SETTING and its POSITION in the comma-separated list,
+    never the VALUE, so a startup crash log still meets AC-5's redaction bar."""
+
+
+@dataclass(frozen=True)
+class ApiKeyConfig:
+    """Parsed OPENREADING_API_KEYS / OPENREADING_API_KEY_SCOPES (BL-159). `keys` empty means
+    caller auth is OFF: every endpoint behaves exactly as it does with zero configuration (AC-1).
+    `scopes` maps a configured key to the backend ids it may reach; a key absent from `scopes` is
+    unscoped — it reaches every backend the deployment's existing stage-1 compliance filter and
+    router already allow it (AC-4)."""
+
+    keys: frozenset[str] = frozenset()
+    scopes: dict[str, frozenset[str]] = field(default_factory=dict)
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.keys)
+
+
+def _load_api_key_config() -> ApiKeyConfig:
+    """OPENREADING_API_KEYS: comma-separated bearer tokens (the same comma-list convention
+    OPENREADING_TRAIN_OPTOUT_CONFIRMED/OPENREADING_BAA_TIER_CONFIRMED already use) — unset or
+    empty means caller auth is off (AC-1's byte-for-byte-unchanged default). Unlike those two
+    siblings, an empty ENTRY here is a hard failure rather than silently dropped: a key is
+    security-bearing, so a stray comma should never be able to leave an operator believing a token
+    is configured when a parse quietly discarded it.
+
+    OPENREADING_API_KEY_SCOPES: comma-separated `token=backend1|backend2|...` entries narrowing
+    one already-listed key to a backend allow-list. A key with no entry here is unscoped. Every
+    malformed shape below (empty entry, missing '=', empty key/backend-list, a scope for a key
+    OPENREADING_API_KEYS never listed, two scopes for the same key) raises ServerConfigError
+    (AC-7) rather than guessing at operator intent."""
+    raw_keys = os.environ.get("OPENREADING_API_KEYS", "")
+    keys: list[str] = []
+    if raw_keys.strip():
+        for i, part in enumerate(raw_keys.split(","), start=1):
+            key = part.strip()
+            if not key:
+                raise ServerConfigError(
+                    f"OPENREADING_API_KEYS entry {i} is empty — check for a stray comma"
+                )
+            keys.append(key)
+    key_set = frozenset(keys)
+
+    raw_scopes = os.environ.get("OPENREADING_API_KEY_SCOPES", "")
+    scopes: dict[str, frozenset[str]] = {}
+    if raw_scopes.strip():
+        if not key_set:
+            raise ServerConfigError(
+                "OPENREADING_API_KEY_SCOPES is set but OPENREADING_API_KEYS is empty — a scope "
+                "needs a key to scope"
+            )
+        seen: set[str] = set()
+        for i, entry in enumerate(raw_scopes.split(","), start=1):
+            entry = entry.strip()
+            if not entry:
+                raise ServerConfigError(
+                    f"OPENREADING_API_KEY_SCOPES entry {i} is empty — check for a stray comma"
+                )
+            if "=" not in entry:
+                raise ServerConfigError(
+                    f"OPENREADING_API_KEY_SCOPES entry {i} is missing '=' "
+                    "(expected token=backend1|backend2)"
+                )
+            token, _, backends_raw = entry.partition("=")
+            token = token.strip()
+            if not token:
+                raise ServerConfigError(
+                    f"OPENREADING_API_KEY_SCOPES entry {i} has an empty key before '='"
+                )
+            if token not in key_set:
+                raise ServerConfigError(
+                    f"OPENREADING_API_KEY_SCOPES entry {i} scopes a key that is not listed in "
+                    "OPENREADING_API_KEYS"
+                )
+            if token in seen:
+                raise ServerConfigError(
+                    f"OPENREADING_API_KEY_SCOPES entry {i} defines a second scope for a key "
+                    "that already has one"
+                )
+            seen.add(token)
+            backend_ids = [b.strip() for b in backends_raw.split("|")]
+            if not backends_raw.strip() or any(not b for b in backend_ids):
+                raise ServerConfigError(
+                    f"OPENREADING_API_KEY_SCOPES entry {i} has an empty or malformed backend "
+                    "list (expected token=backend1|backend2)"
+                )
+            scopes[token] = frozenset(backend_ids)
+    return ApiKeyConfig(keys=key_set, scopes=scopes)
+
+
+def _token_authorized(presented: str, config: ApiKeyConfig) -> str | None:
+    """The configured key `presented` matches, or None. Every candidate is compared with
+    hmac.compare_digest — never ==/in/startswith against the raw configured value (BL-159 AC-6) —
+    and EVERY candidate is checked regardless of whether an earlier one already matched, so the
+    number of constant-time comparisons never depends on the presented value's content: a request
+    sharing a long valid prefix with a real key takes no measurably different time to reject than
+    one sharing none."""
+    matched: str | None = None
+    for key in config.keys:
+        if hmac.compare_digest(presented, key):
+            matched = key
+    return matched
+
+
+def _is_auth_exempt_path(path: str) -> bool:
+    """GET /healthz and POST /v1/webhooks/{backend_id} — the two endpoints the openreading.server
+    docstring's Security section documents as intentionally reachable unauthenticated — stay
+    reachable with no Authorization header whether or not any API key is configured (BL-159 AC-8).
+    """
+    return path == "/healthz" or path.startswith("/v1/webhooks/")
+
+
+def _unauthorized_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=401,
+        content={"error": {"category": "unauthorized", "message": "missing or invalid API key"}},
+    )
+
+
+def _scope_denied_response(backend_id: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=403,
+        content={
+            "error": {
+                "category": "scope_denied",
+                "message": f"this API key is not scoped to reach backend {backend_id!r}",
+                "backend_code": backend_id,
+            }
+        },
+    )
+
+
+def _out_of_scope_backend(req: OpenReadingRequest, scope: frozenset[str]) -> str | None:
+    """The backend id `req` would actually reach that sits outside `scope`, or None when nothing
+    does — including when the plain router's own plan is already empty, which is ComplianceRefused's
+    call to make, not scope's (BL-159 AC-4: an allow-list only ever subtracts from what compliance/
+    routing already allow, never adds to it).
+
+    Called BEFORE any adapter is constructed or credential resolved (AC-3), for both a directly-
+    named backend and an "auto" (or "strategy:none", api.run_request's own escape hatch back to
+    plain routing) request the router would otherwise pick one for. A REAL `strategy:<name>` walk
+    is deliberately NOT scope-checked in this version: a strategy can touch more than one backend
+    internally, and scoping that composition raises the same kind of question this spec's own Scope
+    section already cuts for per-token compliance-floor scoping ("deserves its own dedicated pass"
+    rather than folding in here) — see the BL-159 implementation receipt."""
+    backend_id = req.backend.id
+    strat = strip_strategy_prefix(backend_id)
+    if strat is not None and strat != "none":
+        return None  # a real strategy walk — not scope-checked in this version
+    if backend_id == "auto" or strat == "none":
+        plan = Router(build_registry(), _server_router_config()).route(req)
+        chosen = plan.chosen.descriptor.id if plan.chosen else None
+        return chosen if chosen is not None and chosen not in scope else None
+    return backend_id if backend_id not in scope else None
+
+
+def _readiness_dict(r: BackendReadiness, liveness_probe: str = "none") -> dict[str, Any]:
+    """One row of GET /v1/backends. `ready` means CONFIGURED — deps import, declared env resolves —
+    and has never meant reachable; `liveness_probe` (Pulse) is the ADDITIVE static declaration of
+    whether that second question can be answered at all, and what answering it would do. It is a
+    descriptor read: free, offline, no call, which is the whole reason it belongs on this endpoint
+    while the liveness ANSWER does not (internal/design/liveness.md §6.1)."""
+    return {
+        "slug": r.slug,
+        "type": r.type,
+        "extra_installed": r.extra_installed,
+        "creds_found": r.creds_found,
+        "creds_missing": r.creds_missing,
+        "ready": r.ready,
+        "liveness_probe": liveness_probe,
+    }
+
+
+def _error_envelope(exc: Exception) -> tuple[int, dict[str, Any]]:
+    """(HTTP status, error body) for one failure — the single place the taxonomy is mapped.
+
+    An async job that fails after submit records the body alone: a poll- or webhook-driven failure
+    must report the same category/backend_code/missing_env the identical failure reports inline,
+    but its HTTP status belongs to the job fetch (always 200), not to the failure.
+    """
+    status: int
+    env: dict[str, Any]
+    if isinstance(exc, PlanExhaustedError):
+        status, env = 502, {"category": "plan_exhausted", "message": str(exc), "trail": exc.trail}
+    elif isinstance(exc, ComplianceRefused):
+        status = 403
+        env = {
+            "category": "compliance_refused",
+            "message": str(exc),
+            "backend_code": exc.constraint,
+        }
+    elif isinstance(exc, UnsupportedFeatureError):
+        status = 422
+        env = {"category": "unsupported_feature", "message": str(exc), "backend_code": exc.feature}
+    elif isinstance(exc, RetryableError):
+        status = 504
+        env = {
+            "category": "retryable_exhausted",
+            "message": str(exc),
+            "backend_code": exc.backend_code,
+        }
+    elif isinstance(exc, UnknownStrategyError):
+        status = 400
+        env = {
+            "category": "unknown_strategy",
+            "message": str(exc),
+            "backend_code": "unknown_strategy",
+        }
+    elif isinstance(exc, MissingCredentialsError):
+        status = 424
+        env = {"category": "terminal", "message": str(exc), "backend_code": "missing_credentials"}
+        env["missing_env"] = exc.missing
+    elif isinstance(exc, TerminalError):
+        code = exc.backend_code or ""
+        status = {"auth_rejected": 424, "doc_too_large": 413}.get(code, 502)
+        env = {"category": "terminal", "message": str(exc), "backend_code": exc.backend_code}
+    else:
+        status, env = 500, {"category": "error", "message": str(exc)}
+    return status, env
+
+
+def _error_response(exc: Exception):
+    status, env = _error_envelope(exc)
+    return JSONResponse(status_code=status, content={"error": env})
+
+
+def create_app(*, cors_origins: list[str] | None = None):
+    app = FastAPI(title="OpenReading", version=__version__)
+    jobs: dict[str, JobRecord] = {}
+    app.state.jobs = jobs  # exposed for tests to seed async/webhook jobs offline
+    # Idempotency cache for the /v1/parse `auto` chain: one per app, so it lives as long as the
+    # server process and never crosses into another app instance (D-v3-3).
+    app.state.result_cache = BoundedResultCache()
+
+    # Strategy config is loaded ONLY from OPENREADING_CONFIG — the server never sniffs its cwd
+    # (spec §1.2). A broken config fails fast at startup.
+    from openreading.strategies.loader import load_config as _load_strategy_config
+
+    _loaded = _load_strategy_config(None, allow_cwd=False)
+    app.state.strategy_config = _loaded.config if _loaded else None
+
+    # BL-159: parsed ONCE here, not per-request (unlike _server_router_config) — a malformed
+    # OPENREADING_API_KEYS/_SCOPES config must fail server startup (AC-7), and re-parsing per
+    # request would only ever surface that on the first authenticated request instead.
+    api_key_config = _load_api_key_config()
+    app.state.api_key_config = api_key_config
+
+    # Registered BEFORE the optional CORS middleware below so CORS ends up OUTERMOST (Starlette/
+    # FastAPI's add_middleware prepends — the LAST middleware added runs FIRST on a request): a
+    # browser's unauthenticated CORS preflight (OPTIONS) is answered by CORSMiddleware before it
+    # ever reaches this gate, exactly like it would with zero API keys configured.
+    @app.middleware("http")
+    async def _caller_auth(request: Request, call_next):  # noqa: ANN001, ANN202 - fastapi-typed
+        # AC-1: zero keys configured ⇒ skip entirely — byte-for-byte today's behavior, the same
+        # "off by default" contract every other OPENREADING_* deploy knob in this file honors.
+        # AC-8: the two intentionally-open paths stay open whether or not any key is configured.
+        if not api_key_config.enabled or _is_auth_exempt_path(request.url.path):
+            return await call_next(request)
+        scheme, _, presented = request.headers.get("authorization", "").partition(" ")
+        matched_key = (
+            _token_authorized(presented, api_key_config) if scheme.lower() == "bearer" else None
+        )
+        if matched_key is None:
+            return _unauthorized_response()
+        # Stashed for the handler's own scope check (AC-3/AC-4) — None means unscoped (reaches
+        # everything compliance/routing already allow), matching a disabled-auth request's own
+        # `getattr(request.state, "api_key_scope", None)` default exactly.
+        request.state.api_key_scope = api_key_config.scopes.get(matched_key)
+        return await call_next(request)
+
+    if cors_origins:
+        from fastapi.middleware.cors import CORSMiddleware
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(cors_origins),
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
+    def _bad_request(detail: str):
+        return JSONResponse(
+            status_code=400, content={"error": {"category": "bad_request", "message": detail}}
+        )
+
+    def _unknown_backend(e: Exception):
+        return JSONResponse(
+            status_code=404, content={"error": {"category": "unknown_backend", "message": str(e)}}
+        )
+
+    def _not_found(category: str, message: str):
+        return JSONResponse(
+            status_code=404, content={"error": {"category": category, "message": message}}
+        )
+
+    def _bad_signature():
+        return JSONResponse(
+            status_code=401,
+            content={
+                "error": {"category": "bad_signature", "message": "invalid webhook signature"}
+            },
+        )
+
+    async def _parse_request(request: Request) -> OpenReadingRequest:
+        body = await request.json()  # raises on invalid JSON → caught by caller
+        schemas.validate_request(body)  # vendored request schema (raises → 400)
+        return OpenReadingRequest.model_validate(body)
+
+    @app.get("/healthz")
+    def healthz() -> dict[str, Any]:
+        return {"status": "ok", "version": __version__}
+
+    @app.get("/v1/backends")
+    def backends() -> list[dict[str, Any]]:
+        # Free, offline, instant, safe — and it stays that way. Folding a liveness CHECK in here
+        # would turn one page load into 13 outbound calls; only the static `liveness_probe`
+        # DECLARATION is added, which is a descriptor read (internal/design/liveness.md §6.1).
+        broker = EnvCredentialBroker()
+        rows = []
+        for s in sorted(BUILTIN_ADAPTERS):
+            adapter = make_adapter(s)
+            rows.append(
+                _readiness_dict(
+                    backend_readiness(adapter, broker=broker),
+                    liveness_probe=probe_kind(adapter.descriptor).value,
+                )
+            )
+        return rows
+
+    @app.post("/v1/backends/{backend_id}/liveness")
+    async def backend_liveness(backend_id: str, request: Request):
+        """Is this backend actually answering? (internal/design/liveness.md §6.)
+
+        POST, not GET, because a probe is neither safe nor idempotent in the HTTP sense: it causes
+        an outbound call, may wake a cold container, and may consume a vendor rate limit. A GET is
+        defined as safe and cacheable, and browsers, proxies and link prefetchers are entitled to
+        issue one speculatively — which would spend the operator's rate limit without anyone
+        asking. ONE backend per call, never a fan-out over the registry: that would be the
+        "silently probe 13 vendors" defect wearing a POST.
+
+        Always 200 with a report — including `unreachable` and `unauthorized`. Mapping "the
+        backend is down" to 5xx would conflate *openreading failed* with *openreading
+        successfully determined the backend is down*; the second is a successful diagnostic and
+        the report body IS its result. This is why liveness deliberately does not route through
+        `_error_response`. The only non-200s are upstream of any probe: 404 unknown backend, and
+        403 scope_denied.
+        """
+        try:
+            adapter = make_adapter(backend_id)
+        except KeyError as e:
+            return _unknown_backend(e)
+        # BL-159: this endpoint resolves a vendor credential and emits a call to that vendor, so it
+        # is exactly the "gate before spend" boundary the key allow-list exists for. Gated before
+        # any credential is resolved, matching /v1/parse's ordering.
+        scope = getattr(request.state, "api_key_scope", None)
+        if scope is not None and backend_id not in scope:
+            return _scope_denied_response(backend_id)
+        timeout_s: float | None = None
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001 — an empty/absent body is the normal case, not an error
+            body = None
+        if isinstance(body, dict) and body.get("timeout_s") is not None:
+            try:
+                timeout_s = float(body["timeout_s"])
+            except (TypeError, ValueError):
+                return _bad_request('"timeout_s" must be a number')
+        # Blocking (network) work off the event loop, like every other dispatch in this file. The
+        # probe's own bound is clamped by check_liveness, so a caller cannot park a worker.
+        report = await run_in_threadpool(
+            check_liveness, adapter, broker=EnvCredentialBroker(), timeout_s=timeout_s
+        )
+        env = report.to_schema_dict()
+        schemas.validate_liveness_report(env)  # never emit a non-conforming report
+        return env
+
+    @app.post("/v1/parse")
+    async def parse(request: Request):
+        try:
+            body = await request.json()
+        except Exception as e:  # noqa: BLE001 — invalid JSON is a 400
+            return _bad_request(f"invalid JSON body: {e}")
+        # v0.4: opt-in candidate retention (strategy runs). Popped before schema validation so the
+        # strict request schema (additionalProperties: false) still passes.
+        keep = bool(body.pop("keep_candidates", False)) if isinstance(body, dict) else False
+        try:
+            schemas.validate_request(body)
+            req = OpenReadingRequest.model_validate(body)
+        except Exception as e:  # noqa: BLE001 — any validation failure is a 400
+            return _bad_request(str(e))
+        # BL-159 AC-3: scope-gate BEFORE run_request ever constructs an adapter or resolves a
+        # vendor credential — for both a directly-named backend outside the key's allow-list and
+        # an "auto" request the router would otherwise have picked one for.
+        scope = getattr(request.state, "api_key_scope", None)
+        if scope is not None:
+            denied = _out_of_scope_backend(req, scope)
+            if denied is not None:
+                return _scope_denied_response(denied)
+        try:
+            # run_request is sync and drives the job loop via asyncio.run internally, which cannot
+            # nest inside this endpoint's event loop → run it in a worker thread.
+            result = await run_in_threadpool(
+                api.run_request,
+                req,
+                config=_server_router_config(),
+                strategy_config=app.state.strategy_config,
+                keep_candidates=keep,
+                cache=app.state.result_cache,
+            )
+        except KeyError as e:
+            return _unknown_backend(e)
+        except _ADAPTER_ERRORS as e:
+            return _error_response(e)
+        schemas.validate_response(result)  # never emit a non-conforming response
+        return result
+
+    @app.post("/v1/route")
+    async def route(request: Request):
+        try:
+            req = await _parse_request(request)
+        except Exception as e:  # noqa: BLE001
+            return _bad_request(str(e))
+        plan = Router(build_registry(), _server_router_config()).route(req)
+        return {
+            "chosen": plan.chosen.descriptor.id if plan.chosen else None,
+            "fallbacks": [a.descriptor.id for a in plan.fallbacks],
+            "dropped": {
+                i: {"stage": dr.stage, "code": dr.code, "reason": dr.detail}
+                for i, dr in sorted(plan.dropped.items())
+            },
+            "terminal_reason": plan.terminal_reason,
+        }
+
+    @app.post("/v1/compare")
+    async def compare_endpoint(request: Request):
+        # Pure (DESIGN L1): compares already-computed response envelopes; never executes a backend.
+        try:
+            body = await request.json()
+        except Exception as e:  # noqa: BLE001 — any JSON failure is a 400
+            return _bad_request(f"invalid JSON body: {e}")
+        if not isinstance(body, dict) or not isinstance(body.get("responses"), list):
+            return _bad_request('body must be {"responses": [...], "baseline"?, "truth"?}')
+        from openreading.comparison import CompareInputError
+        from openreading.comparison import compare as _compare
+
+        try:
+            return _compare(
+                body["responses"], baseline=body.get("baseline"), truth=body.get("truth")
+            )
+        except CompareInputError as e:
+            return _bad_request(str(e))
+
+    @app.post("/v1/batch")
+    async def batch_endpoint(request: Request):
+        # Manifest v0.6: many documents → one batch-result envelope. The server composes per-item
+        # requests from the given document shapes (no directory expansion — that is a client-side
+        # concept, §9) and drives them through the SAME pooled, timed platform runner
+        # `api.run_batch` already uses (`batch.runner.run_batch`), not a hand-rolled loop — so
+        # `summary.duration_ms` is real elapsed time (never the fabricated literal 0), the caller's
+        # `jobs` is honored as a bounded worker pool, and `jobs` is echoed on `request` (BL-78).
+        # M6 per-item isolation is preserved: run_batch's own per-item wrapper (_run_item) catches
+        # any exception — request-build or execution — and turns it into a `failed` item without
+        # aborting the batch, the same as the two except clauses this replaces used to.
+        from openreading.batch import runner as batch_runner
+        from openreading.batch.sources import ResolvedSource, format_of
+        from openreading.types.batch import BatchRequestEcho, SourceRef
+
+        try:
+            body = await request.json()
+        except Exception as e:  # noqa: BLE001
+            return _bad_request(f"invalid JSON body: {e}")
+        if not isinstance(body, dict) or not isinstance(body.get("documents"), list):
+            return _bad_request('body must be {"documents": [<document>...], "backend"?, ...}')
+        docs = body["documents"]
+        if len(docs) > MAX_BATCH_DOCUMENTS:
+            return _bad_request(
+                f"documents count {len(docs)} is over the max-documents limit "
+                f"({MAX_BATCH_DOCUMENTS})"
+            )
+        backend = body.get("backend", "auto")
+        # BL-105: `shared` (merged into EVERY per-item request below, in run_one) is an ALLOWLIST
+        # of the fields meant to apply batch-wide — not a blocklist of the three batch-envelope-
+        # only keys (documents/backend/jobs). A blocklist let `document` (singular) — a genuine
+        # OpenReadingRequest field, just not one that belongs at this position in the body — sail
+        # through BL-102's "is this a real field name" check untouched and land in `shared` exactly
+        # like a legitimate shared field would; run_one's dict literal ({"document":
+        # docs_by_relpath[relpath], "backend": {...}, **shared}) then let shared's own `document`
+        # key, appearing last, silently win over every item's real per-item document. Enumerating
+        # the allowed set explicitly (matching the openreading.server docstring's own documented
+        # shared-field list) is also forward-safe: a future OpenReadingRequest field only becomes
+        # an implicit batch-wide override if it's deliberately added here, never merely because
+        # pydantic
+        # recognizes the name. None of the five allowed fields have a JSON alias distinct from
+        # their attribute name (only `async_`/`async` does, and `async_` is deliberately excluded
+        # from this batch-shared set), so an allowlist of attribute names is exact here — no alias
+        # table needed.
+        batch_shared_fields = {"outputs", "extraction_schema", "features", "pages", "compliance"}
+        shared = {k: v for k, v in body.items() if k in batch_shared_fields}
+        # BL-102: validate once, here, before a single item is attempted — unlike /v1/parse, which
+        # validates its whole body against the vendored JSON Schema (additionalProperties: false)
+        # before touching pydantic at all, nothing upstream of this point used to check the body's
+        # keys, so an unrecognized key reached pydantic once PER ITEM, deep inside run_one, where
+        # run_batch's own M6 per-item-isolation wrapper caught the resulting ValidationError and
+        # turned it into a `failed` item — reporting an HTTP 200 with every item failing instead of
+        # surfacing the single request-shape problem it actually is.
+        unrecognized = sorted(
+            k
+            for k in body
+            if k not in batch_shared_fields and k not in ("documents", "backend", "jobs")
+        )
+        if unrecognized:
+            message = f"unrecognized field(s) in batch body: {', '.join(unrecognized)}"
+            if "max_jobs" in unrecognized:
+                # max_jobs specifically is the foreseeable mistake, not a contrived one: it is the
+                # correctly-spelled parameter name for the identical semantic control on this
+                # feature's other two surfaces (--max-jobs on the CLI, max_jobs= in the Python
+                # API), sitting one field below `jobs` — which this endpoint DOES accept — in the
+                # same request body.
+                message += (
+                    "; 'max_jobs' is not supported on this endpoint — see the openreading.server "
+                    "docstring's jobs-ceiling note"
+                )
+            return _bad_request(message)
+        # BL-159 AC-3/AC-4: `backend` (top-level, shared by every item) is scope-gated the same
+        # way a named /v1/parse or /v1/jobs backend is — before make_adapter is even reached below
+        # for the direct-name case, so an out-of-scope batch never resolves any vendor credential.
+        scope = getattr(request.state, "api_key_scope", None)
+        if backend != "auto" and not str(backend).startswith("strategy:"):
+            try:
+                make_adapter(backend)
+            except KeyError as e:
+                return _unknown_backend(e)
+            if scope is not None and backend not in scope:
+                return _scope_denied_response(str(backend))
+        try:
+            raw_jobs = int(body.get("jobs", 1))
+        except (TypeError, ValueError):
+            return _bad_request('"jobs" must be an integer')
+        try:
+            # BL-84: floor clamps to 1, ceiling rejects — the shared helper (batch.runner
+            # .bound_jobs), called here before BatchRequestEcho is built below, exactly like the
+            # other two surfaces. No caller-facing override on this surface (see MAX_BATCH_DOCUMENTS
+            # above): a "max_jobs" field in the body is rejected outright by the unrecognized-field
+            # check above (BL-102) rather than silently ignored, which is what this comment
+            # incorrectly claimed before that fix landed.
+            jobs = batch_runner.bound_jobs(raw_jobs)
+        except batch_runner.JobsLimitError as e:
+            return _bad_request(str(e))
+
+        sources: list[ResolvedSource] = []
+        docs_by_relpath: dict[str, Any] = {}
+        for i, doc in enumerate(docs):
+            ref = SourceRef(
+                filename=(doc.get("filename") if isinstance(doc, dict) else None) or f"doc-{i}",
+                format=format_of(
+                    (doc.get("filename") or doc.get("url") or "") if isinstance(doc, dict) else ""
+                ),
+                url=doc.get("url") if isinstance(doc, dict) else None,
+                relpath=str(i),
+            )
+            sources.append(ResolvedSource(ref=ref))
+            docs_by_relpath[str(i)] = doc
+
+        # BL-159 AC-3/AC-4 (continued): `backend == "auto"` (or "strategy:none") can route each
+        # item to a DIFFERENT backend — capability/format scoring reads each item's own document,
+        # so no single upfront plan speaks for the whole batch the way it can for /v1/parse's one
+        # document. Build each item's real request (exactly as run_one below does) and check it
+        # BEFORE run_batch ever calls run_one for real, so a scope violation on any one item
+        # rejects the whole batch up front rather than letting earlier items already spend against
+        # a real backend while a later one is still found out of scope mid-pool.
+        if scope is not None and (
+            backend == "auto" or strip_strategy_prefix(str(backend)) == "none"
+        ):
+            for doc in docs_by_relpath.values():
+                try:
+                    item_req = OpenReadingRequest.model_validate(
+                        {"document": doc, "backend": {"id": backend}, **shared}
+                    )
+                except Exception:  # noqa: BLE001 — an unbuildable item is run_batch's own M6
+                    # per-item-isolation concern (surfaces there as a `failed` item); it is not a
+                    # scope decision, so this pre-check simply defers to that existing path.
+                    continue
+                denied = _out_of_scope_backend(item_req, scope)
+                if denied is not None:
+                    return _scope_denied_response(denied)
+
+        def run_one(src: ResolvedSource, _idem: str | None) -> dict[str, Any]:
+            # May run on any of up to `jobs` concurrent worker threads (run_batch's own bounded
+            # pool). Resolve the original per-item document by the same index used as
+            # SourceRef.relpath above, then drive it through the single-document pipeline exactly
+            # as the old per-item loop did.
+            relpath = src.ref.relpath
+            assert relpath is not None  # every source built above sets relpath=str(i)
+            req = OpenReadingRequest.model_validate(
+                {
+                    "document": docs_by_relpath[relpath],
+                    "backend": {"id": backend},
+                    **shared,
+                }
+            )
+            return api.run_request(
+                req, config=_server_router_config(), strategy_config=app.state.strategy_config
+            )
+
+        echo = BatchRequestEcho(
+            backend=str(backend), jobs=jobs, source_args=[s.ref.filename for s in sources]
+        )
+        # run_batch is synchronous (serial when jobs==1, else its own bounded ThreadPoolExecutor)
+        # and measures real wall-clock time internally — run the whole call off the event loop
+        # thread, same as the single-item run_in_threadpool calls this endpoint used to make.
+        result = await run_in_threadpool(
+            batch_runner.run_batch, sources, run_one=run_one, jobs=jobs, request_echo=echo
+        )
+        env = result.to_schema_dict()
+        schemas.validate_batch_result(env)
+        return env
+
+    @app.post("/v1/jobs")
+    async def submit_job(request: Request):
+        try:
+            req = await _parse_request(request)
+        except Exception as e:  # noqa: BLE001
+            return _bad_request(str(e))
+        backend = req.backend.id
+
+        # `strategy:<name>` — wrap the WHOLE strategy walk as one synthetic job (integration.md
+        # §3.4). The walk runs via api.run_request (same as /v1/parse); for local/offline backends
+        # it resolves immediately, so the job is created already succeeded with its orchestration.
+        strat = strip_strategy_prefix(backend)
+        if strat is not None and strat != "none":
+            try:
+                result = await run_in_threadpool(
+                    api.run_request,
+                    req,
+                    config=_server_router_config(),
+                    strategy_config=app.state.strategy_config,
+                )
+            except KeyError as e:
+                return _unknown_backend(e)
+            except _ADAPTER_ERRORS as e:
+                # UnknownStrategyError is a TerminalError, so this catches it too;
+                # _error_response maps it to its own 400 before the generic terminal branch.
+                return _error_response(e)
+            schemas.validate_response(result)
+            sjob = Job(
+                id=uuid.uuid4().hex,
+                backend_id=backend,
+                wait_mode=WaitMode.INLINE,
+                state=JobState.SUCCEEDED,
+            )
+            rec = JobRecord(
+                sjob.id, backend, None, sjob, req, int(time.time() * 1000), response=result
+            )
+            jobs[sjob.id] = rec
+            return _job_dict(rec)
+
+        if backend == "auto" or strat == "none":  # strategy:none forces the legacy auto path
+            return _bad_request("async jobs require a named backend, not 'auto'")
+        # BL-159 AC-3: `backend` is guaranteed a literal named id by this point (both `auto`-
+        # shaped cases already returned above) — scope-gate it before prepare_named_backend
+        # constructs an adapter or resolves a vendor credential.
+        scope = getattr(request.state, "api_key_scope", None)
+        if scope is not None:
+            denied = _out_of_scope_backend(req, scope)
+            if denied is not None:
+                return _scope_denied_response(denied)
+        try:
+            # Same helper /v1/parse's run_request uses for its named-backend branch (BL-91): a
+            # directly-named backend is compliance-gated (ComplianceRefused → 403) before
+            # credential-gated (MissingCredentialsError → 424, signup_url hint included) — this
+            # branch must not be able to hand-copy its own, independently-drifting version again.
+            # deadline_ms=None (BL-153): no request-schema field originates a real per-request
+            # deadline for this path yet — see api.prepare_named_backend's own docstring.
+            adapter, req, ctx = api.prepare_named_backend(
+                req, backend, config=_server_router_config(), deadline_ms=None
+            )
+        except KeyError as e:
+            return _unknown_backend(e)
+        except _ADAPTER_ERRORS as e:
+            return _error_response(e)
+        try:
+            with auth_hinted(adapter.descriptor, ctx.credentials):
+                job = await run_in_threadpool(adapter.submit, req, ctx)
+        except _ADAPTER_ERRORS as e:
+            return _error_response(e)
+        rec = JobRecord(
+            job.id,
+            backend,
+            adapter,
+            job,
+            req,
+            int(time.time() * 1000),
+            # BL-77: anchor the drive-deadline to submission, once — not to "now" on every GET.
+            deadline_ms=RealClock().now_ms() + DEFAULT_DEADLINE_MS,
+        )
+        if job.is_terminal():
+            try:
+                # BL-93: auth_hinted wraps this call too (it previously closed right after
+                # adapter.submit() above), so an AdapterError normalize() raises gets the same
+                # attach_auth_hint + secret redaction the identical failure gets from submit()
+                # itself three lines up, instead of reaching rec.error carrying a raw secret value.
+                with auth_hinted(adapter.descriptor, ctx.credentials):
+                    rec.response = _metered(adapter, job, req, ctx, ctx.credentials)
+            except Exception as e:  # noqa: BLE001 - BL-85: a non-adapter exception out of
+                # normalize() becomes a failed job, not a crash — the same guard the webhook leg
+                # already has, applied here so the documented cross-leg error-shape contract
+                # (the openreading.server docstring) actually holds for the submit leg too.
+                _, rec.error = _error_envelope(e)
+        jobs[job.id] = rec
+        return _job_dict(rec)
+
+    @app.get("/v1/jobs/{job_id}")
+    async def get_job(job_id: str):
+        rec = jobs.get(job_id)
+        if rec is None:
+            return _not_found("unknown_job", job_id)
+        pending = rec.response is None and rec.error is None and not rec.job.is_terminal()
+        # BL-83: rec.job is one mutable object and the drive below crosses into a real OS thread
+        # via run_in_threadpool — two concurrent GETs for the same still-pending job_id must not
+        # both invoke adapter.poll() on it at once. acquire(blocking=False) is the non-blocking,
+        # thread-safe "is a drive already in flight?" check; it never stalls the event loop
+        # either way. A caller that loses the race falls straight through to reporting rec's
+        # current state rather than launching a second, redundant (and, for a billed-per-poll
+        # backend, doubly-charged) drive.
+        if (
+            pending
+            and rec.job.wait_mode is not WaitMode.WEBHOOK
+            and rec.drive_lock.acquire(blocking=False)
+        ):
+            try:
+                # POLL jobs are driven on demand; WEBHOOK jobs complete via /v1/webhooks. This
+                # handler builds its own RunContext independently of submit_job's (not carried on
+                # JobRecord), via the same build_run_context(...) factory every other execution
+                # surface uses — NOT a bare RunContext(credentials=...), which would drop
+                # ctx.runtime and break azure_document_intelligence's poll() unconditionally
+                # (Ledger T4a, F8): with no client ever cached on `rec.adapter` across calls
+                # (T4a item 3), THIS is now the credential/runtime source poll() actually builds
+                # its client from — no longer merely for redaction, since a fresh drive here may
+                # be the first (or only) time this process ever calls poll() on this job.
+                ctx = build_run_context(
+                    rec.req, rec.adapter.descriptor, broker=EnvCredentialBroker()
+                )
+                with auth_hinted(rec.adapter.descriptor, ctx.credentials):
+                    # BL-92: always `None`, never `rec.deadline_ms` — see the JobRecord.deadline_ms
+                    # field comment for why threading the stored anchor in here was the bug.
+                    rec.job = await run_in_threadpool(_drive_job, rec.adapter, rec.job, ctx, None)
+                    if rec.job.is_terminal():
+                        # BL-93: also thread creds through for apply_cost_report's OWN redaction
+                        # (a report_cost() failure never raises, so it is never caught — let alone
+                        # redacted — by this enclosing auth_hinted(...) block on its own).
+                        rec.response = _metered(rec.adapter, rec.job, rec.req, ctx, ctx.credentials)
+            except _ADAPTER_ERRORS as e:
+                # BL-77/BL-88: a _DriveSliceExpired — raised ONLY by driver.py's own per-call
+                # deadline check, never by an adapter — means THIS call's own drive-deadline slice
+                # elapsed; it is not genuine exhaustion — the job is still healthy and
+                # non-terminal, it just outran this one call's slice. Leave rec.job/rec.error
+                # untouched (the job stays "running") instead of latching this job "failed"
+                # forever with zero recovery path — the NEXT GET already gets a fresh slice
+                # unconditionally (BL-92: `_drive_job` is always called with `None` above, not a
+                # stored anchor), so no further action is needed here to make that happen; the
+                # `rec.deadline_ms` update below is kept only for the field's own historical shape
+                # (see its comment) and is not what gives the next call its fresh slice. Discrimi-
+                # nated by TYPE, not by `backend_code` string content (BL-88): `backend_code` is
+                # ordinary adapter-writable free text with no uniqueness constraint, and
+                # the openreading.strategies.model docstring's own classifier table names
+                # "deadline_exceeded" as vocabulary adapters should prefer for a genuine vendor
+                # deadline — a bare string match could misclassify that real exhaustion as a
+                # harmless slice expiry. Any
+                # OTHER RetryableError (a real MAX_CONSECUTIVE_FAULTS exhaustion, re-raised from poll()
+                # itself, whatever backend_code the adapter gave it — including this exact sentinel
+                # string) and every other _ADAPTER_ERRORS member still records rec.error exactly as
+                # before.
+                if isinstance(e, _DriveSliceExpired):
+                    rec.deadline_ms = RealClock().now_ms() + DEFAULT_DEADLINE_MS
+                else:
+                    _, rec.error = _error_envelope(e)
+            except Exception as e:  # noqa: BLE001 - BL-85: a non-adapter exception out of
+                # _metered() (e.g. from normalize()) becomes a failed job, not a crash — the same
+                # guard the webhook leg already has. Ordered AFTER the narrower
+                # `except _ADAPTER_ERRORS` clause above, never replacing it: BL-88 adds an
+                # isinstance check inside that narrower clause, and a taxonomy error must always be
+                # caught there first — this broader clause only ever sees what _ADAPTER_ERRORS
+                # does not already claim.
+                _, rec.error = _error_envelope(e)
+            finally:
+                rec.drive_lock.release()
+        return _job_dict(rec)
+
+    @app.post("/v1/webhooks/{backend_id}")
+    async def webhook(backend_id: str, request: Request):
+        try:
+            make_adapter(backend_id)  # validate backend exists
+        except KeyError as e:
+            return _unknown_backend(e)
+        raw = await request.body()
+        headers = {k.lower(): v for k, v in request.headers.items()}
+        secret = _webhook_secret(backend_id)
+        if secret:
+            try:
+                _verify_svix(secret, raw, headers)
+            except Exception:  # noqa: BLE001 - any verify failure is a 401
+                return _bad_signature()
+        elif _webhook_secret_required(backend_id):
+            # BL-50: this backend declares webhook_secret but none is configured — fail closed
+            # instead of falling through to trust an unsigned, unverifiable event as a genuine
+            # vendor result (previously silently accepted, including any fabricated billing data).
+            return _bad_signature()
+        try:
+            event = json.loads(raw)
+        except ValueError:
+            return _bad_request("invalid JSON body")
+        event["headers"] = headers
+        # BL-82: thread the raw bytes through too, so a bound adapter's own resolve_webhook/
+        # verify_webhook check (the dispatcher-level _verify_svix above is the primary gate; this is
+        # the adapter-side backstop for whichever caller ends up with a credential-bound client)
+        # verifies the REAL body instead of always defaulting to b"" and rejecting every genuinely
+        # valid signature.
+        event["_raw"] = raw
+        # BL-66: scoped by BOTH backend_id (Defect 1 — previously any job whose backend_job_id/
+        # webhook_token happened to match `jid` resolved here, regardless of which backend's URL
+        # was posted to) AND wait_mode is WEBHOOK (Defect 1 — previously a POLL-only job, which
+        # never advertises webhook support at all, matched just as readily). jid itself is now read
+        # via the posted-to backend's own vendor field name (Defect 2), not hardcoded to reducto's.
+        jid = _webhook_event_id(backend_id, event)
+        rec = next(
+            (
+                r
+                for r in jobs.values()
+                if r.backend == backend_id
+                and r.job.wait_mode is WaitMode.WEBHOOK
+                # BL-70: an id-less event (jid is None, e.g. a POST body that simply omits the id
+                # field) must never match a job whose own backend_job_id/webhook_token are ALSO
+                # both None — submit() can leave both None when a vendor's otherwise-2xx create-
+                # task response omitted its id field. Without this guard, `None in (None, None)`
+                # is True by construction, hijacking that job with zero id knowledge required.
+                and jid is not None
+                and jid in (r.job.backend_job_id, r.job.webhook_token)
+            ),
+            None,
+        )
+        if rec is None:
+            return _not_found("unknown_job", str(jid))
+        # fresh adapter (client=None) — the server already verified the signature, so resolve_webhook
+        # maps the event without re-verifying.
+        adapter = make_adapter(backend_id)
+        try:
+            # builds its own RunContext independently of submit_job's too — see get_job's own
+            # comment for why this is build_run_context(...), not a bare RunContext(credentials=
+            # ...): resolve_webhook() now requires ctx with no default (Ledger T4a, F9), and a
+            # fresh adapter (client=None) builds its real client from ctx.credentials/ctx.runtime
+            # here, the same way poll() does.
+            ctx = build_run_context(rec.req, adapter.descriptor, broker=EnvCredentialBroker())
+            with auth_hinted(adapter.descriptor, ctx.credentials):
+                rec.job = adapter.resolve_webhook(event, rec.job, ctx)
+        except _ADAPTER_ERRORS as e:
+            return _error_response(e)
+        if rec.job.is_terminal() and rec.response is None:
+            try:
+                # BL-93: a second `with auth_hinted(...)` block, reusing the same `ctx` the
+                # resolve_webhook call three lines up already resolved — the first block closes
+                # right after resolve_webhook, so this leg's _metered() call previously ran
+                # unguarded, the webhook-side twin of Leg 1's identical gap.
+                with auth_hinted(adapter.descriptor, ctx.credentials):
+                    rec.response = _metered(adapter, rec.job, rec.req, ctx, ctx.credentials)
+            except Exception as e:  # noqa: BLE001 - a bad payload becomes a failed job, not a crash
+                _, rec.error = _error_envelope(e)
+        return _job_dict(rec)
+
+    return app
+
+
+def _metered(
+    adapter, job: Job, req, ctx: RunContext, credentials: ResolvedCredentials | None = None
+) -> dict:
+    """Normalize + meter a finished async job — the /v1/jobs and /v1/webhooks surfaces return the
+    same response envelope as /v1/parse, so `usage.cost_usd` is filled the same way.
+
+    `credentials` (BL-93): forwarded to `apply_cost_report` so a `report_cost()` failure's warning
+    is redacted the same way a `normalize()` failure's message is by the caller's own
+    `auth_hinted(...)` wrap — `_metered()` itself raises nothing new, it only threads the value
+    through to the one boundary (`apply_cost_report`) that swallows its own exception and can never
+    be protected by a `with auth_hinted(...):` block around this call.
+
+    `ctx` (Ledger T4b): every caller already has one in scope (it built/reused it to drive the job
+    this same call is normalizing) — threaded through to `normalize`'s new `(job, ctx, slim_req)`
+    signature; `slim_request(req)` is computed here, once, rather than at each of the three
+    call sites."""
+    return apply_cost_report(
+        adapter, job, adapter.normalize(job, ctx, slim_request(req)), credentials
+    ).to_schema_dict()
+
+
+def _drive_job(adapter, job: Job, ctx: RunContext, deadline_ms: float | None = None) -> Job:
+    """Drive one job forward by one GET's worth of polling. BL-92: `get_job` always passes `None`
+    now — every call measures its own DEFAULT_DEADLINE_MS-sized slice fresh from THIS call's own
+    start (below), rather than being handed a stored anchor (BL-77's `JobRecord.deadline_ms`) that
+    a caller polling slower than DEFAULT_DEADLINE_MS could already have outrun before the call even
+    began. The `deadline_ms` parameter itself is untouched — still honored exactly as before for
+    any direct caller (e.g. tests) — it is simply never non-None from get_job in practice anymore.
+
+    `ctx` (Ledger T4a): threaded straight through to `run_to_completion` — see `get_job`'s own
+    comment for why this is no longer merely a redaction nicety.
+    """
+    clock = RealClock()
+    if deadline_ms is None:
+        deadline_ms = clock.now_ms() + DEFAULT_DEADLINE_MS
+    return run_to_completion(adapter, job, ctx=ctx, deadline_ms=deadline_ms, clock=clock)
+
+
+def _registry():
+    from openreading.adapters.registry import build_registry
+
+    return build_registry()

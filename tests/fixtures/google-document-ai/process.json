@@ -1,0 +1,189 @@
+{
+  "document": {
+    "text": "Loan Application\nApplicant income summary.\nRegion\nRevenue\nNorth\n4400\n",
+    "pages": [
+      {
+        "pageNumber": 1,
+        "dimension": {
+          "width": 612.0,
+          "height": 792.0,
+          "unit": "POINTS"
+        },
+        "paragraphs": [
+          {
+            "layout": {
+              "textAnchor": {
+                "textSegments": [
+                  {
+                    "endIndex": "16"
+                  }
+                ]
+              },
+              "confidence": 0.99,
+              "boundingPoly": {
+                "normalizedVertices": [
+                  {
+                    "x": 0.1,
+                    "y": 0.05
+                  },
+                  {
+                    "x": 0.6,
+                    "y": 0.05
+                  },
+                  {
+                    "x": 0.6,
+                    "y": 0.09
+                  },
+                  {
+                    "x": 0.1,
+                    "y": 0.09
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "layout": {
+              "textAnchor": {
+                "textSegments": [
+                  {
+                    "startIndex": "17",
+                    "endIndex": "42"
+                  }
+                ]
+              },
+              "confidence": 0.98,
+              "boundingPoly": {
+                "normalizedVertices": [
+                  {
+                    "x": 0.1,
+                    "y": 0.12
+                  },
+                  {
+                    "x": 0.7,
+                    "y": 0.12
+                  },
+                  {
+                    "x": 0.7,
+                    "y": 0.15
+                  },
+                  {
+                    "x": 0.1,
+                    "y": 0.15
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "tables": [
+          {
+            "layout": {
+              "boundingPoly": {
+                "normalizedVertices": [
+                  {
+                    "x": 0.1,
+                    "y": 0.3
+                  },
+                  {
+                    "x": 0.7,
+                    "y": 0.3
+                  },
+                  {
+                    "x": 0.7,
+                    "y": 0.5
+                  },
+                  {
+                    "x": 0.1,
+                    "y": 0.5
+                  }
+                ]
+              }
+            },
+            "headerRows": [
+              {
+                "cells": [
+                  {
+                    "layout": {
+                      "textAnchor": {
+                        "textSegments": [
+                          {
+                            "startIndex": "43",
+                            "endIndex": "49"
+                          }
+                        ]
+                      }
+                    },
+                    "rowSpan": 1,
+                    "colSpan": 1
+                  },
+                  {
+                    "layout": {
+                      "textAnchor": {
+                        "textSegments": [
+                          {
+                            "startIndex": "50",
+                            "endIndex": "57"
+                          }
+                        ]
+                      }
+                    },
+                    "rowSpan": 1,
+                    "colSpan": 1
+                  }
+                ]
+              }
+            ],
+            "bodyRows": [
+              {
+                "cells": [
+                  {
+                    "layout": {
+                      "textAnchor": {
+                        "textSegments": [
+                          {
+                            "startIndex": "58",
+                            "endIndex": "63"
+                          }
+                        ]
+                      }
+                    },
+                    "rowSpan": 1,
+                    "colSpan": 1
+                  },
+                  {
+                    "layout": {
+                      "textAnchor": {
+                        "textSegments": [
+                          {
+                            "startIndex": "64",
+                            "endIndex": "68"
+                          }
+                        ]
+                      }
+                    },
+                    "rowSpan": 1,
+                    "colSpan": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "entities": [
+      {
+        "type": "gross_pay",
+        "mentionText": "4400.00",
+        "normalizedValue": {
+          "text": "4400.00",
+          "moneyValue": {
+            "units": "4400"
+          }
+        },
+        "confidence": 0.97
+      }
+    ]
+  }
+}
