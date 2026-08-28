@@ -123,6 +123,30 @@ company's own packages that depend on this one, starting with the web UI (`openr
 (`internal/design/ledger.md` → `openreading/design/ledger.md`). Read it for context; never copy
 from it; never import from it — the dependency arrow is company → core, only.
 
+## What belongs in this repo
+
+This is the open-core engine. The test for a new feature: **could a competent engineer rebuild
+it in a week from this repo?** Then it is a mechanism and it belongs here — mechanisms earn
+adoption. What gets better only with private data, tuning, or hosting belongs in the company
+repo, which depends on this one (never the reverse: nothing here may import, call, or assume
+anything outside this package).
+
+Here — the whole 3×3 grid (parse / compare / strategy × CLI / API / agent): the contract
+(schemas, types, geometry), every adapter and the compliance-first router, the credential broker,
+strategies (grammar, engine, signals, calibrate, explain, replay, decision points), compare,
+batch, the ledger, `derive/`, the conformance kit, the thin JSON server, and the benchmark
+**harness** with one synthetic case.
+
+Also here when built: the agent surface (`openreading mcp` tools, `triage`); the decider wire
+executor — the real LLM call behind `DeciderPort` with the caller's key, a generic prompt, and
+offline replay; the intent schema and its routing mechanics; the translation stage and its profile
+grammar; every new backend, signal, verdict, or channel.
+
+Not here, ever: a web UI, labeled datasets (`tests/test_evals_benchmark_only.py` fails if one
+lands in `evals/`), tuned prompts or calibration derived from private corpora, curated intent or
+profile catalogs, anything hosted, multi-tenant, billed, or behind an account. A PR that adds one
+of those is closed, not reviewed.
+
 ## Things not to do
 
 - Do not add a markdown file outside the allowlist. Put it in a module docstring or in the
