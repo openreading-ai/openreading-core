@@ -120,7 +120,7 @@ class InlineExecutor:
     diverge from its own plan mid-run — there is no second worker to disagree with the pinned set)
     but the mechanism and its test exist, per AC-14's T1 row.
 
-    ZDR (Phase C round-1, ann High; rescoped Phase C round-2, sophia Finding 8 / jay Finding 6):
+    ZDR (Phase C round-1, High; rescoped Phase C round-2, Findings 8 and 6):
     `internal/design/ledger.md` §9.4 requires zero retained CONTENT for a ZDR-flagged backend's own
     step — `exec` still writes the ordinary `attempted`/terminal journal records (topology, digests,
     costs — audit metadata, not content) but never calls `blobs.put(...)` for that step. Originally
@@ -156,7 +156,7 @@ class InlineExecutor:
         self._ledger_root = ledger_root
 
     def _is_zdr_backend(self, backend_id: str | None) -> bool:
-        """Phase C round-2 (sophia Finding 8 / jay Finding 6, "Narrowest fix"): whether the backend
+        """Phase C round-2 (Findings 8 and 6, "Narrowest fix"): whether the backend
         that ACTUALLY dispatched this step (not the run's whole eligible set) is itself ZDR-flagged.
         `backend_id is None` (a composite step) or an unregistered/unresolvable id are both treated
         as "not ZDR" — the same as before this fix, since neither ever populated `descriptors` under
@@ -260,7 +260,7 @@ class InlineExecutor:
         permanent failure takes, naming the real reason rather than crashing OR papering over it.
 
         A ZDR-flagged backend's own "ok" record is the other reason `payload` can legitimately be
-        absent (Phase C round-1, jay + sophia, independently): §9.4's "zero retained content" means
+        absent (Phase C round-1, two reviewers independently): §9.4's "zero retained content" means
         `exec`'s own dispatch branch below never calls `blobs.put` for a ZDR run, so the journaled
         `"ok"` record's `payload` is `None` by design, not a missing write. Before this fix, that
         `None` reached `engine.py`'s `_response_payload` unchanged and crashed with an uncaught
@@ -392,7 +392,7 @@ class InlineExecutor:
             )
             raise
 
-        # Phase C round-2 (sophia Finding 8 / jay Finding 6, "the retention ceiling" half): this
+        # Phase C round-2 (Findings 8 and 6, "the retention ceiling" half): this
         # step's own backend just genuinely dispatched — tighten (never widen) the run's stamped
         # ceiling from THIS descriptor's own declared limit, if it's stricter than what's already
         # recorded. A backend that stays merely eligible never reaches this line at all, so it can
@@ -408,7 +408,7 @@ class InlineExecutor:
                     now_epoch_ms=int(self._clock.now_ms()),
                 )
 
-        # Phase C round-1 (ann, Low/confirm-only, not filed as a defect): the full response body —
+        # Phase C round-1 (Low/confirm-only, not filed as a defect): the full response body —
         # whatever include_backend_raw/typed_fields/image settings the request itself asked for —
         # is retained as one blob whenever the ledger is armed; there is no separate opt-out for
         # just the highest-sensitivity fields short of not arming the ledger at all. §9.4's "opt-in"

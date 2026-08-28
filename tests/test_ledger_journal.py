@@ -393,7 +393,7 @@ def test_golden_journal_fixture_validates():
         schemas.validate_journal_record(record)
 
 
-# ---- Phase C round-1 fixes (jay F1-F7, ann's two High + key-isolation Medium) ------------------
+# ---- Phase C round-1 fixes (F1-F7, two High + one key-isolation Medium) ------------------
 
 
 def test_step_id_is_deterministic_sha256_not_random_uuid():
@@ -626,7 +626,7 @@ def test_step_result_payload_rejects_a_set_rather_than_silently_coercing_to_a_li
 
 
 def test_zdr_flagged_backend_suppresses_the_blob_write_entirely():
-    # ann High #1 (rescoped Phase C round-2, sophia Finding 8 / jay Finding 6): a ZDR-flagged
+    # review High 1: (rescoped Phase C round-2, Findings 8 and 6): a ZDR-flagged
     # backend's OWN step must retain zero content — InlineExecutor must never call blobs.put for a
     # step whose OWN `backend_id` resolves to a ZDR-flagged descriptor. The whole-run `zdr=`
     # boolean this test used to arm directly is gone; the gate is now a per-step registry lookup
@@ -685,7 +685,7 @@ def test_zdr_flagged_backend_suppresses_the_blob_write_entirely():
 
 
 def test_arm_ledger_populates_the_sanitizer_with_real_resolved_secret_values(tmp_path, monkeypatch):
-    # ann High #2: a static, empty Sanitizer() never has anything to scrub against — _arm_ledger
+    # review High 2: a static, empty Sanitizer() never has anything to scrub against — _arm_ledger
     # must feed it every eligible descriptor's actually-resolved secret values.
     from tests.fakes import ScriptedBackend
 
@@ -713,7 +713,7 @@ def test_arm_ledger_populates_the_sanitizer_with_real_resolved_secret_values(tmp
 
 
 def test_shredded_run_leaves_no_key_byte_anywhere_under_journal_or_blob_directories(tmp_path):
-    # ann Medium: the design's own named T1 acceptance test for §9.4 — scan every byte under the
+    # a reviewer Medium: the design's own named T1 acceptance test for §9.4 — scan every byte under the
     # journal/blob directories for the key material, not just check the key file's own existence.
     root = tmp_path
     journal = JsonlJournal(root / "run1.jsonl")
@@ -745,7 +745,7 @@ def test_shredded_run_leaves_no_key_byte_anywhere_under_journal_or_blob_director
 def test_planted_canaries_in_password_and_webhook_url_never_reach_disk(
     pdf_path, tmp_path, monkeypatch
 ):
-    # Plan §7's own named T1 test (round-2, ann's non-blocking note): plant a canary in each
+    # Plan §7's own named T1 test (round-2, a non-blocking review note): plant a canary in each
     # excluded field and scan every byte written to disk for it, per AC-9's literal text.
     from openreading.types.request import OpenReadingRequest
 
@@ -769,7 +769,7 @@ def test_planted_canaries_in_password_and_webhook_url_never_reach_disk(
 
 
 def test_planted_canary_in_document_url_never_reaches_disk(tmp_path, monkeypatch):
-    # Finding 3 (Phase C round-1, jay): the canary test above plants password/webhook_url but
+    # Finding 3 (Phase C round-1): the canary test above plants password/webhook_url but
     # never document.url — a THIRD secret-class field per §9.3 ("routinely a presigned URL,
     # forwarded verbatim," unconditionally, not by size), and the one `slim_request_dict` originally
     # missed. `Router.route` classifies `eligible`/`dropped` over the WHOLE registry, not just a
@@ -777,7 +777,7 @@ def test_planted_canary_in_document_url_never_reaches_disk(tmp_path, monkeypatch
     # "text/html"` alone leaves only URL-native backends (docling/azure-document-intelligence/
     # chunkr, all `accepts_url=True`) eligible, so `materialize_document`'s "any eligible backend
     # can't ingest URLs" guard never fires and the URL reaches `_arm_ledger` still a URL — exactly
-    # the shape jay's own repro used.
+    # the shape the reviewer's own repro used.
     from openreading.types.request import OpenReadingRequest
 
     ledger_root = tmp_path / "ledger"
@@ -905,7 +905,7 @@ def test_normalize_actually_receives_the_slimmed_request_at_a_real_call_site(pdf
     slim_req_seen, ctx_seen = captured[0]
     assert slim_req_seen.document.password is None
     assert slim_req_seen.async_.webhook_url is None
-    # Trent Finding 1 (Phase C round 1): the `ctx` threaded to this same real call site is the
+    # Finding 1 (Phase C round-1): the `ctx` threaded to this same real call site is the
     # real, populated RunContext for this run (deadline_ms/idempotency_key filled in by
     # `build_run_context`) — never a fresh, empty `RunContext()`.
     assert ctx_seen is not None

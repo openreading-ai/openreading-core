@@ -91,7 +91,7 @@ def test_validator_is_cached_per_schema_object():
     # response_schema() twice — not once, reusing the same reference — so this pins the
     # underlying invariant the cache depends on (_load returning the identical object per
     # filename), rather than trivially passing regardless of whether that invariant holds
-    # (BL-167 review, trent).
+    # (BL-167 review).
     v1 = schemas._validator(schemas.response_schema())
     v2 = schemas._validator(schemas.response_schema())
     assert v1 is v2

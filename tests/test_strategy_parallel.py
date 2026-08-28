@@ -258,7 +258,7 @@ def test_on_win_drain_leaves_a_losers_job_alone():
 
 
 def test_multiple_losers_are_cancelled_concurrently_not_serially():
-    # BL-164 review (ben, High): adapter.cancel() now issues a real, synchronous vendor HTTP call
+    # BL-164 review (a reviewer, High): adapter.cancel() now issues a real, synchronous vendor HTTP call
     # for four real adapters (previously an instant in-memory no-op for all thirteen) — a plain,
     # unwrapped call per loser inside `_eval_parallel` (an async function) would block THIS
     # process's entire event loop for the sum of every loser's round trip, serially, stalling
@@ -296,10 +296,10 @@ def test_multiple_losers_are_cancelled_concurrently_not_serially():
 
 
 def test_cancel_dispatch_never_blocks_the_response_past_the_node_deadline():
-    # BL-164 review round 2 (trent, High): concurrent dispatch alone doesn't cap the TOTAL wait —
+    # BL-164 review round 2 (High): concurrent dispatch alone doesn't cap the TOTAL wait —
     # a single slow vendor cancel could still extend the response well past the node's own
     # configured deadline, breaking the exact Law 6 promise `_drain` already keeps for a drained
-    # loser ("the response never blocks past the node deadline"). Reproduces trent's own repro
+    # loser ("the response never blocks past the node deadline"). Reproduces the reviewer's own repro
     # shape exactly: a real (not FakeClock) clock, a tight budget.max_duration, and a loser whose
     # cancel() sleeps far longer than that budget — asserts the response returns close to the
     # budget, not close to the sleep.
@@ -505,7 +505,7 @@ def test_composite_shadow_cost_is_not_dropped():
 
 
 def test_composite_winner_raising_report_cost_never_looks_infra_only():
-    # BL-134/Trent, the composite-winner site specifically (:1135 pre-fix): its own basis fold used
+    # BL-134, the composite-winner site specifically (:1135 pre-fix): its own basis fold used
     # to pass resp.usage.cost_basis straight through with no coalescing. Here the composite winner's
     # own internal leaf's report_cost() raises AFTER normalize() already set cost_usd (router/
     # cost.py's own "an adapter meters a channel itself" pattern) — the nested response ends up with

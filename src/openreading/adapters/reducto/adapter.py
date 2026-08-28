@@ -487,7 +487,7 @@ class ReductoAdapter(BackendAdapter):
         # as best-effort and swallows a TerminalError/RetryableError.
         if job.is_terminal():
             return job
-        # Ledger T4a closes BL-164 review (trent, Medium)'s own flagged gap: cancel() now takes
+        # Ledger T4a closes BL-164 review (Medium)'s own flagged gap: cancel() now takes
         # ctx and always builds a real client via _get_client(ctx) — a fresh adapter instance with
         # no bound client (a resumed-from-persistence job, before this adapter has ever called
         # submit()) no longer silently marks CANCELLED with zero vendor contact.

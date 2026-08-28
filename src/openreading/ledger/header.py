@@ -33,7 +33,7 @@ alone — a disclosed limitation, not a crash.
 
 **`document.url` is a secret-class field too, not merely a reference.** §9.3 names it explicitly,
 verbatim, alongside `document.password`/`async_.webhook_url`: "routinely a presigned URL, forwarded
-verbatim" — unconditionally, not by size. Phase C round 1 (jay) found the first version of
+verbatim" — unconditionally, not by size. Phase C round-1 found the first version of
 `slim_request_dict` stripped `bytes_base64`/`password`/`webhook_url` but not `url`, so a URL-sourced
 document's presigned URL landed verbatim, in plaintext, in this header file — which `retention.py`'s
 `reap()` never touches at all, so nothing ever erases it. Fixed the same way `bytes_base64` already
@@ -41,7 +41,7 @@ was: routed through the encrypted blob store instead of the plaintext `slim_requ
 earns the identical shred/erasure guarantee bytes already had, rather than persisting forever.
 
 **Which of the two shapes a `document` blob holds is its own field, not inferred from `media_type`
-(Phase C round-2, jay Finding 7, LOW).** The first version told bytes and URL apart by comparing
+(Phase C round-2 Finding 7, LOW).** The first version told bytes and URL apart by comparing
 `BlobRef.media_type` against the `DOCUMENT_URL_MEDIA_TYPE` sentinel — but a bytes document's own
 `media_type` is `req.document.mime_type`, an unvalidated, caller-supplied string nothing rejects, so
 a (deliberately adversarial, or extraordinarily unlucky) caller setting `mime_type` to that exact
@@ -73,7 +73,7 @@ JOURNAL_VERSION = 1
 _HARD_FIELDS = ("config_hash", "plan_hash", "journal_version")
 
 # A human-readable label for a URL-sourced document's header blob (Finding 3, Phase C round 1,
-# jay). NOT the bytes/URL discriminator — Phase C round 2 (jay Finding 7) found that reading
+# a reviewer). NOT the bytes/URL discriminator — Phase C round-2 (Finding 7) found that reading
 # `BlobRef.media_type` back to tell the two apart could collide with a caller-supplied
 # `document.mime_type` (an unvalidated string on the bytes side); `RunHeader.document_is_url` is
 # the real discriminator now, a field this module alone ever sets. Kept only as the blob's own
@@ -103,7 +103,7 @@ class RunHeader:
     pinned_eligible: dict[str, str] = field(default_factory=dict)
     strategy_name: str = ""
     document: BlobRef | None = None
-    # Phase C round-2 (jay Finding 7): the bytes-vs-URL discriminator for `document`, set only by
+    # Phase C round-2 (Finding 7): the bytes-vs-URL discriminator for `document`, set only by
     # `_arm_ledger`'s own write side — never derived from `document.media_type`, which (for the
     # bytes case) is `req.document.mime_type`, an unvalidated string a caller controls.
     document_is_url: bool = False
@@ -151,7 +151,7 @@ def write_header(
     exists for this `run_id`, so a second `_arm_ledger` call within the same run's own lifetime can
     never clobber the identity a resume would compare against.
 
-    `sanitizer`, when given (Finding 10a, Phase C round 1, jay): the SAME `Sanitizer` chokepoint
+    `sanitizer`, when given (Finding 10a, Phase C round-1): the SAME `Sanitizer` chokepoint
     every journal/blob write already runs through (§9.3) — a backstop, not the primary defense.
     Construction-time exclusion (`slim_request_dict`'s own field-popping, and Finding 3's routing of
     `document.url`/`bytes_base64` through the encrypted blob store instead) is still what keeps a
@@ -244,7 +244,7 @@ def slim_request_dict(req: OpenReadingRequest) -> dict[str, Any]:
     `test_planted_canaries_in_password_and_webhook_url_never_reach_disk` pins as NEVER reaching
     ledger disk in any form: `document.password`, `async.webhook_url`.
 
-    `document.url` (Finding 3, Phase C round 1, jay): §9.3 names it a secret-class field
+    `document.url` (Finding 3, Phase C round-1): §9.3 names it a secret-class field
     unconditionally, "routinely a presigned URL, forwarded verbatim" — the same three-field list
     this module's own `_arm_ledger` caller and `schemas/step.v0.1.json` already quote verbatim
     elsewhere. Popped here exactly like `bytes_base64`, because it now travels the same way

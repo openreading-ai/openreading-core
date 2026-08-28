@@ -389,7 +389,7 @@ def test_cmd_resume_prints_the_refusal_shape_and_returns_exit_3(tmp_path, monkey
 def test_api_resume_run_reconstructs_the_request_from_a_header_on_disk_and_replays_successfully(
     tmp_path, monkeypatch
 ):
-    """Finding 5/10(b) (Phase C round-1, jay): every OTHER replay test in this file drives
+    """Finding 5/10(b) (Phase C round-1): every OTHER replay test in this file drives
     `_arm_ledger`/`run_strategy` directly via `_resume` above, reusing the SAME in-memory `req`
     object the test itself built — never exercising `api.resume_run`/`_request_from_header`'s own
     disk-read reconstruction for a SUCCESSFUL resume (the only two existing `api.resume_run` call
@@ -397,7 +397,7 @@ def test_api_resume_run_reconstructs_the_request_from_a_header_on_disk_and_repla
     injected registry, no in-memory shortcut — against a header actually read from disk, and proves
     the reconstructed request replays to the identical result.
 
-    No `policy={"require_local": True}` workaround needed (Phase C round-2, sophia Finding 8 / jay
+    No `policy={"require_local": True}` workaround needed (Phase C round-2 Finding 8 / a reviewer
     Finding 6, now fixed): against the REAL, whole-registry `eligible` set (`prune.py`'s own
     `plan.eligible_ids`, computed over every registered backend, not just the named strategy step —
     see `slim_request_dict`'s own docstring), `reducto`'s real descriptor (the only built-in with a
@@ -565,7 +565,7 @@ def test_missing_credentials_is_journaled_and_stays_terminal_on_resume_even_once
 def test_resume_replays_both_records_of_a_two_rung_cascade_whose_early_rung_was_skipped(
     tmp_path, monkeypatch
 ):
-    """Finding 1/Finding 8 (Phase C round-1, jay + sophia, independently): the ONLY existing
+    """Finding 1/Finding 8 (Phase C round-1, two reviewers independently): the ONLY existing
     missing-credentials test above uses a SINGLE-rung cascade — `continue` and the (now removed)
     buggy `return Outcome.err(...)` are behaviorally indistinguishable there (both end in
     `PlanExhaustedError`), so it could not catch a regression in `_eval_cascade`'s own skip-check.
@@ -643,7 +643,7 @@ def test_shred_then_resume_reports_payload_expired(tmp_path, monkeypatch):
 def test_resume_reports_a_typed_error_for_a_zdr_flagged_backends_replayed_ok_step(
     tmp_path, monkeypatch
 ):
-    """Finding 2 (Phase C round-1, jay + sophia, independently): a ZDR-flagged backend's live "ok"
+    """Finding 2 (Phase C round-1, two reviewers independently): a ZDR-flagged backend's live "ok"
     dispatch never calls `blobs.put` (§9.4 — zero retained content), so the journaled record's own
     `payload` is `None` by design. Before this fix, replaying that record reached
     `engine._response_payload` unchanged and crashed with an uncaught `pydantic.ValidationError`
@@ -706,7 +706,7 @@ def test_resume_reports_a_typed_error_for_a_zdr_flagged_backends_replayed_ok_ste
 def test_resume_retains_and_replays_a_local_only_run_even_when_an_undispatched_zdr_backend_is_eligible(
     tmp_path, monkeypatch
 ):
-    """Phase C round-2 (sophia Finding 8 / jay Finding 6) — the exact repro shape both reviewers
+    """Phase C round-2 (Findings 8 and 6) — the exact repro shape both reviewers
     used against the REAL production registry (`reducto`, `zdr_flag` + `max_retention_hours=0`,
     eligible for essentially any plain PDF whether or not it's ever named or credentialed),
     reproduced here against a small fake registry so it runs offline. A strategy naming ONLY a

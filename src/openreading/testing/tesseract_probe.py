@@ -28,7 +28,7 @@ def tesseract_ocr_works() -> bool:
     Calls `pytesseract.image_to_data(..., output_type=Output.DICT, config="--dpi ...")` — the same
     entry point and shape `_PytesseractRunner.image_to_data` uses in
     `adapters/tesseract/adapter.py` — not `image_to_string`, a distinct pytesseract code path with
-    its own tesseract-version parsing and output flags (BL-170 review, Trent). A probe that
+    its own tesseract-version parsing and output flags (BL-170 review). A probe that
     exercises a different path than the code it gates could pass or fail independently of whether
     the real code path works.
     """

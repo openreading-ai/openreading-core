@@ -40,7 +40,7 @@ class DatasetReport:
         # exclude unscored cases (overall is None, BL-79's honest "not labeled yet" marker) from
         # both the numerator and denominator, the same move already applied to calibrate.py's
         # Observation.scorer_overall — an unscored case must never silently read as a 0 or drag
-        # the mean, only a genuinely-scored one contributes (BL-86/Jin).
+        # the mean, only a genuinely-scored one contributes (BL-86).
         scored = [r.overall for r in self.results if r.error is None and r.overall is not None]
         return sum(scored) / len(scored) if scored else 0.0
 

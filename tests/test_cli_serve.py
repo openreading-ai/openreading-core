@@ -4,7 +4,7 @@
 coverage anywhere in this repository. Every test here drives `cmd_serve` through `main([...])` and
 monkeypatches `uvicorn.run` (or `uvicorn` itself) so nothing ever actually binds a socket.
 
-Three cases, per the sprint-6 Sophia×Trent 1:1's own correction to a naive two-test plan: (a) the
+Three cases, per the sprint-6 review 1:1's own correction to a naive two-test plan: (a) the
 `except ImportError` branch, forced via `sys.modules["uvicorn"] = None` since a dev environment
 synced with `--all-extras` (this repo's own) has uvicorn importable and can never reach that branch
 any other way; (b) the vendor-key exposure warning's host-gated on/off behavior; (c) `uvicorn.run`

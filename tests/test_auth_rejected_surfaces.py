@@ -106,7 +106,7 @@ def test_batch_parse_items_carry_the_env_var(tmp_path, rejecting_reducto, capsys
     assert captured.err.count("check REDUCTO_API_KEY") == 2, captured.err
 
 
-# --- CLI: route --run driven all the way to PlanExhaustedError (Trent's T7) ----------------------
+# --- CLI: route --run driven all the way to PlanExhaustedError (review T7) ----------------------
 
 
 @pytest.fixture

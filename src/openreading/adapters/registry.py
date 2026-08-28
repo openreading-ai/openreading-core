@@ -45,7 +45,7 @@ def make_adapter(slug: str) -> BackendAdapter:
     if slug not in BUILTIN_ADAPTERS:
         raise KeyError(f"unknown backend {slug!r}; known: {', '.join(sorted(BUILTIN_ADAPTERS))}")
     adapter = BUILTIN_ADAPTERS[slug]()
-    # Ledger T4a (AC-8), fix for ben's F2: this is a SECOND adapter-construction entry point,
+    # Ledger T4a (AC-8), fix for review F2: this is a SECOND adapter-construction entry point,
     # used directly at ~20 production call sites (including api.prepare_named_backend's common
     # named-backend path) that never go through router.registry.Registry.register(). Without this,
     # a below-floor adapter built here sails through to submit()/poll() and fails later, mid-run,

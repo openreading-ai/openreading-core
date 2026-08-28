@@ -470,7 +470,7 @@ class AnthropicClaudeAdapter(BackendAdapter):
         except Exception as e:  # noqa: BLE001
             raise self._map_error(e) from e
 
-        # Ledger T4b fix (Phase C round 1, ben F1): `normalize()` only ever sees `slim_req`, whose
+        # Ledger T4b fix (Phase C round-1, F1): `normalize()` only ever sees `slim_req`, whose
         # `document.bytes_base64`/`.password`/`.url` are nulled by `slim_request`
         # (the openreading.adapters runbook: `normalize` reads `job.raw.payload` ONLY, never a field the caller
         # might have supplied out-of-band via `slim_req`/`req`) — so the exact, byte-derived page
@@ -598,7 +598,7 @@ class AnthropicClaudeAdapter(BackendAdapter):
             rtype = result.get("type")
             if rtype == "succeeded" and result.get("message"):
                 mode = "extract" if req.extraction_schema else "parse"
-                # Ledger T4b fix (Phase C round 2, ben F4): the native-batch path has its own
+                # Ledger T4b fix (Phase C round-2, F4): the native-batch path has its own
                 # exact-page-count blind spot, distinct from round 1's F1 but the same silent-
                 # degradation shape — `req` here is the i-th item's own REAL, unslimmed request
                 # (normalize_many's Protocol takes `reqs: list[OpenReadingRequest]` directly, never
@@ -820,7 +820,7 @@ class AnthropicClaudeAdapter(BackendAdapter):
         slimmed) and carried on `job.raw.payload["_pdf_page_count"]`; else fall back to the
         distinct-cited-pages heuristic (which undercounts and is None in extract mode).
 
-        Ledger T4b fix (Phase C round 1, ben F1): this deliberately never reads real document bytes
+        Ledger T4b fix (Phase C round-1, F1): this deliberately never reads real document bytes
         itself anymore — it used to call `self._pdf_bytes(req)` on `slim_req`, whose bytes are
         always `None` by design (see `ledger.header.slim_request`), so the exact count silently
         degraded to this heuristic for every base64/path-intake request. the openreading.adapters runbook's rule:

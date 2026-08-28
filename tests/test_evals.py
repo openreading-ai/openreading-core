@@ -71,7 +71,7 @@ def test_score_combines_present_dimensions_only():
 def test_score_with_no_recognized_dimension_is_unscored_not_false_perfect():
     # expected={} names none of the five scored dimensions — an ordinary "not labeled yet" shape,
     # indistinguishable from "every measured dimension came back perfect" under the old 1.0
-    # default. Garbled, obviously-wrong text must not score a perfect overall (BL-79/Jin).
+    # default. Garbled, obviously-wrong text must not score a perfect overall (BL-79).
     resp = {"document": {"text": "totally garbled unreadable output nothing like the source"}}
     s = score(resp, {})
     assert s["overall"] is None
@@ -276,7 +276,7 @@ def test_end_to_end_pymupdf_scores_high_on_sample():
 
 
 def test_run_dataset_handles_a_genuinely_unlabeled_case_without_crashing(tmp_path):
-    # BL-86/Jin: a "mid-labeling dataset" — one case with a recognized `expected` dimension, one
+    # BL-86: a "mid-labeling dataset" — one case with a recognized `expected` dimension, one
     # with `expected: {}` (BL-79's honest "not scored" shape, `overall: None`) — must not crash
     # `mean_overall`/`summary()`; the unscored case must be excluded, not silently averaged in.
     pytest.importorskip("fitz", reason="pymupdf not installed")

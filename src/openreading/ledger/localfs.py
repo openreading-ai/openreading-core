@@ -49,7 +49,7 @@ class LocalFsKeyStore:
         # `mode=` on mkdir has no effect when the directory already exists (Path.mkdir's own
         # documented behavior with exist_ok=True) — chmod unconditionally so a keys/ directory
         # created earlier, by a different code path, or under a looser umask doesn't keep wider
-        # permissions than this store requires (Phase C round-1, ann Medium).
+        # permissions than this store requires (Phase C round-1, Medium).
         self._root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._root.chmod(0o700)
 
@@ -62,7 +62,7 @@ class LocalFsKeyStore:
             return p.read_bytes()
         key = secrets.token_bytes(_KEY_BYTES)
         # Create at 0600 atomically — writing then chmod'ing leaves the key briefly readable at
-        # the process's default (umask-dependent) mode, e.g. 0644 (Phase C round-1, ann Medium).
+        # the process's default (umask-dependent) mode, e.g. 0644 (Phase C round-1, Medium).
         fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
             os.write(fd, key)

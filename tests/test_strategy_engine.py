@@ -212,7 +212,7 @@ def test_cascade_reconciles_cost_basis_at_best_effort_exhausted():
     assert res.response.usage.cost_basis == "billed"
 
 
-# ---- BL-134/Trent: a rung with known cost but unset basis is folded as contributing nothing -----
+# ---- BL-134: a rung with known cost but unset basis is folded as contributing nothing -----
 
 
 def test_cascade_a_raising_report_cost_never_leaves_a_billed_rung_looking_free():

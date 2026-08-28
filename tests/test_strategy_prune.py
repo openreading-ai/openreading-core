@@ -189,7 +189,7 @@ def test_dropped_order_is_deterministic_across_hash_seeds():
 
 
 def test_compliance_refused_message_names_dropped_backends_in_sorted_order():
-    # BL-168 review (trent): the ComplianceRefused message sorts dropped_records the same way
+    # BL-168 review: the ComplianceRefused message sorts dropped_records the same way
     # CompiledPlan.dropped does, but nothing previously exercised that branch with more than one
     # dropped backend — the exact user-facing scenario the defect was about: "the explanation
     # shown for why a compliant run was refused." "zulu"/"alpha" are deliberately out of
@@ -284,7 +284,7 @@ def test_config_hash_changes_with_train_optout_confirmed_too():
 
 
 def test_canonical_router_config_raises_on_an_unrecognized_field_type():
-    # BL-163 round-2 review (jay, Medium, dormant): the dispatch rule only handles
+    # BL-163 round-2 review (Medium, dormant): the dispatch rule only handles
     # frozenset/set/primitives today (RouterConfig's actual current fields); a future field of
     # some other shape (a nested dict, a nested dataclass) must FAIL LOUD at compile time here,
     # not silently fall through to json.dumps's default=str fallback — whose repr could hash a

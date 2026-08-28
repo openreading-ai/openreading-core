@@ -196,12 +196,12 @@ def _compute_config_hash(
 
 
 def _canonical_router_config(router_config: RouterConfig) -> dict[str, Any]:
-    # BL-163 review (alex): derive generically from the dataclass's own fields rather than
+    # BL-163 review: derive generically from the dataclass's own fields rather than
     # hand-enumerating them by name, so a future RouterConfig field can't silently drop out of the
     # hash by being forgotten here. A frozenset/set field is sorted to a list (never left to
     # json.dumps's `default=str` fallback, whose str(frozenset(...)) repr order is itself
     # hash-seed-dependent — the exact nondeterminism class BL-168 fixed, through a different door).
-    # BL-163 review (jay, round 2): an unrecognized field type raises here, at compile time, rather
+    # BL-163 review round 2: an unrecognized field type raises here, at compile time, rather
     # than silently falling through to `default=str` — which could hash some future field shape
     # (a nested dict/dataclass, a plain set nested inside something) nondeterministically without
     # ever failing loud. Extend this function's dispatch, don't widen the silent fallback.
@@ -222,7 +222,7 @@ def _canonical_router_config(router_config: RouterConfig) -> dict[str, Any]:
 
 
 def _descriptor_for(registry: Registry, backend_id: str) -> AdapterDescriptor:
-    # BL-163 review (alex): every id here comes from plan.eligible_ids/plan.dropped, both
+    # BL-163 review: every id here comes from plan.eligible_ids/plan.dropped, both
     # populated by Router.route iterating this SAME registry (router.py) — so a miss is a
     # programming error in the caller, not a runtime possibility this function should degrade for.
     adapter = registry.get(backend_id)

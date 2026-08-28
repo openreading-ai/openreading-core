@@ -270,7 +270,7 @@ def test_page_granularity_estimated_rung_then_billed_rung_keeps_billed_basis():
     assert res.response.usage.cost_basis == "billed"
 
 
-# ---- BL-134/Trent: a rung with known cost but unset basis is folded as contributing nothing -----
+# ---- BL-134: a rung with known cost but unset basis is folded as contributing nothing -----
 
 
 def test_page_granularity_a_raising_report_cost_never_leaves_a_billed_rung_looking_free():

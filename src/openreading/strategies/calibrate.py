@@ -59,7 +59,7 @@ class Observation:
     """One document after the rung-1 run: its probe signals + the eval scorer's overall. Despite
     the name, not every document is actually labeled: `scorer_overall` is `None` when its
     `expected` names none of the scorer's five dimensions (an ordinary "not labeled yet" shape,
-    never a claim of perfection — BL-79/Jin); `sweep_predicate` excludes those observations from
+    never a claim of perfection — BL-79); `sweep_predicate` excludes those observations from
     `scorer_agreement` entirely rather than reading the absent label as agreement."""
 
     name: str
@@ -94,7 +94,7 @@ class PredicateSweep:
 class CalibrationReport:
     strategy: str
     n_docs: int
-    n_scored: int  # of n_docs, how many carried a recognized `expected` dimension (BL-87/Noor);
+    n_scored: int  # of n_docs, how many carried a recognized `expected` dimension (BL-87);
     # scorer_agreement is grounded in this subset only — see sweep_predicate's own docstring
     rung1_backend: str
     rung2_backend: str | None
@@ -175,7 +175,7 @@ def sweep_predicate(
     (no recognized `expected` dimension — an ordinary "not labeled yet" shape, not a claim of
     perfection) carries no quality label at all, so it is excluded from `scorer_agreement`'s
     numerator AND denominator entirely, rather than silently reading as "agrees with every
-    threshold" (BL-79/Jin). It still counts toward `escalation_rate`/`cost_per_doc`, which are
+    threshold" (BL-79). It still counts toward `escalation_rate`/`cost_per_doc`, which are
     signal-only and need no label."""
     signal_field, direction = _PREDICATE_SIGNAL[predicate]
     n = len(observations)

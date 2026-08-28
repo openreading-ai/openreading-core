@@ -131,7 +131,7 @@ def test_poll_then_normalize_many_maps_succeeded_and_errored():
     assert out[0].usage.cost_basis == "estimated"
 
 
-# --- Ledger T4b F4 (Phase C round 2, ben): native-batch page counts must be exact, not heuristic --
+# --- Ledger T4b F4 (Phase C round-2): native-batch page counts must be exact, not heuristic --
 
 
 def test_normalize_many_exact_page_count_from_real_pdf_bytes_not_citation_heuristic():
@@ -140,7 +140,7 @@ def test_normalize_many_exact_page_count_from_real_pdf_bytes_not_citation_heuris
     # native Message Batches and never call submit(), so every batch item's synth.raw.payload
     # never got a "_pdf_page_count" key and _page_count() silently fell back to the distinct-
     # cited-pages heuristic for every native-batch item: the same silent-degradation shape round
-    # 1's F1 was scored High for, just on the batch path. Ben's own repro: a real 2-page PDF,
+    # 1's F1 was scored High for, just on the batch path. the review's own repro: a real 2-page PDF,
     # native-batch parse mode reports 1 (only page 1 is cited in the fixture), extract mode
     # reports None (no citations at all to count from).
     doc_bytes = build_sample_pdf()  # a genuine, byte-parseable 2-page PDF (not the fake PDF_B64)

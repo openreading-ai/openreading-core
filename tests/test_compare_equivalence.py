@@ -18,7 +18,7 @@ POSITIVE = [
     ("USD 4400", "4400 USD", "money"),
     ("$4,400.00", "4400", "money"),  # BL-36: currency-signalled vs signal-less bare number
     ("4400 USD", "4400", "money"),  # BL-36: same bridge, signal on the trailing-code side
-    ("£100", "100 GBP", "money"),  # symbol normalizes to the correct ISO code (BL-45/Trent)
+    ("£100", "100 GBP", "money"),  # symbol normalizes to the correct ISO code (BL-45)
     ("1,234", "1234", "number"),
     ("1234.0", "1234", "number"),
     ("-1,000", "-1000", "number"),
@@ -30,10 +30,10 @@ POSITIVE = [
 NEGATIVE = [
     ("$4,400.00", "$4,600.00"),  # money amounts differ
     ("4400 USD", "4400 EUR"),  # money currencies differ
-    ("$100", "€100"),  # money currencies differ — both symbol-represented (BL-45/Trent)
-    ("$100", "100 EUR"),  # money currencies differ — symbol vs. named code (BL-45/Trent)
-    ("100 USD", "€100"),  # money currencies differ — named code vs. symbol (BL-45/Trent)
-    ("$100", "£100"),  # money currencies differ — a second symbol pair (BL-45/Trent)
+    ("$100", "€100"),  # money currencies differ — both symbol-represented (BL-45)
+    ("$100", "100 EUR"),  # money currencies differ — symbol vs. named code (BL-45)
+    ("100 USD", "€100"),  # money currencies differ — named code vs. symbol (BL-45)
+    ("$100", "£100"),  # money currencies differ — a second symbol pair (BL-45)
     ("12", "13"),  # numbers differ
     ("2024-01-02", "2024-02-01"),  # day/month swap — must NOT be equivalent
     ("01/02/2024", "02/01/2024"),  # ambiguous numeric dates — deliberately unparsed

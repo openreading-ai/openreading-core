@@ -400,7 +400,7 @@ def cmd_resume(args) -> int:
         print(f"[resume] {e}", file=sys.stderr)
         return 3
     except PlanExhaustedError as e:
-        # Finding 6/7 (Phase C round-1, sophia): `cmd_parse` already routes the identical exception
+        # Finding 6/7 (Phase C round-1): `cmd_parse` already routes the identical exception
         # through `_print_exhausted` (above) for its own `auth_rejected`-hint enrichment — a resumed
         # walk dispatches live for any step not yet terminal in the journal, so it can reach a real
         # `auth_rejected` response exactly like a fresh `parse` can. Without this clause,
@@ -895,7 +895,7 @@ def cmd_replay(args) -> int:
 def cmd_calibrate(args) -> int:
     """Derive gate thresholds from a sample of documents (signals.md §5). A case whose `expected`
     names none of the eval scorer's five recognized dimensions is fine — an ordinary "not labeled
-    yet" shape, excluded from `scorer_agreement` rather than silently required (BL-87/Noor); the
+    yet" shape, excluded from `scorer_agreement` rather than silently required (BL-87); the
     report's `n_scored` field says how many cases actually contributed. Runs the strategy's rung-1
     backend over the dataset, scores with the eval scorers, sweeps each gated threshold, and prints
     candidate operating points + a ready-to-paste `escalate_if:` RECOMMENDATION (never rewrites the
@@ -949,7 +949,7 @@ def cmd_calibrate(args) -> int:
     ) as e:
         print(f"[calibrate] {e}", file=sys.stderr)
         return 3
-    # n_scored < n_docs (BL-87/Noor): scorer_agreement is grounded only in cases whose `expected`
+    # n_scored < n_docs (BL-87): scorer_agreement is grounded only in cases whose `expected`
     # named a recognized dimension — an unlabeled sample makes it a flat, precise-looking number
     # that measured nothing, easy to mistake for "measured and found wanting."
     if report.n_scored == 0:

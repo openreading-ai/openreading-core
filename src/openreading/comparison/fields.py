@@ -66,7 +66,7 @@ def field_section(
             # None — its documented "these are incomparable" contract, not "these disagree"), so
             # it gets the identical treatment as a key that never appeared at all: excluded from
             # `present`/the equivalence machinery, flowing into `capable_absent`/`field_missed`
-            # instead of a false `field_value_conflict` (BL-109/Jin).
+            # instead of a false `field_value_conflict` (BL-109).
             if val is None:
                 by_subject[s.label] = {
                     "present": False,
@@ -91,7 +91,7 @@ def field_section(
             # with EVERY other present value, not just the arbitrary first one (`reference`). A
             # signal-less value can equivalence_tier-match two present values that do not match
             # each other, so a subject that only agrees with `reference` can still sit inside a
-            # row-level disagreement — this must show `null`, not a false "matched" (BL-52/Jin).
+            # row-level disagreement — this must show `null`, not a false "matched" (BL-52).
             complete = all(
                 equivalence_tier(val, other_val) is not None
                 for other_label, other_val in present
@@ -105,7 +105,7 @@ def field_section(
 
         # Mutual agreement among ALL present values, not just each vs. `present[0]` — a
         # signal-less value can equivalence_tier-match two present values that do not match each
-        # other (BL-45/Jin), so anchoring on a single reference is not transitive.
+        # other (BL-45), so anchoring on a single reference is not transitive.
         all_equiv = all(
             equivalence_tier(va, vb) is not None
             for i, (_, va) in enumerate(present)

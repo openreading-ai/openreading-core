@@ -33,7 +33,7 @@ def _value_for(subject: Subject, nk: str) -> tuple[bool, Any]:
     value is treated the same as a key that never appeared: `present=False` — it is incomparable
     (equivalence_tier(None, x) is always None, "incomparable" not "disagree"), so both
     `consensus_section` and `baseline_section` must exclude it from clustering/matching rather
-    than reading it as a genuine outlier or a "differ" against a real value (BL-109/Jin)."""
+    than reading it as a genuine outlier or a "differ" against a real value (BL-109)."""
     for key, entry in subject.typed_fields.items():
         if _norm_key(key) == nk:
             val = _field_value(entry)
@@ -49,7 +49,7 @@ def consensus_section(
     reported, whether or not a cluster reaches majority — a genuine N-way split, a clean tie, or
     one subject reporting what the others missed is exactly the outcome this section exists to
     surface, so it gets `has_majority: False` / `majority_value: None` / every present subject
-    listed in `outliers`, not silent omission from the report (BL-68/Jin)."""
+    listed in `outliers`, not silent omission from the report (BL-68)."""
     if len(subjects) < 3:
         return None
     n_capable = sum(1 for s in subjects if caps[s.label]["fields"])
@@ -61,7 +61,7 @@ def consensus_section(
         # cluster present values by equivalence; the largest cluster is the candidate majority.
         # Complete-linkage (must match EVERY existing cluster member, not just cl[0]) — a
         # signal-less value can bridge to two values that do not agree with each other, so
-        # single-linkage against the first member alone is not transitive (BL-45/Jin).
+        # single-linkage against the first member alone is not transitive (BL-45).
         clusters: list[list[tuple[str, Any]]] = []
         for label, val in present:
             for cl in clusters:
@@ -129,7 +129,7 @@ def truth_section(subjects: list[Subject], truth: dict[str, Any]) -> dict[str, A
     table grid — laid out side by side (L5: the evals scorer verbatim, no second system). When
     `truth` names none of the scorer's five dimensions (most simply `{}`), `score()` returns an
     honest `overall: None` for every subject rather than a false-perfect `1.0` — surfaced here
-    unchanged, since this section is a pass-through of the scorer's own dict (BL-79/Jin)."""
+    unchanged, since this section is a pass-through of the scorer's own dict (BL-79)."""
     return {
         "dimensions": sorted(truth.keys()),
         "by_subject": {s.label: score(s.response, truth) for s in subjects},

@@ -138,7 +138,7 @@ def test_route_require_local_drops_all_hosted_and_can_run(sample_pdf, tmp_path, 
 def test_route_run_normalize_crash_is_a_clean_error_not_a_traceback(
     sample_pdf, tmp_path, capsys, monkeypatch
 ):
-    # BL-99 Finding 2 (Trent, folded into this item): before execute_plan itself caught a plain
+    # BL-99 Finding 2 (folded into this item): before execute_plan itself caught a plain
     # normalize() crash, it propagated straight out of execute_plan, past cmd_route's own
     # `except PlanExhaustedError` clause (the only one it has around `--run`), all the way out of
     # main() (which has no catch-all either) — a raw Python traceback, file paths and line numbers,
@@ -454,7 +454,7 @@ def test_compare_fanout_retryable_error_exits_3_clean(sample_pdf, capsys, monkey
 def test_compare_deadline_flag_reaches_the_fanout_and_exceeded_exits_3_clean(
     sample_pdf, capsys, monkeypatch
 ):
-    # BL-169 round-1 review (trent, Medium): compare's fan-out (api.run(doc, backend=bid)) shared
+    # BL-169 round-1 review (Medium): compare's fan-out (api.run(doc, backend=bid)) shared
     # parse's exact original Bug B exposure — no --deadline at all. Folded in the same shape as
     # parse's own single-document sibling: a job that never finishes and never faults, driven past
     # a real (FakeClock) deadline through the real, unmodified CLI entry point.
@@ -475,7 +475,7 @@ def test_compare_deadline_flag_reaches_the_fanout_and_exceeded_exits_3_clean(
 def test_compare_deadline_flag_threads_seconds_to_every_fanned_out_backend_as_ms(
     sample_pdf, capsys, monkeypatch
 ):
-    # BL-169 round-2 review (ben AND trent, both independently, High, mutation-confirmed): the
+    # BL-169 round-2 review (two reviewers independently, High, mutation-confirmed): the
     # end-to-end timeout test above cannot tell "the --deadline value took effect" apart from "the
     # pre-existing 120s default eventually fired anyway" — an infinite-poll fake under FakeClock
     # trips ANY finite deadline identically. Both reviewers proved this by reverting just
@@ -775,7 +775,7 @@ def test_parse_single_document_deadline_flag_threads_seconds_to_named_backend_as
 
 
 def test_parse_single_document_deadline_exceeded_exits_3_clean(sample_pdf, capsys, monkeypatch):
-    # BL-169 round-1 review (trent, High): the two tests above only prove --deadline's
+    # BL-169 round-1 review (High): the two tests above only prove --deadline's
     # seconds-to-ms conversion reaches build_run_context (plumbing) — neither uses a POLL-mode
     # fake, so neither can exercise a job actually running past its deadline. This is the
     # single-document sibling of test_parse_batch_native_deadline_exceeded_exits_3_clean below,

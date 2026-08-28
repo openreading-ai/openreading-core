@@ -1505,7 +1505,7 @@ def test_batch_endpoint_echoes_jobs_actually_used(client):
 def test_batch_endpoint_empty_documents_surfaces_empty_batch_warning(client):
     # BL-147 criterion (c): the runner-level empty_batch fix is a schema-level change to
     # assemble_result, so the server's POST /v1/batch picks it up with no server-side code change
-    # — closing the scope-handoff the Noor×Sophia 1:1 named but didn't chase.
+    # — closing the scope-handoff the review 1:1 named but didn't chase.
     r = client.post("/v1/batch", json={"documents": []})
     assert r.status_code == 200
     env = r.json()

@@ -265,7 +265,7 @@ def test_build_run_context_fills_budget_compliance_idempotency():
 
 
 def test_build_run_context_seeds_default_idempotency_key_when_omitted():
-    # BL-166 review (trent): reducto declares idempotency_supported=False (no vendor mechanism) —
+    # BL-166 review: reducto declares idempotency_supported=False (no vendor mechanism) —
     # pinned explicitly so this test's point (a key is generated regardless of vendor support;
     # forwarding it is the ADAPTER's own job to skip, not build_run_context's) doesn't silently
     # stop being tested if reducto's flag ever flips.
@@ -339,7 +339,7 @@ _URL_SOURCED_NO_DEFAULT_KEY_ADAPTERS = (
 
 
 def test_no_default_idempotency_key_for_url_sourced_document_across_named_adapters():
-    # BL-166 round 2 (trent, following ben's High + FOUNDER-INBOX 2026-08-22): pins, for every
+    # BL-166 round 2 (following a High finding + FOUNDER-INBOX 2026-08-22): pins, for every
     # adapter the disclosure names by name, both halves of the interaction together — it still
     # accepts a URL AND a URL-sourced request to it still gets no default key — so a future
     # change to document_identity, or to any of these adapters' accepts_url flag, can't silently

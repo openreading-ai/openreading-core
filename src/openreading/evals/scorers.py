@@ -134,7 +134,7 @@ def score(resp: dict, expected: dict) -> dict[str, Any]:
     `expected` are scored; `overall` is the mean of the per-dimension headline scores, or `None`
     when `expected` names none of the five recognized dimensions (an ordinary "not labeled yet"
     shape — most simply `expected == {}` — never a claim that every measured dimension came back
-    perfect; callers must not treat `None` as agreement with anything, BL-79/Jin)."""
+    perfect; callers must not treat `None` as agreement with anything, BL-79)."""
     dims: dict[str, Any] = {}
     if "text" in expected:
         dims["text_similarity"] = text_similarity(response_text(resp), expected["text"])

@@ -57,7 +57,7 @@ def document_digest(d: DocumentInput) -> bytes | None:
     `(realpath, size, mtime_ns)` blob for a path. `internal/design/ledger.md` §5.5 ("Three identities,
     deliberately distinct") requires Ledger's own `content_key` to be built from THIS, never from
     `document_identity` — a relocated run computing a different key for byte-identical content is
-    exactly the failure §5.5 names (Phase C round-1, jay F2). Returns the raw digest BYTES (not hex)
+    exactly the failure §5.5 names (Phase C round-1, F2). Returns the raw digest BYTES (not hex)
     so a caller can feed it straight into `content_key`, which hashes whatever `document_bytes` it
     receives again internally — hashing a digest is still a valid, unique identifier, and avoids
     loading a large local file whole just to identify it. `None` for a URL/file_id locator (no bytes

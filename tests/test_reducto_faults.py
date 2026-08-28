@@ -271,7 +271,7 @@ def test_cancel_on_an_already_terminal_job_does_not_call_the_vendor():
 
 
 def test_cancel_on_a_fresh_instance_reaches_the_vendor():
-    # Ledger T4a (AC-5/AC-7, closing BL-164 review (trent, Medium)'s own flagged gap): cancel()
+    # Ledger T4a (AC-5/AC-7, closing BL-164 review (Medium)'s own flagged gap): cancel()
     # now takes ctx: RunContext and always builds its client via self._get_client(ctx) — a fresh
     # instance that never called submit() itself (e.g. a job reconstructed by the Ledger T3 resume
     # path) no longer silently marks CANCELLED with zero vendor contact. Proven here with a

@@ -426,7 +426,7 @@ def test_run_native_deadline_ms_override_can_fail_faster_than_the_native_default
 # risk from this bug). These two prove the specific boundary BL-138 fixes: `ctx.deadline_ms=0` is
 # the single most natural "fail fast, no budget left" value a caller would pass deliberately, and
 # is exactly the value Python's `or` treats as unset. `deadline_ms=-1_000` (already correctly
-# applied today — truthy, so it never hit the buggy line — per the sprint-22 Noor x Trent 1:1) is
+# applied today — truthy, so it never hit the buggy line — per the sprint-22 review 1:1) is
 # pinned here as a permanent regression rather than a fact that lives only in a meeting record.
 
 
@@ -480,7 +480,7 @@ def test_run_native_deadline_ms_zero_fails_fast_not_the_native_default(tmp_path,
 def test_run_native_deadline_ms_negative_fails_fast_with_zero_polls(tmp_path, monkeypatch):
     """A negative `ctx.deadline_ms` is truthy, so it already survived the buggy line unmolested
     before this fix (the fix is a semantic no-op for any truthy value). Pinned here per the
-    sprint-22 Noor x Trent 1:1's live confirmation: `clock.now_ms() + negative_value` is already
+    sprint-22 review 1:1's live confirmation: `clock.now_ms() + negative_value` is already
     strictly in the past the instant it's computed, so the drive loop's very first deadline check —
     before either the WEBHOOK or POLL dispatch branch runs — catches it with poll() never called."""
     import openreading.api as api_module

@@ -41,7 +41,7 @@ def test_probe_false_when_binary_present_but_errors(monkeypatch):
 
 
 def test_probe_false_when_fixture_setup_raises(monkeypatch):
-    # BL-170 review (sophia): the fixture-image/font setup must be inside the same guard as the
+    # BL-170 review: the fixture-image/font setup must be inside the same guard as the
     # OCR call itself — an old Pillow without a size-aware `ImageFont.load_default` must degrade
     # to "unavailable", not escape the probe's own never-raises contract.
     pytest.importorskip("pytesseract")
@@ -77,7 +77,7 @@ def test_probe_false_without_pytesseract_or_pil(monkeypatch):
 
 
 def test_broken_binary_on_path_yields_skip_not_fail(tmp_path):
-    """BL-170 review (Trent): the tests above only assert the probe FUNCTION's return value —
+    """BL-170 review : the tests above only assert the probe FUNCTION's return value —
     none proves the actual `pytest.mark.skipif`-gated real-tesseract tests report SKIPPED rather
     than FAILED/ERROR when a present-but-broken `tesseract` sits on PATH, which is the worklist's
     own named acceptance criterion (internal/runs/ledger-defect-worklist.md: "A test asserts the guard

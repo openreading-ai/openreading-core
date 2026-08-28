@@ -14,7 +14,7 @@ surface): it scans every stamped run under the ledger root and, for one whose ce
 calls `KeyStore.destroy` — the exact mechanism a manual shred uses — so a reaped run and a
 manually-shredded one leave the journal in the identical `payload_expired` state.
 
-**Arm-time vs. dispatch-time (Ledger T3 round-2, sophia Finding 8 / jay Finding 6).** A fresh run's
+**Arm-time vs. dispatch-time (Ledger T3 round-2, Findings 8 and 6).** A fresh run's
 FIRST stamp (`_arm_ledger`, before anything has dispatched) uses the operator default alone — not
 `compute_retention_ceiling_hours` over the whole registry-wide eligible set, which conflated
 "eligible for this document type" with "on this run's actual path" and let an unrelated,
@@ -70,7 +70,7 @@ def stamp_run(root: Path, run_id: str, *, expires_epoch_ms: int, zdr: bool) -> N
 
 
 def tighten_retention(root: Path, run_id: str, descriptor: Any, *, now_epoch_ms: int) -> None:
-    """Ledger T3 round-2 (sophia Finding 8 / jay Finding 6, "the retention ceiling" half of the
+    """Ledger T3 round-2 (Findings 8 and 6, "the retention ceiling" half of the
     fix — see `InlineExecutor._is_zdr_backend` for the ZDR/blob-suppression half): narrows, never
     widens, a run's already-stamped ceiling in response to `descriptor` ACTUALLY dispatching.
 

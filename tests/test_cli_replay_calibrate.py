@@ -179,7 +179,7 @@ def test_calibrate_cli_emits_a_json_report(tmp_path, capsys):
     assert "confidence_below" in {s["predicate"] for s in report["sweeps"]}
 
 
-# ---- BL-87/Noor: n_scored + the [calibrate] under-labeled advisory ----------------------------
+# ---- BL-87: n_scored + the [calibrate] under-labeled advisory ----------------------------
 
 
 def test_calibrate_cli_fully_unlabeled_dataset_reports_zero_scored_and_warns(tmp_path, capsys):

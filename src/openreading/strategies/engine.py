@@ -1175,7 +1175,7 @@ async def _eval_parallel(
                 # `_CANCEL_DISPATCH_EXECUTOR`'s own comment for why that distinction is load-
                 # bearing, not stylistic).
                 #
-                # BL-164 review round 2 (trent, High): concurrency alone doesn't cap the TOTAL
+                # BL-164 review round 2 (High): concurrency alone doesn't cap the TOTAL
                 # wait — a single slow vendor cancel could still extend the response past the
                 # node's own deadline, breaking the exact Law 6 promise `_drain` already keeps for
                 # a drained loser ("the response never blocks past the node deadline"). Bounded on
@@ -1472,7 +1472,7 @@ def _cancel_webhook_loser(ctx: _WalkCtx, branch: Any, label: str, path: str) -> 
     ctx.trace.webhook_dropped.append({"backend": backend, "node": f"{path}.parallel"})
 
 
-# BL-164 review round 2 (trent, High): dispatching a loser's cancel via `asyncio.to_thread` (the
+# BL-164 review round 2 (High): dispatching a loser's cancel via `asyncio.to_thread` (the
 # event loop's own DEFAULT executor) means an abandoned-past-deadline future is still tracked by
 # `asyncio.run()`'s own shutdown sequence (`shutdown_default_executor()`), which WAITS for every
 # outstanding default-executor future before returning — even one this function has already
@@ -1494,7 +1494,7 @@ def _swallow_abandoned_cancel_result(future: asyncio.Future) -> None:
     cannot forcibly stop a running thread) once it eventually finishes on its own, unawaited — so
     Python doesn't log an "exception was never retrieved" warning when it does.
 
-    BL-164 review round 3 (trent): confirmed by direct execution that this callback is NEVER
+    BL-164 review round 3: confirmed by direct execution that this callback is NEVER
     actually invoked in `run_strategy`'s own architecture — CPython's `asyncio.futures`-internal
     future-chaining silently discards the completion once the per-call event loop this future was
     scheduled on has already closed (which it always has, by the time an abandoned future finishes
@@ -1866,7 +1866,7 @@ def _resolve_parallel(
             # same reconciliation internally); fold it into the sibling total via the shared,
             # coalescing _branch_basis helper (BL-134) — not a raw passthrough, so a composite
             # winner whose own cost lacks a resolved basis coalesces to "unknown" here too, rather
-            # than silently folding as if it contributed nothing (Trent).
+            # than silently folding as if it contributed nothing.
             total_basis = _fold_basis(total_basis, _branch_basis(wr))
         if total_cost + own > 0:
             _set_total_cost(
@@ -1922,7 +1922,7 @@ def _branch_basis(r: _BranchOutcome) -> str | None:
     unless the branch contributed a genuinely non-null cost (`_branch_cost`, which — unlike a bare
     `r.cost` check — also recognizes a composite branch's nested cost), so a branch that reported no
     cost at all can never dilute the reduction. Coalesces a confirmed-but-unset `cost_basis` to
-    `"unknown"` rather than a bare `None` (BL-134/Trent) — a real cost with no known basis must
+    `"unknown"` rather than a bare `None` (BL-134) — a real cost with no known basis must
     never be folded as if it contributed nothing at all."""
     if _branch_cost(r) is None or r.response is None or r.response.usage is None:
         return None
@@ -1935,7 +1935,7 @@ def _rung_basis(resp: NormalizedResponse | None, cost: float | None) -> str | No
     extracted cost directly rather than a `_BranchOutcome`. None unless the rung contributed a
     genuinely non-null cost, so a rung that reported no cost at all can never dilute the reduction.
     Coalesces a confirmed-but-unset `cost_basis` to `"unknown"` rather than a bare `None`
-    (BL-134/Trent) — a real cost with no known basis must never be folded as if it contributed
+    (BL-134) — a real cost with no known basis must never be folded as if it contributed
     nothing at all."""
     if cost is None or resp is None or resp.usage is None:
         return None
@@ -1948,7 +1948,7 @@ def _set_total_cost(resp: NormalizedResponse, total: float, basis: str | None = 
     contributed a non-null cost as it was folded into `total` — this function applies it, it does
     not compute it.
 
-    BL-134/Trent hardening: a nonzero `total` must never leave `cost_basis` at the "zero-cost"
+    BL-134 hardening: a nonzero `total` must never leave `cost_basis` at the "zero-cost"
     label `infra_only`, or unset (`None`) — reachable even after every fold site coalesces a bare
     `None` contribution to `"unknown"` (the fold-site fix alone), because `_COST_BASIS_PRIORITY`
     ranks `unknown` BELOW `infra_only`: a genuinely-free branch/rung's own correct `infra_only` tag
@@ -2087,7 +2087,7 @@ async def _eval_paged_cascade(node: dict[str, Any], path: str, ctx: _WalkCtx) ->
     `billed_total` accumulator — a rung's spend is never dropped just because it wasn't first.
     `cost_basis` folds via the same priority-ordering reduction as every other cascade/parallel
     return path (BL-126), coalescing a confirmed-but-unset basis rather than a bare `None`
-    (BL-134/Trent)."""
+    (BL-134)."""
     from openreading.types.request import PageRange, Pages
 
     steps = node["steps"]
@@ -2294,7 +2294,7 @@ async def _eval_cascade(
         # a leaf step
         rr = await _run_leaf(step, spath, ctx, deadline_ms)
         if rr.status == "skip":
-            # Ledger T3 (§4.0/§4.3b), corrected Phase C round 1 (jay + sophia, independently): a
+            # Ledger T3 (§4.0/§4.3b), corrected Phase C round 1 (two reviewers independently): a
             # skip — live or replayed — always fails over to the next rung, exactly as a live skip
             # always has. An earlier version special-cased `rr.replayed` to `return
             # Outcome.err("missing_credentials")` instead, reasoning it was needed for AC-15's
@@ -2497,7 +2497,7 @@ def _step_id(run_id: str, step_path: str, step_seq: int) -> str:
     only form of the key that leaves the process, so it must be deterministic: the same
     `(run_id, step_path, step_seq)` re-journaled (a re-executed walk, a future distributed
     executor's at-least-once redelivery) has to land on the identical `step_id`, which a random
-    UUID structurally cannot do (Phase C round-1, jay F1)."""
+    UUID structurally cannot do (Phase C round-1, F1)."""
     h = hashlib.sha256()
     h.update(run_id.encode())
     h.update(b"\x00")
@@ -2524,7 +2524,7 @@ def _step_request(
     `(realpath, size, mtime_ns)` blob for a path: §5.5 ("Three identities, deliberately distinct")
     names this as the one identity Ledger must not reuse, since a run relocated to a different
     worker would otherwise compute a different key for byte-identical content (Phase C round-1,
-    jay F2). `idempotency_key` falls back to the same value unless the caller supplied its own.
+    F2). `idempotency_key` falls back to the same value unless the caller supplied its own.
 
     `missing_credentials` (Ledger T3 §4.3b): the caller's own `readiness.missing_required(desc,
     rc)` result, threaded through so `InlineExecutor.exec`'s missing-credentials gate can journal

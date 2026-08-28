@@ -442,7 +442,7 @@ def _arm_ledger(
     overrides the T1 placeholder default — see FOUNDER-INBOX.md for why the real default is an
     open founder decision, not settled here.
 
-    Ledger T3 round-2 (sophia Finding 8 / jay Finding 6): a FRESH run's stamp is the operator
+    Ledger T3 round-2 (Findings 8 and 6): a FRESH run's stamp is the operator
     default ALONE — nothing has dispatched yet, so nothing narrows it. Earlier, this stamped
     `compute_retention_ceiling_hours` over `eligible` (the request's WHOLE registry-wide
     compliance/capability survivor set, `Router.route`'s own stage-1/2 output — correct and
@@ -458,7 +458,7 @@ def _arm_ledger(
 
     The `Sanitizer` backstop (§9.3) is still armed with every ELIGIBLE descriptor's
     actually-resolved secret values (unchanged, unaffected by the above) — a static, no-value
-    `Sanitizer()` never has anything to scrub against (Phase C round-1, ann High).
+    `Sanitizer()` never has anything to scrub against (Phase C round-1, High).
 
     Ledger T3 (plan §4.2/§4.4): a FRESH run (`resume=False`, the default — every pre-existing
     caller) writes the run's header once, at this first arm, and does NOT pass `pinned_eligible=`
@@ -533,7 +533,7 @@ def _arm_ledger(
                 run_id, digest, raw, req.document.mime_type or "application/octet-stream"
             )
         elif req.document.url is not None:
-            # Finding 3 (Phase C round-1, jay): `document.url` is a secret-class field (§9.3 —
+            # Finding 3 (Phase C round-1): `document.url` is a secret-class field (§9.3 —
             # "routinely a presigned URL, forwarded verbatim," unconditionally, not by size) that
             # must never land in the plaintext `slim_request` sidecar (`slim_request_dict` already
             # strips it). Routed through the SAME per-run encrypted blob store a `bytes_base64`
@@ -839,24 +839,24 @@ def run(
     **request_overrides: Any,
 ) -> dict[str, Any]:
     """Run a document (path / URL / bytes) through one backend (named), the compliance-first
-    router (`backend="auto"`), or a strategy (`strategy="<name>"` — sugar for
-    `backend="strategy:<name>"`). `config` points at an openreading.yaml (else `./openreading
+        router (`backend="auto"`), or a strategy (`strategy="<name>"` — sugar for
+        `backend="strategy:<name>"`). `config` points at an openreading.yaml (else `./openreading
     .yaml` is discovered). Raises TerminalError / UnknownStrategyError / PlanExhaustedError /
-    RetryableError — this is a thin wrapper over `run_request` (via `build_request`) and propagates
-    whatever it raises, RetryableError included (see `run_request`'s own docstring).
+        RetryableError — this is a thin wrapper over `run_request` (via `build_request`) and propagates
+        whatever it raises, RetryableError included (see `run_request`'s own docstring).
 
-    `deadline_ms` (BL-169): the caller's own absolute time budget for a DIRECTLY-NAMED backend
-    only — forwarded to `run_request`'s named-backend branch (`prepare_named_backend`, BL-153's own
-    plumbing). Omitted (the default), a named backend keeps resolving to
-    `credentials.DEFAULT_DEADLINE_MS` (2 minutes) as before — too short for some hosted async
-    backends' ordinary workload (`the openreading.cli docstring`'s `--deadline` flag is now the CLI surface for
-    this). Has no effect on `backend="auto"` or `strategy="..."` dispatch, which manage their own
-    per-node time budget instead.
+        `deadline_ms` (BL-169): the caller's own absolute time budget for a DIRECTLY-NAMED backend
+        only — forwarded to `run_request`'s named-backend branch (`prepare_named_backend`, BL-153's own
+        plumbing). Omitted (the default), a named backend keeps resolving to
+        `credentials.DEFAULT_DEADLINE_MS` (2 minutes) as before — too short for some hosted async
+        backends' ordinary workload (`the openreading.cli docstring`'s `--deadline` flag is now the CLI surface for
+        this). Has no effect on `backend="auto"` or `strategy="..."` dispatch, which manage their own
+        per-node time budget instead.
 
-    `on_run_armed` (Ledger T3, plan §4.4): invoked once, with the run id, immediately after the
-    ledger successfully arms — only on a strategy-dispatch path (the only one that arms one at
-    all). Mirrors `run_batch`'s own `on_progress`/`on_preflight` optional-hook shape; a plain
-    named-backend or `auto` run never touches the ledger, so this never fires for either."""
+        `on_run_armed` (Ledger T3, plan §4.4): invoked once, with the run id, immediately after the
+        ledger successfully arms — only on a strategy-dispatch path (the only one that arms one at
+        all). Mirrors `run_batch`'s own `on_progress`/`on_preflight` optional-hook shape; a plain
+        named-backend or `auto` run never touches the ledger, so this never fires for either."""
     if env_file:
         load_dotenv(env_file)
     if strategy is not None:
@@ -896,9 +896,9 @@ def _request_from_header(header: RunHeader, blobs: LocalFsBlobStore) -> OpenRead
     NOT recoverable this way — `document.password`/`async.webhook_url`, never persisted).
 
     `header.document` holds EITHER a `bytes_base64` document's own bytes OR (Finding 3, Phase C
-    round-1, jay) a URL-sourced document's `document.url` string — both routed through the same
+    round-1) a URL-sourced document's `document.url` string — both routed through the same
     encrypted blob store rather than the plaintext `slim_request` echo. `header.document_is_url`
-    tells the two apart (Phase C round-2, jay Finding 7 — NOT `media_type`, which for the bytes
+    tells the two apart (Phase C round-2 Finding 7 — NOT `media_type`, which for the bytes
     case is a caller-supplied, unvalidated `mime_type` that could collide with a sentinel value)."""
     body: dict[str, Any] = dict(header.slim_request)
     doc = dict(body.get("document") or {})

@@ -416,7 +416,7 @@ class NuExtractAdapter(BackendAdapter):
         # poll() runs on every other terminal path), so a cancelled race loser doesn't leak one.
         if job.is_terminal():
             return job
-        # Ledger T4a closes BL-164 review (trent, Medium)'s own flagged gap: cancel() now takes
+        # Ledger T4a closes BL-164 review (Medium)'s own flagged gap: cancel() now takes
         # ctx and always builds a real client via _get_client(ctx) — a fresh, client-less adapter
         # instance (e.g. one reconstructed by Ledger T3's resume path) no longer silently no-ops
         # (which previously skipped the cleanup below too).

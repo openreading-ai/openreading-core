@@ -36,7 +36,7 @@ def test_registering_an_at_floor_adapter_succeeds():
 
 
 def test_make_adapter_also_refuses_a_below_floor_adapter_by_name(monkeypatch):
-    # ben's F2: adapters.registry.make_adapter() is a SECOND adapter-construction entry point
+    # a reviewer's F2: adapters.registry.make_adapter() is a SECOND adapter-construction entry point
     # (used directly at ~20 production call sites, including api.prepare_named_backend's common
     # named-backend path) that never goes through Registry.register() — a below-floor adapter
     # built there used to sail through unrefused, all the way to submit()/poll(), instead of being

@@ -18,7 +18,7 @@ from openreading.adapters.base import BackendAdapter
 # floor only needs to reject a version that predates the CURRENT adapter contract's own minimum
 # (v1, the pre-Ledger shape), not force every adapter to already be v2.
 #
-# Ben F3 (Phase C round 1): this floor is deliberately NOT the same number as the built-in fleet's
+# Review F3 (Phase C round 1): this floor is deliberately NOT the same number as the built-in fleet's
 # own `==2` discipline bar, enforced separately by tests/test_protocol_version_guard.py, not by
 # this floor — a third-party adapter that hasn't migrated to v2 can still register and run (with
 # reduced resume guarantees); this floor only refuses protocol_version < 1.

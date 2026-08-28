@@ -956,7 +956,7 @@ def test_c11_is_reachable_through_the_kit_and_never_raises():
 
 # --- Ledger T4a: R1/R2/R3 negative cases -------------------------------------------------------
 #
-# trent's Phase C review (Finding 4): every existing R1/R2/R3 test (across all 13 adapters' own
+# Phase C review (Finding 4): every existing R1/R2/R3 test (across all 13 adapters' own
 # `adapter_factory=` call sites) only proves "a compliant adapter passes" — none prove the checks
 # actually catch a non-compliant one. These three, following this file's own established
 # deliberately-broken-adapter pattern, give each of R1/R2/R3 at least one genuine negative case.
@@ -964,7 +964,7 @@ def test_c11_is_reachable_through_the_kit_and_never_raises():
 
 class _CachesClient(NullAdapter):
     """R2 (AC-7) violation: caches a client-like object under `_active_client` during submit() —
-    exactly the pattern all 8 T4a adapters used to have, and the one R2 exists to catch (trent's
+    exactly the pattern all 8 T4a adapters used to have, and the one R2 exists to catch (the reviewer's
     own Finding 3 repro confirmed this shape fires; this pins it as a real regression test)."""
 
     def submit(self, req, ctx):

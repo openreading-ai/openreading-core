@@ -30,7 +30,7 @@ def test_consensus_majority_and_outlier() -> None:
     assert row["outliers"] == ["c"]
 
 
-# --- N-way transitivity (BL-45/Jin) ------------------------------------------------------
+# --- N-way transitivity (BL-45) ------------------------------------------------------
 
 
 def test_consensus_never_false_agreement_for_named_code_triple() -> None:
@@ -48,7 +48,7 @@ def test_consensus_never_false_agreement_for_named_code_triple() -> None:
 def test_symbol_and_bare_triple_never_falsely_agrees() -> None:
     # Joint gate (BL-45): "$100" and "€100" are genuinely different currencies once normalized to
     # ISO codes, and "100" is signal-less. Checked across the two orderings where the ambiguous
-    # bare value sorts first — proves Trent's money-tier fix and Jin's aggregation fix hold
+    # bare value sorts first — proves the money-tier fix and the aggregation fix hold
     # together, not just individually.
     #
     # The bare value genuinely equivalence-matches EITHER currency on its own (BL-36, unchanged),
@@ -95,7 +95,7 @@ def test_disagree_row_never_shows_full_by_subject_agreement() -> None:
         assert any(bs["equivalence"] is None for bs in row["by_subject"].values())
 
 
-# --- no-consensus outcomes (BL-68/Jin) ---------------------------------------------------
+# --- no-consensus outcomes (BL-68) ---------------------------------------------------
 
 
 def test_consensus_row_present_for_three_way_split_with_no_bridging_value() -> None:
@@ -231,7 +231,7 @@ def test_truth_from_path(tmp_path) -> None:
 
 def test_truth_with_empty_golden_scores_none_not_false_perfect() -> None:
     # An empty golden.json names none of the five scored dimensions — an ordinary "not labeled
-    # yet" shape, not a claim that every subject is perfect (BL-79/Jin). Two subjects with
+    # yet" shape, not a claim that every subject is perfect (BL-79). Two subjects with
     # genuinely, mutually-disagreeing garbage text must both come back honestly unscored.
     a = make_envelope("a", text="totally garbled unreadable output nothing like the source")
     b = make_envelope("b", text="a completely different garble, disagreeing with a entirely")

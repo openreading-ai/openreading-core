@@ -279,11 +279,11 @@ def _one_page_pdf_bytes() -> bytes:
 
 
 def test_pdf_bytes_malformed_base64_falls_back_gracefully_not_a_crash():
-    # Ledger T4b fix (Phase C round 2, trent Finding 4, Low): round 1's F1 fix relocated the
+    # Ledger T4b fix (Phase C round-2 Finding 4, Low): round 1's F1 fix relocated the
     # _pdf_bytes() call from normalize() (where slim_req's bytes are always None, making the call
     # effectively dead) into submit() (where real bytes are genuinely present) — this makes
     # _pdf_bytes()'s own `except (ValueError, OSError): return None` branch live in production for
-    # the first time. It was previously uncovered by any test (trent's round 2 coverage finding).
+    # the first time. It was previously uncovered by any test (the reviewer's round 2 coverage finding).
     # Malformed base64 (bad padding) drives base64.b64decode to raise binascii.Error, a ValueError
     # subclass — submit() must swallow it via _pdf_bytes and fall through cleanly, never raise.
     adapter = AnthropicClaudeAdapter(client=FakeClaudeClient(fixture="parse"))
