@@ -103,7 +103,8 @@ Python is the same contract:
 
 ```python
 import openreading
-resp = openreading.run("doc.pdf", backend="pymupdf")          # one envelope
+
+resp = openreading.run("doc.pdf", backend="pymupdf")  # one envelope
 plan = openreading.route("doc.pdf", policy={"require_baa": True})
 delta = openreading.compare([resp, openreading.run("doc.pdf", backend="tesseract")])
 ```
