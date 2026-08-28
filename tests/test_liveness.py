@@ -288,14 +288,30 @@ def test_backend_adapter_default_probe_is_unsupported():
     assert _NoProbeAdapter().probe_liveness(None, timeout_s=1.0).outcome is ProbeOutcome.UNSUPPORTED
 
 
+def _protocol_members(proto: type) -> frozenset[str]:
+    """The names a `typing.Protocol` requires, on every supported interpreter. 3.13+ has the
+    public `typing.get_protocol_members`; 3.12 exposes `__protocol_attrs__`; 3.11 has neither
+    (the CI leg that caught this) and only the private `typing._get_protocol_attrs`."""
+    import typing
+
+    getter = getattr(typing, "get_protocol_members", None)
+    if getter is not None:
+        return frozenset(getter(proto))
+    attrs = getattr(proto, "__protocol_attrs__", None)
+    if attrs is not None:
+        return frozenset(attrs)
+    return frozenset(typing._get_protocol_attrs(proto))  # type: ignore[attr-defined]
+
+
 def test_adapter_protocol_still_has_exactly_the_eight_required_methods():
     """`probe_liveness` must NOT have been added to `AdapterProtocol`: that Protocol is
     runtime_checkable, so a 9th member would make every third-party adapter that doesn't implement
     it fail `isinstance` — the exact break the design forbids (§3.1)."""
     from openreading.adapters.base import AdapterProtocol
 
-    assert "probe_liveness" not in AdapterProtocol.__protocol_attrs__
-    assert AdapterProtocol.__protocol_attrs__ == {
+    members = _protocol_members(AdapterProtocol)
+    assert "probe_liveness" not in members
+    assert members == {
         "descriptor",
         "capabilities",
         "health",
