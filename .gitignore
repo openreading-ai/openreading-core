@@ -52,7 +52,7 @@ samples/
 # Deliberately NOT tracked. Documentation that describes the system lives in the code as module
 # docstrings, so it sits next to what it describes and goes stale loudly instead of quietly
 # (AGENTS.md). Anything here worth keeping is either distilled into a module doc or moved to the
-# private openreading-internal repo (design/, runs/, research/) — never committed as a file here.
+# private `openreading` company repo (design/, runs/, research/) — never committed as a file here.
 /docs/
 
 # Local git worktrees for isolated feature work.

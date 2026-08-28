@@ -1,7 +1,7 @@
 """Backend liveness ("Pulse") — is a backend *actually answering*, as opposed to merely
 configured? Design record: internal/design/liveness.md; decisions D-v7-1..6 in
 internal/decisions/DECISIONS.md, restated at the end of this docstring. (`internal/` means the
-private openreading-internal context repo, not a directory in this tree.)
+private `openreading` company repo, not a directory in this tree.)
 
 The defect this fixes
 ---------------------

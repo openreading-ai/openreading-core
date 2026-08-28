@@ -30,7 +30,7 @@ Invariants shared by every subcommand
 - Compliance is never widened by any flag. A policy that leaves nothing compliant to run is a
   `ComplianceRefused` refusal, exit 3, from every command that EXECUTES under `--policy`; bare
   `route` prints the empty plan and exits 4 (internal/decisions/DECISIONS.md D7, D7a).
-- `internal/<path>` pointers in this package name files of the private `openreading-internal`
+- `internal/<path>` pointers in this package name files of the private `openreading` company
   context repo (its `decisions/` and `design/` trees), not a directory of this package.
 - The CLI passes no result cache (DECISIONS D-v3-3): silent memoization inside a library call is
   a footgun; a caller who wants it constructs one in Python.

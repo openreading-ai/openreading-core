@@ -3,7 +3,7 @@
 Tracked markdown is limited to the root project files, the GitHub templates under `.github/`,
 and one `README.md` per directory. Everything else — reference docs, design specs, run logs —
 belongs in a module docstring next to the code it describes, or in the private
-`openreading-internal` repo (checked out as `internal/` in the omni umbrella). A separate
+`openreading` company repo (which checks this repo out as `core/`). A separate
 markdown file that contradicts the code looks authoritative and is wrong, and nothing forces
 anyone to notice; a docstring that contradicts the module below it is caught in review.
 

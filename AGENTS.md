@@ -28,7 +28,7 @@ require every module and package to carry a docstring.
 `docs/` is gitignored. Design specs and plans may live there while work is in flight; they are
 working documents, not deliverables. When something in one turns out to be a durable fact about
 the system, **move it into a module docstring**. When it is history worth keeping — a design
-record, a research pack, a run log — it goes to the private `openreading-internal` repo (see
+record, a research pack, a run log — it goes to the private `openreading` company repo (see
 [the company repo](#the-company-repo)), never committed here.
 
 ## What belongs in a module docstring
