@@ -12,14 +12,16 @@ point it at — a local library, a hosted OCR API, or your own model.
 
 In: a PDF, an image, or an office document. Out: one JSON with `document.text`, `document.markdown`,
 `document.pages[].blocks[]` (page-relative coordinates) and optional `typed_fields`. A backend is
-the parser doing the work. The JSON is the same for every backend. Three verbs:
+the parser doing the work. The JSON is the same for every backend. Four verbs:
 
-- **parse**: one document or a folder, one backend, one JSON.
-- **compare**: what two backends' outputs differ on.
-- **route**: pick a backend under a compliance policy.
+- **[parse](src/openreading/cli/README.md)**: one document or a folder, one backend, one JSON.
+- **[compare](src/openreading/comparison/README.md)**: two or more outputs, and a typed verdict on what actually differs.
+- **[route](src/openreading/router/README.md)**: pick a backend under a compliance policy; a dropped backend never returns through a fallback.
+- **[strategy](src/openreading/strategies/README.md)**: cascade or race backends under quality gates, with a trace you can explain and replay.
 
-OpenReading is for developers who need text or structure from many sources without one integration
-per vendor. It is not a hosted service, a UI, or a model: you bring a local backend or a vendor key.
+With a [run ledger](src/openreading/ledger/README.md) armed, an interrupted run resumes from its own journal. OpenReading is for developers
+who need text or structure from many sources without one integration per vendor. It is not a hosted
+service, a UI, or a model: you bring a local backend or a vendor key.
 
 ## Install
 
@@ -167,11 +169,13 @@ the strategy grammar.
 
 | You want to know… | Run / open |
 |---|---|
+| **the full documentation: every guide, and how to use it from an agent** | [`src/openreading/README.md`](src/openreading/README.md) |
 | every command and flag | `uv run openreading --help`, `uv run openreading <cmd> --help` (`parse` needs exactly one of `--backend` / `--strategy` / `--no-strategy`) |
 | which backends are ready on this machine | `uv run openreading backends` |
 | each backend's variables and compliance posture; the env-var precedence rules | [`src/openreading/adapters/README.md`](src/openreading/adapters/README.md); `uv run python -m pydoc openreading.credentials` |
 | the exact JSON shapes (the contract) | [`src/openreading/schemas/README.md`](src/openreading/schemas/README.md), then the `*.json` files beside it |
-| the Python API; strategies, compare, batch, routing in depth | `uv run python -m pydoc openreading`, then `.strategies` · `.comparison` · `.batch` · `.router.compliance` |
+| strategies · compare · routing and keys · batch · the ledger · the server · evals · the CLI · the channel contract | [Strategies](src/openreading/strategies/README.md) · [Compare](src/openreading/comparison/README.md) · [Routing and keys](src/openreading/router/README.md) · [Batch runs](src/openreading/batch/README.md) · [The run ledger](src/openreading/ledger/README.md) · [The HTTP server](src/openreading/server/README.md) · [Evals](src/openreading/evals/README.md) · [The command line](src/openreading/cli/README.md) · [The channel contract](src/openreading/derive/README.md) — one guide per package directory, all linked from the docs home |
+| the Python API, and every reference section | `uv run python -m pydoc openreading`, then `.<module>` |
 | how to add a backend | `uv run python -m pydoc openreading.adapters`, then `scripts/new_adapter.py` |
 | the test gate | `make verify`: lint, types, pytest at a 91% coverage floor, schema and smoke checks; test count: `uv run pytest -m "not live" --collect-only` |
 | what changed | [`CHANGELOG.md`](CHANGELOG.md) |

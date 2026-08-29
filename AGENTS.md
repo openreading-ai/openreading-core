@@ -75,9 +75,15 @@ it. Ids like `D-v3-17` or `BL-161` in comments are stable references into
 | something a README example shows | re-run the README from a fresh clone; paste the new output | none yet |
 | a Known-gaps line becomes false | delete the line where it lives (a directory README or a package docstring) | reviewer |
 | design record / "not built" note | one line in the owning package docstring's Known gaps list; the prose goes to the company repo | `tests/test_docs_policy.py` |
+| subsystem guide (`src/openreading/<pkg>/README.md`) | the same eight sections and nav line as the existing guides (the docs home, `src/openreading/README.md`, fixes the Prev/Next order); a row in the docs home map; the root README "Where the docs are" row for that need | `tests/test_docs_policy.py` (one README per directory); link and YAML-fence checks over guides: none yet |
+| a CLI verb, flag or Python kwarg that changes what a guide's walkthrough shows | re-run that guide's commands from a fresh clone; paste the new output; bump nothing else | none yet |
+| a "Not built yet" line becomes true | delete the line in the guide AND the docstring's "designed, not built" marker, in the same PR | reviewer |
+| a new law / invariant in a package docstring (L*, M*, C*) | one line under that guide's "How it decides" naming the failure it avoids; never the full text | reviewer |
+| a new package under `src/openreading/` | a docs-home map row (need → guide, or "reference only: pydoc") and a Layout line in this file | ruff `D104` (package docstring) |
 
 A fact is documented where it is read: the flag next to its argparse definition, the var next to its
-`os.environ` read, the field next to its schema. The README indexes those places. It never restates them.
+`os.environ` read, the field next to its schema. The README indexes those places. It never restates
+them — and a guide demonstrates, never restates.
 
 ## Golden rules
 
