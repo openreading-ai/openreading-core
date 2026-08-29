@@ -143,6 +143,23 @@ minimum, because a mean hides one garbage word. A grade downgrade lands at once,
 lands only with its implementation. The conformance kit, `openreading.testing.conformance`,
 enforces all of this in the adapter tests.
 
+### A confidence is comparable inside one backend, not across two
+
+C7 puts every confidence on the same number line, and it does not put them on the same meaning.
+Each backend reports its own quantity. Tesseract's 0.8 is a per-word OCR posterior rolled up by
+minimum. A hosted model's 0.8 is that vendor's own score, produced by a different model against a
+different definition of confident. Converting a percent scale to `[0, 1]` fixes the range and
+leaves the meaning alone. So you can rank two of one backend's blocks by confidence, and you cannot
+read one backend's 0.8 as better than another's 0.7.
+
+Two places in this repo compare confidences anyway, and both need reading with that in mind.
+Compare's `confidence_gap` finding flags matched blocks whose confidences sit 0.2 or more apart,
+across two different backends' scales ([Compare](../comparison/README.md)). Treat it as a pointer
+at a block worth opening, never as a measurement of which backend is more sure. A strategy gate
+such as `confidence_below: 0.85` is fitted to whichever backend produced the numbers you swept.
+Re-derive it for every rung that runs a different backend. Carrying one threshold down a ladder
+applies one vendor's cut to another vendor's scale ([Strategies](../strategies/README.md)).
+
 ## Reference
 
 - `uv run python -m pydoc openreading.derive` has the sections `Grades`, `The channel contract`,

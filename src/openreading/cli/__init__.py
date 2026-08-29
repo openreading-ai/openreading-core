@@ -288,7 +288,7 @@ Rank N registered backends on ONE dataset -- measured, not vendor-claimed. Runs 
 `openreading/evals/sample`) through the unchanged `openreading.evals.runner.run_case` path for
 every named backend -- the same per-case compliance gate, the same five-dimension scorer, no second
 scoring or gating path -- and prints one ranked `BenchmarkReport`: measured mean score,
-per-dimension breakdown, per-case winner table, error tally, and each backend's cost basis
+per-dimension breakdown, per-case result table, error tally, and each backend's cost basis
 alongside its score (never a rank without the price that produced it).
 
     openreading leaderboard datasets/paystubs/ --backends aws-textract,google-document-ai
@@ -298,7 +298,17 @@ alongside its score (never a rank without the price that produced it).
 `--format table` (default) prints the dataset's own identity (path, case count, case names) above
 the ranking so a screenshot is never read as a universal verdict rather than "on these N
 documents"; `--format json` is the schema-valid `BenchmarkReport` (`leaderboard-report.v0.1.json`
-in `openreading.schemas`) a script or CI job consumes. A backend's per-case compliance refusal,
+in `openreading.schemas`) a script or CI job consumes.
+
+The table carries `scored` (`n_scored/n_cases`) beside `mean`, and prints `mean` as an em dash when
+`n_scored` is 0, because a mean over no scored case is not a measurement and a printed `0.000` is
+indistinguishable from a backend that measured 0.00 on every case it ran. `errors` does not
+separate them either: a case naming no recognized `expected` dimension is unscored without
+erroring. A non-deterministic backend's row is marked in place -- its mean is one labeled sample.
+The per-case block states `winner=`, `tie=`, `no winner (every scored backend got 0.00)` or
+`no result (no backend produced a score)`, and totals the four, because the report's own `winner`
+field breaks a tie alphabetically for byte-stability and printing that as a result turns ties and
+mutual failures into a clean sweep for anyone tallying the block. The JSON `winner` is unchanged. A backend's per-case compliance refusal,
 or any other per-case fault, is that backend's own scored, error-carrying case -- in its error
 tally, excluded from its mean -- never a silently skipped case,
 never a crash. Every backend makes a REAL call per case: `--all-ready` over a large dataset is N x M

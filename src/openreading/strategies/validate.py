@@ -24,6 +24,7 @@ from openreading.router import compliance as comp
 from openreading.router.compliance import RouterConfig
 from openreading.strategies.model import RawNode, StrategyConfig
 from openreading.strategies.normalize import (
+    DEFAULT_BUNDLE,
     NormalizeError,
     build_library,
     normalize_strategy,
@@ -461,7 +462,12 @@ def _check_leaf(node: dict[str, Any], path: str, ctx: _Ctx, eff_deadline_ms: Any
 
 
 def _gate_predicate_keys(gate: dict[str, Any]) -> list[tuple[str, Any]]:
-    """Flatten a gate's leaf predicates (through one level of any_of/all_of)."""
+    """Flatten a gate's leaf predicates, recursing through any_of/all_of to any depth.
+
+    Order-free and structure-free by design: callers that need the boolean structure (whether the
+    gate can fire at all, and which leaf is the dead one) use `_gate_can_fire` / `_unbindable_leaves`
+    instead, because a flat leaf list cannot tell an OR from an AND.
+    """
     out: list[tuple[str, Any]] = []
     for k, v in gate.items():
         if k in ("any_of", "all_of"):
@@ -488,28 +494,100 @@ def _predicate_binds(key: str, value: Any, desc) -> bool:
     return True  # unknown / conservative: assume bindable
 
 
+def _gate_can_fire(gate: dict[str, Any], desc) -> bool:
+    """Whether this gate could ever fire on `desc`, in the boolean structure `evaluate_gate`
+    actually evaluates: a gate map and `any_of` OR their members, `all_of` ANDs them and an empty
+    `all_of` never fires.
+
+    Flattening the tree to a leaf list and asking "does any leaf bind?" gets `all_of` backwards.
+    One conjunct that can never fire kills the whole conjunction, because `signals.evaluate_gate`
+    requires `all(s.fired for s in sub)` and a predicate whose signal the backend cannot produce is
+    traced `signal_unavailable` and never fires. Such a gate is as dead as a lone `confidence_below`
+    on a confidence-less backend, and a flatten-and-count check reports it clean.
+    """
+    fires = False
+    for key, value in gate.items():
+        if key == "any_of":
+            fires = fires or any(_gate_can_fire(sub, desc) for sub in value)
+        elif key == "all_of":
+            fires = fires or (bool(value) and all(_gate_can_fire(sub, desc) for sub in value))
+        else:
+            fires = fires or _predicate_binds(key, value, desc)
+    return fires
+
+
+def _unbindable_leaves(gate: dict[str, Any], desc, path: str) -> list[tuple[str, str]]:
+    """(node path, predicate key) for every leaf predicate that can never fire on `desc`.
+
+    Located at the leaf's own path rather than the gate's, because "somewhere under this gate one
+    predicate is dead" is not a locatable message once a gate nests.
+    """
+    out: list[tuple[str, str]] = []
+    for key, value in gate.items():
+        if key in ("any_of", "all_of"):
+            for i, sub in enumerate(value):
+                out.extend(_unbindable_leaves(sub, desc, f"{path}.{key}[{i}]"))
+        elif not _predicate_binds(key, value, desc):
+            out.append((f"{path}.{key}", key))
+    return out
+
+
 def _check_gate_bindable(gate: dict[str, Any], desc, slug: str, path: str, ctx: _Ctx) -> None:
-    preds = _gate_predicate_keys(gate)
-    if not preds:
+    if not _gate_predicate_keys(gate):
         return
-    # the `default` bundle always contains binding Tier-1 signals, so it is never all-unbindable —
-    # the exemption falls out naturally; still short-circuit an exact-bundle match for clarity.
-    if all(not _predicate_binds(k, v, desc) for k, v in preds):
+    dead = _unbindable_leaves(gate, desc, path)
+    if not dead:
+        return
+    keys = sorted({k for _, k in dead})
+    if not _gate_can_fire(gate, desc):
         if ctx.current_dialect == "plain":  # re-phrase in the four-word vocabulary (§8)
-            words = ", ".join(sorted({ADVANCED_TO_PLAIN.get(k, k) for k, _ in preds}))
+            words = ", ".join(sorted({ADVANCED_TO_PLAIN.get(k, k) for k in keys}))
             ctx.err(
                 path,
                 f"the {words} check can never fire on {slug!r} — it reports no confidence; add a "
                 "criterion that works everywhere, e.g. `looks_bad: true`",
             )
             return
-        keys = ", ".join(sorted({k for k, _ in preds}))
-        ctx.err(
-            path,
-            f"gate can never fire on {slug!r}: none of its predicates ({keys}) bind — "
-            f"{slug} emits no confidence. Add an always-available signal such as "
-            "chars_per_page_below or garbled, or set on_missing: escalate",
-        )
+        named = ", ".join(keys)
+        if all(not _predicate_binds(k, v, desc) for k, v in _gate_predicate_keys(gate)):
+            ctx.err(
+                path,
+                f"gate can never fire on {slug!r}: none of its predicates ({named}) bind — "
+                f"{slug} emits no confidence. Add an always-available signal such as "
+                "chars_per_page_below or garbled, or set on_missing: escalate",
+            )
+        else:
+            # every live branch runs through an all_of that one dead conjunct closes.
+            ctx.err(
+                path,
+                f"gate can never fire on {slug!r}: {named} never binds ({slug} emits no "
+                "confidence) and an all_of fires only when every member fires, so the whole "
+                f"conjunction is dead. Move {named} out of the all_of (a gate map ORs its keys) "
+                "or set on_missing: escalate",
+            )
+        return
+    # The gate still fires on its other members, so a dead leaf is dead weight rather than a dead
+    # gate — a warning at the leaf, not an error. The exception is the shipped `default` bundle,
+    # whose `confidence_below` is a documented Tier-2 bonus "silently inapplicable on
+    # confidence-less backends" (normalize.DEFAULT_BUNDLE): designed degradation, not an oversight.
+    if gate == DEFAULT_BUNDLE:
+        return
+    for leaf_path, key in dead:
+        if ctx.current_dialect == "plain":
+            word = ADVANCED_TO_PLAIN.get(key, key)
+            ctx.warn(
+                leaf_path,
+                f"the {word} check can never fire on {slug!r} — it reports no confidence — and the "
+                "rest of the gate carries it, so this word does nothing here; drop it or move it "
+                "to a rung whose backend reports confidence",
+            )
+        else:
+            ctx.warn(
+                leaf_path,
+                f"{key} can never fire on {slug!r} — it emits no confidence — but the gate still "
+                "fires on its other predicates, so this one is dead weight: remove it, set "
+                "on_missing: escalate, or move it to a rung whose backend reports confidence",
+            )
 
 
 def _check_cascade(node: dict[str, Any], path: str, ctx: _Ctx, child_kw: dict) -> None:

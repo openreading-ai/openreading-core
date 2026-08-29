@@ -201,6 +201,69 @@ def test_on_missing_escalate_makes_confidence_gate_bindable():
     assert not _errors(cfg)
 
 
+def _gate_cfg(gate):
+    return {
+        "version": 1,
+        "strategies": {"x": {"steps": [{"backend": "pymupdf", "escalate_if": gate}, "reducto"]}},
+    }
+
+
+def test_unbindable_predicate_ord_beside_a_live_one_is_reported():
+    # C4: `confidence_below` on pymupdf never fires. Alone it is a hard error; OR'd beside a
+    # binding predicate the gate still works, so the dead half is dead weight, not a dead gate —
+    # a warning at the leaf's own path, and validate must not stay silent about it.
+    issues = _issues(
+        _gate_cfg({"any_of": [{"confidence_below": 0.0}, {"chars_per_page_below": 50}]})
+    )
+    assert not [i for i in issues if i.level == "error"]
+    warns = [i for i in issues if i.level == "warning"]
+    assert _has(warns, "escalate_if.any_of[0].confidence_below", "can never fire on 'pymupdf'")
+    assert any("dead weight" in i.message for i in warns)
+
+
+def test_flat_gate_map_ors_its_keys_so_a_dead_key_is_reported_too():
+    # a gate map ORs its keys, so this is the same shape as any_of with no list syntax.
+    warns = _warnings(_gate_cfg({"confidence_below": 0.0, "chars_per_page_below": 50}))
+    assert _has(warns, "escalate_if.confidence_below", "can never fire on 'pymupdf'")
+
+
+def test_all_of_with_an_unbindable_member_can_never_fire():
+    # C4, the sharp edge: `all_of` fires only when EVERY member fires, so one predicate that can
+    # never fire kills the whole conjunction. Flattening the tree and asking "does ANY leaf bind?"
+    # gets this backwards and passes a gate that is completely dead.
+    errs = _errors(_gate_cfg({"all_of": [{"confidence_below": 0.0}, {"chars_per_page_below": 50}]}))
+    assert _has(errs, "escalate_if", "can never fire on 'pymupdf'")
+    assert any("all_of" in i.message for i in errs)
+
+
+def test_all_of_dead_conjunct_is_still_dead_when_ord_beside_a_live_branch():
+    # the live `garbled` branch keeps the gate alive, so the dead all_of is a warning, not an error.
+    gate = {
+        "any_of": [
+            {"all_of": [{"confidence_below": 0.0}, {"chars_per_page_below": 50}]},
+            {"garbled": True},
+        ]
+    }
+    issues = _issues(_gate_cfg(gate))
+    assert not [i for i in issues if i.level == "error"]
+    assert _has(
+        [i for i in issues if i.level == "warning"],
+        "escalate_if.any_of[0].all_of[0].confidence_below",
+        "can never fire on 'pymupdf'",
+    )
+
+
+def test_default_bundle_reports_no_dead_predicate_on_pymupdf():
+    # the shipped `default` bundle carries `confidence_below` deliberately — a Tier-2 bonus that is
+    # "silently inapplicable on confidence-less backends" (normalize.DEFAULT_BUNDLE). Designed
+    # degradation is not dead weight, so it must stay silent on both levels.
+    cfg = {
+        "version": 1,
+        "strategies": {"x": {"steps": ["pymupdf", "reducto"], "escalate_if": "default"}},
+    }
+    assert not _issues(cfg)
+
+
 def test_preset_name_collision():
     cfg = {"version": 1, "strategies": {"cost_saver": ["pymupdf"]}}
     assert _has(_errors(cfg), "strategies", "collides")

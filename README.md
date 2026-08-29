@@ -33,7 +33,9 @@ of them. You can ask for four things, each of which answers a problem you alread
   and where each block sits on the page. One command returns one JSON.
 - **[compare](src/openreading/comparison/README.md)**: you have two backends and want to know
   which one reads your documents better. You get a verdict naming what differs, for example a
-  table that one backend lost.
+  table that one backend lost. Compare deliberately names no winner, so when you want a ranking
+  instead, `leaderboard` scores backends against documents you labeled yourself
+  ([Evals](src/openreading/evals/README.md), openreading's benchmark harness).
 - **[route](src/openreading/router/README.md)**: some documents may only go to vendors that meet
   a policy. A policy is a short JSON file that lists what a backend must guarantee before it may
   run. The router applies it and drops every failing backend before anything runs.

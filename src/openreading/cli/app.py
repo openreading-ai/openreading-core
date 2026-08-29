@@ -1059,22 +1059,54 @@ def _render_leaderboard_table(report: Any) -> str:
     lines = [
         f"dataset: {d.path}  ({d.case_count} case(s): {', '.join(d.case_names)})",
         "",
-        f"{'rank':>4}  {'backend':<28} {'mean':>6} {'cost/doc':>10} {'errors':>7}  dimensions",
+        f"{'rank':>4}  {'backend':<28} {'mean':>6} {'scored':>7} {'cost/doc':>10} "
+        f"{'errors':>7}  dimensions",
     ]
     for b in report.backends:
         dims = " ".join(f"{k}={v:.2f}" for k, v in b.dimensions.items())
         nd = "  [non-deterministic: single sample]" if b.non_deterministic else ""
+        # `scored` is the denominator `mean` rests on, and the schema marks n_scored required for
+        # reading mean_score at all. Without it a backend that never scored a case and one that
+        # scored 0.0 on every case it ran are the same row, and `errors` does not separate them —
+        # a case carrying no recognized `expected` dimension is unscored without erroring. A mean
+        # over zero scored cases is not a measurement, so it prints as an em dash rather than a
+        # 0.000 a reader would compare against a measured 0.000.
+        mean = f"{b.mean_score:>6.3f}" if b.n_scored else f"{'—':>6}"
         lines.append(
-            f"{b.rank:>4}  {b.backend_id:<28} {b.mean_score:>6.3f} {b.cost_per_doc:>10.4f} "
-            f"{b.errors:>7}  {dims}{nd}"
+            f"{b.rank:>4}  {b.backend_id:<28} {mean} {f'{b.n_scored}/{b.n_cases}':>7} "
+            f"{b.cost_per_doc:>10.4f} {b.errors:>7}  {dims}{nd}"
         )
     lines.append("")
-    lines.append("per-case winner:")
+    lines.append("per-case result:")
+    tally = {"win": 0, "tie": 0, "all-zero": 0, "no result": 0}
     for c in report.cases:
         scores = ", ".join(
             f"{bid}={s:.2f}" if s is not None else f"{bid}=—" for bid, s in c.scores.items()
         )
-        lines.append(f"  {c.name}: winner={c.winner or '—'}  ({scores})")
+        # The report's `winner` breaks a tie alphabetically (leaderboard-report.v0.1.json), which
+        # is the right rule for a byte-stable JSON field and the wrong thing to print to a human:
+        # naming one backend on a tie, or on a case every backend scored 0.00, invites a per-case
+        # win tally that reads as a sweep when nothing was won. The JSON field is unchanged; the
+        # human block states the outcome it can actually support, and totals it.
+        real = {bid: s for bid, s in c.scores.items() if s is not None}
+        if not real:
+            outcome, bucket = "no result (no backend produced a score)", "no result"
+        else:
+            top = max(real.values())
+            leaders = sorted(bid for bid, s in real.items() if s == top)
+            if top == 0.0:
+                outcome, bucket = "no winner (every scored backend got 0.00)", "all-zero"
+            elif len(leaders) > 1:
+                outcome, bucket = f"tie={','.join(leaders)}", "tie"
+            else:
+                outcome, bucket = f"winner={leaders[0]}", "win"
+        tally[bucket] += 1
+        lines.append(f"  {c.name}: {outcome}  ({scores})")
+    lines.append("")
+    lines.append(
+        f"tally over {len(report.cases)} case(s): "
+        + ", ".join(f"{n} {label}" for label, n in tally.items())
+    )
     return "\n".join(lines)
 
 

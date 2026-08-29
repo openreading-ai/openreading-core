@@ -336,22 +336,30 @@ tools derive thresholds.**
 3. **`fields_required` is the exception by definition:** it fires **on absence** — that is its
    job. It never needs `on_missing`.
 4. **Static check** (`openreading strategy validate` → `openreading.strategies.validate`): a
-   user-written gate whose predicates can **all** never bind on its step's backend is reported
-   as a **validate-time error** naming the fix ("add an always-available signal such as
-   `chars_per_page_below` or `garbled`"). The spec calls it a **load-time** error; **as shipped
-   it is not**: `validate_config` has exactly two callers — the `strategy validate` CLI command
-   and the web UI's strategies panel. `loader.load_config` / `parse_config_raw`, which
+   user-written gate that can never fire on its step's backend is reported as a **validate-time
+   error** naming the fix ("add an always-available signal such as `chars_per_page_below` or
+   `garbled`"). "Can never fire" is computed over the gate's real boolean structure
+   (`validate._gate_can_fire`), not over a flat list of its leaves: a gate map and `any_of` are
+   ORs, so they die only when every leaf is unbindable, but `all_of` is an AND, so ONE unbindable
+   conjunct kills the whole conjunction — `escalate_if: {all_of: [confidence_below: 0.5,
+   chars_per_page_below: 50]}` on a pymupdf step is as dead as the lone `confidence_below`, and a
+   flatten-then-count check reports it clean. A leaf that cannot bind inside a gate that still
+   fires elsewhere is dead weight rather than a dead gate, so it is a **warning** at that leaf's
+   own node path; the failure it avoids is a `calibrate`-recommended `escalate_if:` block passing
+   validation green while half of it can never fire. The spec calls this a **load-time** error;
+   **as shipped it is not**: `validate_config` has exactly two callers — the `strategy validate`
+   CLI command and the web UI's strategies panel. `loader.load_config` / `parse_config_raw`, which
    `openreading run --strategy`, the Python `run()` path and every other `cmd_*` use, run
-   JSON-Schema + pydantic only, so an all-unbindable gate (`escalate_if: { confidence_below:
-   0.5 }` on a pymupdf step) loads without complaint, executes, and traces each predicate
-   `signal_unavailable`. The spec also says "per descriptor channel grades"; the check consults
-   grades for `confidence_below` / `page_confidence_below` (`block_confidence`) and
+   JSON-Schema + pydantic only, so an unbindable gate loads without complaint, executes, and traces
+   each predicate `signal_unavailable`. The spec also says "per descriptor channel grades"; the
+   check consults grades for `confidence_below` / `page_confidence_below` (`block_confidence`) and
    `field_confidence_below` (`typed_fields`) only — every other predicate, including
-   `doc_type_confidence_below`, is treated as always bindable (§4), so in practice the error fires
-   only for a gate made solely of those three keys on a backend graded `X` for them. Two
-   exemptions: gates from the built-in `default` bundle (designed to degrade — its Tier-1 members
-   carry the load) and `backend: auto` leaves (no fixed descriptor; checked at runtime via the
-   trace instead).
+   `doc_type_confidence_below`, is treated as always bindable (§4), so only those three keys ever
+   trigger either level. Exemptions: `backend: auto` leaves (no fixed descriptor; checked at
+   runtime via the trace instead), and the built-in `default` bundle, which is designed to degrade
+   — its Tier-1 members carry the load and its `confidence_below` is a deliberate Tier-2 bonus, so
+   it never earns the dead-weight warning (it was never an error: an OR with binding members
+   fires).
 
 Gate evaluation (`evaluate_gate`): a gate map ORs its predicates; `any_of` (a list of gate maps,
 fires if any fires) and `all_of` (fires if all fire; an empty list never fires) nest to **any**
