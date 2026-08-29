@@ -5,27 +5,55 @@
 ![python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)
 ![license](https://img.shields.io/badge/license-Apache--2.0-blue)
 
-OpenReading turns PDFs, scans and images into one predictable JSON, using whichever parser you
-point it at — a local library, a hosted OCR API, or your own model.
+OpenReading hands your document to a backend and gives you back one JSON whose shape does not
+depend on the backend. A backend is the parser that does the reading, such as PyMuPDF on your
+machine or Reducto's hosted API.
 
 ## What it does
 
-In: a PDF, an image, or an office document. Out: one JSON with `document.text`, `document.markdown`,
-`document.pages[].blocks[]` (page-relative coordinates) and optional `typed_fields`. A backend is
-the parser doing the work. The JSON is the same for every backend. Three verbs:
+Whichever backend reads your document, you get one shape that you can read, compare, or replay.
 
-- **parse**: one document or a folder, one backend, one JSON.
-- **compare**: what two backends' outputs differ on.
-- **route**: pick a backend under a compliance policy.
+```mermaid
+flowchart LR
+  D["your document"] --> B["choose a backend<br>yourself, by policy, or by strategy"]
+  B --> P["the backend reads it"] --> J["one JSON<br>same shape every time"]
+  J --> T["read the text and tables"] & C["compare two backends"] & E["explain or replay a run"]
+```
 
-OpenReading is for developers who need text or structure from many sources without one integration
-per vendor. It is not a hosted service, a UI, or a model: you bring a local backend or a vendor key.
+**The problem.** Every document parser has its own API and its own output shape. Swapping one
+parser for another means rewriting the code that reads its result. Comparing two parsers on your
+own documents is guesswork, because their outputs do not line up. Some documents, such as a
+medical record, must never leave the building at all.
+
+**What you get.** You send one request and read one JSON, whichever parser did the work. The
+JSON has the same keys for every backend, so code written against one backend works against all
+of them. You can ask for four things, each of which answers a problem you already have.
+
+- **[parse](src/openreading/cli/README.md)**: you have a document and want its text, its tables,
+  and where each block sits on the page. One command returns one JSON.
+- **[compare](src/openreading/comparison/README.md)**: you have two backends and want to know
+  which one reads your documents better. You get a verdict naming what differs, for example a
+  table that one backend lost.
+- **[route](src/openreading/router/README.md)**: some documents may only go to vendors that meet
+  a policy. A policy is a short JSON file that lists what a backend must guarantee before it may
+  run. The router applies it and drops every failing backend before anything runs.
+- **[strategy](src/openreading/strategies/README.md)**: you want a cheap backend first and a
+  stronger one only when the first result falls short. A strategy is a named plan that decides
+  for you. Each run leaves a trace of which backends ran and why, for you to print or replay.
+
+**What you need.** Bring a backend and a document it can read. Each backend declares its formats,
+such as PDF, images, office files, HTML and EPUB.
+[The adapter catalog](src/openreading/adapters/README.md) lists the formats per backend. The
+router skips a backend that cannot read your file and records the drop as `unsupported_format`.
+PyMuPDF and Tesseract run locally with no key, while a hosted backend needs your vendor key.
+OpenReading is not a hosted service, a UI, or a model.
 
 ## Install
 
-You need `git`, the `tesseract` binary (`brew install tesseract` / `apt install tesseract-ocr`), and
-either [`uv`](https://docs.astral.sh/uv/), which fetches Python 3.11+ itself, or Python 3.11+ with `pip`.
-No API keys. Nothing is on PyPI yet, so a plain `pip install` of the package fails. Install from the clone.
+Two commands give you a working install with two local backends and no API keys. You need `git`,
+the `tesseract` binary (`brew install tesseract` or `apt install tesseract-ocr`), and
+[`uv`](https://docs.astral.sh/uv/), which fetches Python 3.11+ itself. Python 3.11+ with `pip`
+also works. Nothing is on PyPI yet, so install from the clone.
 
 ```bash
 git clone https://github.com/multiversal-ventures/openreading-core
@@ -34,14 +62,15 @@ uv sync --all-extras --dev       # every backend extra + the dev tools (same as 
 uv run openreading backends      # one row per backend: pymupdf and tesseract yes; hosted backends no, most naming the var they need
 ```
 
-Without uv, run `python3 -m venv .venv && .venv/bin/pip install -e '.[pymupdf,tesseract,server]'`.
-Then type `.venv/bin/openreading …` wherever this page says `uv run openreading …`. In that venv,
-`backends` lists a missing *extra* under MISSING (`httpx (pip install …)`) rather than a variable.
+Without uv, run `python3 -m venv .venv && .venv/bin/pip install -e '.[pymupdf,tesseract,server]'`
+and type `.venv/bin/openreading …` wherever this page says `uv run openreading …`. In that venv,
+`openreading backends` marks a hosted backend as missing an extra rather than a variable.
 
 ## Your first parse
 
-If the `tesseract` row says `no` with `tesseract binary` under MISSING, install the binary now.
-Generate a two-page sample document (or `cp ~/some.pdf sample.pdf`), then parse it:
+Your first JSON is three commands away. If the `tesseract` row says `no` under MISSING, install
+the binary now. Generate a two-page sample document, or copy any PDF of your own to `sample.pdf`,
+then parse it:
 
 ```bash
 uv run python -c 'from openreading.testing.sample_pdf import build_sample_pdf; open("sample.pdf","wb").write(build_sample_pdf())'
@@ -50,7 +79,7 @@ uv run openreading parse sample.pdf --backend pymupdf > pymupdf.json
 ```
 
 You should see one stderr line, `Consider using the pymupdf_layout package …`. That is PyMuPDF's
-advice, not an error. Here is `pymupdf.json`, trimmed to the keys you will read first (numbers rounded):
+advice, not an error. Here is `pymupdf.json`, trimmed to the keys you read first (numbers rounded):
 
 ```json
 { "schema_version": "0.3", "status": { "state": "succeeded" },
@@ -66,13 +95,15 @@ advice, not an error. Here is `pymupdf.json`, trimmed to the keys you will read 
                   "message": "PyMuPDF is a deterministic parser; per-element confidence does not exist" } ] }
 ```
 
-`usage`, `backend_raw` and `channel_provenance` are omitted here. [`src/openreading/schemas/README.md`](src/openreading/schemas/README.md) describes them.
-Check: `grep -c confidence_unavailable pymupdf.json` prints `1`. Every backend returns this shape. A field
-a backend cannot produce is left out and named in `warnings[]`, never invented (`uv run python -m pydoc openreading`).
+This listing omits `usage`, `backend_raw` and `channel_provenance`, which
+[`src/openreading/schemas/README.md`](src/openreading/schemas/README.md) describes. Every backend
+returns this shape. When a backend cannot produce a field, OpenReading leaves it out and names it
+in `warnings[]`. It never invents one, because a made-up confidence looks like a measured one.
 
 ## Compare, route, strategy
 
-**Compare.** Parse the same file with OCR, then diff the two outputs. Abbreviated, you should see:
+**Compare.** Compare tells you which backend read a document better and what the other missed.
+Parse the same sample with Tesseract, then ask what differs. You should see this, abbreviated:
 
 ```bash
 uv run openreading parse sample.pdf --backend tesseract > tesseract.json
@@ -87,11 +118,12 @@ DIFF — pymupdf vs tesseract   (2 page(s))
 …
 ```
 
-Both got every word. OCR lost the table's structure (`uv run python -m pydoc openreading.comparison`).
-If you see `[tesseract] tesseract failed: tesseract is not installed…` (exit 3), install the binary.
+Both backends got every word, while OCR lost the table's structure. If you see the line
+`[tesseract] tesseract failed: tesseract is not installed…` (exit 3), install the binary.
 
-**Route.** A compliance policy is a JSON file of requirements a backend must meet. `require_baa`
-demands a BAA, the HIPAA contract a vendor signs before handling health data. Abbreviated, you should see:
+**Route.** Route hands a sensitive document only to backends that meet your policy. The sample
+stands in for a medical record. `require_baa` demands a BAA, which is the HIPAA contract a vendor
+signs before handling health data. `no_train_on_data` refuses vendors that train on what you send:
 
 ```bash
 echo '{"require_baa": true, "no_train_on_data": true}' > phi.json
@@ -105,9 +137,14 @@ uv run openreading route sample.pdf --policy phi.json
   "terminal_reason": null }
 ```
 
-A backend dropped here never comes back through a fallback (`uv run python -m pydoc openreading.router.compliance`).
+Reducto is dropped because its BAA is offered only on some tiers and none is confirmed here. The
+`fallbacks` list is the order OpenReading tries next if `pymupdf` fails. A dropped backend never
+joins that list, because a fallback that readmits it would leak the record silently.
 
-**Strategy.** A strategy is a named plan that picks backends and checks their output. You should see (timings vary):
+**Strategy.** A strategy gives you the cheap result when it is good enough and the stronger one
+when it is not. It checks each output against quality gates. A gate is one test on a result, for
+example whether the backend detected scanned pages. Four presets ship: `cost_saver`, `fast`,
+`max_accuracy`, and `offline_first`. Run the last one and print its trace:
 
 ```bash
 uv run openreading parse sample.pdf --strategy offline_first > strat.json
@@ -120,22 +157,28 @@ strategy offline_first  →  pymupdf (ok)
       …
 ```
 
-Presets: `cost_saver`, `fast`, `max_accuracy`, `offline_first`. Write your own with `uv run openreading strategy --help`.
+The trace shows PyMuPDF ran, the scanned-pages gate passed, and the run stopped there. Timings
+vary between machines. Write your own strategy with `uv run openreading strategy --help`. An
+interrupted run resumes from its journal, which records every step so far. The
+[run ledger](src/openreading/ledger/README.md) guide explains it.
 
 ## Bring your own key
 
-Hosted backends need a key from the vendor. Without one, the exit code is 3, not a crash:
+A hosted backend works as soon as its vendor key is in `.env`. Without one, the command exits with
+code 3 and names the variable:
 
 ```bash
 uv run openreading parse sample.pdf --backend reducto
 # [reducto] missing required credentials/config: REDUCTO_API_KEY. Sign up / configure: https://platform.reducto.ai
 ```
 
-Fix: `echo 'REDUCTO_API_KEY=sk_…' > .env`, and only that line. Do not copy `.env.example` whole: it
-pre-fills two localhost endpoints. Then `uv run openreading backends` shows `reducto … yes`, and
-calls are billed to your account. Every backend's variables: [`src/openreading/adapters/README.md`](src/openreading/adapters/README.md).
+To fix it, run `echo 'REDUCTO_API_KEY=sk_…' > .env` rather than copying `.env.example`, because
+that file pre-fills two localhost endpoints. Then `uv run openreading backends` shows
+`reducto … yes`. From then on every Reducto call is billed to your account.
 
 ## Python and HTTP
+
+From Python or over HTTP you get the same shapes that the command line prints.
 
 ```python
 import openreading
@@ -156,26 +199,30 @@ curl -s http://127.0.0.1:8787/healthz     # {"status":"ok","version":"0.3.0"}
 
 ## Status and versioning
 
-**Status: pre-release.** The package version is `0.3.0` (`pyproject.toml`, `openreading.__version__`). It is not on
-PyPI and this repository has no git tags yet, so install from a clone as shown above. `CHANGELOG.md` records
-development milestones. Its newest numbered heading, `0.4.0`, is a milestone label, not a published release. The two numbers
-are reconciled when the first release is tagged. Stable now: the vendored JSON Schemas are frozen once cut
-(`tests/test_schema_evolution.py` pins them byte for byte). May still change before 1.0: CLI flags, the Python API,
-the strategy grammar.
+**Status: pre-release.** You can build on the JSON shape today, while CLI flags, the Python API
+and the strategy grammar may still change before 1.0. The JSON Schemas are stable, pinned byte
+for byte by `tests/test_schema_evolution.py`. The package version is `0.3.0` in `pyproject.toml`
+and `openreading.__version__`. It is not on PyPI and has no git tags yet, so install from a
+clone. [`CHANGELOG.md`](CHANGELOG.md) records development milestones. Its newest heading,
+`0.4.0`, is a milestone label, not a published release. The two numbers meet when the first
+release is tagged.
 
 ## Where the docs are
 
+Because each package directory carries one guide, every question below leads to one guide or one
+command.
+
 | You want to know… | Run / open |
 |---|---|
-| every command and flag | `uv run openreading --help`, `uv run openreading <cmd> --help` (`parse` needs exactly one of `--backend` / `--strategy` / `--no-strategy`) |
-| which backends are ready on this machine | `uv run openreading backends` |
-| each backend's variables and compliance posture; the env-var precedence rules | [`src/openreading/adapters/README.md`](src/openreading/adapters/README.md); `uv run python -m pydoc openreading.credentials` |
+| **the full documentation, every guide, and how an agent uses it** | [`src/openreading/README.md`](src/openreading/README.md), then `uv run openreading --help` and `uv run openreading <cmd> --help` for every flag |
+| each backend's variables and compliance posture, and the env-var precedence rules | [`src/openreading/adapters/README.md`](src/openreading/adapters/README.md), then `uv run python -m pydoc openreading.credentials` |
 | the exact JSON shapes (the contract) | [`src/openreading/schemas/README.md`](src/openreading/schemas/README.md), then the `*.json` files beside it |
-| the Python API; strategies, compare, batch, routing in depth | `uv run python -m pydoc openreading`, then `.strategies` · `.comparison` · `.batch` · `.router.compliance` |
-| how to add a backend | `uv run python -m pydoc openreading.adapters`, then `scripts/new_adapter.py` |
-| the test gate | `make verify`: lint, types, pytest at a 91% coverage floor, schema and smoke checks; test count: `uv run pytest -m "not live" --collect-only` |
-| what changed | [`CHANGELOG.md`](CHANGELOG.md) |
+| strategies · compare · routing and keys · batch · the ledger · the server · evals · the CLI · the channel contract | [Strategies](src/openreading/strategies/README.md) · [Compare](src/openreading/comparison/README.md) · [Routing and keys](src/openreading/router/README.md) · [Batch runs](src/openreading/batch/README.md) · [The run ledger](src/openreading/ledger/README.md) · [The HTTP server](src/openreading/server/README.md) · [Evals](src/openreading/evals/README.md) · [The command line](src/openreading/cli/README.md) · [The channel contract](src/openreading/derive/README.md). The docs home links them all. |
+| the Python API, every reference section, and how to add a backend | `uv run python -m pydoc openreading`, then the same command with `.<module>` appended. For a new backend, `uv run python -m pydoc openreading.adapters`, then `scripts/new_adapter.py` |
+| the test gate | `make verify` runs lint, types, pytest at a 91% coverage floor, and the schema and smoke checks. `uv run pytest -m "not live" --collect-only` prints the offline test count. |
 
 ## Contributing · Security · License
 
-[`CONTRIBUTING.md`](CONTRIBUTING.md) · [`SECURITY.md`](SECURITY.md) · Apache-2.0 ([`LICENSE`](LICENSE)). Only the `[pymupdf]` extra is AGPL-3.0, isolated in its own extra.
+[`CONTRIBUTING.md`](CONTRIBUTING.md) · [`SECURITY.md`](SECURITY.md) · Apache-2.0
+([`LICENSE`](LICENSE)). The `[pymupdf]` extra is the only AGPL-3.0 component, kept separate so
+that you can leave it out.
