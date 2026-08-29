@@ -169,7 +169,10 @@ backend cannot produce is ABSENT with a ``warnings[]`` entry — never fabricate
   noteworthy. Codes are an OPEN set; known: ``confidence_unavailable``, ``unsupported_feature``,
   ``fallback_used`` (the router's attempt trail), ``idempotent_replay``, ``baa_tier_confirmed``
   (``require_baa`` satisfied only by the deployment's tier-gated confirmation),
-  ``page_attribution_unavailable``, coordinate-conversion notes. This is what makes the
+  ``page_attribution_unavailable``, ``quality_below_threshold`` (every rung gated, best result
+  retained), ``budget_exhausted`` (the time budget, not a gate, ended a strategy walk — the two
+  are separate codes because escalating is right for the first and wrong for the second),
+  coordinate-conversion notes. This is what makes the
   never-fabricate rule practical: absence is always accounted for.
 - ``backend_raw`` (present by default via ``outputs.include_backend_raw``): the untouched native
   payload — ``payload`` (the raw value: hosted-API JSON verbatim or the serialized native object

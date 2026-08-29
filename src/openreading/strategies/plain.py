@@ -333,7 +333,8 @@ from "escalate when the winner looks bad" to "… or when the branches disagree"
 Time — `max_time` has one placement: `budget.max_duration` on the body root, one pool for the
 whole strategy (the duel and the `then:` rung share it), clamping under `limits:` as always
 (children clamp, never extend). On deadline, keep-best returns the best retained result as
-`Deficient` with the `quality_below_threshold` warning — the same as any exhaustion — never
+`Deficient` with the `quality_below_threshold` warning (`budget_exhausted` when a deadline ended
+the walk) — the same as any exhaustion — never
 silence. The design's `budget_exhausted` *warning* has no emitter in the engine;
 `budget_exhausted` is the error class (`PlanExhaustedError`) only when the deadline ended the
 walk with nothing retained.

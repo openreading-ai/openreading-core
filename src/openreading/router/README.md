@@ -45,7 +45,8 @@ counts as no. Your own policy can relax that, with one of the three keys named u
 the input format and every requested feature. Stage 3 scores the survivors on quality, cost, and
 locality, and that score sets the order. Adding `--run` walks the chain in that order and stops at
 the first backend that succeeds. A backend with no key is skipped, and the skip lands in the
-result's `warnings[]`.
+result's `warnings[]`. Alert on the `fallback_used` warning in an unattended run, because a
+switched backend still exits 0 while returning a weaker answer than the one you planned for.
 
 ## Walkthrough
 

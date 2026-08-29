@@ -1461,6 +1461,34 @@ def test_batch_endpoint_unknown_backend_is_404(client):
     assert r.status_code == 404
 
 
+def test_batch_endpoint_object_form_backend_is_a_400_envelope_not_a_bare_500(client):
+    """`{"backend": {"id": "pymupdf"}}` is the shape `/v1/parse` and the vendored request schema
+    use, so a client that reuses its own body builder sends it here. It reached `make_adapter`
+    unstringified and escaped as an unhandled exception: HTTP 500 with a plain-text
+    `Internal Server Error` body — the one response a client written from the error ladder
+    ("every error body has one shape") cannot parse.
+
+    400, not 500: this endpoint's contract is a string `backend`, so an object is a malformed
+    body in exactly the class of `"jobs": "many"` — the crash was the bug, the status never was.
+    The object is refused rather than reduced to its `id` because `backend` also carries
+    `operation`, `version`, `credentials_ref` and `runtime`, every one of which changes what the
+    parse does; accepting the shape and keeping only `id` would silently run the wrong operation.
+    """
+    r = client.post("/v1/batch", json={"documents": [_batch_doc()], "backend": {"id": "pymupdf"}})
+    assert r.status_code == 400
+    assert r.headers["content-type"].startswith("application/json")
+    body = r.json()
+    assert body["error"]["category"] == "bad_request"
+    assert '"backend": "pymupdf"' in body["error"]["message"]  # names the exact fix
+
+
+def test_batch_endpoint_non_string_backend_is_a_400_envelope(client):
+    for bad in (["pymupdf"], 7, None):
+        r = client.post("/v1/batch", json={"documents": [_batch_doc()], "backend": bad})
+        assert r.status_code == 400, bad
+        assert r.json()["error"]["category"] == "bad_request"
+
+
 def test_batch_endpoint_documents_over_max_is_400(client):
     from openreading.server.app import MAX_BATCH_DOCUMENTS
 

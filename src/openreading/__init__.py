@@ -299,17 +299,27 @@ prose. Branch on:
 
 - `status.state "succeeded"` with no `orchestration`, or `orchestration.outcome "ok"` — clean
   parse -> consume `document` / `typed_fields`.
+- `orchestration.outcome "degraded"` + warning `budget_exhausted` — the time budget ended the
+  walk and the best result so far is returned. Do NOT escalate: a stronger, slower backend is the
+  worst answer to having run out of time. Raise `budget.max_duration` /
+  `limits.max_duration_per_doc`, or accept the result.
 - `orchestration.outcome "degraded"` + warning `quality_below_threshold` — every rung gated;
   this is the best result KEPT, not a clean pass -> escalate: a stronger backend, a `compare`
   strategy, or reject.
 - `status.state "partial"` — some channels/pages made it, some did not -> consume what is
   present; read `warnings[]` for what is missing.
 - warning `fallback_used` / `quality_escalated` — the named backend failed or gated and another
-  answered -> fine to consume; log the trail.
+  answered -> fine to consume; log the trail. Unattended, treat `fallback_used` as alert-worthy,
+  not routine: the run exits 0 either way, so a permanent host fault (an OCR binary that fell off
+  PATH, and every document since silently answered by the text-layer rung instead) looks exactly
+  like a one-off vendor blip until someone reads the trail.
 - warning `confidence_unavailable` — this backend never emits confidence: absence, not zero ->
   do not gate on a number that is not there.
 - retryable error (`timeout`, `rate_limited`, `provider_error`) — transient -> retry with
-  backoff, or the next backend.
+  backoff, or the next backend. `provider_error` is the taxonomy's catch-all and is NOT always
+  transient: a missing local binary or an unusable install lands here too, and retrying it will
+  fail identically forever. The attempt's `code` (the adapter's own failure code, e.g.
+  `TesseractNotFoundError`) is what separates the two — group alerts by it, not by the class.
 - terminal error (`invalid_input`, `auth`) — retrying will not help -> fix the input / the key.
 - `ComplianceRefused` (HTTP 403) — policy forbids every eligible backend; fails closed -> change
   the policy or the ask; never retry harder.
@@ -324,10 +334,13 @@ closed before anything runs; honest accounting (`usage.cost_usd` per attempt and
 labeled by `cost_basis`; the `orchestration` trace records machine-readably why every backend
 ran or did not). The trace vocabulary is CLOSED, unlike `warnings[]`: every attempt carries one
 category from `openreading.strategies.trace.CATEGORIES` — `succeeded`,
-`skipped(missing_credentials)`, `skipped(circuit_open)`, `deadline_pruned`, `quality_escalated`,
+`skipped(missing_credentials)`, `deadline_pruned`, `quality_escalated`,
 `review_escalated`, `raced_lost`, `judged_lost`, `shadow`, `merge_base`, `merge_source`,
-`decider_call`, `judge_call` — each gate record carries `predicate`, `threshold`, `observed`,
-`fired`, `unavailable`, and LLM choices land in `decisions[]`. Switch on these exhaustively.
+`decider_call`, `judge_call` — plus `error(<class>)` for a failed rung. (`skipped(circuit_open)`
+is reserved vocabulary the engine never emits: `defaults.advanced.circuit_breaker` is not
+implemented, and `strategy validate` refuses a config that declares it.) Each gate record carries
+`predicate`, `threshold`, `observed`, `fired`, `unavailable`; a failed attempt may carry the
+backend's own `code`; and LLM choices land in `decisions[]`. Switch on these exhaustively.
 
 Strategies in brief
 ===================

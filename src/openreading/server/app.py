@@ -864,6 +864,23 @@ def create_app(*, cors_origins: list[str] | None = None):
                 f"({MAX_BATCH_DOCUMENTS})"
             )
         backend = body.get("backend", "auto")
+        # `backend` is one shared string for the whole batch here, but it is an OBJECT
+        # (`{"id": ...}`) on /v1/parse and in the vendored request schema, so a client reusing its
+        # own /v1/parse body builder sends the object form — which used to reach `make_adapter`
+        # unstringified and escape as a raw TypeError: HTTP 500, body `Internal Server Error`, the
+        # one response a client written from the documented "every error body has one shape"
+        # ladder cannot parse. Refused rather than reduced to its `id`, because the object also
+        # carries `operation`, `version`, `credentials_ref` and `runtime` — accepting the shape
+        # and keeping only the slug would silently run a different operation than the caller asked
+        # for, which is the failure this project refuses everywhere else.
+        if not isinstance(backend, str):
+            named = (
+                backend.get("id") if isinstance(backend, dict) and backend.get("id") else "pymupdf"
+            )
+            return _bad_request(
+                '"backend" on this endpoint is one string shared by every item, not /v1/parse\'s '
+                f'object — send "backend": "{named}"'
+            )
         # BL-105: `shared` (merged into EVERY per-item request below, in run_one) is an ALLOWLIST
         # of the fields meant to apply batch-wide — not a blocklist of the three batch-envelope-
         # only keys (documents/backend/jobs). A blocklist let `document` (singular) — a genuine

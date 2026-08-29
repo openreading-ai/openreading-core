@@ -66,6 +66,13 @@ class Attempt:
     cost_usd: float | None = None
     cost_basis: str | None = None  # backend-reported basis for cost_usd, e.g. "billed"
     detail: str = ""
+    # The adapter's OWN machine-readable failure code (`TerminalError.backend_code`), forwarded
+    # rather than classified. The engine's error CLASS is a closed, schema-versioned set with an
+    # `on_error` routing contract, and it cannot tell a permanent host fault (a missing local
+    # binary, which will fail identically forever) from a transient provider blip without
+    # branching on backend type. So `error(provider_error)` stays as it is and this carries what
+    # the backend already knew: `detail` is prose for a human, `code` is what a monitor groups by.
+    code: str | None = None
     gates: list[GateRecord] = field(default_factory=list)
     # cross-branch disagreement telemetry on a pick:best winner (§11); None otherwise.
     disagreement: float | None = None
@@ -93,6 +100,8 @@ class Attempt:
             d["cost_basis"] = self.cost_basis
         if self.detail:
             d["detail"] = self.detail
+        if self.code:
+            d["code"] = self.code
         if self.gates:
             d["gates"] = [g.as_dict() for g in self.gates]
         if self.disagreement is not None:

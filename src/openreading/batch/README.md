@@ -230,8 +230,8 @@ curl -s -X POST http://127.0.0.1:8787/v1/batch -H 'content-type: application/jso
 {"state":"succeeded","request":{"backend":"pymupdf","jobs":2,"source_args":["doc-0","doc-1"]},"transports":["platform","platform"]}
 ```
 `backend` is a plain string here, such as `"pymupdf"`, not the `{"id": …}` object `/v1/parse`
-takes. The object form returns a 500 today. Expand directories on the client side. See [The HTTP
-server](../server/README.md).
+takes. The object form is refused with a 400 naming the fix, not run. Expand directories on the
+client side. See [The HTTP server](../server/README.md).
 
 **Mix files, folders, and URLs, or use a hosted backend's native batch.** (shape shown, not run)
 Run `uv run openreading parse https://example.com/loan.pdf corpus/ extra/w2.png --backend pymupdf`.

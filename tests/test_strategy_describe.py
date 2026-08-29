@@ -138,10 +138,18 @@ def test_leaf_and_auto():
     assert "best available" in describe_strategy(_tree("auto"))
 
 
-def test_max_attempts_advanced():
-    # advanced budget with max_attempts (not expressible in Plain) still describes
+def test_max_attempts_is_never_described():
+    # `max_attempts` is read by no engine code, so describing it states a ceiling the run does not
+    # hold to. `strategy validate` refuses the key; this summary must not affirm it either.
     d = describe_strategy(_tree({"steps": ["pymupdf", "reducto"], "budget": {"max_attempts": 3}}))
-    assert "3" in d and "attempt" in d
+    assert "attempt" not in d
+
+
+def test_max_duration_is_still_described():
+    d = describe_strategy(
+        _tree({"steps": ["pymupdf", "reducto"], "budget": {"max_duration": "30s"}})
+    )
+    assert "stops after 30s" in d.lower()
 
 
 def test_deterministic():

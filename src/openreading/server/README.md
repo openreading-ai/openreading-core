@@ -24,7 +24,10 @@ uv run openreading serve
 ```
 
 ```text
-INFO:     Uvicorn running on http://127.0.0.1:8787 (Press CTRL+C to quit)
+[serve] listening on http://127.0.0.1:8787 — readiness: GET /healthz
+INFO:     Started server process [85094]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
 ```
 
 ## Mental model
@@ -131,10 +134,12 @@ until `state` is not `running`. An empty `documents: []` returns 200 with an `em
 
 ### 4. Read the error ladder
 
-Every error body has one shape, so a client needs one parser for all of them. The shape is
-`{"error": {"category", "message", "backend_code"?, "missing_env"?, "trail"?}}`. A failed job's
-`error` is that same body, fetched with 200. Each row in the table below was triggered against the
-running server.
+Every error the server raises deliberately has one shape, so one parser reads all of them. The
+shape is `{"error": {"category", "message", "backend_code"?, "missing_env"?, "trail"?}}`. A failed
+job's `error` is that same body, fetched with 200. Give your client one branch outside that parser
+all the same, because an error no handler catches falls through to the web framework, which answers
+`500` with the plain text `Internal Server Error`. Each row in the table below was triggered
+against the running server, except where the row says otherwise.
 
 ```bash
 curl -s -w '\nHTTP %{http_code}\n' -X POST localhost:8787/v1/parse -H 'content-type: application/json' \
@@ -163,6 +168,23 @@ right, so fix the table.
 | `424` | `terminal` (`missing_credentials`, `auth_rejected`) | named backend has no key (`missing_env[]`), or the provider rejected it | `"backend": {"id": "reducto"}` with no `REDUCTO_API_KEY` |
 | `502` | `plan_exhausted`, `terminal` | every backend in the plan failed (`trail` lists them) | needs a hosted key; shape shown, not run |
 | `504` | `retryable_exhausted` | deadline passed or retries exhausted | needs a hosted key; shape shown, not run |
+| `500` | none; the body is the plain text `Internal Server Error`, not JSON | an error no handler caught | no trigger known today; it is the framework's own fallback, so parse defensively anyway |
+
+`/v1/batch` takes `backend` as one bare string where `/v1/parse` takes an object, which is the
+easiest mistake to make when moving between the two endpoints. The refusal names the fix:
+
+```bash
+curl -s -w '\nHTTP %{http_code}\n' -X POST localhost:8787/v1/batch -H 'content-type: application/json' \
+  -d '{"documents": [{"path": "'"$PWD"'/sample.pdf"}], "backend": {"id": "pymupdf"}}'
+```
+
+```json
+{"error":{"category":"bad_request","message":"\"backend\" on this endpoint is one string shared by every item, not /v1/parse's object — send \"backend\": \"pymupdf\""}}
+HTTP 400
+```
+
+**You should see** 400 in the enveloped shape rather than a bare 500. Sending
+`"backend": "pymupdf"` answers 200 for the same documents.
 
 Two endpoints answer without a bearer even when auth is on: `GET /healthz` and
 `POST /v1/webhooks/{backend_id}`. A vendor holds no token of yours, so a callback could never
@@ -240,11 +262,20 @@ values `GET /v1/backends` returns.
 Reducto signs the callback. The server verifies it with `REDUCTO_WEBHOOK_SECRET` and answers 401
 when the secret is unset. You always supply the callback URL.
 
-**Expose the server beyond localhost.** `uv run openreading serve --host 0.0.0.0` prints:
-```text
-[serve] warning: binding 0.0.0.0 exposes the server — anyone who can reach it spends your vendor keys. Put it behind your own auth/proxy.
+**Expose the server beyond localhost.** Any `--host` other than the literal `127.0.0.1` warns on
+stderr, so the check is broader than a genuinely reachable address. Spelling the loopback address
+differently is enough to see it:
+```bash
+uv run openreading serve --host localhost
 ```
-Set `OPENREADING_API_KEYS` first, and terminate TLS in front of it.
+```text
+[serve] warning: binding localhost exposes the server — anyone who can reach it spends your vendor keys. Put it behind your own auth/proxy.
+[serve] listening on http://127.0.0.1:8787 — readiness: GET /healthz
+…
+```
+`--host 0.0.0.0` prints the same line with its own address, and that one really does reach every
+interface. Set `OPENREADING_API_KEYS` before you bind anywhere but the default, and terminate TLS
+in front of it.
 
 **Probe whether a backend answers.**
 `curl -s -X POST localhost:8787/v1/backends/pymupdf/liveness -d '{}'` returns
@@ -293,12 +324,106 @@ sample through `/v1/parse` and `/v1/batch`, asserts schema-valid responses, and 
 - `/v1/parse`, `/v1/batch` and `/v1/compare` responses are schema-validated before they leave the
   process. The server owns the only result cache, so a replayed item never hides a billed call.
 
+## Operations
+
+This section is for whoever runs the process and watches it. It covers where the log lines go, what
+a restart does to work already in flight, and what there is to measure.
+
+### Read the logs
+
+The server writes to both streams and splits them by kind, which a log-shipping config has to
+account for. Start it with the streams apart and drive one request through:
+
+```bash
+uv run openreading serve --port 8901 > access.log 2> lifecycle.log &
+sleep 3
+curl -s -o /dev/null -X POST localhost:8901/v1/parse -H 'content-type: application/json' \
+  -d '{"document": {"path": "'"$PWD"'/sample.pdf"}, "backend": {"id": "pymupdf"}}'
+sleep 1; cat access.log; echo '--- stderr ---'; cat lifecycle.log
+```
+
+```text
+Consider using the pymupdf_layout package for a greatly improved page layout analysis.
+INFO:     127.0.0.1:58618 - "POST /v1/parse HTTP/1.1" 200 OK
+--- stderr ---
+[serve] listening on http://127.0.0.1:8901 — readiness: GET /healthz
+INFO:     Started server process [85067]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+```
+
+**You should see** one access line per request on stdout and the whole lifecycle on stderr. Three
+properties follow. A backend's own chatter lands in the stdout access log between access lines, so
+that stream is not uniform and a strict parser will choke on the advisory. There is no request id
+and no timestamp on an access line, so a slow request cannot be traced back to a caller. There is
+no log-level knob and no structured output, so filtering happens in your shipper rather than here.
+
+The `[serve] listening on …` line prints only once the port is genuinely claimed, and it names the
+readiness check for the same reason. A port already in use produces one tagged line and exit 3
+rather than a healthy-looking startup followed by a silent death:
+
+```bash
+uv run openreading serve --port 8901; echo "exit=$?"
+```
+
+```text
+[serve] cannot bind 127.0.0.1:8901: Address already in use — free it or pass a different --port
+exit=3
+```
+
+Gate readiness on `GET /healthz` answering 200 all the same, because no log line is a readiness
+contract and the uvicorn lines below it are still printed by the library rather than by this
+process.
+
+### Restart, and what it costs a client
+
+The job store lives in the process, so a restart erases it. A job id that answered `succeeded` a
+moment ago answers 404 afterwards, with the same category a typo gets:
+
+```bash
+curl -s localhost:8901/v1/jobs/omjob_bad0f7e7accf4b528a55c88496545946
+```
+
+```json
+{"error":{"category":"unknown_job","message":"omjob_bad0f7e7accf4b528a55c88496545946"}}
+```
+
+**You should see** `unknown_job` for both a dropped job and an id that never existed. A client
+cannot tell "we lost your finished result, resubmit" from "you asked for something that never
+existed, do not retry", and no field distinguishes them today. Treat 404 on an id your own code
+minted as a resubmit, and reserve the do-not-retry reading for an id you did not mint.
+
+That matters more than it looks, because each `GET /v1/jobs/{id}` is what advances a poll-mode job
+by one slice. Nothing progresses the job in the background. A rolling restart in the middle of a
+poll therefore strands work a vendor has already accepted and will still bill, and no record of it
+survives the process.
+
+### Measure what you can
+
+There is no metrics or tracing surface here, and the "Not built yet" list says so. Three things are
+worth collecting instead. The stdout access log gives request counts and status codes. `uv run
+openreading backends --check <slug>` measures whether a backend really answers and belongs on a
+schedule as a vendor-degradation canary ([Routing and keys](../router/README.md)). Each envelope
+carries `usage.cost_usd`, which is the only per-request spend figure the process produces, so a
+consumer that wants a spend total sums it as responses arrive.
+
+### Load and time budgets
+
+One `openreading serve` is one uvicorn process, and it exposes no worker count and no queue depth.
+Concurrency inside a request is bounded per backend, which [Batch runs](../batch/README.md#sizing-a-large-run)
+measures along with the memory a corpus costs. A request over HTTP is capped at the generic 120
+second budget with no field to raise it, so a long hosted document answers 504 here and needs the
+CLI or the Python API instead. Nothing rate-limits callers and nothing caps spend, so put your own
+proxy in front before more than one client can reach the port.
+
 ## Reference
 
 - `uv run python -m pydoc openreading.server` has the sections "Endpoints", "HTTP status codes",
   "Timeouts", and "Security". `uv run python -m pydoc openreading.server.app` lists every
   environment variable.
 - `uv run openreading serve --help` documents `--host`, `--port`, `--cors-origin`, and `--env-file`.
+  It says nothing about authentication, which is off until `OPENREADING_API_KEYS` names at least
+  one token. Read step 5 above before you start a key-holding process.
 - [JSON Schemas](../schemas/README.md), and the OpenAPI page at `/docs`. It answers 200 while auth
   is off. Once step 5 turns auth on, `/docs` and `/openapi.json` both answer 401 without a bearer,
   so a browser tab cannot open them and a client must send the header itself.
@@ -308,10 +433,15 @@ sample through `/v1/parse` and `/v1/batch`, asserts schema-valid responses, and 
 - Rate limiting, spend accounting, and TLS are not provided here by design. Put your own reverse
   proxy in front (`openreading.server` docstring, "Security": "What this does NOT add: rate
   limiting, spend accounting, transport encryption").
+- A metrics or tracing surface. There is no `/metrics`, no counters, no request id, and no trace
+  hook, and with auth on an unknown path answers 401 rather than 404, so a probe cannot tell "not
+  implemented" from "wrong token". [Measure what you can](#measure-what-you-can) names what to
+  collect instead.
 - A durable job store and server-side resume. The `openreading.server` docstring says under
   "Endpoints", `POST /v1/jobs`: "there is no server-side resume". The `openreading.ledger`
   docstring says under "The substrate contract": "The `/v1/jobs` store stays in-memory,
-  per-process".
+  per-process". [Restart, and what it costs a client](#restart-and-what-it-costs-a-client) shows
+  what a client sees when that store goes away.
 - A `deadline_ms` field over HTTP, so a long hosted job hits 504 at 120 s (`openreading.server`
   docstring, "HTTP status codes", the Timeouts paragraph: "no `deadline_ms` field or query param").
 - Webhook signature verification for `chunkr` and `open-ocr` (`openreading.server` docstring,

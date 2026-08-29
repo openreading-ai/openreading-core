@@ -9,6 +9,10 @@ Invariants shared by every subcommand
 -------------------------------------
 - `--env-file PATH` is accepted everywhere (default `./.env` when present). It never overrides an
   already-set process variable, so an exported value always beats the file.
+- `openreading --version` prints `openreading <version>` on stdout and exits 0, with no
+  subcommand -- the same string as `openreading.__version__` and the `version` field of the
+  server's `GET /healthz`, so an incident's first question has an answer that does not require a
+  running server.
 - stdout carries ONLY the JSON envelope (or the rendered report). Progress, cost preflight,
   backend chatter (stdout is redirected during the run) and every error line go to stderr, so
   `> out.json` is always safe. stderr lines carry a bracket tag. `[<command>]` (`[route]`,
@@ -389,6 +393,20 @@ depends on this one.) Binding any host other than `127.0.0.1` prints a warning: 
 behind your own auth/proxy. The server never reads the working directory for a config -- pass
 `OPENREADING_CONFIG`.
 
+Startup and readiness. The listening socket is claimed BEFORE uvicorn is handed control, so a
+port conflict is one `[serve] cannot bind ...` line and exit 3 with nothing served, and every
+uvicorn startup line that follows is true when it prints. (Left to uvicorn, the order is
+lifespan-then-bind: `INFO: Application startup complete.` is logged before the port is claimed,
+so a readiness gate grepping the log passed a server that was about to die of a conflict.) The
+one line this CLI prints is `[serve] listening on http://HOST:PORT -- readiness: GET /healthz`,
+after the bind, naming the port the kernel actually gave (`--port 0` resolves to a real one).
+Do not gate on any log line: poll `GET /healthz` until it answers 200. Logging otherwise is
+uvicorn's own -- access logs on stdout, lifecycle on stderr, no request id, no level knob.
+
+Signals. SIGTERM is uvicorn's while the server runs: it drains in-flight requests, logs the
+shutdown, and the process exits 143. `serve` is the one command excluded from this CLI's own
+SIGTERM handling, which would otherwise fire after that clean shutdown.
+
 Exit codes
 ----------
   0  success.
@@ -407,7 +425,10 @@ Exit codes
      plan-exhausted `route --run`, `serve` without its extra or with a malformed
      `OPENREADING_API_KEYS` / `OPENREADING_API_KEY_SCOPES` (one `[serve] ...` line naming the
      bad entry's position, never its value), an unresolvable/empty `leaderboard` dataset, a
-     `resume` refusal / unknown run / expired payloads, an unknown `backends --check` slug, or
+     `resume` refusal / unknown run / expired payloads, an `OPENREADING_LEDGER` pointing at a
+     path this process cannot journal to (`ledger_unavailable`; an armed ledger is a hard
+     dependency, so the run fails rather than parsing unjournalled), an unknown
+     `backends --check` slug, or
      a `RetryableError` reaching a directly-named backend on `parse` / `compare` (rate-limit
      exhaustion, or a poll job past its deadline /
      `openreading.router.driver.MAX_CONSECUTIVE_FAULTS` -- a named backend has no next rung to
@@ -416,10 +437,25 @@ Exit codes
      batch `parse`: partial -- some items failed.
   5  `compare`: inputs are not schema-valid responses, or `--from` on a run that kept no
      candidates.
-  6  interrupted, resumable: `parse` was interrupted (Ctrl-C) while `OPENREADING_LEDGER` was
-     armed. The run did not fail; it parked mid-walk. A single-document run names its own
-     `RUN_ID` for `openreading resume`; a batch names none (batch-level resume is out of scope).
-     Unarmed, an interrupt stays an ordinary interrupt.
+  6  interrupted, resumable: `parse` was interrupted while `OPENREADING_LEDGER` was armed --
+     Ctrl-C or SIGTERM, which the CLI turns into the same interrupt so a supervisor's stop
+     signal parks a run the way an interactive one does. The run did not fail; it parked
+     mid-walk. A single-document run names its own `RUN_ID` for `openreading resume`; a batch
+     names none (batch-level resume is out of scope).
+143  terminated by SIGTERM with no ledger armed: nothing was resumable, so one `[openreading]`
+     line says so and names `OPENREADING_LEDGER`. Unarmed Ctrl-C is unchanged -- it stays an
+     ordinary `KeyboardInterrupt` (traceback, 130), byte-for-byte the pre-ledger behaviour.
+
+Signals: SIGINT and SIGTERM both reach the interrupt path above; SIGKILL cannot be caught and
+journals nothing. Only the FIRST stop signal acts. A second SIGTERM is ignored, because in
+practice it is the same stop arriving twice (a forwarding parent such as `uv run` or a container
+init shim, or a `killpg` that reaches both a wrapper and the process it wraps), and raising a
+second interrupt into the shutdown the first one started is what strands the run mid-teardown.
+A stop that must not wait escalates to SIGKILL, not to another SIGTERM. A process started with
+SIGINT already ignored -- a shell's asynchronous `&` job
+in a non-interactive shell, `nohup`, a masking supervisor -- keeps ignoring it, because a parent
+that shielded this process said so on purpose and reinstalling a handler over that shield would
+break it for everyone downstream. Send SIGTERM to such a process, or run it in the foreground.
 """
 
 from __future__ import annotations

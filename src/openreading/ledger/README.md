@@ -47,6 +47,23 @@ surface. A strategy batch journals one run per item rather than one for the whol
 <id>`, `--no-strategy`, and a native batch journal nothing, even with the variable set. When the
 variable is unset, every surface behaves byte-identically to a build with no ledger at all.
 
+Arming turns the journal into a hard dependency rather than a side-car. A ledger path the process
+cannot write stops the whole parse, and no partial answer reaches stdout:
+
+```bash
+OPENREADING_LEDGER=./sample.pdf uv run openreading parse sample.pdf --strategy offline_first > nd.json; echo "exit=$?"
+```
+
+```text
+[strategy:offline_first] error: NotADirectoryError: [Errno 20] Not a directory: 'sample.pdf/keys'
+exit=1
+```
+
+**You should see** exit 1 and an empty `nd.json`. A read-only mount, a wrong volume path and a
+directory that is really a file all take this row, and each one fails every parse on that host
+rather than degrading to an unjournalled run. Confirm the path is a writable directory before you
+arm a scheduled job, and treat the ledger volume as part of that job's critical path.
+
 ## Walkthrough
 
 ```bash
@@ -126,7 +143,9 @@ byte-identical](#is-a-resumed-run-byte-identical) below says which field differs
 
 Make a slower document and a two-rung strategy. A rung is one backend in the order the strategy
 tries them. Press <kbd>Ctrl</kbd>+<kbd>C</kbd> about two seconds in, while tesseract is still
-working.
+working. A scheduler's `SIGTERM` takes the same path and prints the same two lines, so a
+supervised run parks the same way an interactive one does ([The command
+line](../cli/README.md#operations) has the full signal table).
 
 ```bash
 uv run python -c 'import fitz; s=fitz.open("sample.pdf"); o=fitz.open(); [o.insert_pdf(s) for _ in range(8)]; o.save("slow.pdf")'
@@ -155,9 +174,27 @@ exit=0
 
 **You should see** the interrupted rung recorded as `cancelled` at interrupt time. On resume that
 rung replays as `cancelled` rather than running again, and the next rung executes for real.
-`explain` labels the replayed rung `skipped(missing_credentials)`. When a resumed step runs pymupdf
-live, PyMuPDF's advisory line lands on stdout before the JSON. Strip it with
-`tail -n +2 resumed-slow.json`.
+`explain` labels the replayed rung `skipped(missing_credentials)`. A resumed step that runs pymupdf
+live sends PyMuPDF's advisory to stderr like every other verb, so `resume … | jq` is safe.
+
+That replay rule has a consequence worth planning for. The rung that was interrupted never runs, so
+a resumed document is answered by the rung behind it, which is the weaker backend the strategy would
+otherwise have reached only on a failure:
+
+```bash
+uv run openreading parse slow.pdf --strategy slow 2>/dev/null | jq -r '.backend.id'
+jq -r '.backend.id' resumed-slow.json
+```
+
+```text
+tesseract
+pymupdf
+```
+
+**You should see** two different backends for one document. Across a corpus with a few
+interruptions the output is no longer homogeneous, and `backend.id` on each response is the field
+that says which items are affected. Group a finished corpus by that field before you report on it,
+and re-run from scratch the documents that came back from the wrong backend.
 
 ### 5. Refusal by name
 
@@ -239,6 +276,16 @@ happened, but not with what content. Retention defaults to 24 hours and is read 
 hosted backend's own retention limit can only tighten it per step. Raise it before the run, never
 after.
 
+Read the comment on the `sleep 1` line as a precondition rather than a decoration. The reaper runs
+only when another run arms the ledger, so `OPENREADING_LEDGER_RETENTION_HOURS` sets the earliest
+moment a payload may be destroyed and never the moment it is. Nothing sweeps on a timer, and there
+is no purge verb to call. A run whose window expired on Friday keeps its key and its document bytes
+all weekend if nothing else runs, which is exactly the quiet period a retention promise is written
+for. When you owe someone a deletion deadline, schedule a sweep of your own that does not depend on
+how often the pipeline runs: a cron entry that arms the ledger against the sample every hour is
+enough to fire the reaper, and deleting the file under `keys/` yourself has the same effect as the
+last line above.
+
 Destroying the key deletes one file, the key itself. Every other file stays where it was, and the
 blobs stay on disk as ciphertext nothing can now read. The header keeps `document.digest`, which is
 the SHA-256 of the document's own bytes, along with `document.size_bytes`, `document.media_type`,
@@ -264,6 +311,8 @@ are in `uv run python -m pydoc openreading.ledger`. The ones you meet are these.
 
 - Zero delta (L1). When the ledger is unarmed, no file is touched and every byte of output is
   unchanged. Without this rule a ledger would change behaviour for people who never asked for one.
+  L1 says nothing about the armed case, and the armed case is the opposite: a journal that cannot
+  be written fails the parse, as [Mental model](#mental-model) shows.
 - An `attempted` record is written before dispatch and a terminal record after it. A crash between
   the two leaves an orphan, and the idempotency key, one value per identical request, lets a retry
   reconcile it. Without this rule a vendor job could bill and never be recorded.
@@ -312,7 +361,10 @@ Each line names the `openreading.ledger` docstring section that records it.
 - `DELETE /v1/jobs/{job_id}`, a durable job store, and `openreading.run(..., ledger=)` ("Surfaces").
 - Whole-path zero-data-retention shipped per step, and cross-run rejection in `BlobStore.get`
   ("Retention, ZDR, erasure").
-- SIGTERM handling, since only Ctrl-C is caught ("Operational contract").
+- A verb that lists resumable runs. After a `SIGKILL` the only way back to a run id is reading
+  `$OPENREADING_LEDGER/*.header.json` by hand ("Operational contract").
+- A retention sweep on a timer. The reaper runs at arm time only, as the recipe above shows
+  ("Retention, ZDR, erasure").
 
 ## See also
 

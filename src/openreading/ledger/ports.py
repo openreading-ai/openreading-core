@@ -22,6 +22,7 @@ from typing import Any, Protocol
 
 from openreading.ledger.descriptor import ExecutorDescriptor
 from openreading.ledger.step import BlobRef, ExecResult, StepRef, StepRequest, StepResult
+from openreading.types.errors import TerminalError
 
 
 class PayloadExpired(Exception):
@@ -31,6 +32,27 @@ class PayloadExpired(Exception):
     def __init__(self, run_id: str) -> None:
         super().__init__(f"run {run_id!r}: key destroyed, payload unrecoverable")
         self.run_id = run_id
+
+
+class LedgerArmingError(TerminalError):
+    """`$OPENREADING_LEDGER` names a path this process cannot journal to.
+
+    A `TerminalError` so every surface already handles it: the CLI's exit-3 "cannot run" rung with
+    one tagged line, the server's coded error body. It is deliberately fatal — L1's zero-delta
+    promise covers the UNARMED case only, and a run that cannot be journalled must not quietly
+    proceed as if it were resumable — but the operator has to be told which knob did it. The raw
+    `PermissionError`/`NotADirectoryError` carried an errno and a path and never the variable's
+    name, arriving at the generic exit-1 "unexpected error" rung as though the parse had a bug.
+    """
+
+    def __init__(self, root: str, cause: OSError) -> None:
+        super().__init__(
+            f"cannot use the run journal at OPENREADING_LEDGER={root!r}: "
+            f"{cause.strerror or cause}. Point it at a writable directory, or unset it to run "
+            "without a journal (an unjournalled run is not resumable).",
+            backend_code="ledger_unavailable",
+        )
+        self.root = root
 
 
 class Executor(Protocol):

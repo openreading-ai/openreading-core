@@ -69,6 +69,32 @@ _ALWAYS_AVAILABLE = {
 }
 
 
+# Keys the grammar accepts and no engine code reads (model.py §6.1 `max_attempts`, §8
+# `defaults.advanced`). They are refused rather than warned about, and refused rather than left
+# silent, because each one is a safety limit: an author writes it to bound a run that spends money
+# at a vendor, and every surface that could have contradicted them agreed instead — the schema
+# accepted the key, `validate` said OK, and `describe` narrated "Makes at most 1 attempts." back.
+# A kill switch that reports itself armed and is not is worse than no kill switch, so the config
+# that declares one now fails to validate, and the message names the ceiling that does hold.
+_UNENFORCED = {
+    "max_attempts": (
+        "budget.max_attempts is not enforced — no engine code reads it, so this caps nothing and"
+        " the run makes as many attempts as the tree allows. Remove it; bound the run with"
+        " budget.max_duration or limits.max_duration_per_doc, which are enforced"
+    ),
+    "circuit_breaker": (
+        "defaults.advanced.circuit_breaker is not enforced — no engine code reads it, so no"
+        " backend is ever benched after repeated failures and skipped(circuit_open) is never"
+        " emitted. Remove it; there is no per-backend breaker in this version"
+    ),
+    "attempt_timeout": (
+        "defaults.advanced.attempt_timeout is not enforced — no engine code reads it, so an"
+        " attempt is bounded only by the enclosing deadline. Remove it; bound the run with"
+        " budget.max_duration or limits.max_duration_per_doc, which are enforced"
+    ),
+}
+
+
 @dataclass(frozen=True)
 class ValidationIssue:
     level: str  # "error" | "warning"
@@ -155,6 +181,13 @@ def validate_config(
     if raw is not None:
         _scan_secrets(raw, "", ctx)
 
+    advanced = config.defaults.advanced if config.defaults else None
+    if advanced is not None:
+        if advanced.circuit_breaker is not None:
+            ctx.err("defaults.advanced.circuit_breaker", _UNENFORCED["circuit_breaker"])
+        if advanced.attempt_timeout is not None:
+            ctx.err("defaults.advanced.attempt_timeout", _UNENFORCED["attempt_timeout"])
+
     for name in config.strategies:
         try:
             tree = normalize_strategy(name, config)  # resolves extends (cycles, unknown base)
@@ -169,7 +202,6 @@ def validate_config(
             f"strategies.{name}",
             ctx,
             ancestor_deadline_ms=None,
-            ancestor_max_attempts=None,
         )
         if info is not None:  # desugar-computed Plain warnings (§8 rows needing the original body)
             for rel, message in info.warnings:
@@ -349,7 +381,6 @@ def _walk(
     ctx: _Ctx,
     *,
     ancestor_deadline_ms: int | None,
-    ancestor_max_attempts: int | None,
 ) -> None:
     # disagreement_over compares parallel branches (§11) — valid only on a pick:best parallel step.
     is_best_parallel = "parallel" in node and node.get("pick") == "best"
@@ -367,26 +398,11 @@ def _walk(
 
     budget = node.get("budget") or {}
     node_dur_ms = _parse_duration_ms(budget.get("max_duration"))
-    node_max_attempts = budget.get("max_attempts")
-
-    # child-budget-exceeds-parent warning (clamped at run time)
-    if (
-        node_max_attempts is not None
-        and ancestor_max_attempts is not None
-        and node_max_attempts > ancestor_max_attempts
-    ):
-        ctx.warn(
-            f"{path}.budget",
-            f"max_attempts {node_max_attempts} exceeds the enclosing "
-            f"{ancestor_max_attempts} — it will be clamped down",
-        )
+    if budget.get("max_attempts") is not None:
+        ctx.err(f"{path}.budget.max_attempts", _UNENFORCED["max_attempts"])
 
     eff_deadline = _min_opt(node_dur_ms, ancestor_deadline_ms)
-    eff_attempts = _min_opt(node_max_attempts, ancestor_max_attempts)
-    child_kw = dict(
-        ancestor_deadline_ms=eff_deadline,
-        ancestor_max_attempts=eff_attempts,
-    )
+    child_kw = dict(ancestor_deadline_ms=eff_deadline)
 
     if "backend" in node:
         _check_leaf(node, path, ctx, eff_deadline)

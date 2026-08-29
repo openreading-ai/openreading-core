@@ -25,9 +25,11 @@ Environment this module reads itself
 - `OPENREADING_LEDGER` (a directory path; arms the run journal). Read here in exactly one place:
   `_cmd_parse_batch`'s KeyboardInterrupt handler, where it decides between exit 6 ("interrupted,
   per-item runs may be resumable") and re-raising the bare interrupt. Unset, a Ctrl-C in a batch
-  is an ordinary KeyboardInterrupt, byte-for-byte the pre-ledger behavior. The single-document
-  path does not read the variable: it relies on `api.run`'s `on_run_armed` callback, which fires
-  only when the ledger actually armed for THAT run, so a named-backend / `auto` run (which never
+  is an ordinary KeyboardInterrupt, byte-for-byte the pre-ledger behavior (an unset-ledger SIGTERM
+  is caught one level up, by `_terminate_as_interrupt`, and exits 143 with one line). The
+  single-document path does not read the variable: it relies on `api.run`'s `on_run_armed`
+  callback, which fires only when the ledger actually armed for THAT run, so a named-backend /
+  `auto` run (which never
   journals) cannot print a run id that does not exist. Which runs journal is `api._arm_ledger`'s
   call graph, documented in `openreading.api` and internal/design/ledger.md.
 
@@ -44,10 +46,12 @@ import argparse
 import contextlib
 import json
 import os
+import signal
 import sys
 from pathlib import Path
 from typing import Any
 
+from openreading import __version__ as openreading_version
 from openreading import api, schemas
 from openreading.adapters.registry import BUILTIN_ADAPTERS, build_registry, make_adapter
 from openreading.batch.runner import MAX_BATCH_JOBS, JobsLimitError
@@ -259,8 +263,9 @@ def cmd_parse(args) -> int:
         # BL-133: the single-document sibling of _cmd_parse_batch's own (SourceLimitError,
         # SourceNotFoundError) handling below — same exit code (2), same one-tagged-line shape.
         # Without this clause, SourceNotFoundError (an OSError subclass) still fell to the generic
-        # except Exception below rather than exit 2 (the openreading.cli docstring's own documented code for `parse`:
-        # an unresolvable source), landing at the wrong-but-clean exit 1 instead.
+        # except Exception below rather than exit 2 (the openreading.cli docstring's own
+        # documented code for `parse`: an unresolvable source), landing at the wrong-but-clean
+        # exit 1 instead.
         print(f"[{label}] {e}", file=sys.stderr)
         return 2
     except api.PolicyError as e:
@@ -442,7 +447,12 @@ def cmd_resume(args) -> int:
     never falls back to a fresher config. Takes exactly `RUN_ID`; every other option comes from
     the ledger itself (§10)."""
     try:
-        result = api.resume_run(args.run_id)
+        # A resumed walk dispatches live for every step not yet terminal in the journal, so a
+        # backend prints its stdout advisories here exactly as a fresh `parse` does — and `resume`
+        # was the one command not redirecting them, breaking "stdout is one JSON document" on the
+        # recovery path, where the caller is most likely to be a script piping into `jq`.
+        with contextlib.redirect_stdout(sys.stderr):
+            result = api.resume_run(args.run_id)
     except HeaderMismatch as e:
         for field, old, new in e.fields:
             # §10's own transcript names this case "openreading.yaml changed" specifically — every
@@ -553,7 +563,48 @@ def cmd_serve(args) -> int:
             "spends your vendor keys. Put it behind your own auth/proxy.",
             file=sys.stderr,
         )
-    uvicorn.run(app, host=args.host, port=args.port)
+    # Claim the listening socket HERE and hand uvicorn the bound socket, rather than a host/port
+    # for it to claim later. uvicorn's own startup order is lifespan-first, bind-second, so
+    # `INFO: Application startup complete.` is logged BEFORE the port is claimed: a readiness gate
+    # grepping the log for that line passes a server that is about to die of a port conflict, and
+    # the operator reads a healthy startup followed by an exit, with no line joining the two.
+    # Binding first makes every startup line uvicorn prints true at the moment it prints it, and
+    # turns a conflict into what every other "cannot run" on this CLI is — one tagged line, exit 3.
+    # (Even so, no log line is the readiness contract: poll `GET /healthz` until it answers.)
+    #
+    # Done by hand rather than with `uvicorn.Config.bind_socket()` only because that helper logs
+    # its own "Uvicorn running on ..." line, which uvicorn then logs again when it starts serving;
+    # two identical startup lines is a worse thing to hand a responder than these six. Otherwise
+    # it is the same sequence, `listen()` included — `loop.create_server(sock=...)` does that.
+    import socket
+
+    sock = socket.socket(family=socket.AF_INET6 if ":" in args.host else socket.AF_INET)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind((args.host, args.port))
+    except OSError as e:
+        sock.close()
+        print(
+            f"[serve] cannot bind {args.host}:{args.port}: {e.strerror or e} — free it or pass a "
+            "different --port",
+            file=sys.stderr,
+        )
+        return 3
+    sock.set_inheritable(True)
+    # uvicorn suppresses its own "Uvicorn running on ..." line when it is handed a socket (it
+    # assumes `bind_socket()` logged one), so this replaces it — and improves on it: it is printed
+    # only once the port is genuinely claimed, it reports the port the kernel actually gave us
+    # (`--port 0`), and it names the readiness check, because no log line is a readiness contract
+    # and a gate that greps one is a gate that can be fooled.
+    bound_host, bound_port = sock.getsockname()[:2]
+    print(
+        f"[serve] listening on http://{bound_host}:{bound_port} — readiness: GET /healthz",
+        file=sys.stderr,
+    )
+    try:
+        uvicorn.Server(uvicorn.Config(app, host=args.host, port=args.port)).run(sockets=[sock])
+    finally:
+        sock.close()
     return 0
 
 
@@ -1383,6 +1434,16 @@ def cmd_compare(args) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="openreading", description="Unified document-processing CLI.")
+    # Declared before the required subcommand so `openreading --version` answers instead of failing
+    # the "command is required" check: step zero of every incident is "what is deployed?", and the
+    # version was otherwise reachable only from pyproject.toml, `openreading.__version__`, or
+    # `GET /healthz` on a server that may be the thing that is down.
+    p.add_argument(
+        "--version",
+        action="version",
+        version=f"openreading {openreading_version}",
+        help="print the installed openreading version and exit",
+    )
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
         "--env-file", default=None, help="path to a .env file (default: ./.env if present)"
@@ -1734,7 +1795,127 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+@contextlib.contextmanager
+def _terminate_as_interrupt(*, enabled: bool = True):
+    """Make SIGTERM arrive as `KeyboardInterrupt`, so a scheduler's stop signal takes the same path
+    Ctrl-C already does, and is restored on the way out.
+
+    Python's default disposition for SIGTERM kills the process outright: no exception, so no
+    `except KeyboardInterrupt` clause runs, no exit code is chosen, nothing is printed. Under the
+    ledger that meant the interrupted step kept its `attempted` record with no terminal record
+    beside it — indistinguishable on resume from a crash before dispatch, so the rung re-dispatched
+    and was billed a second time. Since every supervisor stops a process with SIGTERM (systemd,
+    Kubernetes, a cron timeout wrapper, a cancelled CI job), the resume story was unreachable from
+    every deployment shape that most needs it, and reachable only from a terminal.
+
+    Raising `KeyboardInterrupt` rather than adding a parallel shutdown path is the point: the exit
+    code, the "resumable" line with its run id, and the `cancelled` journal record asyncio writes
+    when the walk unwinds are all existing, tested consequences of Ctrl-C, and a mirror cannot
+    drift away from them.
+
+    Two dispositions are left alone. An inherited `SIG_IGN` means a parent deliberately shielded
+    this process (`nohup`, a shell's asynchronous `&` job, a masking supervisor); reinstalling a
+    handler over that shield would break a contract someone set on purpose. And `signal.signal`
+    only works on the main thread, so an embedded caller driving `main()` from a worker thread gets
+    today's behaviour rather than a `ValueError`. `enabled=False` is the third: `serve` hands the
+    process to uvicorn, which installs its own handlers for a graceful drain and then re-raises the
+    captured signal after restoring what was there before — so a handler of ours would fire AFTER a
+    clean shutdown and offer resume advice about a journal a server never arms.
+
+    Where the interrupt is raised matters as much as that it is raised
+    ----------------------------------------------------------------
+    A `KeyboardInterrupt` thrown from a signal handler lands in whatever frame the main thread
+    happened to be executing, and two of those frames belong to asyncio's own event-loop
+    bookkeeping. `BaseEventLoop.run_forever` marks the loop running in `_run_forever_setup()` and
+    unmarks it in `_run_forever_cleanup()`; the setup call sits OUTSIDE `run_forever`'s `try` and
+    the cleanup call is the whole of its `finally`, so an exception raised inside either one leaves
+    `loop.is_running()` true with nothing left to correct it. `asyncio.run`'s teardown then reaches
+    `loop.close()`, which refuses — `RuntimeError: Cannot close a running event loop` — from inside
+    a `finally`, where it REPLACES the interrupt that was unwinding. Every clause keyed on the
+    interrupt is bypassed at once: no exit 6, no run id, no `cancelled` record, no exit 143, no
+    one-line message. What the caller gets instead is `[strategy:<name>] error: RuntimeError: ...`
+    and exit 1, which reads like the document failed to parse. Both rules below exist to keep the
+    interrupt out of those two frames.
+
+    Rule one: the interrupt is raised AT MOST ONCE. A repeat SIGTERM is not a second decision, it
+    is the same stop arriving down a second path — every signal-forwarding parent (`uv run`, tini
+    and the other container init shims, any supervisor whose `killpg` reaches both the wrapper and
+    the wrapped process) delivers it twice by construction. The first interrupt is already
+    unwinding by then, and it unwinds THROUGH `_run_forever_cleanup`, so a second interrupt raised
+    on top of it is aimed squarely at the window above. This is the flake that was measured: 32 of
+    40 `uv run` + `killpg` runs died at exit 1 on the RuntimeError, against 0 of 119 when the
+    signal reached the process by one path only. Ignoring the repeat costs nothing operationally —
+    a supervisor's escalation is SIGKILL, which is not ours to catch and still works.
+
+    Rule two: when asyncio has installed its own SIGINT handler, re-raise as SIGINT and let that
+    handler do the work. `asyncio.Runner` installs one for the whole of `run_until_complete`, and
+    it is interrupt-safe by construction: it cancels the main task and wakes the loop instead of
+    throwing through the loop's internals, and the `KeyboardInterrupt` is then raised by `Runner`
+    itself once the loop has unwound and closed. That covers the frame a run is in for essentially
+    all of its wall time. It is also the more faithful mirror — Ctrl-C reaches exactly this
+    handler — and it keeps the `cancelled` journal record, which is written by the cancellation
+    path and not by the interrupt. We delegate only to a handler that is genuinely installed and
+    callable: delegating to an ignored SIGINT (`nohup`, an asynchronous `&` job) would silently
+    turn SIGTERM into a no-op, which is a worse failure than the one being fixed.
+
+    What is left: a first SIGTERM arriving during `asyncio.run`'s own teardown, after `Runner` has
+    restored SIGINT and while it is closing the loop. That is a window of microseconds at the very
+    end of a run, and it is the same window Ctrl-C has had all along — closing it needs a fix in
+    CPython, not here.
+    """
+    if not enabled:
+        yield
+        return
+    try:
+        previous = signal.getsignal(signal.SIGTERM)
+    except (AttributeError, ValueError):  # pragma: no cover - no SIGTERM on this platform
+        yield
+        return
+    if previous is signal.SIG_IGN:
+        yield
+        return
+
+    fired: list[int] = []
+
+    def _raise(signum, _frame):
+        if fired:
+            return  # rule one: the same stop, arriving again — see this function's docstring
+        fired.append(signum)
+        sigint = signal.getsignal(signal.SIGINT)
+        if callable(sigint) and sigint is not signal.default_int_handler:
+            # rule two: asyncio (or whoever else took SIGINT over) knows how to unwind itself.
+            # `raise_signal` runs that handler before returning, so control comes back here only
+            # when it chose not to raise — which is precisely the safe outcome we want.
+            signal.raise_signal(signal.SIGINT)
+            return
+        raise KeyboardInterrupt
+
+    try:
+        signal.signal(signal.SIGTERM, _raise)
+    except (OSError, ValueError):  # pragma: no cover - not the main thread
+        yield
+        return
+    try:
+        yield
+    except KeyboardInterrupt:
+        if not fired:
+            raise  # a real Ctrl-C on an unarmed run: pre-ledger behaviour, unchanged
+        # An armed run never reaches here — its handler already returned 6 with a run id. Unarmed
+        # there is nothing to resume, and the mirror has to stop: letting the interrupt unwind
+        # would report 130 (SIGINT) for a signal the caller did not send, over a traceback that
+        # costs a responder their first minute. One line, and the conventional 128 + SIGTERM.
+        print(
+            "[openreading] terminated by SIGTERM; no run journal was armed, so nothing is"
+            " resumable — set OPENREADING_LEDGER to a directory to make the next one resumable",
+            file=sys.stderr,
+        )
+        raise SystemExit(143) from None
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     load_dotenv(getattr(args, "env_file", None))  # ./.env or --env-file; never overrides set env
-    return args.func(args)
+    with _terminate_as_interrupt(enabled=args.func is not cmd_serve):
+        return args.func(args)

@@ -65,8 +65,13 @@ POST /v1/batch
     server takes explicit documents. A per-item failure never aborts the batch: 200 even when
     `status.state` is `partial`; `documents: []` → 200 with one `empty_batch` warning and
     `summary.total == 0`, mirroring the CLI's empty-directory behaviour. Unknown named backend →
-    404; non-list `documents`, non-integer `jobs`, or any unrecognised body key (`max_jobs`
-    included) → 400.
+    404; non-list `documents`, non-integer `jobs`, any unrecognised body key (`max_jobs`
+    included), or a non-string `backend` → 400. That last one is the shape trap: `backend` here is
+    ONE string shared by every item, while /v1/parse and the vendored request schema take the
+    object `{"id": ...}`, so a client reusing its own /v1/parse body builder sends the object and
+    is refused by name. It is refused rather than reduced to its `id` because the object also
+    carries `operation`, `version`, `credentials_ref` and `runtime` — keeping only the slug would
+    silently run a different operation than the caller asked for.
     Limits: `jobs` < 1 is clamped to 1 (no legitimate intent behind a non-positive count);
     `jobs` > MAX_BATCH_JOBS (32, a real ThreadPoolExecutor size) and `documents` longer than
     MAX_BATCH_DOCUMENTS (200 = `batch.sources.DEFAULT_MAX_ITEMS`, the CLI directory-expansion
@@ -154,6 +159,11 @@ HTTP status codes
      message names the var to check, never the key)
 502  plan exhausted — every backend failed (`plan_exhausted`, `trail`) — or other terminal error
 504  deadline exceeded, retryables exhausted (`retryable_exhausted`)
+500  an unhandled server error. This is the ONE status that does not carry the error body below:
+     the ASGI framework returns the plain text `Internal Server Error`, so a client parsing every
+     response as the envelope crashes on exactly the response it least expected. Branch on the
+     status before parsing, and treat a 500 as a bug to report rather than a caller-side
+     condition to handle — every condition this server knows about has a coded row above.
 
 Error body — also the shape of a failed job's `error` (`missing_env` only for missing
 credentials, `trail` only for `plan_exhausted`):

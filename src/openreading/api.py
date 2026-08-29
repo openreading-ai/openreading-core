@@ -251,7 +251,7 @@ from openreading.ledger.header import (
 from openreading.ledger.inline import InlineExecutor, descriptor_digest
 from openreading.ledger.jsonl import JsonlJournal
 from openreading.ledger.localfs import LocalFsBlobStore, LocalFsKeyStore
-from openreading.ledger.ports import Executor
+from openreading.ledger.ports import Executor, LedgerArmingError
 from openreading.ledger.retention import (
     DEFAULT_RETENTION_HOURS,
     reap,
@@ -522,7 +522,25 @@ def route(
     return Router(build_registry(), router_config(policy)).route(req)
 
 
-def _arm_ledger(
+def _arm_ledger(*args, **kwargs) -> Executor | None:
+    """`_arm_ledger_unguarded` with one guarantee added: every OSError it raises is reported as the
+    ledger's, by name.
+
+    Arming is entirely filesystem work under `$OPENREADING_LEDGER` — creating the key and blob
+    stores, the reaper sweep, the retention stamp, the header, the document blob — and it happens
+    before any backend runs, so nothing else in this call can raise an OSError to be confused with
+    it. Left bare, an unwritable or non-directory ledger root surfaced as `[strategy:s] error:
+    PermissionError: [Errno 13] ...` at exit 1, the "unexpected error" rung, naming a path and an
+    errno but never the variable that put it there — so an operator who had just turned resume on
+    read it as a bug in the parse.
+    """
+    try:
+        return _arm_ledger_unguarded(*args, **kwargs)
+    except OSError as e:
+        raise LedgerArmingError(os.environ.get("OPENREADING_LEDGER", ""), e) from e
+
+
+def _arm_ledger_unguarded(
     run_id: str,
     req,
     registry,

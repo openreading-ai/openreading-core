@@ -282,8 +282,10 @@ def _budget_sentence(tree: dict[str, Any]) -> str:
     bits: list[str] = []
     if budget.get("max_duration"):
         bits.append(f"stops after {budget['max_duration']}")
-    if budget.get("max_attempts"):
-        bits.append(f"makes at most {budget['max_attempts']} attempts")
+    # `max_attempts` is deliberately not described. No engine code reads it (model.py §6.1), so
+    # every sentence about it was a promise the run does not keep — and this summary is printed by
+    # `strategy validate`, the one place an author looks for confirmation that the limit is real.
+    # `validate` now refuses the key outright (strategies.validate._UNENFORCED).
     if not bits:
         return ""
     joined = "; ".join(bits)

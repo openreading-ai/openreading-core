@@ -43,12 +43,16 @@ in-memory, per-process, no server-side resume -- is unjournaled) journal; `--bac
 `submit_many` batches journal nothing. A batch inherits whichever row its items resolve to (one
 run per item).
 
-Exit codes (CLI): `6` = interrupted, resumable -- Ctrl-C while armed. The run did not fail; it
-parked. A single document prints `[parse] interrupted; run <id> is resumable` and the
-`openreading resume <id>` line; a batch prints only that per-item runs may be resumable
-(batch-level resume is not supported, no id is named). Unarmed, Ctrl-C stays an ordinary
-interrupt (130), never 6 -- on the single-document path, which keys on a run having actually
-armed. The batch path is looser: `parse <dir>` returns 6 on Ctrl-C whenever `OPENREADING_LEDGER`
+Exit codes (CLI): `6` = interrupted, resumable -- Ctrl-C or SIGTERM while armed. The two are one
+path, not two: `openreading.cli.app._terminate_as_interrupt` turns a supervisor's stop signal
+into the same `KeyboardInterrupt` a keystroke raises, so both leave the same records and the same
+exit code. The run did not fail; it parked. A single document prints `[parse] interrupted; run
+<id> is resumable` and the `openreading resume <id>` line; a batch prints only that per-item runs
+may be resumable (batch-level resume is not supported, no id is named). Unarmed there is nothing
+to resume and the two part company on the exit code alone: Ctrl-C stays an ordinary interrupt
+(130), SIGTERM prints one line and exits 143 (128 + SIGTERM, the code a supervisor tests for),
+neither ever 6 -- on the single-document path, which keys on a run having actually armed. The
+batch path is looser: `parse <dir>` returns 6 on either signal whenever `OPENREADING_LEDGER`
 is merely set, whether or not any item armed (a `--backend <id>` batch journals nothing and still
 exits 6). A refused resume, an unknown `RUN_ID`, `OPENREADING_LEDGER` unset on
 `resume`, and a resume whose recorded payloads have expired (`PayloadExpired`, the shredded-key
@@ -61,6 +65,14 @@ L1  Zero delta. No ledger configured => every surface's bytes (stdout, stderr, e
     identical to the pre-Ledger build; no file is touched. Mechanically the walk still goes
     through `ctx.exec`, but the executor is `InlineExecutor(journal=NullJournal(), blobs=None)`:
     `append` is a no-op, `get` always misses, so replay is structurally impossible.
+    L1 covers the UNARMED case only. Once `OPENREADING_LEDGER` is set the journal is a HARD
+    dependency, not a side-car that degrades: an unwritable or non-directory root fails the whole
+    run (`api._arm_ledger` -> `LedgerArmingError`, a `TerminalError`: CLI exit 3, one tagged line
+    naming the variable and the path, stdout empty). Deliberate -- a run that cannot be journalled
+    must not proceed as though it were resumable, since the operator's next move on a failure is
+    `openreading resume` and there would be nothing to resume from. Operationally: the ledger
+    volume is on the critical path of every armed parse, so size it, monitor it for space and
+    permissions, and unset the variable rather than let a bad volume take parsing down with it.
 L2  The compliance gate exists exactly once, orchestration-side; its OUTPUT (the eligible set
     plus descriptor digests) is pinned. An executor does a digest-equality check at `exec`,
     before any I/O: a backend outside the pinned set is `ComplianceRefused(not_in_pinned_set)`,
@@ -496,11 +508,17 @@ steps, let in-flight `submit` finish (the billing moment), journal `backend_job_
 never the vendor job, the run continuing and retrievable by `run_id`; a kill switch would be a
 journal-side gate before each `submit`, not a config reload (a fleet already holding work
 ignores config); dead letters would go to a queue owned by the run's initiator, not an on-call
-rotation (per-document data failures, not infrastructure). Shipped: SIGTERM is the interpreter
-default (immediate termination, nothing journaled -- a kill between vendor-accept and the
-terminal record leaves the `attempted`-only orphan the journal contract above reconciles by
-idempotency key); the only signal the CLI handles is Ctrl-C, caught as `KeyboardInterrupt` for
-exit 6. Paging guidance, likewise design: cost-per-run p99 against `budget:`, steps in
+rotation (per-document data failures, not infrastructure). Shipped: the CLI raises
+`KeyboardInterrupt` on SIGTERM as well as on Ctrl-C (`openreading.cli.app._terminate_as_interrupt`),
+so a supervisor's stop signal ends the same way an interactive one does -- exit 6, the resumable
+line and its run id, and the in-flight step recorded `cancelled` rather than left an
+`attempted`-only orphan that re-dispatches and is billed again on resume. Only the first stop
+signal does that: a duplicate from a forwarding parent (`uv run`, a container init shim, a
+`killpg` that reaches a wrapper too) is ignored, because raising a second interrupt into the
+teardown the first one started is what strands the event loop. The escalation is unchanged and
+still works -- SIGKILL journals nothing, and a kill landing between vendor-accept and the terminal
+record leaves the orphan the journal contract above reconciles by idempotency key. Paging
+guidance, likewise design: cost-per-run p99 against `budget:`, steps in
 `submitted` past 2x declared latency (the orphan detector, the only signal that catches a missed
 journal write), and dead-letter arrival rate -- not queue depth, not individual adapter
 failures, and not `decider_downgraded: unavailable` (no production `DeciderPort` exists, so it
