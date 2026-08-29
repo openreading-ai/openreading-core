@@ -45,15 +45,16 @@ of them. You can ask for four things, each of which answers a problem you alread
 such as PDF, images, office files, HTML and EPUB.
 [The adapter catalog](src/openreading/adapters/README.md) lists the formats per backend. The
 router skips a backend that cannot read your file and records the drop as `unsupported_format`.
-PyMuPDF and Tesseract run locally with no key, while a hosted backend needs your vendor key.
+PyMuPDF and Tesseract run locally with no key, while a hosted backend needs your vendor key. If
+you have no document to hand, two synthetic ones ship in
+[`examples/`](examples/README.md) and every command on this page runs against them.
 OpenReading is not a hosted service, a UI, or a model.
 
 ## Install
 
 Two commands give you a working install with two local backends and no API keys. You need `git`,
-the `tesseract` binary (`brew install tesseract` or `apt install tesseract-ocr`), and
-[`uv`](https://docs.astral.sh/uv/), which fetches Python 3.11+ itself. Python 3.11+ with `pip`
-also works. Nothing is on PyPI yet, so install from the clone.
+[`uv`](https://docs.astral.sh/uv/), which fetches Python 3.11+ itself, and the `tesseract` binary.
+Python 3.11+ with `pip` also works. Nothing is on PyPI yet, so install from the clone.
 
 ```bash
 git clone https://github.com/multiversal-ventures/openreading-core
@@ -66,16 +67,39 @@ Without uv, run `python3 -m venv .venv && .venv/bin/pip install -e '.[pymupdf,te
 and type `.venv/bin/openreading …` wherever this page says `uv run openreading …`. In that venv,
 `openreading backends` marks a hosted backend as missing an extra rather than a variable.
 
+### The two local backends
+
+Neither local backend calls anyone, so nothing you parse with them leaves your machine.
+
+- **PyMuPDF** reads a PDF's own text layer. `uv sync` installs it; there is nothing else to set
+  up. It is the only AGPL-3.0 component here, kept in its own `[pymupdf]` extra so that you can
+  leave it out. Its own docs are at
+  [pymupdf.readthedocs.io](https://pymupdf.readthedocs.io/en/latest/installation.html).
+- **Tesseract** renders each page to a bitmap and runs OCR over the pixels, which is what you
+  need when a document is a scan or a photograph and has no text layer to read. `uv sync`
+  installs the Python wrapper, but the OCR engine itself is a separate system binary you install
+  once: `brew install tesseract` on macOS, `sudo apt install tesseract-ocr` on Debian or Ubuntu.
+  Windows and other distributions are covered by
+  [the Tesseract install guide](https://tesseract-ocr.github.io/tessdoc/Installation.html), and
+  each extra language is its own `traineddata` package, such as `tesseract-lang` or
+  `tesseract-ocr-deu`.
+
+`uv run openreading backends` is how you check: both rows should read `yes` under CONFIGURED. A
+missing engine shows up there by name rather than as a crash later.
+
+```
+tesseract                      oss_library        no          tesseract binary (brew install tesseract / apt install tesseract-ocr)
+```
+
 ## Your first parse
 
-Your first JSON is three commands away. If the `tesseract` row says `no` under MISSING, install
-the binary now. Generate a two-page sample document, or copy any PDF of your own to `sample.pdf`,
-then parse it:
+Your first JSON is one command away, because the document is already in the clone.
+[`examples/`](examples/README.md) holds two synthetic one-page bank statements — invented name,
+invented bank, invented balances — each with a header, an account block, a balance summary and a
+dated transaction table. Parse the January one with PyMuPDF:
 
 ```bash
-uv run python -c 'from openreading.testing.sample_pdf import build_sample_pdf; open("sample.pdf","wb").write(build_sample_pdf())'
-ls -l sample.pdf     # 8688 bytes: a title, two paragraphs, a 3×4 table, two columns, a tiny image
-uv run openreading parse sample.pdf --backend pymupdf > pymupdf.json
+uv run openreading parse examples/john_smith_1000_2026_01.pdf --backend pymupdf > pymupdf.json
 ```
 
 You should see one stderr line, `Consider using the pymupdf_layout package …`. That is PyMuPDF's
@@ -84,50 +108,93 @@ advice, not an error. Here is `pymupdf.json`, trimmed to the keys you read first
 ```json
 { "schema_version": "0.3", "status": { "state": "succeeded" },
   "backend": { "id": "pymupdf", "type": "oss_library", "output_paradigm": ["block_tree"] },
-  "document": { "page_count": 2,
-    "text": "OpenReading Test Document\nThis is the first paragraph rendered at twelve points. …",
-    "markdown": "# OpenReading Test Document\n\n…| Region | Units | Revenue |\n| --- | --- | --- |\n| North | 120 | 4400 |…",
+  "document": { "page_count": 1,
+    "text": "First National Bank\n1000 Junction Highway, Kerrville, TX 78028\nACCOUNT STATEMENT\nAccount Holder:\nJohn Smith\n…",
+    "markdown": "First National Bank\n\n1000 Junction Highway, Kerrville, TX 78028 ACCOUNT STATEMENT\n\nAccount Holder:\n\n…",
     "pages": [ { "page_number": 1, "width": 612.0, "height": 792.0, "unit": "pdf_point",
-      "blocks": [ { "type": "title", "text": "OpenReading Test Document", "reading_order": 0,
-        "bbox": { "x": 0.1176, "y": 0.0739, "w": 0.4323, "h": 0.0347, "page": 1,
-                  "bbox_native": { "coords": [72.0, 58.5, 336.56, 85.98], "origin": "top_left", "unit": "pdf_point" } } } ] } ] },
+      "blocks": [ { "type": "text", "native_type": "text", "text": "First National Bank", "reading_order": 0,
+        "bbox": { "x": 0.0588, "y": 0.0265, "w": 0.2085, "h": 0.0243, "page": 1,
+                  "bbox_native": { "coords": [36.0, 21.02, 163.58, 40.3], "origin": "top_left", "unit": "pdf_point" } } } ] } ] },
+  "usage": { "pages_processed": 1, "cost_basis": "infra_only" },
   "warnings": [ { "code": "confidence_unavailable", "field": "block_confidence",
                   "message": "PyMuPDF is a deterministic parser; per-element confidence does not exist" } ] }
 ```
 
-This listing omits `usage`, `backend_raw` and `channel_provenance`, which
-[`src/openreading/schemas/README.md`](src/openreading/schemas/README.md) describes. Every backend
-returns this shape. When a backend cannot produce a field, OpenReading leaves it out and names it
-in `warnings[]`. It never invents one, because a made-up confidence looks like a measured one.
+That page has 21 blocks; one is shown. The listing omits `backend_raw` and `channel_provenance`,
+which [`src/openreading/schemas/README.md`](src/openreading/schemas/README.md) describes. Every
+backend returns this shape. When a backend cannot produce a field, OpenReading leaves it out and
+names it in `warnings[]`. It never invents one, because a made-up confidence looks like a measured
+one — which is exactly the field PyMuPDF is warning about here.
+
+Now read the same page the other way. Tesseract ignores the text layer, renders the page to a
+150-DPI bitmap and OCRs it, which is the work it would do on a photograph of the same statement:
+
+```bash
+uv run openreading parse examples/john_smith_1000_2026_01.pdf --backend tesseract > tesseract.json
+```
+```json
+{ "backend": { "id": "tesseract", "type": "oss_library", "output_paradigm": ["element_list"] },
+  "document": { "page_count": 1,
+    "pages": [ { "page_number": 1, "width": 1275.0, "height": 1650.0, "unit": "pixel",
+      "blocks": [
+        { "type": "text", "native_type": "line", "text": "First National Bank", "confidence": 0.96, "reading_order": 0, "text_type": "printed" },
+        { "type": "text", "native_type": "line", "text": "; Account Hotder-",   "confidence": 0.0,  "reading_order": 3, "text_type": "printed" },
+        { "type": "text", "native_type": "line", "text": "John Smith",          "confidence": 0.93, "reading_order": 4, "text_type": "printed" } ] } ] } }
+```
+
+Three differences, and each one is the contract doing its job. The page is 1275×1650 `pixel`
+rather than 612×792 `pdf_point`, because that is what Tesseract actually measured — `bbox.x/y/w/h`
+stay page-relative fractions either way, so code that positions a block works against both. Every
+block carries a `confidence`, and no `confidence_unavailable` warning appears, because Tesseract
+genuinely measures one per word. And OCR misread `Account Holder:` as `; Account Hotder-` — with
+`confidence: 0.0`, so it told you where it was unsure.
+
+The generated document the subsystem guides use is a different file, with tables, columns and an
+image. Build it whenever a guide asks for `sample.pdf`:
+
+```bash
+uv run python -c 'from openreading.testing.sample_pdf import build_sample_pdf; open("sample.pdf","wb").write(build_sample_pdf())'
+ls -l sample.pdf     # 8688 bytes: a title, two paragraphs, a 3×4 table, two columns, a tiny image
+```
 
 ## Compare, route, strategy
 
 **Compare.** Compare tells you which backend read a document better and what the other missed.
-Parse the same sample with Tesseract, then ask what differs. You should see this, abbreviated:
+You have both readings of the January statement already; now ask what differs between them:
 
 ```bash
-uv run openreading parse sample.pdf --backend tesseract > tesseract.json
-uv run openreading compare sample.pdf --backends pymupdf,tesseract --format diffs
+uv run openreading compare examples/john_smith_1000_2026_01.pdf --backends pymupdf,tesseract --format diffs
 ```
 ```
-DIFF — pymupdf vs tesseract   (2 page(s))
+DIFF — pymupdf vs tesseract   (1 page(s))
+
 ① CONTENT — real text/values either side missed
-   ✔ EQUIVALENT   content shared by all: 1.00  ·  0 real misses
-② TABLES — 1 table(s)
-   table counts differ: {'pymupdf': 1, 'tesseract': 0}
+   ✗ DIVERGENT   content shared by all: 0.98
+   pymupdf:
+     MISSED — 1 line(s) others have that pymupdf lacks:
+        - ; Account Hotder-
+     ONLY pymupdf — 1 line(s) no other backend captured — mostly readable text:
+        + Account Holder:
 …
+④ GRANULARITY
+   pymupdf 21 blocks  ·  tesseract 26 blocks
 ```
 
-Both backends got every word, while OCR lost the table's structure. If you see the line
-`[tesseract] tesseract failed: tesseract is not installed…` (exit 3), install the binary.
+The two agree on 98% of the page and disagree on one line, which the report names on both sides
+instead of handing you a score to go investigate. Compare does not know which backend is right,
+so it does not claim to — but you can see at a glance that the OCR line is the mangled one. The
+one-word headline for this pair is `equivalent`, because a single misread label is not enough to
+call one backend better; `--format diffs` is where the disagreement itself lives.
 
-**Route.** Route hands a sensitive document only to backends that meet your policy. The sample
-stands in for a medical record. `require_baa` demands a BAA, which is the HIPAA contract a vendor
-signs before handling health data. `no_train_on_data` refuses vendors that train on what you send:
+**Route.** Route hands a sensitive document only to backends that meet your policy. A bank
+statement is the everyday case: it names a person, an account and every place they spent money,
+and plenty of teams may not ship one to an arbitrary vendor. `require_baa` demands a BAA, the
+HIPAA contract a vendor signs before handling regulated data. `no_train_on_data` refuses vendors
+that train on what you send:
 
 ```bash
 echo '{"require_baa": true, "no_train_on_data": true}' > phi.json
-uv run openreading route sample.pdf --policy phi.json
+uv run openreading route examples/john_smith_1000_2026_01.pdf --policy phi.json
 ```
 ```json
 { "chosen": "pymupdf",
@@ -139,7 +206,7 @@ uv run openreading route sample.pdf --policy phi.json
 
 Reducto is dropped because its BAA is offered only on some tiers and none is confirmed here. The
 `fallbacks` list is the order OpenReading tries next if `pymupdf` fails. A dropped backend never
-joins that list, because a fallback that readmits it would leak the record silently.
+joins that list, because a fallback that readmits it would leak the statement silently.
 
 **Strategy.** A strategy gives you the cheap result when it is good enough and the stronger one
 when it is not. It checks each output against quality gates. A gate is one test on a result, for
@@ -147,20 +214,44 @@ example whether the backend detected scanned pages. Four presets ship: `cost_sav
 `max_accuracy`, and `offline_first`. Run the last one and print its trace:
 
 ```bash
-uv run openreading parse sample.pdf --strategy offline_first > strat.json
+uv run openreading parse examples/john_smith_1000_2026_01.pdf --strategy offline_first > strat.json
 uv run openreading explain strat.json
 ```
 ```
 strategy offline_first  →  pymupdf (ok)
-  root.steps[0]    pymupdf      succeeded                     66ms  $0
+  root.steps[0]    pymupdf      succeeded                     41ms  $0
       scanned_pages_detected     obs=False thr=True  ok
-      …
+      garbled                    obs=0.0189 thr=True  ok
+      empty_pages_over           obs=0.0 thr=0.2  ok
+      confidence_below           obs=None thr=0.6  skipped
 ```
 
-The trace shows PyMuPDF ran, the scanned-pages gate passed, and the run stopped there. Timings
-vary between machines. Write your own strategy with `uv run openreading strategy --help`. An
-interrupted run resumes from its journal, which records every step so far. The
+The trace shows PyMuPDF ran, three gates passed, and the run stopped there — no second backend, no
+cost. The fourth gate is `skipped` rather than failed: PyMuPDF reports no confidence, so there is
+nothing to test, and a missing measurement never counts as a passing one. Timings vary between
+machines. Write your own strategy with `uv run openreading strategy --help`. An interrupted run
+resumes from its journal, which records every step so far. The
 [run ledger](src/openreading/ledger/README.md) guide explains it.
+
+**A folder at a time.** Point `parse` at a directory and it batches, which is how you run a whole
+corpus rather than one file:
+
+```bash
+uv run openreading parse examples/ --backend pymupdf --jobs 2 > batch.json
+```
+
+`batch.json` carries one entry per file under `items[]`, each with the source's path and SHA-256,
+plus the `summary` that tells you at a glance whether the sweep went as expected:
+
+```json
+{ "total": 3, "succeeded": 2, "failed": 0, "skipped": 1,
+  "pages_processed": 2, "cost_bases": ["infra_only"], "backends": { "pymupdf": 2 } }
+```
+
+Three, because `examples/README.md` is in that folder too. It is skipped with
+`skip_reason: "unsupported_format"` rather than dropped in silence, so the count you get back
+always accounts for every file you pointed at. `scripts/batch_demo.sh path/to/docs` runs the same
+sweep with both local backends and compares the two corpora.
 
 ## Bring your own key
 
@@ -168,7 +259,7 @@ A hosted backend works as soon as its vendor key is in `.env`. Without one, the 
 code 3 and names the variable:
 
 ```bash
-uv run openreading parse sample.pdf --backend reducto
+uv run openreading parse examples/john_smith_1000_2026_01.pdf --backend reducto
 # [reducto] missing required credentials/config: REDUCTO_API_KEY. Sign up / configure: https://platform.reducto.ai
 ```
 
@@ -182,17 +273,19 @@ From Python or over HTTP you get the same shapes that the command line prints.
 
 ```python
 import openreading
-resp = openreading.run("sample.pdf", backend="pymupdf")          # dict
+doc = "examples/john_smith_1000_2026_01.pdf"
+resp = openreading.run(doc, backend="pymupdf")                    # dict
 print(resp["status"]["state"], resp["backend"]["id"])            # succeeded pymupdf
-plan = openreading.route("sample.pdf", policy={"require_baa": True, "no_train_on_data": True})
+plan = openreading.route(doc, policy={"require_baa": True, "no_train_on_data": True})
 print(plan.eligible_ids[0], plan.dropped["reducto"].code)        # pymupdf no_baa
-delta = openreading.compare([resp, openreading.run("sample.pdf", backend="tesseract")])
-print(delta["headline"]["verdict"])                              # mixed
+delta = openreading.compare([resp, openreading.run(doc, backend="tesseract")])
+print(delta["headline"]["verdict"])                              # equivalent
 ```
 ```bash
 uv run openreading serve         # one terminal; listens on http://127.0.0.1:8787 ([server] extra, included above)
+# in another terminal, from the same clone:
 curl -s -X POST http://127.0.0.1:8787/v1/parse -H 'content-type: application/json' \
-  -d '{"document": {"path": "'"$PWD"'/sample.pdf"}, "backend": {"id": "pymupdf"}}' | head -c 80   # another
+  -d '{"document": {"path": "'"$PWD"'/examples/john_smith_1000_2026_01.pdf"}, "backend": {"id": "pymupdf"}}' | head -c 80
 # {"schema_version":"0.3","status":{"state":"succeeded"},"backend":{"id":"pymupdf"
 curl -s http://127.0.0.1:8787/healthz     # {"status":"ok","version":"0.3.0"}
 ```
@@ -215,6 +308,7 @@ command.
 | You want to know… | Run / open |
 |---|---|
 | **the full documentation, every guide, and how an agent uses it** | [`src/openreading/README.md`](src/openreading/README.md), then `uv run openreading --help` and `uv run openreading <cmd> --help` for every flag |
+| what the shipped example documents contain and where they came from | [`examples/README.md`](examples/README.md) |
 | each backend's variables and compliance posture, and the env-var precedence rules | [`src/openreading/adapters/README.md`](src/openreading/adapters/README.md), then `uv run python -m pydoc openreading.credentials` |
 | the exact JSON shapes (the contract) | [`src/openreading/schemas/README.md`](src/openreading/schemas/README.md), then the `*.json` files beside it |
 | strategies · compare · routing and keys · batch · the ledger · the server · evals · the CLI · the channel contract | [Strategies](src/openreading/strategies/README.md) · [Compare](src/openreading/comparison/README.md) · [Routing and keys](src/openreading/router/README.md) · [Batch runs](src/openreading/batch/README.md) · [The run ledger](src/openreading/ledger/README.md) · [The HTTP server](src/openreading/server/README.md) · [Evals](src/openreading/evals/README.md) · [The command line](src/openreading/cli/README.md) · [The channel contract](src/openreading/derive/README.md). The docs home links them all. |
