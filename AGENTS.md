@@ -60,10 +60,29 @@ touch code that carries a rationale comment, **keep it**; if your change makes i
 it. Ids like `D-v3-17` or `BL-161` in comments are stable references into
 `internal/decisions/DECISIONS.md` and `internal/eng-council/`; leave them.
 
+## Where a change gets documented
+
+| New … | Must update | Existing guard |
+|---|---|---|
+| backend | its `AdapterDescriptor`; a row in `src/openreading/adapters/README.md`; a `# --- <slug> (signup: …) ---` block in `.env.example`; the adapter module docstring | `scripts/check_extras_parity.py`, `tests/test_descriptor_specs.py`, `tests/test_scaffold_sentinel.py` |
+| CLI subcommand or flag | argparse `help=` (no `internal/` paths); its section in the `openreading.cli` docstring, exit codes included; the README's docs index only for a new *kind* of question | `tests/test_cli*.py` |
+| schema version | copy to `family.vX.(Y+1).json`; the `*_SCHEMA_FILE` constant; a manifest row in `src/openreading/schemas/README.md`; the `openreading.types` default; a `CHANGELOG.md` line | `tests/test_schema_evolution.py` (byte pins), `tests/test_schema_versioning.py`, `tests/test_types_roundtrip.py` |
+| strategy key or preset | grammar in `strategies/model.py` (and `plain.py` if Plain); a cookbook entry in `strategies/presets.py`; the `strategy --help` epilog if user-facing | `tests/test_docs_truth.py` (every docstring YAML block validates) |
+| env var | one commented line in `.env.example`; the reading module's "Environment … this module reads" section; `credentials.py` only if it is a credential | none yet |
+| exit code / HTTP status | the "Exit codes" ladder in the `openreading.cli` docstring; the "HTTP status codes" table in the `openreading.server` docstring | `tests/test_cli.py`, `tests/test_server.py` |
+| Python API function or kwarg | "Exports and return shapes" in `api.py`; `__all__`; one recipe line in the `openreading` package docstring | `tests/test_api.py` |
+| warning or finding code | the `warnings[]` known-codes list in the `openreading.schemas` docstring (open set); for `compare`, the closed set in the `openreading.comparison` docstring and the `comparison-report` schema enum | closed set: `tests/test_compare_core.py` (reports validate); open set: none |
+| something a README example shows | re-run the README from a fresh clone; paste the new output | none yet |
+| a Known-gaps line becomes false | delete the line where it lives (a directory README or a package docstring) | reviewer |
+| design record / "not built" note | one line in the owning package docstring's Known gaps list; the prose goes to the company repo | `tests/test_docs_policy.py` |
+
+A fact is documented where it is read: the flag next to its argparse definition, the var next to its
+`os.environ` read, the field next to its schema. The README indexes those places. It never restates them.
+
 ## Golden rules
 
 - **`make verify` green is the finish line.** Lint + typecheck + tests at a 91% coverage floor
-  (`uv run pytest -m "not live" --collect-only -q` for the offline count) + schema-validate +
+  (`uv run pytest -m "not live" --collect-only` for the offline count) + schema-validate +
   extras-parity + CLI/strategy/compare/leaderboard smoke. Offline: no keys, no network.
 - **`make sync` before anything else** — `uv sync --all-extras --dev`. A venv synced without
   `--all-extras` silently lacks `uvicorn`, `boto3`, … and the server/hosted paths die with
