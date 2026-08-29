@@ -739,7 +739,7 @@ def test_resume_retains_and_replays_a_local_only_run_even_when_an_undispatched_z
     cfg = _cfg([{"backend": "local-solo"}])  # the strategy names ONLY the local backend
     req = _req()
 
-    before_ms = int(RealClock().now_ms())
+    before_ms = int(RealClock().now_wall_ms())  # the base the stamp uses (see ledger.retention)
     run_id, compiled, result = _run_once(ledger_root, reg, cfg, req)
     assert result.response.document.text == "local succeeded"
     # both backends really are eligible — the shape both reviews' repros used, not a narrower one.
@@ -794,7 +794,7 @@ def test_a_dispatched_hosted_backends_own_retention_limit_tightens_the_runs_ceil
     cfg = _cfg([{"backend": "short-hosted"}])
     req = _req()
 
-    before_ms = int(RealClock().now_ms())
+    before_ms = int(RealClock().now_wall_ms())  # the base the stamp uses (see ledger.retention)
     run_id, _compiled, result = _run_once(ledger_root, reg, cfg, req)
     assert result.response.document.text == "short-lived"
 
@@ -804,6 +804,11 @@ def test_a_dispatched_hosted_backends_own_retention_limit_tightens_the_runs_ceil
     # tightened from the (much longer) operator default down to ~1h — this backend's own declared
     # limit, not the un-narrowed arm-time default (`DEFAULT_RETENTION_HOURS` == 24).
     assert stamp["expires_epoch_ms"] - before_ms <= 2 * 3600_000
+    # ...and tightened on the SAME clock base it was stamped with. `tighten_retention` takes a
+    # `min`, so a monotonic `now` here would beat the wall-clock stamp outright and collapse the
+    # ceiling into 1970 — a hosted dispatch shredding its own run. The upper bound above cannot
+    # see that (a far-too-small stamp satisfies it), so assert the floor too.
+    assert stamp["expires_epoch_ms"] > before_ms
 
 
 # ---- AC-12, scoped to open_ocr/aws_textract (§4.6) -----------------------------------------------

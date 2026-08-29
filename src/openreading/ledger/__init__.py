@@ -94,7 +94,11 @@ L7  The journal holds references; payloads hold content. Anything over the execu
     size-based spill); secret-class fields spill by classification regardless of size. The inline
     executor declares `None` and, armed, puts every step payload in the blob store anyway.
 L8  Time is absolute across a boundary: every deadline, poll schedule and retention stamp is
-    epoch millis. `Job.next_poll_at` is monotonic and never crosses a step.
+    epoch millis. `Job.next_poll_at` is monotonic and never crosses a step. Enforced by the two
+    clocks on `openreading.router.clock`: `now_wall_ms()` for anything that leaves the process
+    (`started/ended_epoch_ms`, `expires_epoch_ms`), `now_ms()` for anything measured inside one
+    (deadlines, backoff, TTLs). The ledger shipped with `now_ms()` in all four positions, which is
+    what this law exists to forbid -- see `openreading.ledger.retention` for what it cost.
 L9  A step is idempotent or it is not a step. At-least-once is the contract; a step that bills
     twice is a defect, not a tradeoff.
 
@@ -219,7 +223,9 @@ retryable | failed | cancelled | replayed`; `payload: BlobRef | JsonValue`, NEVE
 non-serializable payload must raise before construction: under a JSONL journal it would
 otherwise raise after the side effect, leaving an unrecorded real dispatch that replay
 re-executes for real; sets/tuples are rejected rather than coerced); `error{code, taxonomy,
-detail}`, `cost{usd, basis}`, `started/ended_epoch_ms`, `resolved_version`, `journal_seq`.
+detail}`, `cost{usd, basis}`, `started/ended_epoch_ms` (absolute UTC epoch millis per L8 -- the
+journal's only answer to "when did this run", so a consumer can load them as timestamps),
+`resolved_version`, `journal_seq`.
 `BlobRef`: `run_id, digest ("sha256:<64hex>" of the PLAINTEXT), size_bytes, media_type[, store]`.
 No field in replay identity or lineage may be born `x-stability: experimental`: an experimental
 replay key is a contract with an expiry date.

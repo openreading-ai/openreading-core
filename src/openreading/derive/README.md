@@ -3,7 +3,7 @@
 <sub>[Docs home](../README.md) · [← The HTTP server](../server/README.md) · [Evals →](../evals/README.md)</sub>
 
 > **In one sentence.** Every channel in a response is measured, computed by one shared package, or
-> left out with a warning, so nothing in it is invented.
+> left out and marked absent in `channel_provenance`, so nothing in it is invented.
 
 ## What this gives you
 
@@ -65,18 +65,82 @@ confidence and no tables.
 
 ```bash
 uv run python -c "import json; r = json.load(open('pymupdf.json')); print(r['warnings']); print(r['channel_provenance'])"
-uv run python -c "import json; r = json.load(open('tesseract.json')); print(r['channel_provenance'])"
+uv run python -c "import json; r = json.load(open('tesseract.json')); print(r.get('warnings', 'no warnings key at all')); print(r['channel_provenance'])"
 ```
 ```text
 [{'code': 'confidence_unavailable', 'message': 'PyMuPDF is a deterministic parser; per-element confidence does not exist', 'field': 'block_confidence'}]
 {'markdown': 'derived', 'text': 'native', 'blocks': 'native', 'block_bbox': 'native', 'table_cells': 'native'}
+no warnings key at all
 {'text': 'native', 'markdown': 'derived', 'blocks': 'native', 'block_bbox': 'native', 'block_confidence': 'native'}
 ```
 
-**You should see** the `X` channel absent from provenance and named in a warning instead. That is
-C4 and C5 at work: an `X` channel is never filled in, and a warning names it. C6 is the same promise
-for `N` and `D` channels. Both outputs say `markdown: derived`, because the markdown was built here
-from native text. Check: `grep -c confidence_unavailable pymupdf.json` prints `1`.
+**You should see** an `X` channel missing from provenance on both runs, and a warning about it on
+only one of them. pymupdf names its missing confidence in `warnings`. tesseract has no `warnings`
+key at all, and its missing `table_cells` is announced nowhere except by its absence from
+provenance. Both outputs say `markdown: derived`, because the markdown was built here from native
+text. Check: `grep -c confidence_unavailable pymupdf.json` prints `1`.
+
+### Which signal to trust when a channel is missing
+
+Provenance is the reliable signal and `warnings[]` is not. A channel graded `X` is always missing
+from `channel_provenance`, on every run, whatever you asked for. A channel graded `X` is only
+sometimes named in `warnings[]`, and the difference is not documented anywhere in a backend's
+output. Code that checks `warnings[]` to find out whether it lost its tables is code that will
+silently lose its tables.
+
+Compare the two grades that go missing here:
+
+| the missing channel | provenance | `warnings[]` |
+|---|---|---|
+| pymupdf `block_confidence` | always absent | always warns, `confidence_unavailable` |
+| pymupdf and tesseract `typed_fields` | always absent | warns only when the request asked for them |
+| tesseract `table_cells` | always absent | never warns on a default run |
+
+So the honest form of the never-fabricate promise is narrower than "a channel a backend cannot
+produce is named in `warnings[]`". A channel a backend cannot produce is never invented, and it is
+always missing from `channel_provenance`. It may or may not also be named in `warnings[]`. To
+decide whether you got a channel, compare the provenance map against the grades the backend
+declares, which the first command in this walkthrough prints.
+
+The normative rule is C4 and C5 in `uv run python -m pydoc openreading.derive`, and it reads "an
+`X` channel is never populated; a requested `X` channel warns". The first half holds everywhere.
+The second half depends on how you asked, which the next section measures.
+
+### Asking for a channel: `outputs` and `features`
+
+A request can say which channels it wants, through two separate fields that neither README nor
+help text has described until now. `outputs` names the channels to fill. `features` turns on
+capabilities that produce them. They are not interchangeable, and which one a backend watches
+decides whether you get a warning.
+
+| field | keys | default |
+|---|---|---|
+| `outputs` | `markdown`, `text`, `blocks`, `typed_fields` (booleans), `tables` (`none`, `cells`, `markdown`, `html`), `chunking`, `include_backend_raw` | `markdown`, `text`, `blocks` and `include_backend_raw` on, `typed_fields` off, `tables: markdown` |
+| `features` | `ocr`, `ocr_languages`, `layout`, `reading_order`, `tables`, `forms_key_value`, `figures_images`, `signatures`, `classification`, `handwriting` | the schema documents per-key defaults such as `tables: true`, and the object itself is absent unless you pass it |
+
+Requesting `typed_fields` from a backend that cannot produce them does warn:
+
+```bash
+uv run python -c "import openreading; r = openreading.run('sample.pdf', backend='tesseract', outputs={'typed_fields': True}); print([w['code'] for w in r['warnings']])"
+uv run python -c "import openreading; r = openreading.run('sample.pdf', backend='tesseract', outputs={'tables': 'cells'}); print(r.get('warnings', 'no warnings key at all'))"
+uv run python -c "import openreading; r = openreading.run('sample.pdf', backend='tesseract', features={'tables': True}); print([w['code'] for w in r['warnings']])"
+```
+```text
+['typed_fields_unsupported']
+no warnings key at all
+['tables_unsupported']
+```
+
+**You should see** a warning on the first and third calls and silence on the second. Asking
+tesseract for table cells through `outputs` changes nothing, because the tesseract adapter reads
+its table ask from `features.tables` rather than from `outputs.tables`. Pass `features` explicitly
+when you need to be told that a table request could not be met.
+
+> [!WARNING]
+> An adapter tests whether you sent a `features` object at all, and a default request sends none.
+> So a default run gets no `tables_unsupported` warning however badly it needed one, and the
+> per-key default of `tables: true` in the schema does not change that. Check
+> `channel_provenance` rather than relying on this warning to fire.
 
 ## Recipes
 

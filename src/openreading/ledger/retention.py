@@ -12,7 +12,23 @@ overrides it) and logs the placeholder to FOUNDER-INBOX.md rather than presentin
 The reaper is an at-run-start sweep (Open Questions §9 item 2, recommendation (a) — no new CLI
 surface): it scans every stamped run under the ledger root and, for one whose ceiling has passed,
 calls `KeyStore.destroy` — the exact mechanism a manual shred uses — so a reaped run and a
-manually-shredded one leave the journal in the identical `payload_expired` state.
+manually-shredded one leave the journal in the identical `payload_expired` state. Nothing else
+sweeps: expiry deletes nothing until the next run arms the ledger, so the operator owns the
+schedule.
+
+**The clock: `expires_epoch_ms` is an absolute UTC epoch, from `Clock.now_wall_ms()`, never
+`now_ms()`.** The stamp is written by one process and read by another, possibly across a reboot,
+so it is the one place in the ledger where wall time is the correct base and monotonic time is a
+defect. It shipped as `now_ms()` — `time.monotonic()`, whose zero point is the boot — which read
+as 1970 to any loader and, worse, put every pre-reboot stamp permanently in the future of a
+reaper whose own clock had restarted near zero: a run armed on a machine 16 days into its uptime
+recorded an expiry ~17 days out, and after a reboot nothing reaped it until the new boot session
+itself reached 17 days. The failure was one-directional — a stamp is `arm + window`, so any `now`
+that exceeds it has already covered at least the window in real time, and a run could be reaped
+late but never early — so it over-retained rather than shredding early, which is why no test
+caught it. Over-retention is still the compliance defect: it holds PHI past a window an operator
+attested to. `tighten_retention` and `reap` must read the SAME base as the stamp; see the note at
+`InlineExecutor.exec`'s `tighten_retention` call for what mixing them does.
 
 **Arm-time vs. dispatch-time (Ledger T3 round-2, Findings 8 and 6).** A fresh run's
 FIRST stamp (`_arm_ledger`, before anything has dispatched) uses the operator default alone — not

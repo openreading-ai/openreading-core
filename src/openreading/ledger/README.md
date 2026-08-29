@@ -17,8 +17,11 @@ under a key made for that run, and destroying that one key makes those payloads 
 copy at once, backups included. The key sits in the same ledger root as the payloads, so the
 encryption buys you erasure rather than protection from someone who can already read that root.
 `openreading resume <RUN_ID>` re-drives the run from that record
-instead of from scratch. Recorded steps replay byte-identical with zero network calls, and anything
-the first run never reached runs for real. A resume that would amount to a different run, for
+instead of from scratch. A recorded step replays from the journal with zero network calls, and
+returns the payload it returned the first time, byte for byte. Anything the first run never reached
+runs for real. The resumed envelope as a whole is not byte-identical to the original, because it
+records how long the replay took rather than how long the original call took. [Is a resumed run
+byte-identical](#is-a-resumed-run-byte-identical) names the fields that differ. A resume that would amount to a different run, for
 example after the config changed, refuses by name. Payloads expire on a retention clock, and erasing
 a run destroys the key its payloads were encrypted under. You need `sample.pdf` from the root README
 and nothing else, because the walkthrough runs a local strategy.
@@ -79,8 +82,8 @@ jq -c . .openreading/$RUN_ID.jsonl
 jq -c '{strategy_name, config_hash, plan_hash, journal_version, slim_request}' .openreading/$RUN_ID.header.json
 ```
 ```json
-{"step_id":"ac395956…","status":"attempted","attempt":1,"run_id":"7dbf6b71-…","step_path":"root.steps[0]","step_seq":0,"backend_id":"pymupdf","idempotency_key":"om_bae9f534…","content_key":"om_bae9f534…","started_epoch_ms":1387091881,"journal_seq":0}
-{"step_id":"ac395956…","status":"ok","attempt":1,"run_id":"7dbf6b71-…","step_path":"root.steps[0]","step_seq":0,"backend_id":"pymupdf","idempotency_key":"om_bae9f534…","content_key":"om_bae9f534…","payload":{"run_id":"7dbf6b71-…","digest":"sha256:49e166b7…","size_bytes":17091,"media_type":"application/json","store":"localfs"},"ended_epoch_ms":1387091939,"journal_seq":1}
+{"step_id":"bcfe2aac…","status":"attempted","attempt":1,"run_id":"769d5f06-…","step_path":"root.steps[0]","step_seq":0,"backend_id":"pymupdf","idempotency_key":"om_868044b9…","content_key":"om_868044b9…","started_epoch_ms":1788036714842,"journal_seq":0}
+{"step_id":"bcfe2aac…","status":"ok","attempt":1,"run_id":"769d5f06-…","step_path":"root.steps[0]","step_seq":0,"backend_id":"pymupdf","idempotency_key":"om_868044b9…","content_key":"om_868044b9…","payload":{"run_id":"769d5f06-…","digest":"sha256:49e166b7…","size_bytes":17091,"media_type":"application/json","store":"localfs"},"ended_epoch_ms":1788036714899,"journal_seq":1}
 {"strategy_name":"offline_first","config_hash":"sha256:4b081150…","plan_hash":"sha256:3e0803c8…","journal_version":1,"slim_request":{"backend":{"id":"strategy:offline_first"},"document":{"filename":"sample.pdf","mime_type":"application/pdf"},"schema_version":"0.1"}}
 ```
 
@@ -89,6 +92,13 @@ before the backend call, and the `ok` line after it points at a blob. The header
 was, so a later resume can check it. `slim_request` records the document's filename and MIME type,
 and never its bytes, a URL, or a password. The header's own `document` block holds the digest and
 size of those bytes, which is what erasure leaves behind.
+
+`started_epoch_ms` and `ended_epoch_ms` are absolute UTC epoch milliseconds, so
+`1788036714842` reads as 2026-08-29T20:51:54.842Z and you can load them as timestamps directly.
+They carry wall time because they leave the process and a later reader has to make sense of them.
+Durations the engine measures for itself use a monotonic clock instead, which no clock adjustment
+can move, so subtracting these two gives elapsed wall time rather than the engine's own
+`duration_ms`.
 
 ### 3. Resume a completed run without a backend call
 
@@ -108,6 +118,9 @@ strategy offline_first  →  pymupdf (ok)
 **You should see** the same document and a 1ms attempt, because the step was served from the
 journal. `resume` takes only the run id, and every option comes from the ledger. From Python,
 `openreading.resume(run_id)` returns the same dict and arms from the environment as the CLI does.
+
+The two files are not byte-identical, and [Is a resumed run
+byte-identical](#is-a-resumed-run-byte-identical) below says which field differs and why.
 
 ### 4. Interrupt a run, then resume it
 
@@ -166,6 +179,44 @@ strategy to the file, and the resume succeeds. The hash covers the compiled stra
 not the file's bytes. Two other refusals also exit 3. `resume nope` prints
 `no recorded run 'nope' under .openreading`, and any `resume` with the variable unset prints
 `OPENREADING_LEDGER is not set`.
+
+### Is a resumed run byte-identical
+
+The parsed content is. The whole envelope is not, so do not hash the two files and expect a match.
+Diff them and you get one hunk:
+
+```bash
+diff <(jq -S . run.json) <(jq -S . resumed.json)
+```
+```text
+1311c1311
+<         "duration_ms": 57,
+---
+>         "duration_ms": 1,
+```
+
+**You should see** a single difference, at `orchestration.attempts[].duration_ms`. That field
+records how long this execution took, and a replay from the journal really is faster than the
+original backend call. A resume that reported the original 57ms would be the dishonest answer.
+Everything else matches, including the document, the recorded decisions, the chosen backends, the
+costs, and the per-step statuses.
+
+An audit control that hashes a whole envelope will therefore fire on every resume. Hash
+`.document` for the content alone, or drop the timing first when you want the decisions covered
+too:
+
+```bash
+jq -S 'del(.orchestration.attempts[].duration_ms)' run.json | shasum -a 256
+jq -S 'del(.orchestration.attempts[].duration_ms)' resumed.json | shasum -a 256
+```
+```text
+52785254a9f9a18f15a0c25ef2a60c684086f785b9b2eb1bad82bf1cd1001285  -
+52785254a9f9a18f15a0c25ef2a60c684086f785b9b2eb1bad82bf1cd1001285  -
+```
+
+Byte stability differs by envelope type, and [JSON
+Schemas](../schemas/README.md#clocks-and-byte-stability) carries the table. A `parse --backend`
+response is stable across runs, while a `parse --strategy` response and a batch result are not.
 
 ## Recipes
 

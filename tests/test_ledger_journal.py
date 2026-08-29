@@ -27,7 +27,7 @@ from openreading.ledger.retention import compute_retention_ceiling_hours, reap, 
 from openreading.ledger.sanitizer import Sanitizer
 from openreading.ledger.step import BlobRef, StepRef, StepRequest, StepResult
 from openreading.router.cache import document_digest
-from openreading.router.clock import RealClock
+from openreading.router.clock import FakeClock, RealClock
 from openreading.strategies import StrategyConfig
 from openreading.strategies.engine import _step_id
 from openreading.testing.sample_pdf import build_sample_pdf
@@ -911,3 +911,111 @@ def test_normalize_actually_receives_the_slimmed_request_at_a_real_call_site(pdf
     assert ctx_seen is not None
     assert ctx_seen.deadline_ms is not None
     assert ctx_seen.idempotency_key is not None
+
+
+# ---- the retention clock is wall time, not process uptime (B5) ---------------------------------
+
+
+def _null_registry():
+    class R:
+        def get(self, bid):
+            return None
+
+    return R()
+
+
+def _arm(root, run_id, clock):
+    from openreading.credentials import EnvCredentialBroker
+    from openreading.types.request import OpenReadingRequest
+
+    req = OpenReadingRequest.model_validate(
+        {"document": {"path": "/x.pdf"}, "backend": {"id": "strategy:s"}}
+    )
+    return api._arm_ledger(run_id, req, _null_registry(), EnvCredentialBroker(), clock, [])
+
+
+def test_retention_stamp_is_an_absolute_utc_epoch(tmp_path, monkeypatch):
+    """The stamp outlives the process that wrote it, so it may only hold a clock whose zero point
+    outlives the process too. A monotonic reading is uptime: written to disk it reads as 1970 and
+    is meaningless to the next process that compares against it."""
+    import time
+
+    root = tmp_path / "ledger"
+    monkeypatch.setenv("OPENREADING_LEDGER", str(root))
+    monkeypatch.delenv("OPENREADING_LEDGER_RETENTION_HOURS", raising=False)
+    _arm(root, "run-A", RealClock())
+
+    stamp = json.loads((root / "retention" / "run-A.json").read_text())
+    now_wall = time.time() * 1000.0
+    assert now_wall < stamp["expires_epoch_ms"] <= now_wall + 24 * 3600_000 + 60_000, (
+        "expires_epoch_ms must be `wall now + the retention window`, per .env.example's own "
+        "'absolute UTC epoch'"
+    )
+
+
+def test_a_run_past_its_retention_window_is_reaped_after_a_reboot(tmp_path, monkeypatch):
+    """`time.monotonic()`'s reference point is the boot, and Python leaves it formally undefined.
+    Stamped with a monotonic reading, a run armed on a machine 16 days into its uptime records an
+    expiry ~17 days out; after a reboot the reaper's own `now` is minutes, so the comparison says
+    "not yet" and the key survives for as long as the next boot session takes to reach 17 days of
+    uptime. That is PHI held past a retention window an operator attested to."""
+    root = tmp_path / "ledger"
+    monkeypatch.setenv("OPENREADING_LEDGER", str(root))
+    monkeypatch.setenv("OPENREADING_LEDGER_RETENTION_HOURS", "24")
+
+    day_ms = 24 * 3600_000
+    wall_at_arm = 1_700_000_000_000.0
+
+    # A machine 16 days into its uptime arms a run and mints its content key.
+    _arm(root, "phi-run", FakeClock(start_ms=16 * day_ms, wall_start_ms=wall_at_arm))
+    LocalFsKeyStore(root / "keys").get_or_create("phi-run")
+    assert (root / "keys" / "phi-run.key").exists()
+
+    # --- reboot --- uptime restarts near zero; 25 wall-clock hours have passed, so the 24-hour
+    # window is over. The next armed run runs the sweep (there is no cron; see ledger/README.md).
+    _arm(root, "next-run", FakeClock(start_ms=120_000, wall_start_ms=wall_at_arm + 25 * 3600_000))
+
+    assert not (root / "keys" / "phi-run.key").exists(), (
+        "an expired run must be reaped after a reboot — the stamp and the reaper's `now` must "
+        "share a clock base whose zero point survives one"
+    )
+    assert not (root / "retention" / "phi-run.json").exists()
+
+
+def test_journal_timestamps_are_absolute_utc_epochs(tmp_path):
+    """`started_epoch_ms`/`ended_epoch_ms` are the journal's only answer to "when did this run".
+    Holding a monotonic reading they load as 1970-01-17 in every audit row, silently."""
+    root = tmp_path
+    journal = JsonlJournal(root / "run1.jsonl")
+    keys = LocalFsKeyStore(root / "keys")
+    blobs = LocalFsBlobStore(root / "blobs", keys)
+    wall_start = 1_700_000_000_000.0
+    ex = InlineExecutor(
+        journal=journal,
+        blobs=blobs,
+        registry=None,
+        clock=FakeClock(start_ms=16 * 24 * 3600_000, wall_start_ms=wall_start),
+    )
+
+    class FakeResp:
+        def to_schema_dict(self):
+            return {"n": 1}
+
+    req = StepRequest(
+        step_id="s1",
+        run_id="run1",
+        kind="submit",
+        step_path="root",
+        step_seq=0,
+        attempt=1,
+        backend_id="fake",
+    )
+    asyncio.run(ex.exec(req, run=lambda: FakeResp()))
+
+    records = [json.loads(line) for line in (root / "run1.jsonl").read_text().splitlines() if line]
+    stamps = [r[k] for r in records for k in ("started_epoch_ms", "ended_epoch_ms") if r.get(k)]
+    assert stamps, "the dispatch must journal at least one timestamp"
+    for value in stamps:
+        assert value == wall_start, (
+            "a journal timestamp must be the wall clock, not the process's uptime reading"
+        )

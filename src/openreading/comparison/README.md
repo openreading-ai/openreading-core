@@ -265,8 +265,12 @@ failure it prevents. The full list is the `Laws` section of
 
 - Compare is pure. It never runs, retries, or bills, so a report can never quietly cost money.
 - A report never feeds routing or `pick: best`. A feedback loop could widen which backends run.
-- The same inputs produce the same bytes. A report has no timestamps, randomness, or LLM calls, so
-  drift detection is sound.
+- The same inputs produce the same report bytes. A report has no timestamps, randomness, or LLM
+  calls, so drift detection over reports is sound. This is a property of compare alone, and not of
+  the envelopes you feed it. A `parse --backend` response is byte-stable too, while a
+  `parse --strategy` response and a batch result carry timing that moves between runs, so hashing
+  one of those to detect change gives you a false positive every time ([JSON
+  Schemas](../schemas/README.md#clocks-and-byte-stability)).
 - A backend that cannot produce a dimension is `not_capable`, never `missed`. Blaming pymupdf
   for missing confidences would make every report about it wrong.
 - There is one metric stack. Truth mode imports the evals scorer rather than writing a second one.

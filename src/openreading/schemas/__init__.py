@@ -131,11 +131,13 @@ backend cannot produce is ABSENT with a ``warnings[]`` entry — never fabricate
   ``width``/``height``/``unit`` (``pdf_point``/``pixel``/``inch``; needed to de-normalize
   geometry), ``dpi``, ``rotation``, per-page ``markdown``/``text``/``confidence``,
   ``source_backend`` (strategy runs), and ``blocks[]``.
-- ``blocks[]`` — the common spine, one entry per reading-order element: ``type`` (title,
-  section_header, header, footer, page_number, text, list, list_item, table, table_cell, figure,
-  image, caption, formula, code, key_value, form_field, signature, selection_mark, barcode,
-  table_of_contents, other), ``native_type`` (the backend's own label verbatim, e.g. Textract
-  ``KEY_VALUE_SET``), ``text``/``markdown``/``html``, ``bbox`` (optional — markdown-derived
+- ``blocks[]`` — the common spine, one entry per reading-order element: ``type`` (a CLOSED enum
+  of 22: title, section_header, header, footer, page_number, text, list, list_item, table,
+  table_cell, figure, image, caption, formula, code, key_value, form_field, signature,
+  selection_mark, barcode, table_of_contents, other — safe to switch on exhaustively; only a
+  MAJOR may add to it), ``native_type`` (the backend's own label verbatim, e.g. Textract
+  ``KEY_VALUE_SET``; an unmapped native concept arrives as ``type: other`` with the label kept
+  here, which is why the enum can stay closed), ``text``/``markdown``/``html``, ``bbox`` (optional — markdown-derived
   blocks carry none rather than invented geometry), ``confidence`` ([0,1]; absent for
   deterministic parsers and token-stream models, explained by ``confidence_unavailable``),
   ``reading_order`` (0-based), ``table`` (``n_rows``, ``n_cols``, ``cells[]`` with
@@ -317,16 +319,34 @@ Versioning rules
   released response golden validates against its own and every newer response schema
   (``tests/test_schema_evolution.py``), and each descriptor bump carries an
   "older descriptor still validates" test.
-- MINOR allowlist: add optional properties; add values to enums documented OPEN (warning codes,
-  backend ids, block types); widen types where absence was already handled; add schema files;
-  relax producer-only constraints. Consumers must tolerate all of these — the response envelope
+- MINOR allowlist: add optional properties; add values to sets documented OPEN (warning codes,
+  backend ids); widen types where absence was already handled; add schema files; relax
+  producer-only constraints. Consumers must tolerate all of these — the response envelope
   (``NormalizedResponse``, ``extra="ignore"``) parses unknown top-level fields and survives
   re-serialization, with the unknowns DROPPED so ``to_schema_dict()`` never carries an
   unvalidated field; only the nested payload models keep ``extra="forbid"``.
+- Which sets are OPEN is not a matter of policy, and is readable off the schema: an open set is
+  declared ``{"type": "string"}`` and carries its known values in prose (``warnings[].code``,
+  ``backend.id``). A JSON Schema ``enum`` is CLOSED by construction — a value outside it fails
+  validation, so a consumer switching exhaustively on one is doing what the contract invited.
 - MAJOR: remove/rename a field; optional-to-required; tighten a type/constraint consumers see;
-  change an existing field's meaning; add values to CLOSED enums (``status.state``, the
-  comparison-report mode); change the ``document`` anyOf guarantee. Removed/renamed names go on
-  a reserved list and are never reused with different semantics.
+  change an existing field's meaning; add values to CLOSED enums — every ``enum`` in a released
+  schema, including ``status.state``, the comparison-report mode, and ``Block.type``; change the
+  ``document`` anyOf guarantee. Removed/renamed names go on a reserved list and are never reused
+  with different semantics.
+- ``Block.type`` is closed and stays closed, and the normalization layer is what makes that
+  affordable. A backend meeting a native concept with no peer in the 22 values maps it to
+  ``other`` and preserves the vendor's own label in ``native_type`` — required of every adapter
+  (``pydoc openreading.adapters``), implemented as the ``.get(native, BlockType.OTHER)`` default
+  in each mapping table, and stated in the field's own schema ``description``. So a new native
+  concept reaches a caller today, honestly and unambiguously, with no schema change at all; the
+  22 values have not moved since response v0.1 for that reason. Adding a 23rd would not be
+  additive in the way a warning code is: it would RE-PARTITION ``other``, silently reclassifying
+  blocks that shipped under the old value, which is the channel-semantics rule's own test. It
+  would also oblige every adapter's mapping table to be revisited at once, since the vocabulary
+  is normalized ACROSS backends — one backend adopting the new value while another leaves the
+  same concept in ``other`` is a worse contract than no new value. A genuine need for a 23rd type
+  is therefore a MAJOR, deliberately.
 - Channel-semantics rule: documented invariants ARE the contract even when the shape is
   unchanged. Test — would a consumer's legitimate assertion against the old semantics fail on
   new output, or vice versa? Either direction is a breaking semantic change and needs a bump

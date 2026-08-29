@@ -100,3 +100,41 @@ def test_backoff_is_exponential_and_honors_retry_after():
     assert backoff_ms(3, None) == 2000.0
     assert backoff_ms(1, retry_after=5.0) == 5000.0  # retry_after (5s) wins over 500ms
     assert backoff_ms(100, None) == 30_000.0  # capped
+
+
+# ---- the two clock bases (B5) -----------------------------------------------------------------
+
+
+def test_now_ms_is_monotonic_and_never_wall_clock():
+    """`now_ms` measures elapsed time inside one process: deadlines, backoff, TTLs, durations.
+    An NTP step or a DST jump must not move it, so it must NOT be `time.time()`."""
+    import time
+
+    from openreading.router.clock import RealClock
+
+    reading = RealClock().now_ms()
+    assert abs(reading - time.monotonic() * 1000.0) < 1000.0
+    # A wall-clock epoch in ms is ~1.7e12; a monotonic reading is uptime, orders smaller.
+    assert reading < time.time() * 1000.0 / 2
+
+
+def test_now_wall_ms_is_an_absolute_utc_epoch():
+    """`now_wall_ms` is the only clock whose reading may be written to disk or handed to a
+    consumer: it is comparable across processes and across a reboot, which `now_ms` is not."""
+    import time
+
+    from openreading.router.clock import RealClock
+
+    assert abs(RealClock().now_wall_ms() - time.time() * 1000.0) < 1000.0
+
+
+def test_fake_clock_advances_both_bases_together():
+    """A virtual sleep must move wall time too, or a FakeClock-driven test would journal the same
+    timestamp for a step that took an hour of virtual time."""
+    clock = FakeClock(start_ms=0.0, wall_start_ms=1_700_000_000_000.0)
+    assert clock.now_wall_ms() == 1_700_000_000_000.0
+    import asyncio
+
+    asyncio.run(clock.sleep(90.0))
+    assert clock.now_ms() == 90_000.0
+    assert clock.now_wall_ms() == 1_700_000_090_000.0

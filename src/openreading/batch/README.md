@@ -190,6 +190,26 @@ exit=4
 ```
 Exit 4 means `partial`. Some items failed, and the good document still has its full response.
 
+**Load a batch result into a warehouse table.**
+Flatten one row per item from `items[]`, and run three assertions on every load before anything
+queries the result.
+
+```bash
+jq -e '.schema_version == "0.1"' batch.json > /dev/null || echo "schema bumped, re-check the loader"
+jq -r '[.items[] | select(.state == "partial" or .state == "failed") | .source.relpath] | @csv' batch.json
+jq -r '.summary.cost_bases' batch.json
+```
+
+Assert `schema_version` first, because a bump is the one signal that the shape may have moved
+under you. Triage every item whose `state` is not `succeeded` next, since a partial item still
+carries a response and a failed one carries an `error` instead. Read `summary.cost_bases` last,
+and refuse to sum `cost_usd` as spend unless every basis in it is `billed`. An `estimated` basis
+is a rate card applied to a page count rather than money anyone was charged, and
+[JSON Schemas](../schemas/README.md#what-a-response-guarantees) defines all four values in its
+`usage.cost_basis` row. Three columns are absent rather than null when they have no value, which
+are `warnings`, per-block `confidence`, and `typed_fields`, so read them with a default and make
+the column nullable.
+
 **Run from Python.**
 ```python
 import openreading

@@ -208,7 +208,7 @@ class InlineExecutor:
             idempotency_key=req.idempotency_key,
             content_key=req.content_key,
             error=StepError(code=code, taxonomy="ComplianceRefused"),
-            ended_epoch_ms=int(self._clock.now_ms()),
+            ended_epoch_ms=int(self._clock.now_wall_ms()),
         )
 
     def _missing_credentials_gate(self, req: StepRequest) -> StepResult | None:
@@ -235,7 +235,7 @@ class InlineExecutor:
                 taxonomy="missing_credentials",
                 detail=",".join(req.missing_credentials),
             ),
-            ended_epoch_ms=int(self._clock.now_ms()),
+            ended_epoch_ms=int(self._clock.now_wall_ms()),
         )
 
     def _resolve_replay_payload(self, result: StepResult) -> Any:
@@ -339,7 +339,7 @@ class InlineExecutor:
                     attempt=req.attempt,
                     idempotency_key=req.idempotency_key,
                     content_key=req.content_key,
-                    started_epoch_ms=int(self._clock.now_ms()),
+                    started_epoch_ms=int(self._clock.now_wall_ms()),
                 )
             )
         )
@@ -367,7 +367,7 @@ class InlineExecutor:
                         attempt=req.attempt,
                         idempotency_key=req.idempotency_key,
                         content_key=req.content_key,
-                        ended_epoch_ms=int(self._clock.now_ms()),
+                        ended_epoch_ms=int(self._clock.now_wall_ms()),
                     )
                 )
             )
@@ -386,7 +386,7 @@ class InlineExecutor:
                         idempotency_key=req.idempotency_key,
                         content_key=req.content_key,
                         error=StepError(code=type(exc).__name__, taxonomy=_classify_taxonomy(exc)),
-                        ended_epoch_ms=int(self._clock.now_ms()),
+                        ended_epoch_ms=int(self._clock.now_wall_ms()),
                     )
                 )
             )
@@ -398,6 +398,10 @@ class InlineExecutor:
         # recorded. A backend that stays merely eligible never reaches this line at all, so it can
         # never affect the stamp — see `retention.tighten_retention`'s own docstring for why this
         # replaces the old arm-time, whole-eligible-set computation.
+        # `now_wall_ms()`, matching the base `_arm_ledger` stamped with: `tighten_retention` takes
+        # `min(recorded, now + hours)`, so feeding it the other clock would make a monotonic
+        # reading (~1e9) win against a wall-clock stamp (~1e12) every time and shred the run on its
+        # first hosted dispatch. Mixing the two bases in one comparison is the defect, either way.
         if self._ledger_root is not None and req.backend_id is not None:
             adapter = self._registry.get(req.backend_id) if self._registry is not None else None
             if adapter is not None:
@@ -405,7 +409,7 @@ class InlineExecutor:
                     self._ledger_root,
                     req.run_id,
                     adapter.descriptor,
-                    now_epoch_ms=int(self._clock.now_ms()),
+                    now_epoch_ms=int(self._clock.now_wall_ms()),
                 )
 
         # Phase C round-1 (Low/confirm-only, not filed as a defect): the full response body —
@@ -435,7 +439,7 @@ class InlineExecutor:
                     idempotency_key=req.idempotency_key,
                     content_key=req.content_key,
                     payload=payload,
-                    ended_epoch_ms=int(self._clock.now_ms()),
+                    ended_epoch_ms=int(self._clock.now_wall_ms()),
                 )
             )
         )

@@ -579,7 +579,10 @@ def _arm_ledger(
     blobs = LocalFsBlobStore(ledger_root / "blobs", keys)
     journal = JsonlJournal(ledger_root / f"{run_id}.jsonl")
 
-    now_ms = int(clock.now_ms())
+    # Wall clock, never `now_ms()`: the stamp is read back by a LATER process, and a monotonic
+    # reading's zero point is the boot (`openreading.router.clock`). The reaper's own `now` must
+    # come from the same base as the stamp it compares against, so both read `now_wall_ms()`.
+    now_ms = int(clock.now_wall_ms())
     if not resume:
         reap(ledger_root, keys, ledger_root / "blobs", now_epoch_ms=now_ms)
     descriptors = [
