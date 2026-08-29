@@ -133,6 +133,7 @@ src/openreading/
   credentials.py  BYO-key broker                               (docstring: precedence, per-backend vars)
 tests/         offline suite + keyed live lane                 (conftest.py docstring: the runbook)
 scripts/       smoke runners, extras-parity, adapter scaffold
+examples/      two synthetic bank statements the READMEs parse (README.md: what they are)
 ```
 
 Reading a package's documentation: `uv run python -c "import openreading.cli; help(openreading.cli)"`,

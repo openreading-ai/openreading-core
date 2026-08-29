@@ -14,6 +14,16 @@ All notable changes to OpenReading are documented here. The format follows
 
 ## [Unreleased]
 
+### Added — example documents in the clone
+
+`examples/` ships two synthetic one-page bank statements, so a first parse needs no key and no
+document of the reader's own. Both files are ReportLab output with invented names, accounts and
+balances; [`examples/README.md`](examples/README.md) records what they contain and where they came
+from. The root README's walkthrough now runs on them end to end — parse, compare, route, strategy,
+batch — and the compare example shows a real OCR disagreement (`Account Holder:` read as
+`; Account Hotder-`, at `confidence: 0.0`) rather than a synthetic one. `samples/` stays gitignored
+for the reader's own corpus. The generated `sample.pdf` the subsystem guides use is unchanged.
+
 ### Repository split — this is `openreading-core`
 
 The open-core engine (library, CLI, thin JSON server, tests) now lives in its own repository,
