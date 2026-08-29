@@ -292,14 +292,13 @@ table and that output disagree, the output is right. Fix the table.
 
 ## Not built yet
 
-From the `openreading.comparison` docstring (`Enterprise builds on top`, `Deliberately deferred`):
+From the `openreading.comparison` docstring (`Deliberately deferred`):
 
-- A run store with drift detection across time.
-- A visual bbox-overlay delta view.
-- An LLM equivalence judge for fields.
 - Threshold flags (`TAU_TEXT`, `IOU_MIN` stay module constants), chunk-level comparison, and
   page-provenance-aware comparison of `granularity: page` runs.
 - A `compare:` node inside a strategy YAML that emits a report.
+- Streaming or incremental comparison, and cross-document comparison (same backend, different
+  documents), which is evals territory.
 
 ## See also
 

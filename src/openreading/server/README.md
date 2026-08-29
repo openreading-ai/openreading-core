@@ -8,7 +8,8 @@
 ## What this gives you
 
 One process that accepts the packaged request schema and returns the response envelope. An
-envelope is the one JSON shape every surface returns. Control-plane endpoints report readiness and
+envelope is the one JSON shape every surface returns. You run this process yourself, on your own
+machine or network; this repository ships no hosted version of it. Control-plane endpoints report readiness and
 routing plans without running a backend. Keys come from the server's environment, never from a body.
 
 ```bash
@@ -225,8 +226,9 @@ sample through `/v1/parse` and `/v1/batch`, asserts schema-valid responses, and 
 
 ## Not built yet
 
-- Rate limiting, spend accounting, TLS (`openreading.server` docstring, "Security": "What this
-  does NOT add: rate limiting, spend accounting, transport encryption").
+- Rate limiting, spend accounting, TLS. Not provided here by design; put your own reverse proxy in
+  front (`openreading.server` docstring, "Security": "What this does NOT add: rate limiting, spend
+  accounting, transport encryption").
 - A durable job store and server-side resume (`openreading.server` docstring, "Endpoints",
   `POST /v1/jobs`: "there is no server-side resume"; `openreading.ledger` docstring, "The
   substrate contract": "The `/v1/jobs` store stays in-memory, per-process").
