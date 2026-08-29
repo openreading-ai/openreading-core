@@ -10,7 +10,8 @@
 One process that accepts the packaged request schema and returns the response envelope. An
 envelope is the one JSON shape every surface returns. You run this process yourself, on your own
 machine or network; this repository ships no hosted version of it. Control-plane endpoints report
-readiness and routing plans without running a backend. Keys come from the server's environment, never from a body.
+readiness and routing plans without running a backend. Keys come from the server's environment,
+never from a body.
 
 ```bash
 uv run openreading serve
