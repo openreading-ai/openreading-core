@@ -550,6 +550,47 @@ intent: "Prefer complete line-item tables."}` beside `pick: best` in the longhan
 > Every hosted rung that runs is billed to your key, losers, shadows, and judges included.
 > `usage.cost_usd` sums all of them.
 
+**Audit one agent's run from another.** A second agent can check a strategy run without trusting
+the first, because the trace carries everything the check needs. `config_hash` pins the config that
+ran. `eligible` is the candidate list the engine enumerated, so `chosen in eligible` proves the
+choice was in bounds. `decision_id` is byte-stable across a run and its replay, so a replay that
+produces different ids means the inputs were not the same. Gate records carry `skipped` when a
+signal could not be measured, which is what stops an unmeasurable gate from reading as a passing
+one. Save this as `verify_run.py`, using the `choose.yaml` from step 7:
+
+```python
+import json, sys
+run, rep = json.load(open(sys.argv[1])), json.load(open(sys.argv[2]))
+a, b = run["orchestration"], rep["orchestration"]
+assert a["config_hash"] == b["config_hash"], "config differs"
+for d in a["decisions"]:
+    if d["point"] == "route":            # different record shape, no candidate list
+        continue
+    assert d["chosen"] in d["eligible"], f'out of bounds: {d["chosen"]}'
+ids = [d.get("decision_id") for d in a["decisions"]]
+assert ids == [d.get("decision_id") for d in b["decisions"]], "replay diverged"
+for at in a["attempts"]:
+    for g in at.get("gates", []):
+        if g.get("skipped"):
+            print(f'  unmeasured gate {g["predicate"]}: {g["skipped"]}')
+print(f'ok: {len(ids)} decision(s) in bounds, ids stable, config {a["config_hash"][:14]}…')
+```
+
+```bash
+uv run openreading parse sample.pdf --config choose.yaml --strategy band > band.json
+uv run openreading replay sample.pdf --config choose.yaml --strategy band --trace band.json > band-replay.json
+uv run python verify_run.py band.json band-replay.json
+```
+```text
+  unmeasured gate confidence_below: signal_unavailable
+ok: 1 decision(s) in bounds, ids stable, config sha256:3a95198…
+```
+
+**You should see** the gray band's gate reported as unmeasured, because `pymupdf` emits no
+confidence, and the one decision confirmed in bounds. Replay needs the document and the config, not
+only the trace. A `route:` node's record is skipped by the loop above because it is a different
+shape, with an integer `chosen` and no `eligible`.
+
 ## How it decides
 
 These rules keep a strategy from widening compliance, hiding a failure, or spending money it did
