@@ -324,3 +324,145 @@ def test_config_hash_never_contains_a_resolved_credential():
         _req(credentials_ref="env:SOME_ALIAS"), "cheap", config, registry, RouterConfig()
     )
     assert plain.config_hash == with_ref.config_hash
+
+
+# --- caller backend allow-list (the scope a bearer token carries) ------------------------------
+#
+# `compile_strategy(backend_allowlist=...)` is where a `strategy:<name>` walk is bounded to the
+# backends its caller may reach. Before it existed, a strategy id was exempt from the check the
+# server ran on a directly-named backend, so naming any strategy — including a preset, which needs
+# no config file — reached every backend that strategy's rungs touch. These cover the mechanism
+# itself, at the layer that implements it; the end-to-end HTTP behaviour is in test_server.py.
+
+
+def test_allowlist_prunes_an_out_of_scope_rung_and_keeps_the_in_scope_one():
+    registry = build_registry()
+    config = StrategyConfig(version=1, strategies={"s": {"steps": ["pymupdf", "tesseract"]}})
+    compiled = compile_strategy(
+        _req(), "s", config, registry, RouterConfig(), backend_allowlist=frozenset({"pymupdf"})
+    )
+    assert [n["backend"] for n in compiled.root["steps"]] == ["pymupdf"]
+    assert {d.backend: d.code for d in compiled.dropped}["tesseract"] == "scope_denied"
+
+
+def test_allowlist_narrows_the_eligible_set_an_auto_rung_resolves_against():
+    # The reason a reachable set computed by READING the config cannot be the enforcement point:
+    # `auto` names no backend, so only narrowing `eligible` bounds it.
+    registry = build_registry()
+    config = StrategyConfig(version=1, strategies={"s": {"steps": ["auto"]}})
+    unscoped = compile_strategy(_req(), "s", config, registry, RouterConfig())
+    scoped = compile_strategy(
+        _req(), "s", config, registry, RouterConfig(), backend_allowlist=frozenset({"pymupdf"})
+    )
+    assert len(unscoped.eligible) > 1  # the router really did offer more than one
+    assert scoped.eligible == ["pymupdf"]
+
+
+def test_allowlist_never_readmits_a_backend_compliance_already_dropped():
+    # The invariant that outranks the feature: an allow-list only ever SUBTRACTS. Scoping a token
+    # to a hosted backend must not put it back into a require_local run.
+    registry = build_registry()
+    config = StrategyConfig(version=1, strategies={"s": {"steps": ["auto"]}})
+    local_only = compile_strategy(
+        _req({"require_local": True}), "s", config, registry, RouterConfig()
+    )
+    assert "reducto" not in local_only.eligible
+    scoped = compile_strategy(
+        _req({"require_local": True}),
+        "s",
+        config,
+        registry,
+        RouterConfig(),
+        backend_allowlist=frozenset({"reducto", "pymupdf"}),
+    )
+    assert "reducto" not in scoped.eligible
+
+
+def test_allowlist_that_empties_the_tree_refuses_as_scope_not_compliance():
+    # Which exception this is decides which file the operator goes and edits, so a scope-emptied
+    # tree must not arrive wearing compliance's name.
+    from openreading.types.errors import ScopeRefused
+
+    registry = build_registry()
+    config = StrategyConfig(version=1, strategies={"s": {"steps": ["pymupdf"]}})
+    with pytest.raises(ScopeRefused) as e:
+        compile_strategy(
+            _req(), "s", config, registry, RouterConfig(), backend_allowlist=frozenset({"docling"})
+        )
+    assert e.value.backend_code == "pymupdf"
+    assert not isinstance(e.value, ComplianceRefused)
+
+
+def test_scope_refusal_names_a_backend_the_requested_strategy_actually_names():
+    # compile_strategy prunes every OTHER strategy and preset in the same pass so `use:` refs
+    # resolve. Their drops must not be what the refusal reports: "cheap" names only pymupdf, so
+    # naming docling (which only a preset mentions) would send the reader to the wrong rung.
+    from openreading.types.errors import ScopeRefused
+
+    registry = build_registry()
+    config = StrategyConfig(version=1, strategies={"cheap": {"steps": ["pymupdf"]}})
+    with pytest.raises(ScopeRefused) as e:
+        compile_strategy(
+            _req(),
+            "cheap",
+            config,
+            registry,
+            RouterConfig(),
+            backend_allowlist=frozenset({"tesseract"}),
+        )
+    assert e.value.backend_code == "pymupdf"
+    assert "docling" not in str(e.value)
+
+
+def test_no_allowlist_compiles_byte_for_byte_as_before():
+    registry = build_registry()
+    config = StrategyConfig(version=1, strategies={"s": {"steps": ["pymupdf", "tesseract"]}})
+    a = compile_strategy(_req(), "s", config, registry, RouterConfig())
+    b = compile_strategy(_req(), "s", config, registry, RouterConfig(), backend_allowlist=None)
+    assert a.root == b.root and a.eligible == b.eligible and a.config_hash == b.config_hash
+    assert not a.dropped
+
+
+def test_engine_refuses_a_dispatch_the_prune_pass_would_have_had_to_miss():
+    """The second layer, exercised on its own.
+
+    `_resolve_backend` is the last point where the id is known and nothing has been built. It
+    re-checks the allow-list rather than trusting that compile_strategy pruned correctly, because
+    `auto`'s only bound is the CONTENTS of `ctx.eligible` and a list is not a filter: anything that
+    ever seeds that list by another route reopens the hole silently. Here the walk context is built
+    by hand with an out-of-scope id in `eligible` — the state a prune bug would produce — and the
+    resolve must fail closed instead of returning it.
+    """
+    from openreading.strategies.engine import _resolve_backend
+    from openreading.types.errors import ScopeRefused
+
+    ctx = dataclasses.replace(
+        _bare_walk_ctx(), eligible=["reducto"], backend_allowlist=frozenset({"pymupdf"})
+    )
+    with pytest.raises(ScopeRefused) as e:
+        _resolve_backend("auto", ctx)
+    assert e.value.backend_code == "reducto"
+
+    with pytest.raises(ScopeRefused):
+        _resolve_backend("reducto", ctx)  # a literal leaf, same answer
+
+    # ...and it stays out of the way of everything else.
+    assert _resolve_backend("pymupdf", ctx) == "pymupdf"
+    unscoped = dataclasses.replace(ctx, backend_allowlist=None)
+    assert _resolve_backend("reducto", unscoped) == "reducto"
+
+
+def _bare_walk_ctx():
+    """A minimal _WalkCtx for the resolver, which reads only eligible/attempted/allow-list."""
+    from openreading.strategies.engine import _WalkCtx
+    from openreading.strategies.trace import Trace
+
+    return _WalkCtx(
+        req=_req(),
+        registry=build_registry(),
+        broker=EnvCredentialBroker(),
+        clock=FakeClock(),
+        trace=Trace(strategy="s", config_hash=""),
+        trees={},
+        eligible=[],
+    )

@@ -33,6 +33,7 @@ from openreading.types.errors import (
     AdapterError,
     ComplianceRefused,
     RetryableError,
+    ScopeRefused,
     TerminalError,
     UnsupportedFeatureError,
 )
@@ -133,6 +134,7 @@ __all__ = [
     "TerminalError",
     "UnsupportedFeatureError",
     "ComplianceRefused",
+    "ScopeRefused",
     # enums
     "BackendType",
     "BlockType",

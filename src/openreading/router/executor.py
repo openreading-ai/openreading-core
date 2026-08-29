@@ -5,6 +5,11 @@ NormalizedResponse.
 Invariants:
 - It consumes ONLY the RoutePlan. It can never widen eligibility — the router already enforced
   compliance (never-relaxed, fail-closed), so every backend here is already eligible.
+- A plan carrying a caller allow-list (`RoutePlan.backend_allowlist`, set by `restrict_to`) has
+  already had the chain pruned to it. Every chain member is re-checked against it here anyway,
+  before the run context that resolves the vendor credential is built, and an out-of-scope member
+  raises ScopeRefused rather than being skipped: reaching that state means a layer above failed,
+  and this is a security control, so it fails closed and loudly.
 - A backend whose required credentials the broker cannot resolve is SKIPPED (never a crash, never
   a network preflight — the first real proof of a key is the submit call).
 - Terminal / Retryable-exhausted / UnsupportedFeature fall to the next backend. (RetryableError
@@ -43,6 +48,7 @@ from openreading.types.errors import (
     ComplianceRefused,
     PlanExhaustedError,
     RetryableError,
+    ScopeRefused,
     TerminalError,
     UnsupportedFeatureError,
 )
@@ -138,6 +144,24 @@ def execute_plan(
 
     for adapter in plan.chain:
         desc = adapter.descriptor
+        # The caller allow-list backstop, redundant with RoutePlan.restrict_to and here anyway.
+        # This is the last point at which the backend is known and nothing has been built yet:
+        # build_run_context below RESOLVES the vendor credential, and the allow-list exists
+        # precisely so an out-of-scope backend never gets that far. Deliberately outside the try
+        # below — ScopeRefused is not one of the four _TAXONOMY types, so raising it in there
+        # would be swallowed by the `except Exception` fallback handler and become a trail entry,
+        # turning the refusal into a silent skip to the next rung.
+        #
+        # Raise rather than skip: reaching here at all means the prune above did not run or did
+        # not cover this path, and the cost of the two layers disagreeing is asymmetric — a
+        # spurious refusal is a support ticket, a missed one spends someone else's vendor credits
+        # and looks exactly like ordinary traffic. Mirrors strategies.engine._resolve_backend,
+        # which guards the strategy walk's dispatch the same way for the same reason.
+        if plan.backend_allowlist is not None and desc.id not in plan.backend_allowlist:
+            raise ScopeRefused(
+                f"this API key is not scoped to reach backend {desc.id!r}",
+                backend_code=desc.id,
+            )
         # BL-146: the caller's own deadline_ms must reach ctx.deadline_ms — the field an adapter's
         # own code actually reads (e.g. TesseractAdapter.submit()'s subprocess timeout) — not just
         # the local `budget` variable below (which only bounds this function's own wait-loop).

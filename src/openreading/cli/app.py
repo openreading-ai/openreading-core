@@ -490,9 +490,21 @@ def cmd_serve(args) -> int:
             file=sys.stderr,
         )
         return 3
-    from openreading.server import create_app
+    from openreading.server import ServerConfigError, create_app
 
-    app = create_app(cors_origins=args.cors_origin or None)
+    try:
+        app = create_app(cors_origins=args.cors_origin or None)
+    except ServerConfigError as e:
+        # A malformed OPENREADING_API_KEYS / _SCOPES is an operator config error, so it belongs on
+        # the same rung as every other "cannot run" on this CLI (exit 3) and must be readable by
+        # the same log rule: one `[serve] …` line, no traceback. Left uncaught it surfaced as a
+        # 12-line stack with the only useful sentence last, which an operator alerting on the
+        # `[tag]` convention never matched — a server that refuses to start is exactly the moment
+        # that line has to land. Only the message is printed: it names the malformed entry's
+        # POSITION and never its VALUE (BL-159 AC-5), and a startup log must not become the place
+        # a bearer token leaks.
+        print(f"[serve] {e}", file=sys.stderr)
+        return 3
     if args.host != "127.0.0.1":
         print(
             f"[serve] warning: binding {args.host} exposes the server — anyone who can reach it "

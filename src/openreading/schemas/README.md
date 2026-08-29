@@ -148,7 +148,13 @@ HTTP 400. The response history is in `CHANGELOG.md` and in the "Versioning rules
 - `document.page_count` is the source page count even when you request a subset. To check, run
   `uv run openreading parse sample.pdf --backend pymupdf --pages 2`, which prints `page_count: 2`
   and one page.
-- `backend_raw` is outside the versioned contract and may change shape without a version bump.
+- `backend_raw` is the backend's own response body, copied into the envelope untouched. It travels
+  wherever the envelope travels, so it lands in every saved file, batch result, comparison input,
+  and ledger blob. For a run over regulated data that is a second copy of vendor output, shaped by
+  the vendor rather than by this contract, in every artifact. It is outside the versioned contract
+  and may change shape without a version bump. To drop it, set `outputs.include_backend_raw` to
+  `false` in a Python `run()` call or an HTTP request body, which every adapter honors and no CLI
+  flag exposes today.
 - `channel_provenance` is experimental and excluded from backward-compatibility guarantees.
 - A `pymupdf` run also carries `usage`, `backend_raw` and `channel_provenance` today. To see them,
   run `uv run openreading parse sample.pdf --backend pymupdf | python3 -c "import json,sys;

@@ -59,3 +59,42 @@ def test_serve_happy_path_passes_correct_app_host_port(monkeypatch):
 
     assert rc == 0
     assert calls == [(sentinel_app, "0.0.0.0", 9999)]
+
+
+def test_serve_malformed_api_keys_reports_a_tagged_line_not_a_traceback(monkeypatch, capsys):
+    """A malformed OPENREADING_API_KEYS is an operator config error, so it must reach the operator
+    the way every other `cannot run` config error on this CLI does: one `[serve] …` line on stderr
+    and exit 3. It used to escape create_app() as an uncaught ServerConfigError — a 12-line
+    traceback whose only useful sentence was the last one, which no log rule matching this
+    project's `[tag]` convention would ever catch (C9)."""
+    monkeypatch.setattr("uvicorn.run", lambda app, host, port: pytest.fail("must not bind"))
+    monkeypatch.setenv("OPENREADING_API_KEYS", "tok-a,,tok-b")
+
+    rc = main(["serve"])
+
+    assert rc == 3
+    err = capsys.readouterr().err
+    assert err.splitlines() == [
+        "[serve] OPENREADING_API_KEYS entry 2 is empty — check for a stray comma"
+    ]
+    assert "Traceback" not in err
+
+
+def test_serve_malformed_scopes_names_the_position_and_never_the_value(monkeypatch, capsys):
+    """The message content is already right and must stay right: a keys/scopes config error names
+    the offending entry's POSITION, never its VALUE, so a startup-failure log line cannot become
+    the place a bearer token leaks. Wrapping the raise in a tagged line must not start echoing the
+    entry (C9, keeping BL-159 AC-5)."""
+    monkeypatch.setattr("uvicorn.run", lambda app, host, port: pytest.fail("must not bind"))
+    monkeypatch.setenv("OPENREADING_API_KEYS", "sekrit-token-value")
+    monkeypatch.setenv("OPENREADING_API_KEY_SCOPES", "sekrit-token-value=pymupdf,malformed-entry")
+
+    rc = main(["serve"])
+
+    assert rc == 3
+    err = capsys.readouterr().err
+    assert err.startswith("[serve] ")
+    assert "entry 2" in err
+    assert "Traceback" not in err
+    assert "sekrit-token-value" not in err
+    assert "malformed-entry" not in err

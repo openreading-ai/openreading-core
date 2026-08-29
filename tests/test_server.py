@@ -1947,13 +1947,17 @@ def test_caller_auth_scope_denial_happens_before_credential_resolution(monkeypat
     assert err["backend_code"] == "google-document-ai"
 
 
-def test_caller_auth_scope_denies_an_auto_request_that_would_route_to_an_out_of_scope_backend(
+def test_caller_auth_scope_reroutes_an_auto_request_around_an_out_of_scope_first_pick(
     monkeypatch,
 ):
-    # BL-159.3/AC-3: "auto" is scope-checked against the backend the plain router would ACTUALLY
-    # pick — learned via a throwaway /v1/route call (which never executes anything either way), so
-    # this test never hardcodes an assumption about which of the four local candidates scoring
-    # picks.
+    """`auto` asks the router to choose, so a scope on the token bounds WHAT IT MAY CHOOSE FROM
+    rather than vetoing the request whenever the unconstrained top pick falls outside it. The
+    chain is pruned to the allow-list and routing proceeds over what survives — the same
+    subtraction, and the same prune-then-run outcome, a `strategy:` walk already gets.
+
+    The router's own pick is learned via a throwaway /v1/route call (which executes nothing), so
+    this never hardcodes which of the four local candidates scoring picks.
+    """
     payload = _pdf_body("auto")
     payload["compliance"] = {"require_local": True}
     probe = TestClient(create_app())
@@ -1968,10 +1972,133 @@ def test_caller_auth_scope_denies_an_auto_request_that_would_route_to_an_out_of_
     r = client.post(
         "/v1/parse", json=payload, headers={"Authorization": "Bearer scoped-token-0008"}
     )
+    # The one thing that must never happen is the out-of-scope pick running. Whether an in-scope
+    # local backend then succeeds or fails for an environment-specific reason (a missing binary)
+    # is not what this is about, so both outcomes are checked for the same property: every backend
+    # this request reached was one the token allows.
+    assert r.status_code != 403
+    if r.status_code == 200:
+        assert r.json()["backend"]["id"] in set(others)
+    else:
+        reached = {a["backend"] for a in r.json()["error"].get("trail", [])}
+        assert reached <= set(others)
+
+
+def test_caller_auth_scope_bounds_the_whole_auto_fallback_chain_not_just_the_first_pick(
+    monkeypatch,
+):
+    """A RoutePlan's chain is `chosen` PLUS every fallback the compliance router computed, and the
+    `auto` arm walks all of it. A check that reads `chosen` alone therefore guards the first
+    backend and none of the rest: the moment the in-scope pick fails on a document, the request
+    walks the whole eligible registry and hands the document to backends the same token is refused
+    BY NAME, one HTTP call earlier.
+
+    Proven on the attempt trail, which carries exactly one entry per chain member — including a
+    `skipped` entry for one whose credentials did not resolve. An id absent from that trail was
+    never in the chain at all, so no run context was built and no credential was resolved for it,
+    which is the property the allow-list exists to provide.
+    """
+    monkeypatch.setenv("OPENREADING_API_KEYS", "scoped-token-0026")
+    monkeypatch.setenv("OPENREADING_API_KEY_SCOPES", "scoped-token-0026=pymupdf")
+    client = TestClient(create_app())
+    headers = {"Authorization": "Bearer scoped-token-0026"}
+
+    for other in ("tesseract", "docling"):
+        denied = client.post("/v1/parse", json=_pdf_body(other), headers=headers)
+        assert denied.status_code == 403
+        assert denied.json()["error"]["backend_code"] == other
+
+    # A document the in-scope backend cannot parse is what drives the chain past its first rung.
+    body = _pdf_body("auto")
+    body["document"]["bytes_base64"] = base64.b64encode(b"not a pdf").decode()
+    r = client.post("/v1/parse", json=body, headers=headers)
+    assert r.status_code == 502
+    trail = [a["backend"] for a in r.json()["error"]["trail"]]
+    assert trail == ["pymupdf"]
+
+
+def test_caller_auth_scope_denies_auto_when_it_leaves_no_backend_in_the_chain(monkeypatch):
+    """Fail closed, not open. When the allow-list removes every backend the router found eligible,
+    the request is refused 403 `scope_denied` — never 502 (which reads as "they tried and failed",
+    when none was allowed to try) and never a success on nothing.
+
+    Scope names itself as the cause because it is the narrower and later subtraction: the fix is
+    the token's allow-list, not the request's compliance policy, and reporting it as a compliance
+    refusal would send the operator to the wrong file. An already-empty router plan stays
+    ComplianceRefused, because there scope removed nothing.
+    """
+    payload = _pdf_body("auto")
+    payload["compliance"] = {"require_local": True}  # bounds the eligible set to local backends
+    monkeypatch.setenv("OPENREADING_API_KEYS", "scoped-token-0027")
+    monkeypatch.setenv("OPENREADING_API_KEY_SCOPES", "scoped-token-0027=reducto")  # never local
+    client = TestClient(create_app())
+    r = client.post(
+        "/v1/parse", json=payload, headers={"Authorization": "Bearer scoped-token-0027"}
+    )
     assert r.status_code == 403
-    err = r.json()["error"]
-    assert err["category"] == "scope_denied"
-    assert err["backend_code"] == chosen
+    assert r.json()["error"]["category"] == "scope_denied"
+
+
+def test_a_scoped_runs_allowlist_survives_into_resume_via_the_headers_pinned_set(
+    tmp_path, monkeypatch
+):
+    """`openreading resume` recompiles the strategy with NO allow-list, because a resume is an
+    operator action on the CLI where there is no token. The server can still arm a ledger run for a
+    scoped caller, so the question is whether resuming one re-drives it across backends the
+    original token was refused.
+
+    It does not, and the reason is the ledger rather than the recompile. A scope that pruned a
+    named rung changes the compiled tree and `plan_hash` refuses the resume outright. A scope that
+    only narrowed the eligible set — this `auto`-rung case, where the tree is `{backend: auto}`
+    either way — leaves `plan_hash` matching, and the header's `pinned_eligible` is what carries
+    the scope: `_arm_ledger(resume=True)` arms the resumed executor's per-step gate from the header
+    rather than a freshly recomputed set.
+
+    Pinned on the header's own recorded set, not on which backend happens to run, so this says the
+    same thing on a machine with no tesseract binary. The unscoped contrast is what makes it a
+    statement about the scope and not about the router.
+    """
+    from openreading import api
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENREADING_LEDGER", str(tmp_path / "ledger"))
+    (tmp_path / "openreading.yaml").write_text("version: 1\nstrategies:\n  s: [auto]\n")
+    monkeypatch.setenv("OPENREADING_CONFIG", str(tmp_path / "openreading.yaml"))
+    monkeypatch.setenv("OPENREADING_API_KEYS", "scoped-token-0029")
+    monkeypatch.setenv("OPENREADING_API_KEY_SCOPES", "scoped-token-0029=pymupdf")
+
+    r = TestClient(create_app()).post(
+        "/v1/parse",
+        json=_pdf_body("strategy:s"),
+        headers={"Authorization": "Bearer scoped-token-0029"},
+    )
+    assert r.status_code == 200 and r.json()["backend"]["id"] == "pymupdf"
+
+    headers = sorted((tmp_path / "ledger").glob("*.header.json"))
+    assert len(headers) == 1
+    header = json.loads(headers[0].read_text())
+    # The narrowed set, not the whole eligible registry an unscoped run of the same strategy pins.
+    assert sorted(header["pinned_eligible"]) == ["pymupdf"]
+
+    resumed = api.resume_run(header["run_id"])
+    assert resumed["status"]["state"] == "succeeded"
+    assert resumed["backend"]["id"] == "pymupdf"
+
+
+def test_an_unscoped_run_of_the_same_strategy_pins_the_whole_eligible_set(tmp_path, monkeypatch):
+    """The contrast the test above rests on: without a scope, the same `auto` strategy pins every
+    eligible backend, so the single-entry pinned set there is the allow-list's doing and not a
+    property of `auto` rungs."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENREADING_LEDGER", str(tmp_path / "ledger"))
+    (tmp_path / "openreading.yaml").write_text("version: 1\nstrategies:\n  s: [auto]\n")
+    monkeypatch.setenv("OPENREADING_CONFIG", str(tmp_path / "openreading.yaml"))
+    monkeypatch.delenv("OPENREADING_API_KEYS", raising=False)
+
+    r = TestClient(create_app()).post("/v1/parse", json=_pdf_body("strategy:s"))
+    assert r.status_code == 200
+    header = json.loads(sorted((tmp_path / "ledger").glob("*.header.json"))[0].read_text())
+    assert len(header["pinned_eligible"]) > 1
 
 
 def test_caller_auth_multiple_keys_some_scoped_some_not(monkeypatch):
@@ -2018,27 +2145,15 @@ def test_caller_auth_scope_denies_a_direct_named_batch_backend(monkeypatch):
     assert err["backend_code"] == "tesseract"
 
 
-def test_caller_auth_scope_denies_an_auto_batch_whose_per_item_pick_is_out_of_scope(monkeypatch):
+def test_caller_auth_scope_denies_an_auto_batch_no_item_can_run_in_scope(monkeypatch):
     # BL-159 AC-3 extended to /v1/batch's "auto": each item can route differently by its own
     # document, so the pre-check walks every item's own plan (see _out_of_scope_backend's own
-    # docstring) rather than a single upfront decision — proven here with one item, learning its
-    # real pick the same probe-via-/v1/route way the /v1/parse "auto" test above does.
+    # docstring) rather than a single upfront decision. The refusal is up front — before run_batch
+    # calls run_one for real — so no earlier item spends at a real backend while a later one is
+    # still being found out of scope mid-pool.
     doc = _batch_doc()
-    probe = TestClient(create_app())
-    plan = probe.post(
-        "/v1/route",
-        json={
-            "document": doc,
-            "backend": {"id": "auto"},
-            "compliance": {"require_local": True},
-        },
-    ).json()
-    chosen = plan["chosen"]
-    assert chosen is not None
-
     monkeypatch.setenv("OPENREADING_API_KEYS", "scoped-token-0010")
-    others = sorted({"pymupdf", "tesseract", "docling", "qwen-vl"} - {chosen})
-    monkeypatch.setenv("OPENREADING_API_KEY_SCOPES", f"scoped-token-0010={'|'.join(others)}")
+    monkeypatch.setenv("OPENREADING_API_KEY_SCOPES", "scoped-token-0010=reducto")  # never local
     client = TestClient(create_app())
     r = client.post(
         "/v1/batch",
@@ -2046,9 +2161,32 @@ def test_caller_auth_scope_denies_an_auto_batch_whose_per_item_pick_is_out_of_sc
         headers={"Authorization": "Bearer scoped-token-0010"},
     )
     assert r.status_code == 403
-    err = r.json()["error"]
-    assert err["category"] == "scope_denied"
-    assert err["backend_code"] == chosen
+    assert r.json()["error"]["category"] == "scope_denied"
+
+
+def test_caller_auth_scope_bounds_the_auto_fallback_chain_of_every_batch_item(monkeypatch):
+    """/v1/batch runs the plain `auto` arm once per document, so the chain bypass was one delivery
+    to an out-of-scope backend PER ITEM.
+
+    A batch item's error carries no attempt trail, only the exhaustion message — which counts the
+    chain (`len(plan.chain)`), so "all 1" is an exact statement that this item's chain held the one
+    backend the token allows and nothing else. Unscoped, the same request reports all 13.
+    """
+    monkeypatch.setenv("OPENREADING_API_KEYS", "scoped-token-0028")
+    monkeypatch.setenv("OPENREADING_API_KEY_SCOPES", "scoped-token-0028=pymupdf")
+    client = TestClient(create_app())
+    bad = {"filename": "bad.pdf", "bytes_base64": base64.b64encode(b"not a pdf").decode()}
+    r = client.post(
+        "/v1/batch",
+        json={"documents": [bad, bad], "backend": "auto"},
+        headers={"Authorization": "Bearer scoped-token-0028"},
+    )
+    assert r.status_code == 200
+    items = r.json()["items"]
+    assert len(items) == 2
+    for item in items:
+        assert item["state"] == "failed"
+        assert item["error"]["message"] == "all 1 eligible backend(s) failed or were skipped"
 
 
 def test_caller_auth_scope_denies_a_direct_named_jobs_backend(monkeypatch):
@@ -2068,12 +2206,19 @@ def test_caller_auth_scope_denies_a_direct_named_jobs_backend(monkeypatch):
     assert err["backend_code"] == "tesseract"
 
 
-def test_caller_auth_real_strategy_walk_bypasses_scope_by_design(tmp_path, monkeypatch):
-    # BL-159 (documented boundary — see _out_of_scope_backend's own docstring): a REAL
-    # `strategy:<name>` walk is deliberately not scope-checked in this version, since it can touch
-    # more than one backend internally. Proven by scoping the token to EXCLUDE the one backend
-    # ("pymupdf") the strategy actually walks through and confirming the request still succeeds
-    # rather than being scope_denied.
+def test_caller_auth_scope_is_enforced_across_a_real_strategy_walk(tmp_path, monkeypatch):
+    """A `strategy:<name>` id must not be a way around the allow-list.
+
+    This test used to assert the opposite — that a real strategy walk is "deliberately not
+    scope-checked" — which made `strategy:<anything>` a universal bypass: the same token refused
+    a backend directly reached and RAN it through a strategy, and the four presets run configless,
+    so every caller has one. With hosted keys configured server-side that is a token scoped to a
+    free local parser spending vendor credits on whatever a preset's rungs touch.
+
+    Scoped to "tesseract" only; the strategy's single rung is "pymupdf". Nothing the walk can
+    reach is in scope, so the request is refused for the same reason and with the same category
+    the direct call already gives, naming the backend that was denied.
+    """
     cfg = tmp_path / "om.yaml"
     cfg.write_text("version: 1\nstrategies:\n  cheap: [pymupdf]\n")
     monkeypatch.setenv("OPENREADING_CONFIG", str(cfg))
@@ -2085,8 +2230,97 @@ def test_caller_auth_real_strategy_walk_bypasses_scope_by_design(tmp_path, monke
         json=_pdf_body("strategy:cheap"),
         headers={"Authorization": "Bearer scoped-token-0016"},
     )
+    assert r.status_code == 403
+    err = r.json()["error"]
+    assert err["category"] == "scope_denied"
+    assert err["backend_code"] == "pymupdf"
+
+
+def test_caller_auth_scope_prunes_an_out_of_scope_rung_and_runs_the_rest(tmp_path, monkeypatch):
+    """A scope SUBTRACTS from what compliance and routing already allow — it does not veto the
+    whole walk the moment one rung is out of bounds, which is exactly how the compliance filter
+    upstream of it already behaves. The in-scope rung runs; the out-of-scope rung is pruned before
+    the walk starts, so no adapter for it is ever built and no credential for it is ever resolved.
+    The prune is recorded in `orchestration.dropped`, so a caller can see WHY the strategy did not
+    escalate rather than silently getting a shorter cascade."""
+    cfg = tmp_path / "om.yaml"
+    cfg.write_text("version: 1\nstrategies:\n  two_rung: [pymupdf, tesseract]\n")
+    monkeypatch.setenv("OPENREADING_CONFIG", str(cfg))
+    monkeypatch.setenv("OPENREADING_API_KEYS", "scoped-token-0018")
+    monkeypatch.setenv("OPENREADING_API_KEY_SCOPES", "scoped-token-0018=pymupdf")
+    client = TestClient(create_app())
+    r = client.post(
+        "/v1/parse",
+        json=_pdf_body("strategy:two_rung"),
+        headers={"Authorization": "Bearer scoped-token-0018"},
+    )
     assert r.status_code == 200
-    assert r.json()["backend"]["id"] == "pymupdf"
+    body = r.json()
+    assert body["backend"]["id"] == "pymupdf"
+    dropped = {d["backend"]: d["code"] for d in body["orchestration"].get("dropped", [])}
+    assert dropped.get("tesseract") == "scope_denied"
+    assert all(a["backend"] != "tesseract" for a in body["orchestration"]["attempts"])
+
+
+def test_caller_auth_scope_bounds_an_auto_rung_inside_a_strategy(tmp_path, monkeypatch):
+    """The dynamic case, and the reason a static reachable-set computed from the config is not
+    enough: an `auto` rung names no backend at all, and resolves at walk time against the router's
+    eligible order over the WHOLE registry. Scoped to "tesseract", an `auto` rung must never
+    resolve to pymupdf — the backend the same token is refused directly, and the one the router
+    picks for this local-only request when nothing narrows it."""
+    cfg = tmp_path / "om.yaml"
+    cfg.write_text("version: 1\nstrategies:\n  anything: [auto]\n")
+    monkeypatch.setenv("OPENREADING_CONFIG", str(cfg))
+    monkeypatch.setenv("OPENREADING_API_KEYS", "scoped-token-0019")
+    monkeypatch.setenv("OPENREADING_API_KEY_SCOPES", "scoped-token-0019=tesseract")
+    client = TestClient(create_app())
+    payload = _pdf_body("strategy:anything")
+    payload["compliance"] = {"require_local": True}
+    r = client.post(
+        "/v1/parse", json=payload, headers={"Authorization": "Bearer scoped-token-0019"}
+    )
+    # Whatever tesseract itself then does (run, or fail for an environment-specific reason such as
+    # a missing binary) is not what this is about: `auto` must not have resolved to pymupdf.
+    assert not (r.status_code == 200 and r.json()["backend"]["id"] == "pymupdf")
+    if r.status_code == 200:
+        assert r.json()["backend"]["id"] == "tesseract"
+
+
+def test_caller_auth_scope_is_enforced_across_a_builtin_preset(monkeypatch):
+    """The presets need no config file, so `strategy:offline_first` is available to every caller
+    of every deployment — which is what made the bypass universal rather than a property of one
+    operator's openreading.yaml. Scoped to "docling", the preset's first rung (pymupdf) must not
+    run, with no OPENREADING_CONFIG set at all."""
+    monkeypatch.delenv("OPENREADING_CONFIG", raising=False)
+    monkeypatch.setenv("OPENREADING_API_KEYS", "scoped-token-0020")
+    monkeypatch.setenv("OPENREADING_API_KEY_SCOPES", "scoped-token-0020=docling")
+    client = TestClient(create_app())
+    r = client.post(
+        "/v1/parse",
+        json=_pdf_body("strategy:offline_first"),
+        headers={"Authorization": "Bearer scoped-token-0020"},
+    )
+    assert not (r.status_code == 200 and r.json()["backend"]["id"] == "pymupdf")
+
+
+def test_caller_auth_unscoped_key_still_walks_every_rung_of_a_strategy(tmp_path, monkeypatch):
+    """The other direction of the same gate: a key with no allow-list configured is never narrowed
+    by scope, so enforcing scope across strategy walks must not change a single byte for the
+    unscoped case (BL-159 AC-1/AC-4)."""
+    cfg = tmp_path / "om.yaml"
+    cfg.write_text("version: 1\nstrategies:\n  two_rung: [pymupdf, tesseract]\n")
+    monkeypatch.setenv("OPENREADING_CONFIG", str(cfg))
+    monkeypatch.setenv("OPENREADING_API_KEYS", "unscoped-token-0021")
+    client = TestClient(create_app())
+    r = client.post(
+        "/v1/parse",
+        json=_pdf_body("strategy:two_rung"),
+        headers={"Authorization": "Bearer unscoped-token-0021"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["backend"]["id"] == "pymupdf"
+    assert not body["orchestration"].get("dropped")
 
 
 def test_caller_auth_never_leaks_a_configured_key_value(monkeypatch, caplog):
@@ -2303,3 +2537,74 @@ def test_backends_endpoint_carries_the_static_probe_declaration_without_probing(
     assert rows["chunkr"]["liveness_probe"] == "none"
     # and it does NOT leak a liveness ANSWER into this endpoint
     assert "status" not in rows["pymupdf"] and "measured" not in rows["pymupdf"]
+
+
+def test_caller_auth_scope_is_enforced_on_a_strategy_job(tmp_path, monkeypatch):
+    """`POST /v1/jobs` wraps a whole strategy walk as one synthetic job and runs it through the
+    same api.run_request. Wrapping the walk in a job must not be a way to reach a backend the same
+    token is refused when it asks synchronously."""
+    cfg = tmp_path / "om.yaml"
+    cfg.write_text("version: 1\nstrategies:\n  cheap: [pymupdf]\n")
+    monkeypatch.setenv("OPENREADING_CONFIG", str(cfg))
+    monkeypatch.setenv("OPENREADING_API_KEYS", "scoped-token-0022")
+    monkeypatch.setenv("OPENREADING_API_KEY_SCOPES", "scoped-token-0022=tesseract")
+    client = TestClient(create_app())
+    r = client.post(
+        "/v1/jobs",
+        json=_pdf_body("strategy:cheap"),
+        headers={"Authorization": "Bearer scoped-token-0022"},
+    )
+    assert r.status_code == 403
+    assert r.json()["error"]["category"] == "scope_denied"
+
+
+def test_caller_auth_scope_is_enforced_on_every_item_of_a_strategy_batch(tmp_path, monkeypatch):
+    """A batch is the highest-volume shape: one request, `documents[]` items of spend. The
+    top-level `backend` check deliberately skips a `strategy:` id (a walk picks its own backends),
+    so the allow-list has to reach every item's own run."""
+    cfg = tmp_path / "om.yaml"
+    cfg.write_text("version: 1\nstrategies:\n  cheap: [pymupdf]\n")
+    monkeypatch.setenv("OPENREADING_CONFIG", str(cfg))
+    monkeypatch.setenv("OPENREADING_API_KEYS", "scoped-token-0023")
+    monkeypatch.setenv("OPENREADING_API_KEY_SCOPES", "scoped-token-0023=tesseract")
+    client = TestClient(create_app())
+    doc = {
+        "bytes_base64": base64.b64encode(build_sample_pdf()).decode(),
+        "mime_type": "application/pdf",
+    }
+    r = client.post(
+        "/v1/batch",
+        json={"documents": [doc, doc], "backend": "strategy:cheap"},
+        headers={"Authorization": "Bearer scoped-token-0023"},
+    )
+    assert r.status_code == 200  # a batch reports per-item outcomes, not an HTTP error
+    items = r.json()["items"]
+    assert len(items) == 2
+    # Every item fails identically and nothing runs: the refusal happens while compiling the walk,
+    # so no item spends before a later one is found out of scope.
+    assert all(i["state"] == "failed" for i in items)
+    assert all("not scoped" in i["error"]["message"] for i in items)
+    assert r.json()["summary"]["succeeded"] == 0
+
+
+def test_caller_auth_scope_is_enforced_when_defaults_strategy_makes_auto_a_walk(
+    tmp_path, monkeypatch
+):
+    """The bypass that hides behind an ordinary id: with `defaults.strategy` configured, a plain
+    `auto` request runs a STRATEGY, not the plain router. Gating it at the door against whatever
+    the plain router would have picked checks a backend the request never uses, so `auto` here has
+    to be handed to the walk's own enforcement like any other strategy."""
+    cfg = tmp_path / "om.yaml"
+    cfg.write_text("version: 1\ndefaults:\n  strategy: cheap\nstrategies:\n  cheap: [pymupdf]\n")
+    monkeypatch.setenv("OPENREADING_CONFIG", str(cfg))
+    monkeypatch.setenv("OPENREADING_API_KEYS", "scoped-token-0024")
+    monkeypatch.setenv("OPENREADING_API_KEY_SCOPES", "scoped-token-0024=tesseract")
+    client = TestClient(create_app())
+    r = client.post(
+        "/v1/parse",
+        json=_pdf_body("auto"),
+        headers={"Authorization": "Bearer scoped-token-0024"},
+    )
+    assert not (r.status_code == 200 and r.json()["backend"]["id"] == "pymupdf")
+    assert r.status_code == 403
+    assert r.json()["error"]["category"] == "scope_denied"

@@ -267,6 +267,7 @@ from openreading.types.errors import (
     AdapterError,
     ComplianceRefused,
     MissingCredentialsError,
+    ScopeRefused,
     SourceNotFoundError,
     TerminalError,
     UnknownStrategyError,
@@ -675,10 +676,15 @@ def _run_strategy_request(
     keep_candidates: bool = False,
     plain_info=None,
     on_run_armed: Callable[[str], None] | None = None,
+    backend_allowlist: frozenset[str] | None = None,
 ) -> dict[str, Any]:
     """Compile + run a named strategy, embedding the orchestration block into the response.
     Raises UnknownStrategyError (→ 400 / exit 2) when the name is absent. `plain_info` (from the
-    loader) lets a Plain strategy's gate records carry their source word for `explain` (§9)."""
+    loader) lets a Plain strategy's gate records carry their source word for `explain` (§9).
+    `backend_allowlist` is the caller's ceiling on which backends the walk may reach; it is
+    enforced in compile_strategy (which is what bounds an `auto` rung) and re-checked at every
+    dispatch, and raises ScopeRefused (→ 403 scope_denied) when it leaves the walk nothing to
+    run."""
     from openreading.strategies import compile_strategy, run_strategy
     from openreading.strategies.model import StrategyConfig
     from openreading.strategies.presets import PRESET_NAMES
@@ -696,7 +702,15 @@ def _run_strategy_request(
         # defaults, so compilation sees only the request's own compliance.
         strategy_config = StrategyConfig(version=1)
     registry = build_registry()
-    compiled = compile_strategy(req, name, strategy_config, registry, config, plain_info=plain_info)
+    compiled = compile_strategy(
+        req,
+        name,
+        strategy_config,
+        registry,
+        config,
+        plain_info=plain_info,
+        backend_allowlist=backend_allowlist,
+    )
     # materialize a URL to bytes if any eligible backend can't ingest URLs (mirrors the auto arm)
     if any(
         not (a := registry.get(bid)) or not a.descriptor.accepts_url for bid in compiled.eligible
@@ -801,6 +815,7 @@ def run_request(
     cache: BoundedResultCache | None = None,
     deadline_ms: int | None = None,
     on_run_armed: Callable[[str], None] | None = None,
+    backend_allowlist: frozenset[str] | None = None,
 ) -> dict[str, Any]:
     """Execute a fully-built request (backend.id names a backend, 'auto', or 'strategy:<name>').
     The server calls this with the RouterConfig + strategy config from its env; `run()` calls it
@@ -811,12 +826,29 @@ def run_request(
     wired to a real caller in BL-169) is forwarded to `prepare_named_backend` for the named-backend
     branch only — `run()`'s own `deadline_ms` parameter and the CLI's `--deadline` flag on `parse`
     now originate a real one; `auto`/strategy dispatch is untouched, it manages its own per-node
-    time budget instead. Raises KeyError (unknown
-    backend), UnknownStrategyError, PlanExhaustedError, ComplianceRefused, TerminalError, or
-    RetryableError (a directly-named backend's rate-limit exhaustion, or router.driver's poll loop
-    past its deadline/MAX_CONSECUTIVE_FAULTS — the `auto` path folds this into PlanExhaustedError via
-    execute_plan/D-v2-7.2 instead, since it can fall back to the next backend; a named backend has
-    no next rung, so it surfaces here under its own type)."""
+    time budget instead.
+
+    `backend_allowlist` is the CALLER's ceiling on which backends this request may reach (the
+    server's per-token `OPENREADING_API_KEY_SCOPES` entry); None means unscoped. Every arm that
+    picks its own backends reads it, which is all of them but the directly-named one:
+
+    - Both strategy arms — including the one an `auto` request takes when `defaults.strategy` is
+      configured, which is a strategy walk wearing an `auto` id and would otherwise be gated as
+      though the plain router had chosen.
+    - The plain `auto` arm, which prunes the router's CHAIN to the allow-list before executing it.
+      A caller gating this one at the door can only ever check the router's first pick; the plan
+      is chosen plus every fallback, and `execute_plan` walks all of it, so the backends behind
+      the first pick were reachable by a request that named any of them and got 403.
+
+    Only the directly-named arm needs nothing here, because there the id IS the request and the
+    caller can gate it before the call.
+
+    Raises KeyError (unknown backend), UnknownStrategyError, PlanExhaustedError, ComplianceRefused,
+    ScopeRefused (the caller's allow-list leaves the walk, or the pruned `auto` chain, nothing to
+    run), TerminalError, or RetryableError (a directly-named backend's rate-limit exhaustion, or
+    router.driver's poll loop past its deadline/MAX_CONSECUTIVE_FAULTS — the `auto` path folds this
+    into PlanExhaustedError via execute_plan/D-v2-7.2 instead, since it can fall back to the next
+    backend; a named backend has no next rung, so it surfaces here under its own type)."""
     broker = broker or EnvCredentialBroker()
     config = config or RouterConfig()
     backend = req.backend.id
@@ -835,6 +867,7 @@ def run_request(
             keep_candidates=keep_candidates,
             plain_info=plain_info,
             on_run_armed=on_run_armed,
+            backend_allowlist=backend_allowlist,
         )
     if strat == "none":
         backend = "auto"  # escape hatch: plain router, no defaults.strategy
@@ -854,6 +887,7 @@ def run_request(
             keep_candidates=keep_candidates,
             plain_info=plain_info,
             on_run_armed=on_run_armed,
+            backend_allowlist=backend_allowlist,
         )
 
     if backend == "auto":
@@ -861,11 +895,33 @@ def run_request(
         if plan.chosen is None:
             # the router eliminated every backend on compliance/capability → refused, NOT a
             # runtime failure (PlanExhaustedError is for a non-empty plan whose backends all fail).
+            # Checked BEFORE the allow-list below, so an already-empty plan stays compliance's
+            # call: scope removed nothing there, and only ever subtracts (BL-159 AC-4).
             dropped = ", ".join(f"{i}:{dr.code}" for i, dr in sorted(plan.dropped.items()))
             raise ComplianceRefused(
                 f"no eligible backend for the request (dropped: {dropped})",
                 constraint=plan.terminal_reason or "no_compliant_backend",
             )
+        if backend_allowlist is not None:
+            # The caller's ceiling, applied to the whole CHAIN — chosen plus every fallback — and
+            # applied HERE, between routing and execution, because this is the last moment the set
+            # of backends this request can reach is known and the first adapter has yet to be
+            # built. `auto` names no backend, so a check at the door can only ever speak for the
+            # router's first pick; the twelve behind it were reachable, and a document that pymupdf
+            # fails on walked straight into them.
+            denied = sorted(i for i in plan.eligible_ids if i not in backend_allowlist)
+            first_pick = plan.chosen.descriptor.id
+            plan = plan.restrict_to(backend_allowlist)
+            if plan.chosen is None:
+                # Fail closed. Nothing this caller may reach survived, so this is scope's refusal
+                # to make and not compliance's: the fix is the token's allow-list, and answering
+                # `compliance_refused` would send the operator to edit a policy that is not the
+                # problem. Never a 502 either — no backend was allowed to try, so nothing failed.
+                raise ScopeRefused(
+                    "this API key is not scoped to reach any backend eligible for this request "
+                    f"(denied: {', '.join(denied)})",
+                    backend_code=first_pick,
+                )
         if any(not a.descriptor.accepts_url for a in plan.chain):
             req = materialize_document(req, transport=transport)
         return execute_plan(plan, req, broker=broker, cache=cache).to_schema_dict()
@@ -1021,6 +1077,19 @@ def resume_run(run_id: str) -> dict[str, Any]:
     AC-3); anything genuinely unreached executes for real. No other input is taken — "every option
     comes from the ledger" (§10) — the original request is reconstructed from the header's own
     `document`/`slim_request` fields via `_request_from_header`.
+
+    A run the SERVER armed for a scoped caller resumes correctly without the caller's allow-list,
+    which is worth stating because the `compile_strategy` call below deliberately passes none. A
+    resume is a CLI/library action with no token concept, so the scope cannot come from the caller;
+    it comes from the ledger, like every other option:
+
+    - A scope that pruned a named rung changed the compiled tree, so `plan_hash` no longer matches
+      and the resume hard-refuses (`plan_hash` is one of the three identity fields, `_HARD_FIELDS`).
+    - A scope that only narrowed the eligible set — the `auto`-rung case, where the tree is
+      identical either way — leaves `plan_hash` matching, and correctly so. The header's
+      `pinned_eligible` carries that narrowed set, and `_arm_ledger(resume=True)` arms the resumed
+      executor's per-step gate from THIS header rather than a freshly recomputed set, so an `auto`
+      rung re-resolves inside the original scope rather than across the whole registry.
 
     Raises `LookupError` when `OPENREADING_LEDGER` is unset or no header exists for `run_id`, or
     `ledger.header.HeaderMismatch` when the live config/plan/journal-version identity no longer

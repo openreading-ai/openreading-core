@@ -49,9 +49,26 @@ def _req(compliance: dict | None = None) -> OpenReadingRequest:
     return OpenReadingRequest.model_validate(body)
 
 
-def _run(cfg, reg, *, compliance=None, env=None, decider_llm=None, judge_llm=None, replay=None):
+def _run(
+    cfg,
+    reg,
+    *,
+    compliance=None,
+    env=None,
+    decider_llm=None,
+    judge_llm=None,
+    replay=None,
+    backend_allowlist=None,
+):
     r = _req(compliance)
-    compiled = compile_strategy(r, "s", StrategyConfig.model_validate(cfg), reg, RouterConfig())
+    compiled = compile_strategy(
+        r,
+        "s",
+        StrategyConfig.model_validate(cfg),
+        reg,
+        RouterConfig(),
+        backend_allowlist=backend_allowlist,
+    )
     return run_strategy(
         compiled,
         r,
@@ -595,6 +612,46 @@ def test_judge_compliance_ineligible_downgrades_traced():
     assert res.response.backend.id == "docling"  # engine composite picks the CLEAN local candidate
     jd = [d for d in _decisions(res) if d["point"] == "judge"][0]
     assert jd["decider"] == "engine" and jd["downgraded"] == "compliance"
+
+
+def test_judge_out_of_scope_backend_downgrades_to_engine_traced():
+    """A `judge:` block names a backend that gets CALLED, with the operator's vendor key, and it
+    was gated only by compliance and routing — never by the caller's allow-list. The judge port is
+    not armed on any shipped surface, so nothing spent; this closes it before the wire executor
+    lands rather than after, because at that point it becomes a backend a scoped request reaches
+    with no check at all.
+
+    No port is passed, deliberately: the refusal must come from the scope gate itself, not from
+    the `port is None` fallback that happens to make the whole path inert today. `scope_denied`
+    and not `compliance` — the two have different fixes, and the reason is what an operator reads.
+    """
+    reg = scripted_registry(
+        ScriptedBackend("reducto", cost_low=0.01, text=GARBLED_SHORT),
+        ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN),
+        ScriptedBackend("pymupdf", local=True, text=CLEAN),  # the judge backend, and out of scope
+    )
+    res = _run(
+        _judge_cfg(),
+        reg,
+        env={"OPENREADING_LLM_DECIDER": "1"},
+        backend_allowlist=frozenset({"reducto", "aws-textract"}),
+    )
+    jd = [d for d in _decisions(res) if d["point"] == "judge"][0]
+    assert jd["decider"] == "engine" and jd["downgraded"] == "scope_denied"
+
+
+def test_decide_out_of_scope_decider_backend_downgrades_to_engine_traced():
+    """The decider carries the identical hole as the judge above and is closed the same way — a
+    `decider:` backend is called with the operator's key too. Closing one and leaving its twin is
+    how a hole reopens the moment someone reads the fixed half and assumes the pattern."""
+    res = _run(
+        _decide_cfg(decider={"llm": {"backend": "reducto"}}),
+        _decide_reg(),
+        env={"OPENREADING_LLM_DECIDER": "1"},
+        backend_allowlist=frozenset({"pymupdf", "docling", "tesseract"}),
+    )
+    d = _decisions(res)[0]
+    assert d["decider"] == "engine" and d["downgraded"] == "scope_denied"
 
 
 def test_judge_determinism():

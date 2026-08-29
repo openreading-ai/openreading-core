@@ -516,6 +516,7 @@ from openreading.types.errors import (
     ComplianceRefused,
     PlanExhaustedError,
     RetryableError,
+    ScopeRefused,
     TerminalError,
     UnsupportedFeatureError,
 )
@@ -629,6 +630,12 @@ class _WalkCtx:
     trace: Trace
     trees: dict[str, dict[str, Any] | None]
     eligible: list[str]
+    # The caller's backend allow-list (the server's OPENREADING_API_KEY_SCOPES entry for the
+    # presented token), or None when the caller is unscoped. compile_strategy has already pruned
+    # the tree and shortened `eligible` with it; this copy exists so the id the walk is ABOUT to
+    # dispatch is re-checked against the allow-list itself rather than trusted because an earlier
+    # pass was supposed to have handled it (_resolve_backend).
+    backend_allowlist: frozenset[str] | None = None
     facts: Facts = field(default_factory=Facts)
     attempted: set[str] = field(default_factory=set)
     deadline_ms: float | None = None
@@ -778,6 +785,7 @@ def run_strategy(
         router_config=compiled.router_config,
         env=os.environ if env is None else env,
         port=decider_llm,
+        backend_allowlist=compiled.backend_allowlist,
     )
 
     ctx = _WalkCtx(
@@ -788,6 +796,7 @@ def run_strategy(
         trace=trace,
         trees=compiled.trees,
         eligible=list(compiled.eligible),
+        backend_allowlist=compiled.backend_allowlist,
         facts=compute_facts(req, compiled.effective_compliance or None),
         deadline_ms=clock.now_ms()
         + _resolve_outer_budget_ms(compiled.max_duration_ms, deadline_ms),
@@ -1625,6 +1634,7 @@ async def _select_best(
         router_config=ctx.router_config,
         env=ctx.env,
         port=ctx.judge_llm,
+        backend_allowlist=ctx.backend_allowlist,
     )
     downgraded = status.reason
     if status.mode == "engine":
@@ -2668,12 +2678,31 @@ def _child_ctx(ctx: _WalkCtx, deadline_ms: float) -> _WalkCtx:
 
 
 def _resolve_backend(slug: str, ctx: _WalkCtx) -> str | None:
-    if slug != "auto":
-        return slug
-    for candidate in ctx.eligible:  # stage-3 order, first not-yet-attempted
-        if candidate not in ctx.attempted:
-            return candidate
-    return None
+    """The concrete backend id this step will dispatch, or None when `auto` has nothing left.
+
+    The last point at which the id is known and nothing has been built yet — every leaf-dispatch
+    site (`_run_leaf`, `_run_branch`, `_eval_paged_cascade`) passes through here before the
+    registry lookup, so it is also the last place the caller's allow-list can be enforced.
+
+    That enforcement is redundant with compile_strategy's prune, and is here anyway. An allow-list
+    is a security control, and the cost of the two layers disagreeing is asymmetric: a spurious
+    refusal is a support ticket, while a missed one spends someone else's vendor credits and looks
+    exactly like normal traffic. `auto` in particular is bounded only by the CONTENTS of
+    `ctx.eligible`, so anything that ever puts an id into that list by another route — or a node
+    type added later that resolves a backend without going through the prune — silently reopens
+    the hole. Failing closed here means it cannot.
+    """
+    resolved = slug
+    if slug == "auto":
+        resolved = next((c for c in ctx.eligible if c not in ctx.attempted), None)
+        if resolved is None:
+            return None
+    if ctx.backend_allowlist is not None and resolved not in ctx.backend_allowlist:
+        raise ScopeRefused(
+            f"this API key is not scoped to reach backend {resolved!r}",
+            backend_code=resolved,
+        )
+    return resolved
 
 
 def _actual_cost(resp: NormalizedResponse) -> float | None:

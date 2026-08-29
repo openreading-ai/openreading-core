@@ -13,7 +13,10 @@ network at all. A backend is one parser, such as a local library or a hosted API
 named plan over one or more backends, and only strategy runs are journaled. With
 `OPENREADING_LEDGER` set to a directory, every strategy run writes a journal into it. A journal is
 an append-only record of what was attempted and what came back. Every payload in it is encrypted
-under a key made for that run. `openreading resume <RUN_ID>` re-drives the run from that record
+under a key made for that run, and destroying that one key makes those payloads unreadable in every
+copy at once, backups included. The key sits in the same ledger root as the payloads, so the
+encryption buys you erasure rather than protection from someone who can already read that root.
+`openreading resume <RUN_ID>` re-drives the run from that record
 instead of from scratch. Recorded steps replay byte-identical with zero network calls, and anything
 the first run never reached runs for real. A resume that would amount to a different run, for
 example after the config changed, refuses by name. Payloads expire on a retention clock, and erasing
@@ -83,7 +86,9 @@ jq -c '{strategy_name, config_hash, plan_hash, journal_version, slim_request}' .
 
 **You should see** two journal lines that share one `step_id`. The `attempted` line is written
 before the backend call, and the `ok` line after it points at a blob. The header pins what the run
-was, so a later resume can check it. `slim_request` carries no bytes, URL, or password.
+was, so a later resume can check it. `slim_request` records the document's filename and MIME type,
+and never its bytes, a URL, or a password. The header's own `document` block holds the digest and
+size of those bytes, which is what erasure leaves behind.
 
 ### 3. Resume a completed run without a backend call
 
@@ -181,7 +186,20 @@ exit=3
 Deleting the key is exactly what the reaper does. The journal stays, so the run still answers what
 happened, but not with what content. Retention defaults to 24 hours and is read at arm time. A
 hosted backend's own retention limit can only tighten it per step. Raise it before the run, never
-after. Back up `*.jsonl`, `*.header.json`, and `blobs/`, and never back up `keys/` alongside them.
+after.
+
+Destroying the key deletes one file, the key itself. Every other file stays where it was, and the
+blobs stay on disk as ciphertext nothing can now read. The header keeps `document.digest`, which is
+the SHA-256 of the document's own bytes, along with `document.size_bytes`, `document.media_type`,
+`slim_request.document.filename`, its MIME type, `config_hash`, `plan_hash`, and the pinned backend
+set. The journal keeps each step's backend, status, timing, and cost. What survives is therefore a
+permanent index of which documents this machine processed and when.
+
+Treat that index as regulated data if the documents were. A filename can name a person before
+anything inside the file is read, and this repository's own example document is
+`examples/john_smith_1000_2026_01.pdf`. A digest identifies a document exactly to anyone who already
+holds a copy of it. Back up `*.jsonl`, `*.header.json`, and `blobs/` on those terms, and never back
+up `keys/` alongside them.
 
 **Replay decisions against a new document.**
 `uv run openreading replay other.pdf --trace run.json` re-executes the strategy. It takes each
@@ -203,6 +221,14 @@ are in `uv run python -m pydoc openreading.ledger`. The ones you meet are these.
 - Secrets never enter a payload (L6), so a presigned URL never lands in a backup. Blobs are
   addressed by `(run_id, digest)` and never shared across runs (L7), so a replay never serves
   another run's bytes.
+- Erasure is crypto-shredding rather than deletion, because a delete would have to reach every
+  replica and backup one file at a time. Each blob is encrypted with a stdlib SHA-256 counter-mode
+  stream cipher under a fresh 32-byte key per run. That cipher is unauthenticated, and integrity
+  comes from the digest the journal recorded rather than from the cipher.
+- The key protects backups, not the ledger root. `keys/` is mode 0700 and each key file is 0600,
+  while the blobs beside them are 0644, all under the one directory `OPENREADING_LEDGER` names.
+  Anyone who can read that whole directory can read the payloads, so give it the filesystem and
+  full-disk protection you would give the documents themselves.
 - A recorded outcome is final. A `skipped` for missing credentials replays as a skip even if the key
   exists now, and the cascade still falls to the next rung. Without this rule a resume could quietly
   dispatch to a vendor the original run never used.

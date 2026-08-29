@@ -213,6 +213,10 @@ resolves the decision point to its engine default with the reason traced as
 - `malformed` — output fails schema validation or engine re-validation (§3.2), or the port raised.
 - `refusal` — the model declines to choose (`action: None`).
 - `compliance` — the decider/judge backend was dropped by the request's compliance filter (§3.5).
+- `scope_denied` — the decider/judge backend is outside the CALLER's backend allow-list. A
+  `decider:`/`judge:` backend is CALLED, with the operator's vendor key, so the same per-token
+  ceiling that bounds every dispatched backend bounds it. Checked ahead of `compliance` because
+  the caller can act on it, and reported instead of it when both apply.
 - `env_disabled` — a `decider:` (or `judge:`) block exists but `OPENREADING_LLM_DECIDER` is not
   set (§1).
 - `unavailable` — enabled and eligible, but no executor port is wired into this runtime; also
@@ -243,6 +247,14 @@ point runs (`_backend_eligible`). If it is dropped (`require_local` and the deci
 via engine semantics, traced `decider_downgraded: compliance`, and the port is never called. An LLM
 that trains on data can therefore never see a `no_train_on_data` document — structurally, not
 contractually. Compliance is never widened here.
+
+The same backend is checked against the CALLER's allow-list on the same pass, ahead of compliance,
+traced `decider_downgraded: scope_denied`. A `decider:`/`judge:` backend is one that gets CALLED,
+with the operator's vendor key, so the per-token ceiling that bounds every dispatched backend has
+to bound it too. Nothing spends on this path today (no port is wired into any shipped surface, so
+the status resolves to `unavailable` before a call), which is exactly why the gate is here now:
+the day the wire executor lands, this would otherwise be a backend a scoped request reaches with
+no check at all.
 
 §4 LLM-as-judge
 ---------------
@@ -402,6 +414,8 @@ DOWNGRADE_REASONS = frozenset(
         "env_disabled",  # a decider is configured but OPENREADING_LLM_DECIDER is not set (§1)
         "trace_missing",  # 14.3 — replay: a decision point has no logged choice
         "unavailable",  # enabled + eligible, but no LLM executor deployed in this runtime (D-v3-15)
+        "scope_denied",  # the decider/judge backend is outside the CALLER's allow-list. Distinct
+        # from "compliance": that one's fix is the policy, this one's is the token's allow-list.
         "otherwise_pruned",  # BL-54 — a decide node's own otherwise: was pruned by compliance and
         # dispatch resolved through the substituted among[0] survivor (integration.md §2c), not the
         # operator's configured default
@@ -584,6 +598,7 @@ def resolve_decider_status(
     router_config: RouterConfig,
     env: Mapping[str, str],
     port: DeciderPort | None,
+    backend_allowlist: frozenset[str] | None = None,
 ) -> DeciderStatus:
     """The two-key enablement + compliance gate, computed once per walk (§3.5: the verdict binds
     every decision point in the request identically). Priority: no block → pure engine; block but
@@ -596,6 +611,14 @@ def resolve_decider_status(
     if not enabled:
         return DeciderStatus("engine", "env_disabled", backend)
 
+    if backend_allowlist is not None and backend not in backend_allowlist:
+        # Ahead of the compliance gate below so the reported reason is the one the caller can act
+        # on, and because scope is the narrower, later subtraction (strategies.prune uses the same
+        # precedence). Downgrades to engine mode rather than raising: a decision point resolving
+        # to its engine default is this taxonomy's answer to every decider failure, and refusing
+        # the whole walk over an out-of-scope JUDGE would be a bigger hammer than the caller's
+        # scope asks for — the backends that actually process the document are bounded elsewhere.
+        return DeciderStatus("engine", "scope_denied", backend)
     reason = _backend_eligible(backend, req, registry, effective_compliance, router_config)
     if reason is not None:
         return DeciderStatus("engine", reason, backend)
@@ -614,6 +637,7 @@ def resolve_judge_status(
     router_config: RouterConfig,
     env: Mapping[str, str],
     port: JudgePort | None,
+    backend_allowlist: frozenset[str] | None = None,
 ) -> DeciderStatus:
     """The judge's enablement + compliance gate for one `pick: best` node. Unlike the decider, the
     judge needs no top-level `decider:` block (its backend is on the `judge:` block, decider.md
@@ -622,6 +646,14 @@ def resolve_judge_status(
     enabled, backend = _env_decider_backend(env, judge_backend)
     if not enabled:
         return DeciderStatus("engine", "env_disabled", backend)
+    if backend_allowlist is not None and backend not in backend_allowlist:
+        # Ahead of the compliance gate below so the reported reason is the one the caller can act
+        # on, and because scope is the narrower, later subtraction (strategies.prune uses the same
+        # precedence). Downgrades to engine mode rather than raising: a decision point resolving
+        # to its engine default is this taxonomy's answer to every decider failure, and refusing
+        # the whole walk over an out-of-scope JUDGE would be a bigger hammer than the caller's
+        # scope asks for — the backends that actually process the document are bounded elsewhere.
+        return DeciderStatus("engine", "scope_denied", backend)
     reason = _backend_eligible(backend, req, registry, effective_compliance, router_config)
     if reason is not None:
         return DeciderStatus("engine", reason, backend)

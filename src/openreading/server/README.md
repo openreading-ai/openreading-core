@@ -155,14 +155,31 @@ right, so fix the table.
 |---|---|---|---|
 | `200` | none | success; also `GET /v1/jobs/{id}` of a failed job, and every liveness probe result | any step above |
 | `400` | `bad_request`, `unknown_strategy` | body not JSON, fails the request schema, unknown `strategy:<name>`, bad `jobs` or `timeout_s`, `/v1/jobs` with `auto` | `"backend": {"id": "strategy:nope"}` |
-| `401` | `unauthorized`, `bad_signature` | auth on and no valid bearer; webhook signature invalid or its secret unset | `POST /v1/webhooks/reducto` with any body and no `REDUCTO_WEBHOOK_SECRET` |
-| `403` | `compliance_refused`, `scope_denied` | the policy leaves nothing to run; the token is not scoped to that backend | `"backend": {"id": "reducto"}, "compliance": {"require_baa": true}` |
+| `401` | `unauthorized`, `bad_signature` | auth on and no valid bearer, on every endpoint but the two named below; webhook signature invalid or its secret unset | `POST /v1/webhooks/reducto` with any body and no `REDUCTO_WEBHOOK_SECRET` |
+| `403` | `compliance_refused`, `scope_denied` | the policy leaves nothing to run; the token is not scoped to the backend it named, or scope empties that request's router chain or strategy walk | `"backend": {"id": "reducto"}, "compliance": {"require_baa": true}` |
 | `404` | `unknown_backend`, `unknown_job` | the id names nothing | `"backend": {"id": "nope"}`; `GET /v1/jobs/j_nope` |
 | `413` | `terminal` (`doc_too_large`) | document over the backend's size limit | needs a hosted key; shape shown, not run |
 | `422` | `unsupported_feature` | the named backend cannot produce what you asked for | `"backend": {"id": "pymupdf"}, "extraction_schema": {"instructions": "totals"}` |
 | `424` | `terminal` (`missing_credentials`, `auth_rejected`) | named backend has no key (`missing_env[]`), or the provider rejected it | `"backend": {"id": "reducto"}` with no `REDUCTO_API_KEY` |
 | `502` | `plan_exhausted`, `terminal` | every backend in the plan failed (`trail` lists them) | needs a hosted key; shape shown, not run |
 | `504` | `retryable_exhausted` | deadline passed or retries exhausted | needs a hosted key; shape shown, not run |
+
+Two endpoints answer without a bearer even when auth is on: `GET /healthz` and
+`POST /v1/webhooks/{backend_id}`. A vendor holds no token of yours, so a callback could never
+present one. With auth on and no bearer, `/healthz` returns 200, and
+`POST /v1/webhooks/chunkr -d '{"task_id":"forged-1"}'` returns 404 `unknown_job`. That 404 means the
+request reached the handler and looked the job up rather than being challenged for a token.
+
+A webhook is closed instead by its signature, and only `reducto` declares a signing secret today.
+The same unauthenticated call to `POST /v1/webhooks/reducto` returns 401 `bad_signature`, which is
+the row above. For `chunkr` and `open-ocr` the `openreading.server` docstring says both "verify
+nothing (neither has a signature mechanism), so treat webhook mode on either as unauthenticated
+until real verification ships". On a server reachable beyond loopback that is an unauthenticated and
+unverified write path into the job store for those two backends. The same docstring states what
+contains it: the lookup only considers jobs for the URL's own `{backend_id}` that are already
+waiting in webhook mode, so "a forged chunkr/open-ocr event can only settle a chunkr/open-ocr
+webhook-mode job whose id it names". It can reach no other backend's job and no polled job. Decide
+your network policy for those two paths before you bind beyond loopback.
 
 ### 5. Turn on caller auth
 
@@ -191,8 +208,27 @@ HTTP 403
 ```
 
 **You should see** 401 without a bearer token, 200 with it, and 403 outside the scope. `/healthz`
-stays open without a bearer. A malformed scope entry stops the server at startup with a
-`ServerConfigError` that names the entry position, never the value.
+and `POST /v1/webhooks/{backend_id}` stay open without a bearer, as the note under the ladder
+explains. A malformed entry in either variable stops the server before it binds a socket:
+
+```bash
+OPENREADING_API_KEYS="$TOK" OPENREADING_API_KEY_SCOPES="$TOK=pymupdf,=tesseract" \
+  uv run openreading serve; echo "exit=$?"
+```
+```text
+[serve] OPENREADING_API_KEY_SCOPES entry 2 has an empty key before '='
+exit=3
+```
+
+The line goes to stderr under the `[serve]` tag every other CLI failure uses, so one log rule
+catches it. It names the entry's position and never its value, which keeps a startup log from
+becoming the place a token leaks. A second scope for one key and a scope for a key that
+`OPENREADING_API_KEYS` never listed are refused the same way.
+
+Startup checks the shape of a scope and not the backend ids inside it. A typo such as `pymupfd`
+binds the socket with no warning and leaves that token able to reach nothing, so every request
+under it answers 403 naming a backend you believe you allowed. Check each id against the `slug`
+values `GET /v1/backends` returns.
 
 ## Recipes
 
@@ -227,8 +263,33 @@ sample through `/v1/parse` and `/v1/batch`, asserts schema-valid responses, and 
   flag. A compliance attestation is the operator's declaration that a backend meets a requirement,
   such as a signed business associate agreement (BAA). Nothing lands in `ps` or shell history, and
   no caller can attest on the operator's behalf.
-- A scope only narrows what compliance and routing already allow. It is checked before any adapter
-  is built, so an out-of-scope request never resolves a vendor credential.
+- A scope only narrows what compliance and routing already allow. A directly named backend is
+  checked at the door, before any adapter is built, so an out-of-scope name never resolves a
+  vendor credential.
+- An `auto` request runs on the router's fallback chain pruned to the token's backends. That chain
+  is the backend the router picks plus every backend it would fall back to, and an out-of-scope
+  member is removed before the run rather than reached. A token scoped to `pymupdf` and
+  `tesseract` is refused `docling` by name, and its `auto` request on a file neither can parse
+  fails with a trail naming those two backends alone.
+- An `auto` request whose top pick alone is out of scope is rerouted, not refused. That is a
+  change in behaviour. The old check read the router's first pick and nothing behind it, which
+  refused the request over a choice the caller never made. Worse, it left every fallback behind
+  that pick unchecked. A token scoped to `tesseract` is still refused `pymupdf` by name, and the
+  same token's `auto` request answers 200 on `tesseract`.
+- A `strategy:<name>` request is checked too, from inside the walk, because a walk chooses its own
+  backends and cannot be judged at the door. Every out-of-scope rung is pruned before it runs, and
+  an `auto` rung resolves only against what is left. A token scoped to `pymupdf` that names
+  `strategy:offline_first` therefore runs `pymupdf` alone, and the response's
+  `orchestration.dropped` lists `docling` and `tesseract` with code `scope_denied` at stage 0.
+- Pruning a walk or a chain down to nothing is a refusal, never a 502 and never a silent run on
+  nothing. A token scoped to `reducto` that names `strategy:offline_first` answers 403 with `this
+  API key is not scoped to reach any backend strategy 'offline_first' can run (denied: docling,
+  pymupdf, tesseract)`. The same token sending `auto` under `require_local` answers 403 with `this
+  API key is not scoped to reach backend 'pymupdf'`, which names the backend the router would have
+  used rather than the ones the token allows.
+- Only a strategy records what the scope removed. A pruned `auto` chain leaves no
+  `orchestration.dropped` block on the envelope. You see what survived, in `backend.id` on success
+  or in a 502 `trail`, but never a list of what was pruned.
 - `/v1/parse`, `/v1/batch` and `/v1/compare` responses are schema-validated before they leave the
   process. The server owns the only result cache, so a replayed item never hides a billed call.
 
@@ -238,7 +299,9 @@ sample through `/v1/parse` and `/v1/batch`, asserts schema-valid responses, and 
   "Timeouts", and "Security". `uv run python -m pydoc openreading.server.app` lists every
   environment variable.
 - `uv run openreading serve --help` documents `--host`, `--port`, `--cors-origin`, and `--env-file`.
-- [JSON Schemas](../schemas/README.md), and the OpenAPI page at `/docs` (200).
+- [JSON Schemas](../schemas/README.md), and the OpenAPI page at `/docs`. It answers 200 while auth
+  is off. Once step 5 turns auth on, `/docs` and `/openapi.json` both answer 401 without a bearer,
+  so a browser tab cannot open them and a client must send the header itself.
 
 ## Not built yet
 
@@ -252,9 +315,8 @@ sample through `/v1/parse` and `/v1/batch`, asserts schema-valid responses, and 
 - A `deadline_ms` field over HTTP, so a long hosted job hits 504 at 120 s (`openreading.server`
   docstring, "HTTP status codes", the Timeouts paragraph: "no `deadline_ms` field or query param").
 - Webhook signature verification for `chunkr` and `open-ocr` (`openreading.server` docstring,
-  "Endpoints", `POST /v1/webhooks/{backend_id}`: "verify nothing").
-- Scope checks across a `strategy:<name>` walk (`openreading.server` docstring, "Security": "not
-  scope-checked in this version").
+  "Endpoints", `POST /v1/webhooks/{backend_id}`: "verify nothing"). What that exposes today, and
+  what contains it, is under the error ladder above.
 
 ## See also
 

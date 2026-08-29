@@ -389,12 +389,14 @@ Exit codes
      `explain` argument, a `--policy` file that is not a valid policy object (an unknown key, a
      non-object top level, or a value of the wrong type), a `ComplianceRefused` refusal (from
      `parse`, `strategy plan`, `replay`, `calibrate`, `compare`, `leaderboard`), a
-     plan-exhausted `route --run`, `serve` without its
-     extra, an unresolvable/empty `leaderboard` dataset, a `resume` refusal / unknown run /
-     expired payloads, an unknown `backends --check` slug, or a `RetryableError` reaching a
-     directly-named backend on `parse` / `compare` (rate-limit exhaustion, or a poll job past its
-     deadline / `openreading.router.driver.MAX_CONSECUTIVE_FAULTS` -- a named backend has no next
-     rung to fall back to).
+     plan-exhausted `route --run`, `serve` without its extra or with a malformed
+     `OPENREADING_API_KEYS` / `OPENREADING_API_KEY_SCOPES` (one `[serve] ...` line naming the
+     bad entry's position, never its value), an unresolvable/empty `leaderboard` dataset, a
+     `resume` refusal / unknown run / expired payloads, an unknown `backends --check` slug, or
+     a `RetryableError` reaching a directly-named backend on `parse` / `compare` (rate-limit
+     exhaustion, or a poll job past its deadline /
+     `openreading.router.driver.MAX_CONSECUTIVE_FAULTS` -- a named backend has no next rung to
+     fall back to).
   4  `route`: no compliant backend for the policy (the empty plan is printed as JSON);
      batch `parse`: partial -- some items failed.
   5  `compare`: inputs are not schema-valid responses, or `--from` on a run that kept no
