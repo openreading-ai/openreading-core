@@ -4,10 +4,13 @@ All notable changes to OpenReading are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> **Tagged `v0.3.0`, not yet on PyPI.** These are development milestones, each complete and merged
-> to `main` on the date shown, with `make verify` green on a clean clone. `v0.3.0` is tagged in git
-> and `pyproject.toml` is at `0.3.0`, but nothing is published to PyPI yet. The first PyPI release
-> is tracked in [`ROADMAP.md`](https://github.com/multiversal-ventures/openreading/blob/main/runs/ROADMAP.md) §1.2.
+> **Pre-release: package `0.3.0`, no git tags, not on PyPI.** The entries below are development
+> milestones. Each was complete and merged to `main` on the date shown, with `make verify` green on
+> a clean clone. `pyproject.toml` and `openreading.__version__` say `0.3.0`. This repository has no
+> git tags, and nothing is published to PyPI, so install from a clone ([`README.md`](README.md),
+> *Install*). The newest numbered heading below, `[0.4.0]`, is a milestone label, not a published release.
+> The package number and this file are reconciled when the first release is tagged. The road to that
+> release is [`ROADMAP.md`](https://github.com/multiversal-ventures/openreading/blob/main/runs/ROADMAP.md) §1.2 (company repo, members only).
 
 ## [Unreleased]
 
@@ -22,14 +25,14 @@ decision log and labeled data stay private there — links below that point at i
 company members only. History before this point is in the private repo.
 
 Deferred-by-design items and the path to a first published release. See [`PENDING.md`](https://github.com/multiversal-ventures/openreading/blob/main/runs/PENDING.md)
-for the engineering backlog and [`ROADMAP.md`](https://github.com/multiversal-ventures/openreading/blob/main/runs/ROADMAP.md) for the Community/Enterprise split.
+for the engineering backlog and [`ROADMAP.md`](https://github.com/multiversal-ventures/openreading/blob/main/runs/ROADMAP.md) for the Community/Enterprise split (both company repo, members only).
 
 ### Renamed — the project is `openreading`, was `openmanifold`
 
 The vendors this repo integrates all sell the category as *document intelligence*. The name now
 claims the plain-English version of it: a parser is named for its input, reading is named for what
 the reader came to find out — which is the intent thesis the repo is built around
-([`docs/thesis.md`](https://github.com/multiversal-ventures/openreading/blob/main/product/thesis.md) §1).
+([`docs/thesis.md`](https://github.com/multiversal-ventures/openreading/blob/main/product/thesis.md) §1, company repo, members only).
 
 Everything moved at once, while the cost was lowest: nothing is published to PyPI, so no consumer
 had pinned an import path or a schema `$id`.
@@ -121,7 +124,7 @@ door: [`openreading.strategies.plain`](src/openreading/strategies/plain.py). Sch
 One command over a **directory** (or glob / many files / http(s) URLs) of *any supported format* →
 **one JSON** covering every document, and two such runs compared per-document. Composes the
 single-document pipeline without touching `request.v0.1` / `response.v0.3`. Design:
-[`internal/design/batch-intake.md`](https://github.com/multiversal-ventures/openreading/blob/main/design/batch-intake.md).
+[`internal/design/batch-intake.md`](https://github.com/multiversal-ventures/openreading/blob/main/design/batch-intake.md) (company repo, members only).
 
 **Added**
 
@@ -140,7 +143,7 @@ single-document pipeline without touching `request.v0.1` / `response.v0.3`. Desi
 
 The response contract gains *named, fixture-tested channel semantics*. Response schema **v0.3**,
 adapter-descriptor **v0.3**. Design + rationale:
-[`internal/design/canonical-normalization.md`](https://github.com/multiversal-ventures/openreading/blob/main/design/canonical-normalization.md).
+[`internal/design/canonical-normalization.md`](https://github.com/multiversal-ventures/openreading/blob/main/design/canonical-normalization.md) (company repo, members only).
 
 **Added** (additive, backward-compatible — proven transitively in `tests/test_schema_evolution.py`)
 
@@ -173,7 +176,7 @@ flipped to all-strict (C1/C6/C7 hard; C11 advisory) now that every backend passe
   fixes landed for live-only defects (pulse multipart `/extract` + id-prefix leaks; nuextract
   multipart job upload + HTML-island table grids; the `.env` inline-comment loader bug); pulse/
   nuextract structured extraction verified (pulse now captures per-field confidence + citations).
-  See [`internal/design/live-verification-plan.md`](https://github.com/multiversal-ventures/openreading/blob/main/design/live-verification-plan.md).
+  See [`internal/design/live-verification-plan.md`](https://github.com/multiversal-ventures/openreading/blob/main/design/live-verification-plan.md) (company repo, members only).
 
 ### Pending
 - **Live verification (remaining)** — the hosted lanes without keys here (anthropic, textract,
@@ -186,7 +189,7 @@ flipped to all-strict (C1/C6/C7 hard; C11 advisory) now that every backend passe
   compose, publish the generated OpenAPI spec, and stand up a docs site.
 - Smaller deferred items (per-token cost metering, `start_after: auto` hedging, the joint
   threshold-vector `calibrate` sweep, `text_source: prior_ocr`, `file:line:column` validate
-  locations) are catalogued in [`PENDING.md`](https://github.com/multiversal-ventures/openreading/blob/main/runs/PENDING.md).
+  locations) are catalogued in [`PENDING.md`](https://github.com/multiversal-ventures/openreading/blob/main/runs/PENDING.md) (company repo, members only).
 
 ## [0.4.0] — 2026-07-27 — "Compare"
 
@@ -195,7 +198,7 @@ differ* — which fields each got, missed, or disagreed on; where they disagree 
 blocks only one saw; what each cost. Because every backend returns the one envelope, `compare` is a
 **pure function over N schema-valid responses** — a leaf feature that changes no adapter, router,
 engine, or the response schema. Settled design in [`openreading.comparison`](src/openreading/comparison/__init__.py); judgment
-calls (D-v4-13/14) in [`DECISIONS.md`](https://github.com/multiversal-ventures/openreading/blob/main/decisions/DECISIONS.md).
+calls (D-v4-13/14) in [`DECISIONS.md`](https://github.com/multiversal-ventures/openreading/blob/main/decisions/DECISIONS.md) (company repo, members only).
 
 ### Added
 - **The report** — vendored `comparison-report.v0.1.json` (validated in `make verify`), with a
@@ -227,7 +230,7 @@ The optional multi-backend orchestration layer: an `openreading.yaml` that compo
 quality-threshold cascades, parallel fan-outs, routes, and LLM decision points — executed by a
 deterministic engine under hard rails (compliance never widened, budgets enforced, every decision
 traced). Settled design in [`openreading.strategies`](src/openreading/strategies/__init__.py); build history in
-[`PROGRESS.md`](https://github.com/multiversal-ventures/openreading/blob/main/runs/PROGRESS.md); judgment calls in [`DECISIONS.md`](https://github.com/multiversal-ventures/openreading/blob/main/decisions/DECISIONS.md).
+[`PROGRESS.md`](https://github.com/multiversal-ventures/openreading/blob/main/runs/PROGRESS.md) (company repo, members only); judgment calls in [`DECISIONS.md`](https://github.com/multiversal-ventures/openreading/blob/main/decisions/DECISIONS.md) (company repo, members only).
 
 ### Added
 - **Config spine** — vendored `strategy-config.v0.1.json` grammar (five node types plus shorthands,
@@ -285,7 +288,7 @@ Hosted backends run against real provider APIs from your own keys, exposed throu
 ## [0.1.0] — 2026-07-22 — "The contract and engine core"
 
 The foundation: one request shape and one response schema over many backends, with a compliance-first
-router and a fully-local tier. Design research in [`research/openreading/`](https://github.com/multiversal-ventures/openreading/tree/main/research/openreading)
+router and a fully-local tier. Design research in [`research/openreading/`](https://github.com/multiversal-ventures/openreading/tree/main/research/openreading) (company repo, members only)
 (127 backends profiled from primary sources).
 
 ### Added
@@ -302,7 +305,6 @@ router and a fully-local tier. Design research in [`research/openreading/`](http
 - **Tooling** — a conformance kit and secret scrubber shipped in the package for downstream adapter
   authors, and an evaluation harness (scorers, datasets, runner).
 
-[Unreleased]: https://github.com/shad0wfax/openreading/compare/v0.3.0...HEAD
-[0.3.0]: https://github.com/shad0wfax/openreading/releases/tag/v0.3.0
-
-<!-- 0.2.0 and 0.1.0 predate git tags; they are development milestones, not tagged releases. -->
+<!-- No version above is a git tag. Every heading is a development milestone. The Keep a Changelog
+     compare and release link definitions ([Unreleased], [0.4.0], …) are added when the first release
+     is tagged. -->

@@ -28,14 +28,21 @@ $ make serve-smoke   # boots the real HTTP server on a socket; not part of verif
 $ make verify-live   # only if you touched a hosted adapter and have its keys; skips otherwise
 ```
 
-CI runs `make verify` on Python 3.11–3.14. Catching it locally is cheaper.
+CI runs `make verify` on Python 3.11–3.14. Catching it locally is cheaper. The coverage floor is
+`--cov-fail-under` in the Makefile. A test pins the README badge to it. The offline test count is
+whatever `uv run pytest -m "not live" --collect-only` prints. The runbook is the docstring of
+`tests/conftest.py`. It covers every surface, both lanes (offline and live), and the "is a new
+backend tested well?" checklist.
 
 ## Conventions worth knowing
 
 **Documentation lives in code.** Module docstrings, not markdown. If your change adds a
 contract, an env var, an exit code, or a non-obvious decision, it goes in the docstring of the
 module that owns it — with the failure the decision avoids. `tests/test_docs_policy.py` rejects
-new markdown files; ruff `D100`/`D104` reject modules without a docstring.
+new markdown files. Ruff `D100`/`D104` reject modules without a docstring. The table under
+[*Where a change gets documented*](AGENTS.md#where-a-change-gets-documented) in `AGENTS.md` says
+which docstring, README, or `CHANGELOG.md` line each kind of change must touch, and which test
+catches forgetting it.
 
 **Tests come first.** New behaviour arrives with a test that fails before your change and
 passes after. Hosted backends are tested against respx fixtures and injected faults; never add a
