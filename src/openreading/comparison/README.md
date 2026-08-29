@@ -1,29 +1,29 @@
-# Compare — what differs between two backends' outputs
+# Compare: what differs between two backends' outputs
 
 <sub>[Docs home](../README.md) · [← Strategies](../strategies/README.md) · [Batch runs →](../batch/README.md)</sub>
 
-> **In one sentence.** Hand `compare` two or more saved responses and it tells you, as a typed
-> verdict plus a severity-sorted list of findings, exactly where the backends disagree, without
-> running or billing anything.
+> **In one sentence.** Hand `compare` two or more saved responses and it names exactly where the
+> backends disagree, as a verdict plus findings, without running or billing anything.
 
 ## What this gives you
 
-One command over N response files (the JSON envelope every backend returns). It prints a
-scoreboard, a one-word verdict (`equivalent`, `mixed`, `divergent`), and findings such as
-`table_shape_mismatch` with a snippet of the block. It picks no winner unless you bring a baseline
-or a golden file (expected values). Python: `openreading.compare()`. HTTP: `POST /v1/compare`.
+A backend is one parser, such as the local `pymupdf` library or a hosted API. You ran two backends
+on the same invoice, both reported `succeeded`, and the totals in the two outputs differ. You need
+to know which one to trust and what exactly differs, without reading two 40 KB files by hand.
+`openreading compare pymupdf.json tesseract.json` reads the two envelopes, the one JSON shape every
+backend returns, and prints a scoreboard, a verdict, and findings. A verdict is one word over the
+whole comparison, and it is `equivalent`, `mixed`, or `divergent`. A finding is one specific
+difference, named by a code and sorted by severity. For example, `table_shape_mismatch` means the
+backends found different numbers of tables in the document. Compare picks no winner unless you name
+one output as the baseline or bring a golden file of expected values. You need two saved envelopes,
+such as `pymupdf.json` and `tesseract.json` from the root README, and no key.
 
 ## Mental model
 
-The question this page answers, from someone who has just run two backends over one invoice:
-"Both say `succeeded`. One of them lost the table. How do I see that without reading two 40 KB
-JSON files by hand?"
-
-A response envelope is the one JSON shape every backend returns ([JSON
-Schemas](../schemas/README.md)). Because the shapes match, comparing them is a pure function: same
-inputs in, byte-identical report out. Compare never runs a backend, so it costs nothing and needs no
-key. Subjects (the responses being compared) arrive three ways, and all three end in the same pure
-step.
+Because every envelope has the same shape, comparing two of them is a pure function of their
+contents. Pure means the same inputs always produce a byte-identical report, and no backend runs, so
+it costs nothing and needs no key. A subject is one response being compared, and subjects arrive
+three ways that all end in the same pure step.
 
 ```mermaid
 flowchart LR
@@ -38,13 +38,14 @@ flowchart LR
   G --> R
 ```
 
-Files are `source: file`. Fan-out (`compare doc.pdf --backends a,b`) runs each backend once,
-one after another, then compares. It is the only mode that spends money (`source: fanout`).
-`parse --keep-candidates` keeps a strategy's losing branches for `compare --from` (`candidate`).
-
-Compare then looks at four dimensions: run facts (the scoreboard), typed fields, text, and blocks
-with tables. A backend that cannot produce one is marked `not_capable`, never blamed for missing it.
-Human-readable formats show only differences by default, because agreement is noise in a delta.
+Fan-out, written `compare doc.pdf --backends a,b`, runs each backend once in turn, and it alone
+spends money. Its subjects are marked `source: fanout`, while saved files are marked `source: file`.
+A strategy is a named plan over backends, and `parse --keep-candidates` keeps its losing branches.
+`compare --from` then reads those kept branches as the third kind of subject, `candidate`. Compare
+looks at four dimensions: run facts for the scoreboard, typed fields, text, and blocks with tables.
+A backend that cannot produce one dimension is marked `not_capable`, and it is never blamed for
+missing it. The human-readable formats show only differences by default, because agreement is noise
+in a delta.
 
 ## Walkthrough
 
@@ -59,7 +60,8 @@ uv run openreading parse sample.pdf --backend tesseract > tesseract.json
 ```
 
 **You should see** one stderr line from PyMuPDF about `pymupdf_layout`. It is advice, not an
-error. Compare the two files. This is mode (a), the base step every other mode reduces to.
+error. Compare the two files. Two saved files are the base mode, and every other mode reduces to
+it.
 
 ```bash
 uv run openreading compare pymupdf.json tesseract.json --format table
@@ -96,7 +98,8 @@ uv run python -c "import json; r = json.load(open('report.json')); print(list(r)
 # ['schema_version', 'mode', 'subjects', 'alignment', 'headline', 'fields', 'text', 'blocks', 'findings', 'warnings'] mixed
 ```
 
-Read the two-way text diff (exactly two subjects, git style), then the four-section view.
+The `diff` format needs exactly two subjects and prints a git-style text diff. The `diffs` format
+prints a four-section view. Read both.
 
 ```bash
 uv run openreading compare pymupdf.json tesseract.json --format diff
@@ -123,13 +126,13 @@ uv run openreading compare pymupdf.json tesseract.json --format diffs
 ```
 
 **You should see** pymupdf emitting one cell per line and tesseract one row per line in the
-diff, then `EQUIVALENT` under CONTENT. Neither backend lost a word. Tesseract lost the grid. `diffs`
-(plural) separates content from packaging, two axes a raw finding list mixes together.
+diff, then `EQUIVALENT` under CONTENT. Neither backend lost a word, but tesseract lost the grid.
+`diffs` (plural) separates content from packaging, two axes a raw finding list mixes together.
 
 ### 3. Fan out, save, and re-render
 
-Try mode (b), fan-out, and keep each response so you can replay the comparison later. Then
-re-render the saved report. `explain` recognizes a comparison report by its shape.
+Fan-out runs the backends for you and saves each response, so you can replay the comparison later.
+Then re-render the saved report with `explain`, which recognizes a comparison report by its shape.
 
 ```bash
 uv run openreading compare sample.pdf --backends pymupdf,tesseract --save-dir out/ --format table
@@ -149,8 +152,10 @@ uv run python -c "import json; c = json.load(open('src/openreading/evals/sample/
 uv run openreading compare pymupdf.json tesseract.json --truth golden.json --format json | uv run python -c "import json, sys; print(json.load(sys.stdin)['truth']['by_subject'])"
 # {'pymupdf': {'overall': 1.0, 'dimensions': {'text_contains': 1.0, 'table_cell_accuracy': 1.0}}, 'tesseract': {'overall': 0.5, 'dimensions': {'text_contains': 1.0, 'table_cell_accuracy': 0.0}}}
 ```
-The golden file is the `expected` object of an evals case ([Evals](../evals/README.md)). The evals
-scorer scores each subject against it. The `table` renderer prints no truth section, so read JSON.
+Evals is the benchmark harness in this repo, and it scores a parse against known-correct values.
+The golden file is the `expected` object of an evals case ([Evals](../evals/README.md)), and the
+evals scorer scores each subject against it. The `table` renderer prints no truth section, so read
+JSON.
 
 **Sign every field delta against one backend.**
 ```bash
@@ -167,7 +172,7 @@ uv run openreading compare pymupdf.json tesseract.json pymupdf2.json --format ta
 # SUBJECT … pymupdf … tesseract … pymupdf#2
 ```
 Subjects may repeat a backend. The second pymupdf becomes `pymupdf#2`. At three or more
-subjects the JSON gains a `consensus` section: the majority value per field and the outliers.
+subjects the JSON gains a `consensus` section with the majority value per field and the outliers.
 
 **Compare what a strategy discarded.**
 ```yaml
@@ -183,7 +188,7 @@ uv run openreading compare --from strat.json --format table | head -5
 ```
 Save the YAML as `openreading.yaml` in the working directory. Without `--keep-candidates` the
 loser is dropped and `compare --from` exits 5 with the fix in the message. Parallel-style
-branches are kept; superseded cascade rungs are not ([Strategies](../strategies/README.md)).
+branches are kept, but superseded cascade rungs are not ([Strategies](../strategies/README.md)).
 
 **Compare two batch runs of the same folder.**
 ```bash
@@ -200,8 +205,9 @@ CORPUS COMPARE — runA vs runB
   …
 ```
 When every subject is a batch result, documents pair by `relpath`, then `filename`, then
-`sha256`. A document in only one run is `unpaired`, not an error. `--format diffs` prints the
-values one run captured and the other missed. `--format diff` is refused (exit 2).
+`sha256`. A `relpath` is the path relative to the folder you passed. A document in only one run is
+`unpaired`, not an error. `--format diffs` prints the values one run captured and the other missed.
+`--format diff` is refused (exit 2).
 
 **Branch on a verdict in Python.**
 ```python
@@ -222,18 +228,22 @@ There is no fan-out in Python. Call `openreading.run()` per backend yourself, th
 
 ## How it decides
 
-Each rule names the failure it prevents. The full list is the `Laws` section of
+These rules are why a report is safe to run in a loop and safe to trust. Each rule names the
+failure it prevents. The full list is the `Laws` section of
 `uv run python -m pydoc openreading.comparison`.
 
 - Compare is pure. It never runs, retries, or bills, so a report can never quietly cost money.
 - A report never feeds routing or `pick: best`. A feedback loop could widen which backends run.
-- Same inputs, same bytes. No timestamps, randomness, or LLM calls, so drift detection is sound.
+- The same inputs produce the same bytes. A report has no timestamps, randomness, or LLM calls, so
+  drift detection is sound.
 - A backend that cannot produce a dimension is `not_capable`, never `missed`. Blaming pymupdf
   for missing confidences would make every report about it wrong.
-- One metric stack. Truth mode imports the evals scorer rather than writing a second one.
-- Generative backends cap content findings at `info`: run-to-run drift looks like a real difference.
-- Exit codes: `0` report, `2` misuse, `3` fan-out cannot run, `5` invalid input or no
-  candidates, `1` anything else. Details: `uv run python -m pydoc openreading.cli`, `compare`.
+- There is one metric stack. Truth mode imports the evals scorer rather than writing a second one.
+- A generative backend, such as `anthropic-claude`, caps content findings at `info`, because its
+  run-to-run drift looks like a real difference.
+- The exit codes are `0` for a report, `2` for misuse, `3` when fan-out cannot run, `5` for invalid
+  input or no candidates, and `1` for anything else. The details are in
+  `uv run python -m pydoc openreading.cli`, section `compare`.
 
 ### Verdict vocabulary
 
@@ -283,8 +293,8 @@ table and that output disagree, the output is right. Fix the table.
 
 ## Reference
 
-- `uv run python -m pydoc openreading.comparison` — sections `Acquisition`, `The four
-  dimensions`, `Alignment`, `Stances`, `The report`, `Corpus compare`. The equivalence ladder
+- `uv run python -m pydoc openreading.comparison` has the sections `Acquisition`, `The four
+  dimensions`, `Alignment`, `Stances`, `The report`, and `Corpus compare`. The equivalence ladder
   is `uv run python -m pydoc openreading.comparison.equivalence`.
 - `uv run openreading compare --help` and `uv run openreading explain --help`.
 - `src/openreading/schemas/comparison-report.v0.2.json`, `corpus-report.v0.1.json`, and
@@ -303,8 +313,8 @@ From the `openreading.comparison` docstring (`Deliberately deferred`):
 ## See also
 
 - [Docs home](../README.md)
-- [Strategies](../strategies/README.md) — `--keep-candidates` and the parallel constructs.
-- [Batch runs](../batch/README.md) — the batch-result envelope corpus mode consumes.
-- [Evals](../evals/README.md) — the scorer behind `--truth`.
+- [Strategies](../strategies/README.md): `--keep-candidates` and the parallel constructs.
+- [Batch runs](../batch/README.md): the batch-result envelope corpus mode consumes.
+- [Evals](../evals/README.md): the scorer behind `--truth`.
 
 <sub>[Docs home](../README.md) · [← Strategies](../strategies/README.md) · [Batch runs →](../batch/README.md)</sub>

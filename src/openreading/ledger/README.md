@@ -1,17 +1,24 @@
-# The run ledger — resume, replay offline, erase
+# The run ledger: resume, replay offline, erase
 
 <sub>[Docs home](../README.md) · [← Batch runs](../batch/README.md) · [The HTTP server →](../server/README.md)</sub>
 
 > **In one sentence.** With `OPENREADING_LEDGER` set, every strategy run leaves a journal you can
-> resume after an interruption, replay with no backend calls, and erase by destroying one key.
+> resume after an interruption, replay with no network, and erase by destroying one key.
 
 ## What this gives you
 
-A journal for each strategy run: the append-only record of what was attempted, what came back,
-and the payloads, encrypted under a per-run key. A strategy is a named plan over one or more
-backends. `openreading resume <RUN_ID>` re-drives the run from that record. Recorded steps replay
-byte-identical with zero network calls. Anything unreached runs for real. A resume that would mean
-a different run refuses by name. Payloads expire on a retention clock; erasure destroys its key.
+A long run was interrupted after two hosted backends had already been called and billed. You want to
+finish it without paying for those calls again, and later to reproduce it for an audit with no
+network at all. A backend is one parser, such as a local library or a hosted API. A strategy is a
+named plan over one or more backends, and only strategy runs are journaled. With
+`OPENREADING_LEDGER` set to a directory, every strategy run writes a journal into it. A journal is
+an append-only record of what was attempted and what came back. Every payload in it is encrypted
+under a key made for that run. `openreading resume <RUN_ID>` re-drives the run from that record
+instead of from scratch. Recorded steps replay byte-identical with zero network calls, and anything
+the first run never reached runs for real. A resume that would amount to a different run, for
+example after the config changed, refuses by name. Payloads expire on a retention clock, and erasing
+a run destroys the key its payloads were encrypted under. You need `sample.pdf` from the root README
+and nothing else, because the walkthrough runs a local strategy.
 
 ## Mental model
 
@@ -28,11 +35,11 @@ flowchart LR
   K["retention reaper, at every fresh arm"] -->|"destroys the key"| B
 ```
 
-Arming means setting `OPENREADING_LEDGER=<dir>` in the environment. There is no flag. Only
-strategy runs journal: `--strategy NAME`, or `auto` with `defaults.strategy`, on every surface, and
-one run per item in a strategy batch. `--backend <id>`, `--no-strategy`, and a native batch journal
-nothing, even with the variable set. Unarmed, every surface is byte-identical to a build with no
-ledger.
+Arming means setting `OPENREADING_LEDGER=<dir>` in the environment, and there is no flag for it.
+Only strategy runs journal, meaning `--strategy NAME` or `auto` with `defaults.strategy`, on every
+surface. A strategy batch journals one run per item rather than one for the whole batch. `--backend
+<id>`, `--no-strategy`, and a native batch journal nothing, even with the variable set. When the
+variable is unset, every surface behaves byte-identically to a build with no ledger at all.
 
 ## Walkthrough
 
@@ -41,7 +48,7 @@ uv run python -c 'from openreading.testing.sample_pdf import build_sample_pdf; o
 export OPENREADING_LEDGER=./.openreading
 ```
 
-### 1. A backend run journals nothing; a strategy run leaves a record
+### 1. A backend run journals nothing, a strategy run leaves a record
 
 ```bash
 uv run openreading parse sample.pdf --backend pymupdf > /dev/null; ls .openreading
@@ -57,10 +64,10 @@ ls: .openreading: No such file or directory
 .openreading/retention/7dbf6b71-adb5-4e90-9188-a184fdba9d05.json
 ```
 
-**You should see** nothing after the backend run and six files, of five kinds, after the strategy
-run: a header, a journal (`.jsonl`), two blobs (the input document and the response), a key (mode
-0600 in a 0700 directory), and a retention stamp. Read the id: `RUN_ID=$(basename
-.openreading/*.header.json .header.json)`.
+**You should see** nothing after the backend run and six files after the strategy run. The six
+files are of five kinds: a header, a journal (`.jsonl`), two blobs (the input document and the
+response), a key (mode 0600 in a 0700 directory), and a retention stamp. Capture the run id for the
+next steps with `RUN_ID=$(basename .openreading/*.header.json .header.json)`.
 
 ### 2. What a record looks like
 
@@ -74,11 +81,11 @@ jq -c '{strategy_name, config_hash, plan_hash, journal_version, slim_request}' .
 {"strategy_name":"offline_first","config_hash":"sha256:4b081150…","plan_hash":"sha256:3e0803c8…","journal_version":1,"slim_request":{"backend":{"id":"strategy:offline_first"},"document":{"filename":"sample.pdf","mime_type":"application/pdf"},"schema_version":"0.1"}}
 ```
 
-**You should see** two journal lines with one `step_id`: `attempted` before the backend call, `ok`
-after it, pointing at a blob. The header pins what the run was. `slim_request` carries no bytes,
-URL, or password.
+**You should see** two journal lines that share one `step_id`. The `attempted` line is written
+before the backend call, and the `ok` line after it points at a blob. The header pins what the run
+was, so a later resume can check it. `slim_request` carries no bytes, URL, or password.
 
-### 3. Resume a completed run: replay, no backend call
+### 3. Resume a completed run without a backend call
 
 ```bash
 uv run openreading resume $RUN_ID > resumed.json
@@ -93,14 +100,15 @@ strategy offline_first  →  pymupdf (ok)
       …
 ```
 
-**You should see** the same document and a 1ms attempt: the step was served from the journal.
-`resume` takes only the run id. Every option comes from the ledger. From Python,
+**You should see** the same document and a 1ms attempt, because the step was served from the
+journal. `resume` takes only the run id, and every option comes from the ledger. From Python,
 `openreading.resume(run_id)` returns the same dict and arms from the environment as the CLI does.
 
 ### 4. Interrupt a run, then resume it
 
-Make a slower document and a two-rung strategy; each backend it tries is one rung. Press
-<kbd>Ctrl</kbd>+<kbd>C</kbd> about two seconds in, while tesseract is still working:
+Make a slower document and a two-rung strategy. A rung is one backend in the order the strategy
+tries them. Press <kbd>Ctrl</kbd>+<kbd>C</kbd> about two seconds in, while tesseract is still
+working.
 
 ```bash
 uv run python -c 'import fitz; s=fitz.open("sample.pdf"); o=fitz.open(); [o.insert_pdf(s) for _ in range(8)]; o.save("slow.pdf")'
@@ -113,7 +121,7 @@ uv run openreading parse slow.pdf --strategy slow > interrupted.json; echo "exit
 exit=6
 ```
 
-**You should see** exit 6 and an empty `interrupted.json`. Now resume, and read the journal:
+**You should see** exit 6 and an empty `interrupted.json`. Now resume the run and read the journal:
 
 ```bash
 uv run openreading resume dcb81857-018f-4e30-8e12-e91d915a1d64 > resumed-slow.json; echo "exit=$?"
@@ -127,10 +135,11 @@ exit=0
 {"status":"ok","step_path":"root.steps[1]","backend_id":"pymupdf","journal_seq":3}
 ```
 
-**You should see** the interrupted rung recorded `cancelled` at interrupt time. On resume it
-replays as that outcome, not re-run, and the next rung executes for real. `explain` labels the
-replayed rung `skipped(missing_credentials)`. When a resumed step runs pymupdf live, PyMuPDF's
-advisory line lands on stdout before the JSON; strip it with `tail -n +2 resumed-slow.json`.
+**You should see** the interrupted rung recorded as `cancelled` at interrupt time. On resume that
+rung replays as `cancelled` rather than running again, and the next rung executes for real.
+`explain` labels the replayed rung `skipped(missing_credentials)`. When a resumed step runs pymupdf
+live, PyMuPDF's advisory line lands on stdout before the JSON. Strip it with
+`tail -n +2 resumed-slow.json`.
 
 ### 5. Refusal by name
 
@@ -147,10 +156,11 @@ uv run openreading resume dcb81857-018f-4e30-8e12-e91d915a1d64 > /dev/null; echo
 exit=3
 ```
 
-**You should see** exit 3 with both hashes named. Restore the body and add an unrelated strategy
-to the file: the resume succeeds. The hash covers the compiled strategy this run used, not the
-file's bytes. Also exit 3: `resume nope` (`no recorded run 'nope' under .openreading`) and any
-`resume` with the variable unset (`OPENREADING_LEDGER is not set`).
+**You should see** exit 3 with both hashes named. Restore the strategy body and add an unrelated
+strategy to the file, and the resume succeeds. The hash covers the compiled strategy this run used,
+not the file's bytes. Two other refusals also exit 3. `resume nope` prints
+`no recorded run 'nope' under .openreading`, and any `resume` with the variable unset prints
+`OPENREADING_LEDGER is not set`.
 
 ## Recipes
 
@@ -169,66 +179,70 @@ exit=3
 exit=3
 ```
 Deleting the key is exactly what the reaper does. The journal stays, so the run still answers what
-happened, just not with what content. Retention (default 24 hours) is read at arm time. Each
-dispatched hosted backend's own limit can only tighten it per step. Raise it before the run, never
-after. Back up `*.jsonl`, `*.header.json`, and `blobs/`; never `keys/` alongside them.
+happened, but not with what content. Retention defaults to 24 hours and is read at arm time. A
+hosted backend's own retention limit can only tighten it per step. Raise it before the run, never
+after. Back up `*.jsonl`, `*.header.json`, and `blobs/`, and never back up `keys/` alongside them.
 
 **Replay decisions against a new document.**
 `uv run openreading replay other.pdf --trace run.json` re-executes the strategy. It takes each
-logged decision from `run.json`'s `orchestration` block, not from the journal. Replay is the
-[Strategies](../strategies/README.md) mechanism; resume is this one.
+logged decision from `run.json`'s `orchestration` block, not from the journal. Replay belongs to
+[Strategies](../strategies/README.md), and resume belongs to this page.
 
 ## How it decides
 
-The nine laws are L1–L9 in `uv run python -m pydoc openreading.ledger`. The ones you meet:
+The rules below explain every refusal and replay you met in the walkthrough. All nine laws, L1–L9,
+are in `uv run python -m pydoc openreading.ledger`. The ones you meet are these.
 
-- Zero delta (L1). Unarmed, no file is touched and every byte of output is unchanged. Avoids: a
-  ledger that changes behaviour for people who never asked for one.
-- `attempted` before dispatch, terminal after. A crash between the two leaves an orphan reconciled
-  by idempotency key. Avoids: a vendor job that billed and was never recorded.
-- Refuse rather than diverge (L5). `config_hash`, `plan_hash`, and `journal_version` are hard
-  fields. Avoids: a resume that silently becomes a different run.
-- Secrets never enter a payload (L6); blobs are addressed by `(run_id, digest)` and never shared
-  across runs (L7). Avoids: a presigned URL in every backup; replay serving another run's bytes.
+- Zero delta (L1). When the ledger is unarmed, no file is touched and every byte of output is
+  unchanged. Without this rule a ledger would change behaviour for people who never asked for one.
+- An `attempted` record is written before dispatch and a terminal record after it. A crash between
+  the two leaves an orphan, and the idempotency key, one value per identical request, lets a retry
+  reconcile it. Without this rule a vendor job could bill and never be recorded.
+- Refuse rather than diverge (L5). A mismatch in `config_hash`, `plan_hash`, or `journal_version`
+  refuses the resume outright. Without this rule a resume could silently become a different run.
+- Secrets never enter a payload (L6), so a presigned URL never lands in a backup. Blobs are
+  addressed by `(run_id, digest)` and never shared across runs (L7), so a replay never serves
+  another run's bytes.
 - A recorded outcome is final. A `skipped` for missing credentials replays as a skip even if the key
-  exists now. The cascade still falls to the next rung. Avoids: a resume that quietly dispatches
-  to a vendor the original run never used.
-- The compliance gate runs once and its output is pinned (L2). Each replayed step checks its backend
-  against the pin. Avoids: a drifted backend readmitted on resume.
+  exists now, and the cascade still falls to the next rung. Without this rule a resume could quietly
+  dispatch to a vendor the original run never used.
+- The compliance gate runs once and its output is pinned (L2). The compliance gate is the filter
+  that drops backends your policy forbids. Each replayed step checks its backend against the pin, so
+  a backend that drifted out of policy is never readmitted on resume.
 
 ## Reference
 
-- `uv run python -m pydoc openreading.ledger` — arming, exit codes, the nine laws, the journal
+- `uv run python -m pydoc openreading.ledger` covers arming, exit codes, the nine laws, the journal
   contract, resume, retention and erasure.
-- `uv run python -m pydoc openreading.api` — "Environment variables read by this module": which
-  runs journal.
-- `uv run openreading resume --help`; `uv run python -m pydoc openreading.cli` — exit 6.
-- `src/openreading/schemas/step.v0.1.json`, `journal.v0.1.json` — record shapes;
-  [JSON Schemas](../schemas/README.md).
+- `uv run python -m pydoc openreading.api`, section "Environment variables read by this module",
+  lists which runs journal.
+- `uv run openreading resume --help` and `uv run python -m pydoc openreading.cli` document exit 6.
+- `src/openreading/schemas/step.v0.1.json` and `journal.v0.1.json` hold the record shapes,
+  described in [JSON Schemas](../schemas/README.md).
 
 ## Not built yet
 
 Each line names the `openreading.ledger` docstring section that records it.
 
-- The `submit` / `drive` / `emit` step decomposition; today each rung is one `submit` step ("The
+- The `submit` / `drive` / `emit` step decomposition. Today each rung is one `submit` step ("The
   step contract").
 - The endpoint term of the compliance pin (L2) and checking the trace against the journal by
   sequence (L3) ("The nine Ledger laws").
-- Executor limit and capability enforcement ("The port surface"); the executor conformance kit and
+- Executor limit and capability enforcement ("The port surface"). The executor conformance kit and
   any distributed executor ("The substrate contract").
-- Executor id, descriptor digest, and `key_id` in the header ("Resume"); batch child runs and
+- Executor id, descriptor digest, and `key_id` in the header ("Resume"). Batch child runs and
   batch-level `resume` ("The journal contract").
 - `DELETE /v1/jobs/{job_id}`, a durable job store, and `openreading.run(..., ledger=)` ("Surfaces").
-- Whole-path zero-data-retention, shipped per step; cross-run rejection in `BlobStore.get`
+- Whole-path zero-data-retention shipped per step, and cross-run rejection in `BlobStore.get`
   ("Retention, ZDR, erasure").
-- SIGTERM handling; only Ctrl-C is caught ("Operational contract").
+- SIGTERM handling, since only Ctrl-C is caught ("Operational contract").
 
 ## See also
 
 - [Docs home](../README.md)
-- [Strategies](../strategies/README.md) — `replay`, `explain`, the trace.
-- [Batch runs](../batch/README.md) — one journaled run per item.
-- [The HTTP server](../server/README.md) — `/v1/jobs` is in-memory, never resumed.
+- [Strategies](../strategies/README.md) for `replay`, `explain`, and the trace.
+- [Batch runs](../batch/README.md), which journals one run per item.
+- [The HTTP server](../server/README.md), where `/v1/jobs` is in-memory and never resumed.
 - [JSON Schemas](../schemas/README.md)
 
 <sub>[Docs home](../README.md) · [← Batch runs](../batch/README.md) · [The HTTP server →](../server/README.md)</sub>

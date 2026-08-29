@@ -1,24 +1,29 @@
-# Batch runs — a folder in, one JSON out
+# Batch runs: a folder in, one JSON out
 
 <sub>[Docs home](../README.md) · [← Compare](../comparison/README.md) · [The run ledger →](../ledger/README.md)</sub>
 
-> **In one sentence.** Point `parse` at a directory, a glob, or several files and get one
-> `batch-result` JSON with a full response per document; then compare two such runs document by
-> document.
+> **In one sentence.** Point `parse` at a folder, a glob, or several files and get one
+> `batch-result` JSON holding a full response per document.
 
 ## What this gives you
 
-One invocation over many documents. Each document runs the ordinary single-document pipeline on
-its own. One failure never stops the rest. A file the backend (the parser you chose) cannot read
-is skipped with a reason. The result is one envelope: the response JSON, with a fixed shape. It
-carries a complete `response` per succeeded item, a summary, and warnings. Run the same folder
-with two backends and `compare` the envelopes to learn which backend is better on your documents.
+You have a folder of two hundred documents and one parser that works well on a single file. Running
+it in a shell loop means two hundred output files, a crash halfway that stops everything, and no
+summary at the end. A backend is one parser, such as the local `pymupdf` library or a hosted API.
+`openreading parse corpus/ --backend pymupdf > batch.json` runs the whole folder in one invocation
+and prints one JSON document. Each document runs the ordinary single-document pipeline on its own,
+so one failure never stops the rest. A file the backend cannot read is skipped with a reason such as
+`unsupported_format`. The result is one envelope, meaning one JSON document with a fixed shape, and
+this one is called `batch-result`. It carries a complete `response` per succeeded item, a summary
+with counts, and warnings. Run the same folder with a second backend and `compare` the two envelopes
+to learn which backend is better on your documents. You need `sample.pdf` from the root README, a
+folder to copy it into, and no key for the local backends.
 
 ## Mental model
 
-The batch layer wraps the single-document path and never changes it. Intake expands your sources
-into a sorted list. Each item then runs exactly as `parse one.pdf` would, with its own routing and
-compliance check.
+The batch layer wraps the single-document path and never changes what that path does. Intake is the
+first step, and it expands your sources into one sorted list of files. Each item then runs exactly
+as `parse one.pdf` would, with its own routing and its own compliance check.
 
 ```mermaid
 flowchart LR
@@ -32,8 +37,9 @@ flowchart LR
   C --> V["verdict per document + rollup"]
 ```
 
-Batch or single is decided by input form, not by count. A directory or a glob that expands to one
-file is still a batch. A single named file is always the single `response`, byte for byte.
+Whether a run is a batch is decided by the form of the input and never by the count. A directory or
+a glob that expands to a single file is still a batch with one item. A single named file always
+yields the ordinary single `response`, byte for byte.
 
 ## Walkthrough
 
@@ -58,7 +64,7 @@ Consider using the pymupdf_layout package for a greatly improved page layout ana
 
 **You should see** one progress line per file on stderr, exit 0, and pure JSON in `batch.json`.
 The `.txt` is a skip with a reason, never a crash. `--save-dir` also wrote `out/a.pdf.json` and
-`out/b.pdf.json`: each item's own `response`, with subdirectories preserved. `batch.json` is a
+`out/b.pdf.json`, each item's own `response`, with subdirectories preserved. `batch.json` is a
 `batch-result.v0.1`. Here it is with the two inner responses cut out:
 
 ```json
@@ -73,9 +79,11 @@ The `.txt` is a skip with a reason, never a crash. `--save-dir` also wrote `out/
   "warnings": [ { "code": "items_skipped", "message": "1 file(s) skipped: 1 unsupported_format" } ] }
 ```
 
-One item per file, in argument order; a directory's files come sorted by relative path (M1),
-whatever order the progress lines finished in. Each item has a `relpath`, the pairing key for
-corpus compare. Check: `jq -r '.items[] | "\(.source.relpath) \(.state)"' batch.json`.
+The envelope holds one item per file, in argument order. A directory's files come sorted by
+relative path, whatever order the progress lines finished in, and that ordering is rule M1 under
+How it decides. Each item has a `relpath`, the path relative to the folder you passed, and corpus
+compare pairs documents by it.
+Check: `jq -r '.items[] | "\(.source.relpath) \(.state)"' batch.json`.
 
 ### 2. A single file, a glob, several files, `--jobs`, the size guard, a strategy
 
@@ -97,13 +105,16 @@ exit=2
 ```
 
 **You should see** a `0.3` single response for the named file and batch envelopes for the glob and
-the pair. Quote the glob. Unquoted, the shell expands it into two files, which is also a batch.
-`--jobs N` runs N items at once. The default is 1: serial, and safe under rate limits. `--jobs 0`
-clamps to 1; above `--max-jobs` (32) exits 2. `--max-items` (default 200) refuses before any file
-is read. Under `--strategy` each succeeded item carries its own `orchestration` block, because the
-strategy runs per document ([Strategies](../strategies/README.md)).
+the pair. Quote the glob, because the shell expands an unquoted one into two files, which is also a
+batch. `--jobs N` runs N items at once. The default of 1 runs them one at a time, which is safe
+under rate limits. `--jobs 0` clamps to 1, and a value above `--max-jobs` (32) exits 2.
+`--max-items` (default 200) refuses before any file is read. Under `--strategy` each succeeded item
+carries its own `orchestration` block, because the strategy runs per document
+([Strategies](../strategies/README.md)).
 
 ### 3. The payoff: compare two runs of the same folder
+
+Two batch envelopes of the same folder tell you which backend is better, document by document.
 
 ```bash
 uv run openreading parse corpus/ --backend tesseract > batchB.json
@@ -123,10 +134,11 @@ FINDINGS (across paired documents)
 ```
 
 **You should see** one verdict line per document and a rollup of finding codes. A verdict is the
-compare judgement on one pair. `--format diffs` prints what each side captured that the other
-missed. `--format json` is the schema-valid `corpus-report`, with the same numbers under `.rollup`.
-A document in one run but not the other is `unpaired`: a finding, not a crash. Mixing a batch
-envelope with a single response is exit 2. Verdicts and codes: [Compare](../comparison/README.md).
+compare judgement on one pair, such as `mixed` when the texts agree but the tables do not.
+`--format diffs` prints what each side captured that the other missed. `--format json` is the
+schema-valid `corpus-report`, with the same numbers under `.rollup`. A document in one run but not
+the other is `unpaired`, which is a finding and not a crash. Mixing a batch envelope with a single
+response exits 2. The verdicts and codes are in [Compare](../comparison/README.md).
 
 ## Recipes
 
@@ -142,7 +154,7 @@ jq -c '.items[] | select(.state=="failed") | {relpath: .source.relpath, error}' 
 exit=4
 {"relpath":"bad.pdf","error":{"code":"FileDataError","message":"PyMuPDF failed: Failed to open stream"}}
 ```
-Exit 4 is `partial`: some items failed, and the good document still has its full response.
+Exit 4 means `partial`. Some items failed, and the good document still has its full response.
 
 **Run from Python.**
 ```python
@@ -150,7 +162,8 @@ import openreading
 env = openreading.run_batch(["corpus/"], backend="pymupdf", jobs=2)
 print(env["status"]["state"], env["summary"]["succeeded"], env["summary"]["backends"])   # succeeded 2 {'pymupdf': 2}
 ```
-Same envelope, same intake rules. `max_items=` and `max_jobs=` are the keyword forms of the flags.
+Python returns the same envelope under the same intake rules. `max_items=` and `max_jobs=` are the
+keyword forms of the flags.
 
 **Batch over HTTP.**
 ```bash
@@ -162,64 +175,67 @@ curl -s -X POST http://127.0.0.1:8787/v1/batch -H 'content-type: application/jso
 ```json
 {"state":"succeeded","request":{"backend":"pymupdf","jobs":2,"source_args":["doc-0","doc-1"]},"transports":["platform","platform"]}
 ```
-`backend` is a slug string here, not the `{"id": …}` object `/v1/parse` takes. The object form
-returns a 500 today. Expand directories on the client side. See [The HTTP
+`backend` is a plain string here, such as `"pymupdf"`, not the `{"id": …}` object `/v1/parse`
+takes. The object form returns a 500 today. Expand directories on the client side. See [The HTTP
 server](../server/README.md).
 
-**Mix files, folders, and URLs; use a hosted backend's native batch.** (shape shown, not run)
-`uv run openreading parse https://example.com/loan.pdf corpus/ extra/w2.png --backend pymupdf`. A
-URL passes through to its item as `document.url`, with no `sha256` at intake. Hidden files and
-symlinks inside a directory are skipped. With a hosted key, `--backend anthropic-claude` over a
-directory sends one vendor batch job, and each item reports `"transport": "native"`. `--deadline
-SECONDS` overrides its one-hour wait. More than 10 live items on a directly named hosted backend
-print a `[preflight]` cost line on stderr first, never a prompt.
+**Mix files, folders, and URLs, or use a hosted backend's native batch.** (shape shown, not run)
+Run `uv run openreading parse https://example.com/loan.pdf corpus/ extra/w2.png --backend pymupdf`.
+A URL passes through to its item as `document.url`, with no `sha256` at intake. Hidden files and
+symlinks inside a directory are skipped. A native batch is the vendor's own bulk endpoint, which
+takes the whole folder as one job. With a hosted key, `--backend anthropic-claude` over a directory
+sends one vendor batch job, and each item reports `"transport": "native"`. `--deadline SECONDS`
+overrides its one-hour wait. More than 10 live items on a directly named hosted backend print a
+`[preflight]` cost line on stderr first, never a prompt.
 
 ## How it decides
 
-Each rule names the failure it avoids. The full set is M1–M10 in the package docstring.
+These rules are why a batch never surprises you with a different envelope shape, a crash, or a
+widened compliance set. Each rule names the failure it avoids. The full set is M1–M10 in the
+package docstring.
 
 Source: `src/openreading/batch/__init__.py` (the M1–M10 invariants). Live truth: `uv run python -m
-pydoc openreading.batch`. If this table and that text disagree, the text is right; fix the table.
+pydoc openreading.batch`. If this table and that text disagree, the text is right. Fix the table.
 
 | Rule | What it avoids | Where |
 |---|---|---|
 | `M2` envelope by input form, not count | An envelope type that flips with how many files a folder holds | `batch.sources.looks_batch` |
 | `M1` sorted, recursive, deterministic expansion | Two runs of one folder that pair differently | `batch.sources.resolve_intake` |
-| `M3` unsupported format is a skip with a reason | A `.docx` crashing the run, or vanishing silently | `batch.sources.resolve_intake` |
+| `M3` unsupported format is a skip with a reason | A file the chosen backend cannot read crashing the run, or vanishing silently | `batch.sources.resolve_intake` |
 | `M4` item and jobs ceilings refuse before reading | A home directory, or an accidental hosted spend | `batch.sources`, `batch.runner.bound_jobs` |
 | `M6` per-item isolation | One bad file taking the corpus down | `batch.runner` |
 | `M7` per-item routing and compliance, no batch-level cache | A cached decision widening the compliant set | `batch.runner`, `openreading.api` |
 
-Status: `succeeded` means at least one item succeeded and none failed (exit 0). `partial` means
-some of each (exit 4). `failed` means nothing succeeded (exit 1). Skips alone never fail a batch
-that produced something. An all-skipped or empty batch is `failed`, with an `items_skipped` or
-`empty_batch` warning saying why. Silence is never mistaken for a hang.
+The batch status has three values. `succeeded` means at least one item succeeded and none failed
+(exit 0). `partial` means some of each (exit 4). `failed` means nothing succeeded (exit 1). Skips
+alone never fail a batch that produced something. An all-skipped or empty batch is `failed`, with
+an `items_skipped` or `empty_batch` warning saying why. Silence is never mistaken for a hang.
 
 ## Reference
 
-- `uv run python -m pydoc openreading.batch` — the layer, M1–M10, the envelope, native batch,
-  surfaces and exits.
-- `uv run python -m pydoc openreading.comparison.corpus` — pairing precedence and verdicts.
-- `uv run openreading parse --help` — every batch flag.
-- `src/openreading/schemas/batch-result.v0.1.json`, `corpus-report.v0.1.json` —
-  [JSON Schemas](../schemas/README.md); `scripts/batch_demo.sh` — the larger local demo.
+- `uv run python -m pydoc openreading.batch` covers the layer, M1–M10, the envelope, native batch,
+  surfaces, and exits.
+- `uv run python -m pydoc openreading.comparison.corpus` covers pairing precedence and verdicts.
+- `uv run openreading parse --help` lists every batch flag.
+- `src/openreading/schemas/batch-result.v0.1.json` and `corpus-report.v0.1.json` are described in
+  [JSON Schemas](../schemas/README.md). `scripts/batch_demo.sh` is the larger local demo.
 
 ## Not built yet
 
 - `--retry-failed <batch.json>`, a merge-rerun of failed items (`openreading.batch` docstring,
   "Deferred").
-- Webhook-mode batches; server-side directory upload as a multipart bundle (same).
-- Corpus-level evals, `--truth` per document; native batch for providers that stage through GCS or
-  blob containers (same).
-- Batch-level resume: Ctrl-C with `OPENREADING_LEDGER` set exits 6 — even for a `--backend` batch
-  that journaled nothing — and names no run id (`openreading.cli` docstring, exit codes).
+- Webhook-mode batches, and server-side directory upload as a multipart bundle (same).
+- Corpus-level evals with `--truth` per document, and native batch for providers that stage through
+  GCS or blob containers (same).
+- Batch-level resume. Ctrl-C with `OPENREADING_LEDGER` set exits 6 and names no run id, even for a
+  `--backend` batch that journaled nothing (`openreading.cli` docstring, exit codes).
 
 ## See also
 
 - [Docs home](../README.md)
-- [Compare](../comparison/README.md) — the verdicts a corpus report rolls up.
-- [The run ledger](../ledger/README.md) — one journaled run per item.
-- [The HTTP server](../server/README.md) — `POST /v1/batch`.
+- [Compare](../comparison/README.md): the verdicts a corpus report rolls up.
+- [The run ledger](../ledger/README.md): one journaled run per item.
+- [The HTTP server](../server/README.md): `POST /v1/batch`.
 - [Backend adapters](../adapters/README.md) · [JSON Schemas](../schemas/README.md)
 
 <sub>[Docs home](../README.md) · [← Compare](../comparison/README.md) · [The run ledger →](../ledger/README.md)</sub>

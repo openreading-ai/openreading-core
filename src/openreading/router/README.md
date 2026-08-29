@@ -1,20 +1,29 @@
-# Routing and keys — pick a backend under a compliance policy, with your own key
+# Routing and keys: pick a backend under a compliance policy, with your own key
 
 <sub>[Docs home](../README.md) · [← The command line](../cli/README.md) · [Strategies →](../strategies/README.md)</sub>
 
-> **In one sentence.** Give the router a policy. It prints which backends survive, why the rest
-> were dropped, and the order it will try them, before anything runs.
+> **In one sentence.** Give the router a policy and it prints which backends survive, why the rest
+> were dropped, and the order to try them, before anything runs.
 
 ## What this gives you
 
-A plan, not a guess. `openreading route` reads a policy file and prints the chosen backend, the
-fallback chain, and a coded reason for every backend it refused. Compliance is a filter, never a
-score. No fallback, strategy, or named `--backend` can readmit a backend the policy dropped. Keys
-are read from your environment per request and go nowhere but the provider.
+A backend is one parser, whether a local library, a self-hosted model, or a hosted API, and you have
+several to choose from. Some documents carry data only certain vendors may see, so you need to know
+which backends qualify before a page leaves your machine. `openreading route sample.pdf --policy
+phi.json` prints that plan without running any backend at all. A policy is a JSON file of
+requirements, for example `{"require_baa": true}` to admit only vendors with a signed BAA. A BAA
+(Business Associate Agreement) is the HIPAA contract a vendor signs before it may see protected
+health information. The plan names the chosen backend, the fallback chain behind it, and a coded
+reason for every backend the router refused. A fallback is the next backend tried when one fails,
+and a strategy is a named plan over backends. Neither of those, and no named `--backend` either,
+can readmit a dropped backend, because compliance is a filter and never a score. Keys are read from
+your environment per request and go nowhere but the provider. You need `sample.pdf` and `phi.json`
+from the root README and no key.
 
 ## Mental model
 
-Three stages. The first two are yes/no gates. The third only orders the survivors.
+The router works in three stages, and the first two are gates while the third only orders the
+survivors. A gate means each backend either passes or is dropped with a coded reason.
 
 ```mermaid
 flowchart LR
@@ -27,22 +36,24 @@ flowchart LR
   F -. "run: chosen first, then each fallback" .-> X["result plus warnings"]
 ```
 
-A backend is one parser: a library, a self-hosted model, or a hosted API. A BAA (Business
-Associate Agreement) is the HIPAA contract a vendor signs before it may see PHI (protected health
-information). Stage 1 asks whether a backend may see the document at all. It fails closed: a fact
-the backend leaves `unverified` counts as no. Stage 2 asks whether the backend can do the job
-(input format, requested features). Stage 3 scores the survivors on quality, cost, and locality.
-`--run` walks the chain in that order until one backend succeeds. A backend with no key is
-skipped, and the skip lands in the result's `warnings[]`.
+Stage 1 asks whether a backend may see the document at all, and it fails closed. Failing closed
+means a fact the backend leaves `unverified`, such as an unconfirmed region or retention claim,
+counts as no. Stage 2 asks whether the backend can do the job, which means the input format and
+every requested feature. Stage 3 scores the survivors on quality, cost, and locality, and that score
+sets the order. Adding `--run` walks the chain in that order and stops at the first backend that
+succeeds. A backend with no key is skipped, and the skip lands in the result's `warnings[]`.
 
 ## Walkthrough
 
-Every command below was run on 2026-08-28 from an empty directory. Only `pymupdf` and `tesseract`
-were available, and no keys were set. Outputs are pasted and trimmed with `…`, never edited. The
-checks use `jq` (`brew install jq` or `apt install jq` if `which jq` prints nothing).
-Continuing from the root README: if `sample.pdf` and `phi.json` exist, skip the first two lines.
+Seven steps take you from a baseline plan to the same answers from Python. Every command below
+was run on 2026-08-28 from an empty directory. Only `pymupdf` and `tesseract` were available, and
+no keys were set. Outputs are pasted and trimmed with `…`, never edited. The checks use `jq`
+(`brew install jq` or `apt install jq` if `which jq` prints nothing). If `sample.pdf` and
+`phi.json` already exist from the root README, skip the first two lines.
 
 ### 1. The sample, a PHI policy, and the baseline plan
+
+The baseline plan shows which backends a PHI policy admits before anything runs.
 
 ```bash
 uv run python -c 'from openreading.testing.sample_pdf import build_sample_pdf; open("sample.pdf","wb").write(build_sample_pdf())'
@@ -63,7 +74,7 @@ uv run openreading route sample.pdf --policy phi.json
 }
 ```
 
-**You should see** `pymupdf` chosen and exit 0. Check: `uv run openreading route sample.pdf
+**You should see** `pymupdf` chosen and exit 0. As a check, `uv run openreading route sample.pdf
 --policy phi.json | jq -c '[.dropped[].code] | unique'` prints `["no_baa","trains_on_data"]`. A
 local backend never needs a BAA, so `pymupdf`, `docling`, `tesseract`, and `qwen-vl` survive.
 
@@ -71,6 +82,8 @@ Failure note: a misspelled key (`"require_baaa": true`) is ignored without a mes
 backend survives. If `dropped` is `{}` under a policy you expected to bite, check the spelling.
 
 ### 2. Vary the policy: local only, region, retention
+
+Each policy axis has its own pair of drop codes, and this step shows all three axes.
 
 ```bash
 echo '{"require_local": true}' > local.json
@@ -86,17 +99,19 @@ for p in local eu retention; do uv run openreading route sample.pdf --policy $p.
 ```
 
 **You should see** only local backends survive `require_local`, and two different codes on each
-other axis. `region_mismatch` is a stated "no": the backend lists regions and `eu` is not among
-them. `region_unverified` is silence: it lists none, and silence fails closed. Retention pairs
-the same way. The region match is exact: `eu` does not satisfy `eu-west-1`.
+other axis. `region_mismatch` is a stated "no", because the backend lists regions and `eu` is not
+among them. `region_unverified` is silence, because the backend lists none, and silence fails
+closed. Retention pairs the same way. The region match is exact, so `eu` does not satisfy
+`eu-west-1`.
 
 Failure note: `{"max_retention": "soon"}` drops every hosted backend with `retention_unparseable`.
 That is your input, not the vendor's, so no switch relaxes it.
 
 ### 3. Attestations, then the tolerance switch
 
-`reducto` drops at `no_baa` because its BAA is `tier_gated`, offered only on a higher plan. If you
-signed it, say so. Then admit the vendors that were silent on region and retention:
+An attestation tells the router about paperwork it cannot see, such as a BAA you signed on a
+higher plan. `reducto` drops at `no_baa` because its BAA is `tier_gated`, offered only on a higher
+plan. If you signed it, say so. Then admit the vendors that were silent on region and retention:
 
 ```bash
 echo '{"require_baa": true, "no_train_on_data": true, "baa_tier_confirmed": ["reducto"]}' > phi-reducto.json
@@ -111,9 +126,9 @@ uv run openreading route sample.pdf --policy tolerant.json | jq -c '.dropped | m
 ```
 
 **You should see** `reducto` in the fallbacks and gone from `dropped`. In the second plan, every
-`*_unverified` drop is gone while every stated "no" remains. The first plan runs offline as-is —
+`*_unverified` drop is gone while every stated "no" remains. The first plan runs offline as-is.
 `pymupdf` is chosen and answers, and the response carries no attestation warning. The
-`baa_tier_confirmed` warning appears only when `reducto` itself answers. Name it:
+`baa_tier_confirmed` warning appears only when `reducto` itself answers. To name it, call
 `openreading.run("sample.pdf", backend="reducto", policy={"require_baa": True, "no_train_on_data":
 True, "baa_tier_confirmed": ["reducto"]})` (needs `REDUCTO_API_KEY`). The response's `warnings[]`
 then gains `{"code": "baa_tier_confirmed", "field": "reducto", …}`. `train_optout_confirmed:
@@ -123,8 +138,9 @@ chain under `no_train_on_data`, while `nuextract`, `open-ocr`, and `pulse` drop 
 
 ### 4. Run the plan, then watch it fall back
 
-`pymupdf` reads PDFs, not images. Run the PHI plan, then render one page as a PNG and run the local
-plan on it:
+`--run` executes the plan in order, and a backend that cannot answer is skipped rather than
+crashing the run. `pymupdf` reads PDFs, not images. Run the PHI plan, then render one page as a
+PNG and run the local plan on it:
 
 ```bash
 uv run openreading route sample.pdf --policy phi.json --run > run.json
@@ -138,7 +154,7 @@ uv run openreading route sample.png --policy local.json --run | jq -c '{chosen, 
 {"chosen":"docling","pymupdf":"unsupported_format","ran":"tesseract","warning":"docling skipped (missing_credentials) → fell back to tesseract"}
 ```
 
-**You should see** the plan gain a `result` (the normalized response, or envelope) with exit 0. A
+**You should see** the plan gain a `result`, which is the envelope, with exit 0. A
 `pymupdf_layout` advisory goes to stderr, so stdout stays pure JSON. On the PNG, `pymupdf` is a
 stage-2 drop and `docling` is chosen. `docling` has no `DOCLING_SERVE_URL` set, so it is skipped
 and `tesseract` answers. The skip is recorded as `fallback_used`, and nothing outside the plan is
@@ -146,6 +162,8 @@ tried. If the whole chain fails, `--run` exits 3, prints the plan anyway, and na
 on stderr.
 
 ### 5. Configured is not reachable
+
+`backends` tells you which variables are set, and `--check` tells you whether a backend answers.
 
 ```bash
 uv run openreading backends
@@ -172,6 +190,8 @@ for the hosted rows and spends no network call on them.
 
 ### 6. Bring a key
 
+This step shows where a key comes from and which source wins when two are set.
+
 ```bash
 uv run openreading parse sample.pdf --backend reducto; echo "exit=$?"
 OPENREADING_REDUCTO_API_KEY=not-a-real-key uv run openreading backends | grep reducto
@@ -190,16 +210,22 @@ reducto                        hosted_api         yes         -
 ```
 
 **You should see** exit 3 naming the variable, `yes` from a fake value, and `.env` setting one
-variable the first time and none the second. Configured means found, not accepted: a rejected key
-fails at submit with `key was found but rejected by reducto — check REDUCTO_API_KEY`, and the
-provider's body is dropped, not echoed.
+variable the first time and none the second. Configured means found, not accepted. A rejected key
+fails at submit with the sentence below, and the provider's body is dropped rather than echoed.
 
-For secrets, highest first: a request's `credentials_ref` alias (only if the operator allow-listed
-it), `OPENREADING_<SLUG>_<KEY>`, the native variable (`REDUCTO_API_KEY`), then the provider SDK's
-own chain. An exported shell variable always beats `.env`, so a value exported earlier in the
-session wins over the file you just edited. The CLI loads `./.env` (or `--env-file`) on every call.
+```text
+key was found but rejected by reducto — check REDUCTO_API_KEY
+```
+
+The precedence for secrets, highest first, is a request's `credentials_ref` alias (only if the
+operator allow-listed it), then `OPENREADING_<SLUG>_<KEY>`, then the native variable
+(`REDUCTO_API_KEY`), then the provider SDK's own chain. An exported shell variable always beats
+`.env`, so a value exported earlier in the session wins over the file you edited a moment ago. The
+CLI loads `./.env` (or `--env-file`) on every call.
 
 ### 7. The same answers from Python
+
+The Python API returns the same plan and raises the same refusal as the CLI.
 
 ```bash
 uv run python -c '
@@ -213,41 +239,44 @@ except Exception as e:
 '
 ```
 
-**You should see** the values in the two comments. Naming a backend does not bypass the policy:
-`ComplianceRefused` is raised before any credential is looked up.
+**You should see** the values in the two comments. Naming a backend does not bypass the policy,
+and `ComplianceRefused` is raised before any credential is looked up.
 
 ## Recipes
 
 **Reorder the survivors by cost or accuracy.** `echo '{"optimize_for": "cost"}' > opt.json`, then
 `uv run openreading route sample.pdf --policy opt.json | jq -c .fallbacks`. Under `cost` the local
-backends lead (`docling`, `tesseract`, `qwen-vl`). Under `accuracy` the P0 backends lead:
-`docling`, then the hosted P0s (`azure-document-intelligence`, `google-document-ai`, `chunkr`,
-`aws-textract`, `reducto`, `nuextract`), ahead of every P1 (`tesseract`, `qwen-vl`, `open-ocr`,
-`pulse`, `anthropic-claude`). P0/P1 is the descriptor's `router.integration_priority`, the stage-3
-quality proxy (`_QUALITY_BY_PRIORITY` in `router/router.py`). Stage 3 changes the order, never the
-set.
+backends lead (`docling`, `tesseract`, `qwen-vl`). Under `accuracy` the order follows
+`router.integration_priority`, the descriptor field stage 3 uses as its quality proxy
+(`_QUALITY_BY_PRIORITY` in `router/router.py`). The P0 backends lead, with `docling` first, then
+the hosted P0s (`azure-document-intelligence`, `google-document-ai`, `chunkr`, `aws-textract`,
+`reducto`, `nuextract`), ahead of every P1 (`tesseract`, `qwen-vl`, `open-ocr`, `pulse`,
+`anthropic-claude`). Stage 3 changes the order, never the set.
 
-**Route PHI through a vendor whose BAA you signed.** (needs a hosted key: `REDUCTO_API_KEY`; shape
-shown, not run) Step 3's policy plus a request that names `reducto`: `openreading.run("sample.pdf",
-backend="reducto", policy=…)` from Python, or a strategy rung `reducto` under that policy. The
-response's `warnings[]` gains `{"code": "baa_tier_confirmed", "field": "reducto", "message":
-"require_baa satisfied for reducto by operator confirmation alone: …"}`, so a PHI run never rests
-silently on paperwork. `route --run` alone is answered by `pymupdf` and carries no such warning.
+**Route PHI through a vendor whose BAA you signed.** (needs the hosted key `REDUCTO_API_KEY`, so
+the shape is shown, not run) Use step 3's policy plus a request that names `reducto`, either
+`openreading.run("sample.pdf", backend="reducto", policy=…)` from Python or a strategy rung
+`reducto` under that policy. The response's `warnings[]` gains `{"code": "baa_tier_confirmed",
+"field": "reducto", "message": "require_baa satisfied for reducto by operator confirmation alone:
+…"}`, so a PHI run never rests silently on paperwork. `route --run` alone is answered by `pymupdf`
+and carries no such warning.
 
 **Prove a backend answers, not only that it is configured.** `uv run openreading backends --check
 all` probes only backends that declare a probe. A dead `DOCLING_SERVE_URL` reports `unreachable`
 with `MEASURED yes` (the `openreading.liveness` docstring's acceptance case). A `vendor` probe
 such as `anthropic-claude` leaves your network, and the PROBE column says so first.
 
-**Read an empty plan (exit 4).** Shape only. A local backend is the guaranteed floor for
-`require_local` and `require_baa`, so no policy on a default install reaches it. When every
-backend is dropped, `route` still prints the plan and exits 4:
+**Read an empty plan (exit 4).** This is the shape only, because a local backend is the guaranteed
+floor for `require_local` and `require_baa` and no policy on a default install reaches it. When
+every backend is dropped, `route` still prints the plan and exits 4:
 
 ```json
 {"chosen": null, "fallbacks": [], "dropped": {"…": {"stage": 1, "code": "…", "reason": "…"}}, "terminal_reason": "no_compliant_backend"}
 ```
 
 ## How it decides
+
+Five rules shape the router, and each one exists to avoid a specific failure.
 
 | Rule | Failure it avoids | Enforced in |
 |---|---|---|
@@ -257,7 +286,8 @@ backend is dropped, `route` still prints the plan and exits 4:
 | No key means skip; a rejected key names its variable, never its value. | A crash mid-chain, or a secret echoed from a vendor body. | `router/executor.py`, `readiness.py` |
 | Configured and reachable are different columns. | A dead URL rendered as a green "ready". | `readiness.py`, `liveness.py` |
 
-Policy keys and where each lands. Source: `src/openreading/api.py` (`build_request`,
+The next table lists every policy key and where each lands. Source: `src/openreading/api.py`
+(`build_request`,
 `router_config`). Live truth: `uv run python -m pydoc openreading.cli` → `route` (the `policy.json`
 keys paragraph).
 
@@ -274,10 +304,11 @@ keys paragraph).
 | `train_optout_confirmed` | router config | Backend ids whose training opt-out you applied. |
 | `baa_tier_confirmed` | router config | Backend ids whose tier-gated BAA you signed. |
 
-Drop codes seen in this guide. Source: `src/openreading/router/compliance.py` (`evaluate`),
-`src/openreading/router/router.py` (`_capability_drop`). Live truth: `uv run openreading route
-sample.pdf --policy <file> | jq .dropped`. If this table and that output disagree, the output is
-right — fix the table.
+The last table lists the drop codes seen in this guide. Source:
+`src/openreading/router/compliance.py` (`evaluate`), `src/openreading/router/router.py`
+(`_capability_drop`). Live truth: `uv run openreading route sample.pdf --policy <file> | jq
+.dropped`. If this table and that output disagree, the output is right. Fix the table. A dash in
+the Step column means no step in this guide triggers the code.
 
 | Code | Stage | Trigger | Step |
 |---|---|---|---|
@@ -295,21 +326,25 @@ right — fix the table.
 
 ## Reference
 
-- `uv run python -m pydoc openreading.router.router` — the stages and their invariants.
-- `uv run python -m pydoc openreading.router.compliance` — the stage-1 gate and the attestations.
-- `uv run python -m pydoc openreading.router.executor` — the chain, skips, `fallback_used`.
-- `uv run python -m pydoc openreading.credentials` — precedence, `.env`, per-backend variables.
-- `uv run python -m pydoc openreading.readiness` and `openreading.liveness` — the status ladder.
+- `uv run python -m pydoc openreading.router.router` prints the stages and their invariants.
+- `uv run python -m pydoc openreading.router.compliance` prints the stage-1 gate and the
+  attestations.
+- `uv run python -m pydoc openreading.router.executor` prints the chain, the skips, and
+  `fallback_used`.
+- `uv run python -m pydoc openreading.credentials` prints the precedence, `.env`, and the
+  per-backend variables.
+- `uv run python -m pydoc openreading.readiness` and `openreading.liveness` print the status
+  ladder.
 - `uv run openreading route --help`, `uv run openreading backends --help`, `.env.example`.
 - [Backend adapters](../adapters/README.md): "Reading the compliance columns", "Override form".
 
 ## Not built yet
 
-- Server-side `deadline_ms`: `/v1/parse` and `/v1/jobs` cannot raise the 120 s budget
-  (`openreading.server`, "Timeouts").
+- Server-side `deadline_ms` does not exist, so `/v1/parse` and `/v1/jobs` cannot raise the 120 s
+  budget (`openreading.server`, "Timeouts").
 - Webhook wait mode has no push path and degrades to polling (`openreading.router.driver`).
-- A latency term in stage 3: no descriptor field exists, so `optimize_for: latency` weights quality
-  and cost only (`router/router.py`, `_WEIGHTS`).
+- Stage 3 has no latency term. No descriptor field exists, so `optimize_for: latency` weights
+  quality and cost only (`router/router.py`, `_WEIGHTS`).
 - `MISSING` stays `-` for `anthropic-claude` and `aws-textract` when unconfigured ([Known
   gaps](../adapters/README.md#known-gaps)).
 
@@ -317,8 +352,8 @@ right — fix the table.
 
 - [Docs home](../README.md)
 - [The command line](../cli/README.md)
-- [Strategies](../strategies/README.md) — cascades and races over the same compliance filter.
-- [The HTTP server](../server/README.md) — the same router behind `POST /v1/parse`.
+- [Strategies](../strategies/README.md) runs cascades and races over the same compliance filter.
+- [The HTTP server](../server/README.md) puts the same router behind `POST /v1/parse`.
 - [Backend adapters](../adapters/README.md) · [JSON Schemas](../schemas/README.md)
 
 <sub>[Docs home](../README.md) · [← The command line](../cli/README.md) · [Strategies →](../strategies/README.md)</sub>

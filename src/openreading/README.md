@@ -1,19 +1,33 @@
-# OpenReading — one JSON over every document parser
+# OpenReading: one JSON over every document parser
 
 <sub>Docs home · [The command line →](cli/README.md)</sub>
 
-> **In one sentence.** One request and one JSON envelope over many document parsers, with typed
-> compare verdicts, replayable strategy traces, compliance-first routing, and resumable runs.
+> **In one sentence.** OpenReading returns one JSON shape from every document parser, so switching,
+> comparing, or routing between parsers never changes the code downstream.
 
 ## What OpenReading is
 
-A backend is a parser: a local library, a hosted API, or a self-hosted model. Point OpenReading at
-one; every backend returns the same JSON, the envelope. A channel (text, tables, confidence) that a
-backend cannot produce is left out and named in `warnings[]`, never invented. A compliance policy
-drops backends before anything runs. No fallback, strategy, or request field can bring one back.
+You have a folder of documents and more than one parser that could read them. A local library
+handles documents made by software well, a hosted API reads scanned pages better, and each returns
+its own JSON shape. When two parsers disagree on an invoice total, nothing shows you which fields
+differ. Some documents carry data that only certain vendors may see, and nothing tracks that for
+you.
 
-Three jobs, three surfaces. Every cell returns the same schema. An agent uses the same surfaces
-today; a native tool surface is [not built](#not-built-yet).
+OpenReading solves those problems with one request shape and one response shape over every parser. A
+backend is one parser, whether a local library, a hosted API, or a self-hosted model you run. Every
+backend returns the same JSON document, called the envelope, so you write the code that reads it
+once. For example, `openreading parse sample.pdf --backend pymupdf` and the same command with
+`--backend tesseract` print envelopes with identical field names. A channel is one kind of output
+inside the envelope, such as plain text, tables, or per-block confidence. When a backend cannot
+produce a channel, the envelope leaves it out and names it in `warnings[]` rather than inventing a
+value. A compliance policy is a short list of rules about which backends may see a document. The
+router applies that policy before anything runs, and no later step, fallback, or setting can bring a
+dropped backend back.
+
+To follow the guides you need the install from the root README and the `sample.pdf` it builds. Every
+guide runs offline with the `pymupdf` and `tesseract` backends, and a step that needs a hosted key
+says so in place. An agent uses the same surfaces today, and a native tool surface is [not
+built](#not-built-yet).
 
 | Job | CLI `openreading …` | API (Python `openreading.*`; HTTP `openreading serve`) | Agent branches on |
 |---|---|---|---|
@@ -29,22 +43,28 @@ Source: `src/openreading/__init__.py` (The 3x3). Live truth: `uv run python -m p
   against it before a result leaves the process. [JSON Schemas](schemas/README.md), [The channel
   contract](derive/README.md).
 - **Typed compare verdicts.** `compare` reads saved envelopes and returns a `headline.verdict` plus
-  a closed (fixed) set of finding codes. It never runs a backend and never feeds the router.
+  a closed set of finding codes, meaning the list is fixed and an agent can switch on it
+  exhaustively. For example, `divergent` means the backends disagree on every channel compared,
+  such as the text and the table cells. It never runs a backend and never feeds the router.
   [Compare](comparison/README.md).
-- **Replayable strategy traces.** A strategy is a tree of backends under quality gates, tests on
-  each result. Every attempt carries one category from a closed vocabulary. `explain` renders the
-  trace; `replay --trace` re-executes its decisions. [Strategies](strategies/README.md).
-- **Compliance-first routing, never widened.** Stage 1 drops backends for policy. Stages 2 and 3
-  only filter and reorder the survivors. An unverified claim counts as no. [Routing and
-  keys](router/README.md).
-- **Ledger resume.** With `OPENREADING_LEDGER` set, a strategy run journals every step.
-  `resume <run_id>` replays the recorded steps and runs the rest. [The run ledger](ledger/README.md).
-- **Batch to corpus.** A folder in, one `batch-result` out. Two of them compare into a per-document
-  corpus verdict. [Batch runs](batch/README.md).
+- **Replayable strategy traces.** A strategy is a tree of backends under quality gates, and a gate
+  is a test on each result that decides whether to accept it or move on. Every attempt carries
+  one category from a closed vocabulary. `explain` renders the trace, and `replay --trace`
+  re-executes its decisions. [Strategies](strategies/README.md).
+- **Compliance-first routing, never widened.** Stage 1 drops backends for policy, and stages 2 and
+  3 only filter and reorder the survivors. An unverified claim, such as a vendor that lists no
+  regions, counts as no. [Routing and keys](router/README.md).
+- **Ledger resume.** With `OPENREADING_LEDGER` set, a strategy run journals every step, meaning it
+  writes each step to disk as it completes. `resume <run_id>` replays the recorded steps and runs
+  the rest. [The run ledger](ledger/README.md).
+- **Batch to corpus.** A folder goes in and one `batch-result` comes out. Two of them compare into
+  a per-document corpus verdict. [Batch runs](batch/README.md).
 - **Measured leaderboards.** `leaderboard` ranks backends on a dataset you supply, through the same
   scorer `compare --truth` uses. [Evals](evals/README.md).
 
 ### One document's path
+
+Every document follows the path below, whichever backend answers.
 
 ```mermaid
 flowchart LR
@@ -61,13 +81,14 @@ flowchart LR
 
 The router reads adapter descriptions only and never branches on backend type. `derive` computes
 every derived channel once, deterministically, so a declared channel always has an implementation
-or a warning. A strategy runs the router once per rung (a cascade step); the ledger journals each
-rung as it completes.
+or a warning. A strategy runs the router once per rung, and a rung is one step of a cascade. The
+ledger journals each rung as it completes.
 
 ## The map
 
-Time is reading time. Every guide runs offline with `pymupdf` and `tesseract`. A step that needs a
-hosted key is marked in place and shows the shape, not a run.
+The table below tells you which guide answers which need and how long each takes to read. Every
+guide runs offline with `pymupdf` and `tesseract`. A step that needs a hosted key is marked in
+place and shows the shape, not a run.
 
 | You want to… | Guide | Time |
 |---|---|---|
@@ -86,9 +107,9 @@ hosted key is marked in place and shows the shape, not a run.
 
 Every guide has the same eight sections: what it gives you, mental model, walkthrough, recipes, how
 it decides, reference, not built yet, see also. Reference truth stays in docstrings. `uv run python
--m pydoc openreading.<module>` prints a package's contract; `uv run openreading <cmd> --help` prints
-every flag. A guide demonstrates and points; it never restates a docstring. The maintenance rule is
-"Where a change gets documented" in [`AGENTS.md`](../../AGENTS.md).
+-m pydoc openreading.<module>` prints a package's contract, and `uv run openreading <cmd> --help`
+prints every flag. A guide demonstrates and points, and it never restates a docstring. The
+maintenance rule is "Where a change gets documented" in [`AGENTS.md`](../../AGENTS.md).
 
 ## Using OpenReading from an agent
 
@@ -107,8 +128,9 @@ exit=3
 ```
 
 From Python, `run()` returns the envelope as a dict. `POST /v1/parse` returns the same envelope
-over HTTP ([The HTTP server](server/README.md)). This run uses the `offline_first` preset (a shipped
-strategy), so the `orchestration` block is present. Printed values appear as trailing comments:
+over HTTP ([The HTTP server](server/README.md)). This run uses the `offline_first` preset, a
+strategy that ships with the package, so the `orchestration` block is present. Printed values
+appear as trailing comments:
 
 ```python
 import openreading
@@ -126,7 +148,9 @@ else:
 
 ### Branch on typed fields
 
-Source: `src/openreading/__init__.py` (Let your agents decide — the triage playbook). Live truth:
+The table below maps each signal an agent can read to the action it should take.
+
+Source: `src/openreading/__init__.py` ("Let your agents decide", the triage playbook). Live truth:
 `uv run python -m pydoc openreading`. If this table and that output disagree, the output is right.
 Fix the table.
 
@@ -146,7 +170,9 @@ Fix the table.
 
 ### Read the trace
 
-- `warnings[].code` is an open set: switch on the codes you know and tolerate the rest.
+The trace tells an agent which vocabulary it can switch on exhaustively and which it must tolerate.
+
+- `warnings[].code` is an open set, so switch on the codes you know and tolerate the rest.
 - The strategy trace is closed, so an agent can switch on it exhaustively. Every attempt in
   `orchestration.attempts[]` carries one `category` from `openreading.strategies.trace.CATEGORIES`:
   `succeeded`, `skipped(missing_credentials)`, `skipped(circuit_open)`, `deadline_pruned`,
@@ -158,16 +184,17 @@ Fix the table.
   openreading.comparison`, Finding codes).
 
 A strategy has three decision points: the gray band of a `review_if` gate, a `decide:` node, and
-`pick: best` judging. Every choice lands in `decisions[]` with a deterministic `decision_id`.
+`pick: best` judging. The gray band is the range where a score falls between the accept and reject
+thresholds. Every choice lands in `decisions[]` with a deterministic `decision_id`.
 `openreading replay --trace out.json` re-executes them for audit. The engine enumerates the
-candidates; a decision cannot override compliance. Today every point resolves to the engine
+candidates, and a decision cannot override compliance. Today every point resolves to the engine
 default, because no LLM executor ships ([Not built yet](#not-built-yet)).
 
 ### Brief the model
 
 `uv run python -m pydoc openreading` is the self-contained briefing for a model using the library.
 Every backend id, flag and JSON shape in it comes from the vendored schemas. Feed it as the system
-prompt. Its first screen, abbreviated:
+prompt. Its first screen looks like this, abbreviated:
 
 ```bash
 uv run python -m pydoc openreading | head -40
@@ -188,17 +215,19 @@ openreading.adapters` instead.
 
 Nothing below exists in the package today. Each line names where the gap is recorded.
 
-- `openreading mcp` — a native tool surface for agents. Integrate through the CLI, Python dicts, or
-  HTTP. Recorded in the `openreading` package docstring (Known gaps) and `AGENTS.md` (Also here when
+- `openreading mcp`, a native tool surface for agents, does not exist. Integrate through the CLI,
+  Python dicts, or HTTP. The gap is recorded in the `openreading` package docstring (Known gaps)
+  and `AGENTS.md` (Also here when built).
+- `triage`, a verb that would apply the playbook above for you, does not exist. `uv run
+  openreading --help` lists no such verb. The gap is recorded in `AGENTS.md` (Also here when
   built).
-- `triage` — a verb that applies the playbook above for you. `uv run openreading --help` lists no
-  such verb. Recorded in `AGENTS.md` (Also here when built).
-- The decider wire executor — the real LLM call behind `DeciderPort`. Today every enabled decision
-  point takes the engine default, traced `decider_downgraded: unavailable`. Recorded in
-  `openreading.strategies.decider` (Status).
-- The intent schema and its routing mechanics; the translation stage and its profile grammar.
-  Recorded in `AGENTS.md` (Also here when built).
-- A closed registry for `warnings[].code`, and schema validation of the `orchestration` block's
-  inner shape. Recorded in the `openreading` package docstring (Known gaps).
+- The decider wire executor, the real LLM call behind `DeciderPort`, does not exist. Today every
+  enabled decision point takes the engine default, traced as `decider_downgraded: unavailable`. The
+  gap is recorded in `openreading.strategies.decider` (Status).
+- Neither the intent schema with its routing mechanics nor the translation stage with its profile
+  grammar is built. The gap is recorded in `AGENTS.md` (Also here when built).
+- There is no closed registry for `warnings[].code` and no schema validation of the
+  `orchestration` block's inner shape. The gap is recorded in the `openreading` package docstring
+  (Known gaps).
 
 <sub>Docs home · [The command line →](cli/README.md)</sub>
