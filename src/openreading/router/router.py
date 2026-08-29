@@ -1,6 +1,6 @@
-"""The 3-stage router (routing_and_compliance.md §4.1): compliance hard-filter → capability
-filter → cost/quality/latency scoring. It reads AdapterDescriptors only and never branches on
-backend type.
+"""The 3-stage router (internal/research/openreading/routing_and_compliance.md §4.1): compliance
+hard-filter → capability filter → cost/quality/latency scoring. It reads AdapterDescriptors only
+and never branches on backend type.
 
 Invariants enforced here:
 - Stages 1 & 2 are boolean gates; stage 3 only reorders survivors.

@@ -127,10 +127,12 @@ class ComplianceProfile(BaseModel):
     data_region_options: list[str] = Field(default_factory=list)
     data_retention: str | None = None
     # 'unverified' = the vendor's no-train claim is unconfirmed → the router fails closed unless
-    # RouterConfig.allow_unverified_compliance is set (routing_and_compliance.md §3/§4).
+    # RouterConfig.allow_unverified_compliance is set
+    # (internal/research/openreading/routing_and_compliance.md §3/§4).
     trains_on_customer_data: Literal["yes", "no", "opt_out", "na_local", "unverified"] = "no"
     runs_fully_local: bool = False
-    # richer §4.3 fields the compliance filter reads (routing_and_compliance.md):
+    # richer §4.3 fields the compliance filter reads
+    # (internal/research/openreading/routing_and_compliance.md):
     max_retention_hours: float | None = None
     train_opt_out_precondition: str | None = None
     zdr_flag: str | None = None

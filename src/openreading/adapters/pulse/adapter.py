@@ -9,7 +9,8 @@ confidence is channel X and never fabricated (a warning says so). Compliance: SO
 HIPAA BAA on Pro only (`hipaa_baa="tier_gated"`: a require_baa request drops Pulse unless the
 deployment lists it in `baa_tier_confirmed`), GDPR — and the no-train posture is UNVERIFIED, so
 `trains_on_customer_data="unverified"`: a no-train request drops Pulse unless the deployment sets
-`allow_unverified_compliance` (routing_and_compliance.md §3/§4 — fail closed). Sources:
+`allow_unverified_compliance` (internal/research/openreading/routing_and_compliance.md §3/§4 —
+fail closed). Sources:
 https://docs.runpulse.com/api-reference/endpoint/extract, runpulse.com/security (accessed 2026-07-21).
 """
 

@@ -11,14 +11,16 @@ A backend is one parser, whether a local library, a self-hosted model, or a host
 several to choose from. Some documents carry data only certain vendors may see, so you need to know
 which backends qualify before a page leaves your machine. `openreading route sample.pdf --policy
 phi.json` prints that plan without running any backend at all. A policy is a JSON file of
-requirements, for example `{"require_baa": true}` to admit only vendors with a signed BAA. A BAA
+requirements, for example `{"require_baa": true}` to admit only vendors that advertise a BAA. A BAA
 (Business Associate Agreement) is the HIPAA contract a vendor signs before it may see protected
-health information. The plan names the chosen backend, the fallback chain behind it, and a coded
-reason for every backend the router refused. A fallback is the next backend tried when one fails,
-and a strategy is a named plan over backends. Neither of those, and no named `--backend` either,
-can readmit a dropped backend, because compliance is a filter and never a score. Keys are read from
-your environment per request and go nowhere but the provider. You need `sample.pdf` and `phi.json`
-from the root README and no key.
+health information. That gate reads what each vendor publishes about its own BAA, so passing it is
+necessary and not sufficient. The agreement your organisation actually signed is yours to confirm
+out of band, because no backend tells the router about your paperwork. The plan names the chosen
+backend, the fallback chain behind it, and a coded reason for every backend the router refused.
+A fallback is the next backend tried when one fails, and a strategy is a named plan over backends.
+Neither of those, and no named `--backend` either, can readmit a dropped backend, because
+compliance is a filter and never a score. Keys are read from your environment per request and go
+nowhere but the provider. You need `sample.pdf` and `phi.json` from the root README and no key.
 
 ## Mental model
 
@@ -38,10 +40,12 @@ flowchart LR
 
 Stage 1 asks whether a backend may see the document at all, and it fails closed. Failing closed
 means a fact the backend leaves `unverified`, such as an unconfirmed region or retention claim,
-counts as no. Stage 2 asks whether the backend can do the job, which means the input format and
-every requested feature. Stage 3 scores the survivors on quality, cost, and locality, and that score
-sets the order. Adding `--run` walks the chain in that order and stops at the first backend that
-succeeds. A backend with no key is skipped, and the skip lands in the result's `warnings[]`.
+counts as no. Your own policy can relax that, with one of the three keys named under
+[How it decides](#how-it-decides). Stage 2 asks whether the backend can do the job, which means
+the input format and every requested feature. Stage 3 scores the survivors on quality, cost, and
+locality, and that score sets the order. Adding `--run` walks the chain in that order and stops at
+the first backend that succeeds. A backend with no key is skipped, and the skip lands in the
+result's `warnings[]`.
 
 ## Walkthrough
 
@@ -76,10 +80,24 @@ uv run openreading route sample.pdf --policy phi.json
 
 **You should see** `pymupdf` chosen and exit 0. As a check, `uv run openreading route sample.pdf
 --policy phi.json | jq -c '[.dropped[].code] | unique'` prints `["no_baa","trains_on_data"]`. A
-local backend never needs a BAA, so `pymupdf`, `docling`, `tesseract`, and `qwen-vl` survive.
+local backend never needs a BAA, so `pymupdf`, `docling`, `tesseract`, and `qwen-vl` survive. The
+three hosted survivors pass for the other reason: `azure-document-intelligence`,
+`google-document-ai`, and `anthropic-claude` each declare `hipaa_baa: yes`, which records that the
+vendor publishes a BAA. [The catalog](../adapters/README.md#catalog) names the page each claim was
+read from and the date it was read.
 
-Failure note: a misspelled key (`"require_baaa": true`) is ignored without a message, and every
-backend survives. If `dropped` is `{}` under a policy you expected to bite, check the spelling.
+Failure note: the router checks your policy against the ten keys in
+[How it decides](#how-it-decides) before it routes, so a typo cannot quietly empty the filter.
+`echo '{"require_baaa": true}' > typo.json` then `uv run openreading route sample.pdf --policy
+typo.json` exits 3 and names the key on stderr.
+
+```text
+[route] invalid policy typo.json: unknown policy key: 'require_baaa' (did you mean 'require_baa'?); valid keys: allow_unverified_compliance, …
+```
+
+A file whose top level is a JSON array, a string or `null` is refused the same way, with `policy
+must be a JSON object, got list`. Read `dropped` on the runs that matter even so, because a policy
+can be spelled correctly and still admit more than you intended.
 
 ### 2. Vary the policy: local only, region, retention
 
@@ -261,6 +279,27 @@ the shape is shown, not run) Use step 3's policy plus a request that names `redu
 …"}`, so a PHI run never rests silently on paperwork. `route --run` alone is answered by `pymupdf`
 and carries no such warning.
 
+**Apply a policy to a whole folder.** `parse` takes no `--policy`, so the batch verb alone cannot
+carry one. Put the same flat keys in a `policy:` block in `openreading.yaml` and run the folder
+under a strategy from that file:
+
+```bash
+mkdir corpus && cp sample.pdf corpus/a.pdf && cp sample.pdf corpus/b.pdf
+printf 'version: 1\npolicy:\n  require_local: true\nstrategies:\n  local_only:\n    steps:\n      - backend: pymupdf\n' > openreading.yaml
+uv run openreading parse corpus/ --strategy local_only --config openreading.yaml | jq -c .summary
+```
+
+```json
+{"total":2,"succeeded":2,"failed":0,"skipped":0,"duration_ms":…,"cost_bases":["infra_only"],"pages_processed":4,"backends":{"pymupdf":2}}
+```
+
+The block gates every item. Swap the rung for `reducto` and each item fails with
+`ComplianceRefused` at exit 1, because `require_local` drops it. From Python the equivalent is
+`openreading.run_batch(["corpus/"], policy={"require_local": True})`, which takes the policy
+directly. A typo in the block is refused before any document opens, so every item fails with
+`PolicyError` at exit 1. A `--backend` run ignores the file's `policy:` block even with `--config`,
+so use a strategy or the Python call when a corpus must be gated.
+
 **Prove a backend answers, not only that it is configured.** `uv run openreading backends --check
 all` probes only backends that declare a probe. A dead `DOCLING_SERVE_URL` reports `unreachable`
 with `MEASURED yes` (the `openreading.liveness` docstring's acceptance case). A `vendor` probe
@@ -303,6 +342,15 @@ keys paragraph).
 | `allow_unverified_compliance` | router config | Admits `*_unverified` drops. Never a stated "no", never `retention_unparseable`. |
 | `train_optout_confirmed` | router config | Backend ids whose training opt-out you applied. |
 | `baa_tier_confirmed` | router config | Backend ids whose tier-gated BAA you signed. |
+
+Your policy is the only thing that sets the eligible set, and exactly three of its keys widen that
+set. Each of the three is an attestation, which means you are telling the router about paperwork it
+cannot see. `allow_unverified_compliance` admits the backends that stayed silent on a fact instead
+of answering no. `baa_tier_confirmed` admits the named backends whose tier-gated BAA you signed.
+`train_optout_confirmed` admits the named backends whose training opt-out you applied. Nothing
+after the policy widens the set again, so a fallback, a named `--backend`, a strategy rung and a
+resume can only work inside it. That downstream half is what other pages mean by compliance never
+being widened, and it is the part you can promise an auditor.
 
 The last table lists the drop codes seen in this guide. Source:
 `src/openreading/router/compliance.py` (`evaluate`), `src/openreading/router/router.py`
@@ -347,6 +395,10 @@ the Step column means no step in this guide triggers the code.
   quality and cost only (`router/router.py`, `_WEIGHTS`).
 - `MISSING` stays `-` for `anthropic-claude` and `aws-textract` when unconfigured ([Known
   gaps](../adapters/README.md#known-gaps)).
+- No policy key gates on a descriptor's `soc2`, `gdpr`, `pci` or `phi_path_constraints` fields.
+  Backends record them and stage 1 reads none of them, so a SOC 2 or GDPR requirement has no gate
+  of its own (`router/compliance.py`, `evaluate`). `data_region` is the nearest thing, and it
+  matches declared regions rather than any legal posture.
 
 ## See also
 

@@ -1,4 +1,4 @@
-"""Stage-1 compliance hard-filter (routing_and_compliance.md §4.4).
+"""Stage-1 compliance hard-filter (internal/research/openreading/routing_and_compliance.md §4.4).
 
 This is a pass/fail gate applied FIRST and never traded off against quality/cost. Any field
 relevant to an active constraint that is UNVERIFIED (None/absent) fails closed unless the

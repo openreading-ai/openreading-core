@@ -94,9 +94,9 @@ tesseract                      oss_library        no          tesseract binary (
 ## Your first parse
 
 Your first JSON is one command away, because the document is already in the clone.
-[`examples/`](examples/README.md) holds two synthetic one-page bank statements — invented name,
-invented bank, invented balances — each with a header, an account block, a balance summary and a
-dated transaction table. Parse the January one with PyMuPDF:
+[`examples/`](examples/README.md) holds two synthetic one-page bank statements, with an invented
+name, an invented bank and invented balances. Each has a header, an account block, a balance
+summary and a dated transaction table. Parse the January one with PyMuPDF:
 
 ```bash
 uv run openreading parse examples/john_smith_1000_2026_01.pdf --backend pymupdf > pymupdf.json
@@ -124,7 +124,7 @@ That page has 21 blocks; one is shown. The listing omits `backend_raw` and `chan
 which [`src/openreading/schemas/README.md`](src/openreading/schemas/README.md) describes. Every
 backend returns this shape. When a backend cannot produce a field, OpenReading leaves it out and
 names it in `warnings[]`. It never invents one, because a made-up confidence looks like a measured
-one — which is exactly the field PyMuPDF is warning about here.
+one, and confidence is exactly the field PyMuPDF is warning about here.
 
 Now read the same page the other way. Tesseract ignores the text layer, renders the page to a
 150-DPI bitmap and OCRs it, which is the work it would do on a photograph of the same statement:
@@ -143,11 +143,11 @@ uv run openreading parse examples/john_smith_1000_2026_01.pdf --backend tesserac
 ```
 
 Three differences, and each one is the contract doing its job. The page is 1275×1650 `pixel`
-rather than 612×792 `pdf_point`, because that is what Tesseract actually measured — `bbox.x/y/w/h`
-stay page-relative fractions either way, so code that positions a block works against both. Every
-block carries a `confidence`, and no `confidence_unavailable` warning appears, because Tesseract
-genuinely measures one per word. And OCR misread `Account Holder:` as `; Account Hotder-` — with
-`confidence: 0.0`, so it told you where it was unsure.
+rather than 612×792 `pdf_point`, because that is what Tesseract actually measured. The
+`bbox.x/y/w/h` values stay page-relative fractions either way, so code that positions a block works
+against both. Every block carries a `confidence`, and no `confidence_unavailable` warning appears,
+because Tesseract genuinely measures one per word. And OCR misread `Account Holder:` as
+`; Account Hotder-` with `confidence: 0.0`, so it told you where it was unsure.
 
 The generated document the subsystem guides use is a different file, with tables, columns and an
 image. Build it whenever a guide asks for `sample.pdf`:
@@ -182,15 +182,15 @@ DIFF — pymupdf vs tesseract   (1 page(s))
 
 The two agree on 98% of the page and disagree on one line, which the report names on both sides
 instead of handing you a score to go investigate. Compare does not know which backend is right,
-so it does not claim to — but you can see at a glance that the OCR line is the mangled one. The
+so it does not claim to, and you can still see at a glance that the OCR line is the mangled one. The
 one-word headline for this pair is `equivalent`, because a single misread label is not enough to
 call one backend better; `--format diffs` is where the disagreement itself lives.
 
 **Route.** Route hands a sensitive document only to backends that meet your policy. A bank
 statement is the everyday case: it names a person, an account and every place they spent money,
-and plenty of teams may not ship one to an arbitrary vendor. `require_baa` demands a BAA, the
-HIPAA contract a vendor signs before handling regulated data. `no_train_on_data` refuses vendors
-that train on what you send:
+and plenty of teams may not ship one to an arbitrary vendor. `require_baa` keeps out every vendor
+that does not publish a BAA, the HIPAA contract a vendor signs before handling regulated data.
+`no_train_on_data` refuses vendors that train on what you send:
 
 ```bash
 echo '{"require_baa": true, "no_train_on_data": true}' > phi.json
@@ -205,8 +205,18 @@ uv run openreading route examples/john_smith_1000_2026_01.pdf --policy phi.json
 ```
 
 Reducto is dropped because its BAA is offered only on some tiers and none is confirmed here. The
-`fallbacks` list is the order OpenReading tries next if `pymupdf` fails. A dropped backend never
-joins that list, because a fallback that readmits it would leak the statement silently.
+three hosted vendors that survive are there because each one publishes a BAA, which its descriptor
+records. That is a vendor's advertised offer read on a date, not an agreement you hold, so
+`require_baa` narrows the field without finishing the job. Confirm your own signed paperwork before
+real data moves, and see [the catalog](src/openreading/adapters/README.md#catalog) for where each
+claim came from.
+
+The `fallbacks` list is the order OpenReading tries next if `pymupdf` fails. A dropped backend
+never joins that list, because a fallback that readmits it would leak the statement silently. Your
+policy file is the only thing that sets the eligible set, and three of its keys widen that set on
+purpose, which [Routing and keys](src/openreading/router/README.md#how-it-decides) names. A key the
+router does not recognise is refused rather than ignored, so a typo cannot leave you with a clean
+exit code and no filter.
 
 **Strategy.** A strategy gives you the cheap result when it is good enough and the stronger one
 when it is not. It checks each output against quality gates. A gate is one test on a result, for
@@ -226,11 +236,11 @@ strategy offline_first  →  pymupdf (ok)
       confidence_below           obs=None thr=0.6  skipped
 ```
 
-The trace shows PyMuPDF ran, three gates passed, and the run stopped there — no second backend, no
-cost. The fourth gate is `skipped` rather than failed: PyMuPDF reports no confidence, so there is
-nothing to test, and a missing measurement never counts as a passing one. Timings vary between
-machines. Write your own strategy with `uv run openreading strategy --help`. An interrupted run
-resumes from its journal, which records every step so far. The
+The trace shows PyMuPDF ran, three gates passed, and the run stopped there, with no second backend
+and no cost. The fourth gate is `skipped` rather than failed: PyMuPDF reports no confidence, so
+there is nothing to test, and a missing measurement never counts as a passing one. Timings vary
+between machines. Write your own strategy with `uv run openreading strategy --help`. An interrupted
+run resumes from its journal, which records every step so far. The
 [run ledger](src/openreading/ledger/README.md) guide explains it.
 
 **A folder at a time.** Point `parse` at a directory and it batches, which is how you run a whole
@@ -252,6 +262,12 @@ Three, because `examples/README.md` is in that folder too. It is skipped with
 `skip_reason: "unsupported_format"` rather than dropped in silence, so the count you get back
 always accounts for every file you pointed at. `scripts/batch_demo.sh path/to/docs` runs the same
 sweep with both local backends and compares the two corpora.
+
+`parse` takes no `--policy`, so the command above runs with no compliance filter in force. A
+corpus reaches the router's policy gate two other ways: a `policy:` block in `openreading.yaml`
+under `parse <dir> --strategy <name> --config openreading.yaml`, or
+`openreading.run_batch(paths, policy={…})` from Python.
+[Routing and keys](src/openreading/router/README.md#recipes) runs both.
 
 ## Bring your own key
 

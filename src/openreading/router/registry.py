@@ -1,7 +1,8 @@
 """In-memory backend registry: descriptor.id → adapter. The router reads descriptors from
 here and never branches on backend type. A production deployment swaps in a shared/dynamic
 registry behind the same surface; eligibility is always recomputed per request from current
-descriptor state (routing_and_compliance.md §5.5 — never cache eligibility across term changes).
+descriptor state (internal/research/openreading/routing_and_compliance.md §5.5 — never cache
+eligibility across term changes).
 """
 
 from __future__ import annotations

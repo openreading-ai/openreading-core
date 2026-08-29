@@ -106,7 +106,7 @@ def _print_exhausted(tag: str, e: PlanExhaustedError, trail_summary: str) -> Non
 
 
 class _PolicyError(Exception):
-    """A `--policy` file that can't be read or parsed."""
+    """A `--policy` file that can't be read, parsed, or validated as a policy."""
 
 
 def _describe_read_error(e: OSError | json.JSONDecodeError) -> str:
@@ -132,16 +132,32 @@ def _describe_read_error(e: OSError | json.JSONDecodeError) -> str:
 
 
 def _load_policy(path: str | None) -> dict[str, Any] | None:
-    """Read a `--policy` JSON file. Raises like `load_config` does for `--config` so each command
-    reports it under its own tag — a bad policy path is a user error, not a crash."""
+    """Read and validate a `--policy` JSON file. Raises like `load_config` does for `--config` so
+    each command reports it under its own tag — a bad policy path is a user error, not a crash.
+
+    Validation is `api.validate_policy`, the same call `route()`/`run()` make, so a policy the
+    library refuses is never accepted here. It is done at LOAD time rather than left to the first
+    reader because every `--policy` subcommand shares this function, and a policy that is wrong is
+    wrong before the document is even opened. `cannot read` covers the file; `invalid policy`
+    covers its content; both are the same soft-failure bucket (exit 3) for the caller.
+    """
     # `is None`, not falsy: only an absent flag means "no policy". An explicit `--policy ""` has to
     # fail loudly rather than silently drop the compliance constraints the caller meant to apply.
     if path is None:
         return None
     try:
-        return json.loads(Path(path).read_text())
+        raw = json.loads(Path(path).read_text())
     except (OSError, json.JSONDecodeError) as e:
         raise _PolicyError(f"cannot read policy {path}: {_describe_read_error(e)}") from e
+    # A file holding `null` parses fine, and `validate_policy(None)` means "no policy" — correct
+    # for the Python default, wrong for a flag the caller typed on purpose. Rejected here, where
+    # the difference between "argument omitted" and "file says null" is still visible.
+    if raw is None:
+        raise _PolicyError(f"invalid policy {path}: policy must be a JSON object, got null")
+    try:
+        return api.validate_policy(raw)
+    except api.PolicyError as e:
+        raise _PolicyError(f"invalid policy {path}: {e}") from e
 
 
 def cmd_parse(args) -> int:
@@ -247,6 +263,12 @@ def cmd_parse(args) -> int:
         # an unresolvable source), landing at the wrong-but-clean exit 1 instead.
         print(f"[{label}] {e}", file=sys.stderr)
         return 2
+    except api.PolicyError as e:
+        # A `--policy` file is already refused by _load_policy before we get here; this is the
+        # strategy config's own `policy:` block, refused at the compile boundary. Exit 3 either
+        # way — the caller should not have to know which of the two files carried the bad key.
+        print(f"[{label}] {e}", file=sys.stderr)
+        return 3
     except Exception as e:  # noqa: BLE001
         print(f"[{label}] error: {type(e).__name__}: {e}", file=sys.stderr)
         return 1
@@ -727,7 +749,11 @@ def cmd_strategy_plan(args) -> int:
         compiled = compile_strategy(
             req, args.strategy, loaded.config, build_registry(), api.router_config(policy)
         )
-    except (NormalizeError, ComplianceRefused) as e:
+    # PolicyError: the config's own `policy:` block, refused at the compile boundary
+    # (strategies/prune._validated_policy) rather than at load, since the schema leaves that
+    # sub-object open. Same rung as a malformed `--policy` file — a policy that is wrong is wrong
+    # before the document is opened.
+    except (NormalizeError, ComplianceRefused, api.PolicyError) as e:
         print(f"[strategy plan] {e}", file=sys.stderr)
         return 3
     out = {
@@ -873,7 +899,7 @@ def cmd_replay(args) -> int:
                 clock=RealClock(),
                 replay=decisions,
             )
-    except (NormalizeError, ComplianceRefused) as e:
+    except (NormalizeError, ComplianceRefused, api.PolicyError) as e:
         print(f"[replay] {e}", file=sys.stderr)
         return 3
     except PlanExhaustedError as e:

@@ -138,7 +138,18 @@ def validate_config(
     except NormalizeError as e:
         return [ValidationIssue("error", "strategies", str(e))]
 
-    ctx = _Ctx(config, library, _merged_policy(config, policy), plain_info)
+    # The effective policy is validated here, not just at run time, because this command exists to
+    # find a broken config BEFORE a run does — and because `_Ctx` builds its own Compliance +
+    # RouterConfig out of this same raw dict for the steps-unreachable check. An unvalidated block
+    # makes that advice wrong in the direction that reads as reassurance: a typo'd key produces no
+    # unreachable-step warning at all, and a quoted `allow_unverified_compliance: "false"` coerces
+    # truthy and reports a `trains_on_customer_data: unverified` backend as reachable. When the
+    # policy is refused the context is dropped rather than built from a dict we do not trust, so
+    # the rest of the file is still checked and this error is the only thing said about the policy.
+    merged_policy, policy_issue = _checked_merged_policy(config, policy)
+    ctx = _Ctx(config, library, merged_policy, plain_info)
+    if policy_issue is not None:
+        ctx.issues.append(policy_issue)
 
     if raw is not None:
         _scan_secrets(raw, "", ctx)
@@ -174,6 +185,24 @@ def _merged_policy(config: StrategyConfig, extra: dict[str, Any] | None) -> dict
     if extra:
         base.update(extra)  # --policy adds / tightens
     return base or None
+
+
+def _checked_merged_policy(
+    config: StrategyConfig, extra: dict[str, Any] | None
+) -> tuple[dict[str, Any] | None, ValidationIssue | None]:
+    """The merged policy, or `(None, issue)` when it is not a well-formed policy object.
+
+    Reported as an ERROR, not a warning: `prune._validated_policy` refuses the identical block on
+    the run path, so a file this returns an issue for cannot run at all. `strategy validate` saying
+    OK about a config that `strategy plan` refuses would be the worse half of the same defect.
+    """
+    from openreading.api import PolicyError, validate_policy  # lazy: api is the layer above
+
+    merged = _merged_policy(config, extra)
+    try:
+        return validate_policy(merged), None
+    except PolicyError as e:
+        return None, ValidationIssue("error", "policy", str(e))
 
 
 def _descriptor(slug: str):

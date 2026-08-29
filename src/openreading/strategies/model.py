@@ -89,7 +89,9 @@ strategies:                   # the library of named strategies (§2)
 Secrets never appear in this file — backends resolve credentials from the environment exactly as
 on the direct path (`credentials_ref` indirection only). Any key matching a credential pattern is
 a `strategy validate` error (`validate._scan_secrets`) — the schema's open sub-trees (`policy`,
-`with.*`) do not lock it down, so such a file still loads on the run path (§9).
+`with.*`) do not lock it down, so such a file still parses (§9). Under `with.*` it then runs;
+under `policy:` it does not, because a secret-looking key is also an unknown policy key and
+`prune._validated_policy` refuses the whole block before any of it becomes a constraint.
 
 1.2 Discovery order (first hit wins; sources are never merged)
 --------------------------------------------------------------
@@ -137,6 +139,12 @@ request's value if set, else the file adds it (request-wins-else-file — there 
 on regions, and the request is the more specific choice); deployment keys map to `RouterConfig`
 (`allow_unverified_compliance` ORs; `train_optout_confirmed` / `baa_tier_confirmed` union). The
 effective compliance is what prunes the tree AND what the route `compliance` facts read.
+
+The block is refused whole (`api.PolicyError`, via `prune._validated_policy`) if it names a key
+outside `api.POLICY_KEYS` or gives one the wrong type. The schema declares this sub-object
+`additionalProperties: true`, so that check is the only thing standing between a typo and a run
+with no constraint: `require_locall` used to be dropped in silence, and a quoted
+`allow_unverified_compliance: "false"` was truthy enough to switch the fail-closed tolerance ON.
 
 
 2. The node grammar — five node types, closed, recursive

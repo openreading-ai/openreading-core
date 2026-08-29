@@ -26,7 +26,8 @@ Exports and return shapes
   `dropped` ({backend_id: DropReason}), `terminal_reason`, `chain`, `eligible_ids`.
 - `resume_run(run_id) -> dict` (exported as `openreading.resume`).
 - Lower seams shared with the CLI/server, public by name: `build_request`, `run_request`,
-  `prepare_named_backend`, `materialize_document`, `router_config`.
+  `prepare_named_backend`, `materialize_document`, `router_config`, `validate_policy`
+  (+ `PolicyError`, `POLICY_KEYS`).
 
 `source` is a path, an http(s):// URL, or raw bytes — never a request dict. A path's MIME type is
 inferred from its extension (pdf/png/jpg/jpeg/tif/tiff/docx/xlsx/pptx), default
@@ -68,9 +69,26 @@ server-only `OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE` / `OPENREADING_TRAIN_OPTOU
 `OPENREADING_BAA_TIER_CONFIRMED` env vars are NOT consulted here; `policy=` is the Python API's
 only spelling of them.
 
+Those ten names are the WHOLE policy grammar (`POLICY_KEYS`), and `validate_policy` refuses
+anything else before a single key is read: a policy must be an object, every key must be one of
+the ten, and every value must type-check against the model that key feeds — `PolicyError`
+(a `ValueError`) otherwise, from `route`/`run`/`run_batch`/`build_request`/`router_config` alike,
+and exit 3 with a `[<command>] invalid policy <path>: …` line from every CLI `--policy` flag.
+An HTTP caller spells the same constraints as `request.compliance` / `request.routing`, which the
+request schema and `Compliance`/`Routing` (`extra="forbid"`) already refuse identically; the
+policy path is checked in the same strict, non-coercing way so the surfaces cannot disagree.
+This is validation of SHAPE only — no key means anything new, and no policy that was enforced
+before is enforced differently now. It exists because the alternative is silent: the split into
+`compliance` / `routing` / `RouterConfig` used to happen before anything validated the dict, so
+an unrecognised key (`require_baaa`, `hipaa`, `gdpr`) was dropped without a word and the
+constraint the operator wrote simply did not exist — every backend eligible, `dropped` empty,
+exit 0. A compliance gate that can be turned off by a typo is not a gate.
+
 Exceptions
 ----------
-`KeyError` unknown backend slug · `ValueError` reserved override · `SourceNotFoundError` ·
+`KeyError` unknown backend slug · `ValueError` reserved override · `PolicyError` (a `ValueError`:
+malformed `policy=`; CLI exit 3. Never reaches the server, which has no policy bag — an HTTP
+caller's equivalent mistake is a 400 from the request schema) · `SourceNotFoundError` ·
 `UnknownStrategyError` (server 400 / CLI exit 2) · `ComplianceRefused` (403 / exit 3) ·
 `MissingCredentialsError` (424 / exit 3) · `PlanExhaustedError` (`auto` only: every rung failed;
 carries the attempt trail) · `TerminalError` (any adapter failure, INCLUDING an unexpected
@@ -191,6 +209,7 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+import difflib
 import errno
 import hashlib
 import os
@@ -198,6 +217,8 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+from pydantic import ValidationError
 
 from openreading.adapters._http import error_for_status
 from openreading.adapters.registry import build_registry, make_adapter
@@ -250,7 +271,7 @@ from openreading.types.errors import (
     TerminalError,
     UnknownStrategyError,
 )
-from openreading.types.request import OpenReadingRequest
+from openreading.types.request import Compliance, OpenReadingRequest, Routing
 
 # Reserved `backend.id` prefix for a strategy reference (spec §1.3 / loader.STRATEGY_PREFIX).
 # Inlined here so a plain named-backend run never imports the strategy package (guardrail T10).
@@ -267,14 +288,87 @@ _MIME_BY_EXT = {
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 }
-_COMPLIANCE_KEYS = (
-    "require_baa",
-    "no_train_on_data",
-    "data_region",
-    "require_local",
-    "max_retention",
+# The policy key set, DERIVED from the three things a policy key can become — never re-typed
+# beside them. A second, hand-maintained list is how a key gets added to the router and silently
+# dropped by the loader (or the reverse): before this, `_apply_policy` filtered the caller's dict
+# down to its own copy of the compliance names one line BEFORE `Compliance(extra="forbid")` could
+# see it, so a misspelled or invented key was discarded in silence and the constraint the operator
+# wrote simply did not exist. `tests/test_policy_validation.py` pins the derivation.
+COMPLIANCE_POLICY_KEYS = tuple(Compliance.model_fields)  # -> request.compliance
+# A deliberate SUBSET of Routing: `fallback` is a request field (chain order), not a constraint.
+ROUTING_POLICY_KEYS = ("doc_type_hint", "optimize_for")  # -> request.routing
+# -> RouterConfig (D7/D7a). A dataclass, so validate_policy type-checks these three by hand;
+# test_policy_keys_are_derived_from_the_models_they_feed fails if a fourth arrives unchecked.
+ROUTER_CONFIG_POLICY_KEYS = tuple(RouterConfig.__dataclass_fields__)
+POLICY_KEYS = tuple(
+    sorted({*COMPLIANCE_POLICY_KEYS, *ROUTING_POLICY_KEYS, *ROUTER_CONFIG_POLICY_KEYS})
 )
 _MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
+
+
+class PolicyError(ValueError):
+    """A `policy=` / `--policy` value that is not a well-formed policy object.
+
+    A `ValueError`, because a policy is an argument the caller wrote, not a backend outcome: it
+    never belongs in the `AdapterError` ladder. The CLI re-raises it under its own tag for exit 3
+    (`cli.app._load_policy`), and the server never sees it — an HTTP caller spells the same
+    constraints as `request.compliance` / `request.routing`, which the request schema and the
+    pydantic models already refuse the same way.
+    """
+
+
+def validate_policy(policy: Any) -> dict[str, Any] | None:
+    """Refuse a malformed policy before any of it is read, on every non-HTTP surface.
+
+    `None` means "no policy" (the documented Python default) and passes through. Anything else
+    must be an object whose keys are all in `POLICY_KEYS` and whose values type-check against the
+    model each key feeds. Returns the policy unchanged; it validates, it never rewrites.
+
+    Value types are checked by delegating to `Compliance` / `Routing` rather than re-stating them,
+    so the policy surface and the request schema cannot disagree about what `optimize_for` accepts.
+    `RouterConfig` is a dataclass with no validation of its own, so its three keys are checked
+    here — and strictly: `bool("false")` is `True`, so a *string* under
+    `allow_unverified_compliance` used to switch the fail-closed posture ON, and a bare string
+    under `train_optout_confirmed` became a frozenset of its characters, confirming no backend at
+    all while looking like it confirmed one.
+    """
+    if policy is None:
+        return None
+    if not isinstance(policy, dict):
+        raise PolicyError(
+            f"policy must be a JSON object, got {type(policy).__name__}; "
+            f"valid keys: {', '.join(POLICY_KEYS)}"
+        )
+    unknown = sorted(k for k in policy if k not in POLICY_KEYS)
+    if unknown:
+        named = []
+        for key in unknown:
+            near = difflib.get_close_matches(str(key), POLICY_KEYS, n=1)
+            named.append(f"{key!r}" + (f" (did you mean {near[0]!r}?)" if near else ""))
+        plural = "s" if len(unknown) > 1 else ""
+        raise PolicyError(
+            f"unknown policy key{plural}: {', '.join(named)}; valid keys: {', '.join(POLICY_KEYS)}"
+        )
+    try:
+        # strict=: the HTTP surface type-checks the same values against request.v0.1.json BEFORE
+        # pydantic sees them, and JSON Schema does not coerce. Without strict=, `require_baa:
+        # "yes"` would be accepted here and rejected over HTTP — the same divergence in a new place.
+        Compliance.model_validate(
+            {k: policy[k] for k in COMPLIANCE_POLICY_KEYS if k in policy}, strict=True
+        )
+        Routing.model_validate(
+            {k: policy[k] for k in ROUTING_POLICY_KEYS if k in policy}, strict=True
+        )
+    except ValidationError as e:
+        errors = "; ".join(f"{'.'.join(str(p) for p in d['loc'])}: {d['msg']}" for d in e.errors())
+        raise PolicyError(f"invalid policy value: {errors}") from e
+    if not isinstance(policy.get("allow_unverified_compliance", False), bool):
+        raise PolicyError("invalid policy value: allow_unverified_compliance must be true or false")
+    for key in ("train_optout_confirmed", "baa_tier_confirmed"):
+        value = policy.get(key, [])
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            raise PolicyError(f"invalid policy value: {key} must be a list of backend ids")
+    return policy
 
 
 def _document_dict(source: str | bytes, mime_type: str | None) -> dict[str, Any]:
@@ -311,18 +405,23 @@ def _document_dict(source: str | bytes, mime_type: str | None) -> dict[str, Any]
 
 
 def _apply_policy(body: dict[str, Any], policy: dict | None) -> None:
+    # Validate the WHOLE policy first, then split. Splitting first made the split a silent
+    # whitelist: whatever it did not recognize never reached a validator (see validate_policy).
+    policy = validate_policy(policy)
     if not policy:
         return
-    compliance = {k: policy[k] for k in _COMPLIANCE_KEYS if k in policy}
+    compliance = {k: policy[k] for k in COMPLIANCE_POLICY_KEYS if k in policy}
     if compliance:
         body["compliance"] = compliance
-    routing = {k: policy[k] for k in ("optimize_for", "doc_type_hint") if k in policy}
+    routing = {k: policy[k] for k in ROUTING_POLICY_KEYS if k in policy}
     if routing:
         body["routing"] = routing
 
 
 def router_config(policy: dict | None) -> RouterConfig:
-    policy = policy or {}
+    # The other half of the policy read (D7/D7a's three deployment keys). It validates too: a
+    # `route`-shaped call reaches this with a policy that never passed through build_request.
+    policy = validate_policy(policy) or {}
     return RouterConfig(
         allow_unverified_compliance=bool(policy.get("allow_unverified_compliance", False)),
         train_optout_confirmed=frozenset(policy.get("train_optout_confirmed", [])),
@@ -1052,6 +1151,12 @@ def run_batch(
     from openreading.types.batch import BatchRequestEcho
 
     jobs = _batch_runner.bound_jobs(jobs, max_jobs=max_jobs)
+    # Like `jobs`, `policy` is an argument about the WHOLE batch, so it is checked before intake
+    # rather than per item. On the platform path a per-item failure is isolated into that item's
+    # `error` and never raised (M6) — correct for a document that could not be read, wrong for a
+    # policy the caller mistyped, which would otherwise come back as N identical item errors and a
+    # zero exit instead of one refusal.
+    validate_policy(policy)
 
     if env_file:
         load_dotenv(env_file)

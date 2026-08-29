@@ -81,7 +81,9 @@ def compile_strategy(
 
     # (0) union the file `policy:` block into the effective compliance + RouterConfig (spec §1.3:
     # constraints only ADD — compliance is never widened). This feeds BOTH the prune and the
-    # route compliance facts.
+    # route compliance facts. Both folds refuse a malformed block first (`_validated_policy`):
+    # the schema leaves this sub-object open, so a typo or a quoted boolean would otherwise
+    # change the compliance posture here in silence. Raises api.PolicyError.
     effective_compliance = _union_compliance(req.compliance, config.policy)
     router_config = _merge_router_config(router_config, config.policy)
 
@@ -234,10 +236,39 @@ def _hash_json(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
 
 
+def _validated_policy(policy: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Refuse a malformed file `policy:` block before any key of it becomes a constraint.
+
+    The schema declares this sub-object `additionalProperties: true` on purpose (model.py §1.1),
+    so it is the one policy surface a JSON-Schema check cannot close, and both failures it lets
+    through are silent. A misspelled `require_locall` was dropped without a word, leaving the run
+    with no locality constraint at all — the hosted rung stayed eligible and died later on
+    credentials. A quoted `allow_unverified_compliance: "false"` is truthy to `bool()`, so a value
+    whose plain-English intent is *off* switched the fail-closed tolerance ON and admitted a
+    `trains_on_customer_data: unverified` backend that the same policy written with a real boolean
+    keeps out. `api.validate_policy` is the same function `--policy` and `route()`/`run()` already
+    call, so two spellings of one policy cannot disagree about what it means.
+
+    The guard sits in the two functions that turn the raw dict into a constraint rather than in
+    their callers, because wiring it caller-by-caller is exactly what left this reader uncovered:
+    `calibrate.calibrate_strategy` folds the same block by calling these two directly, never
+    through `compile_strategy`.
+    """
+    # lazy: `api` is the layer above `strategies` (it imports compile_strategy inside its own
+    # functions for the same reason) — a module-level import here would invert the arrow.
+    from openreading.api import PolicyError, validate_policy
+
+    try:
+        return validate_policy(policy)
+    except PolicyError as e:
+        raise PolicyError(f"invalid policy in the strategy config: {e}") from e
+
+
 def _union_compliance(req_compliance, policy: dict[str, Any] | None) -> dict[str, Any]:
     """Effective compliance = request ∪ file `policy:` compliance keys, most-restrictive-wins
     (booleans OR to True; region/retention: request wins if set, else the file adds it).
     Constraints only ever ADD — this can never widen the request's compliance."""
+    policy = _validated_policy(policy)
     eff: dict[str, Any] = {}
     base = req_compliance.model_dump() if req_compliance else {}
     for k in _COMPLIANCE_BOOL:
@@ -254,6 +285,7 @@ def _merge_router_config(base: RouterConfig, policy: dict[str, Any] | None) -> R
     OR-s to True; train_optout_confirmed / baa_tier_confirmed union). `replace` rather than a fresh
     RouterConfig, so a field this fold does not name carries forward instead of silently resetting
     to its default."""
+    policy = _validated_policy(policy)
     if not policy:
         return base
     allow = base.allow_unverified_compliance or bool(policy.get("allow_unverified_compliance"))

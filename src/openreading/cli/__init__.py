@@ -27,9 +27,10 @@ Invariants shared by every subcommand
   non-conforming response surfaces as an uncaught traceback, not a coded exit.
 - A `<file>` starting with `http(s)://` is a URL: backends that ingest URLs natively get it
   as-is, the rest download to bytes first.
-- Compliance is never widened by any flag. A policy that leaves nothing compliant to run is a
-  `ComplianceRefused` refusal, exit 3, from every command that EXECUTES under `--policy`; bare
-  `route` prints the empty plan and exits 4 (internal/decisions/DECISIONS.md D7, D7a).
+- No flag widens the eligible set; the policy file sets it, and three of its keys widen it
+  deliberately. A policy that leaves nothing compliant to run is a `ComplianceRefused` refusal,
+  exit 3, from every command that EXECUTES under `--policy`; bare `route` prints the empty plan
+  and exits 4 (internal/decisions/DECISIONS.md D7, D7a).
 - `internal/<path>` pointers in this package name files of the private `openreading` company
   context repo (its `decisions/` and `design/` trees), not a directory of this package.
 - The CLI passes no result cache (DECISIONS D-v3-3): silent memoization inside a library call is
@@ -121,7 +122,7 @@ per file, so it lands here with the same hint on stderr AND each item's `error` 
 unknown_strategy` -- in the envelope); 2 unresolvable source, `--max-items` or
 `--max-jobs` exceeded; 3 cannot run at all (missing credentials, `ComplianceRefused`, or -- for a
 native-batch backend -- a `RetryableError` / deadline from `submit_many`, which has no next rung
-and does not retry; `parse` has no `--policy` flag, so an unreadable policy is not a `parse` exit);
+and does not retry; `parse` has no `--policy` flag, so a bad policy is not a `parse` exit);
 6 interrupted while `OPENREADING_LEDGER` was set -- per-item runs may be individually resumable,
 but batch-level resume is not supported, so no single run id is named.
 
@@ -161,12 +162,16 @@ Print the compliance-first plan; with `--run`, execute the whole chain (chosen, 
 
 `policy.json` keys: `require_baa`, `no_train_on_data`, `data_region`, `require_local`,
 `max_retention`, `optimize_for`, `doc_type_hint`, `allow_unverified_compliance`,
-`train_optout_confirmed`, `baa_tier_confirmed`. Output is `{chosen, fallbacks, dropped: {id:
+`train_optout_confirmed`, `baa_tier_confirmed`. Those ten are the whole grammar: the file must be
+a JSON object, any other key is refused by name (with a `did you mean` for a near miss), and a
+value of the wrong type is refused too -- exit 3, `[route] invalid policy <path>: ...`, from every
+`--policy` flag in this CLI, because a compliance constraint that can be turned off by a typo is
+not a constraint (`api.validate_policy`). Output is `{chosen, fallbacks, dropped: {id:
 {stage, code, reason}}, terminal_reason}` plus, with `--run`, a `result`. `--run` never widens the
 plan; a fallback actually used is recorded in the result's `warnings[]`. Exits: 0; 4 no compliant
-backend (the empty plan is still printed as JSON); 3 unreadable policy or document, or a
-plan-exhausted `--run` (the plan is still printed; the stderr trail names each backend's failure
-and a `check <VAR>` hint for every rejected key).
+backend (the empty plan is still printed as JSON); 3 an unreadable or invalid policy, an
+unreadable document, or a plan-exhausted `--run` (the plan is still printed; the stderr trail
+names each backend's failure and a `check <VAR>` hint for every rejected key).
 
 The last three keys are router configuration, not request fields (`api.router_config` folds them
 into `RouterConfig`, DECISIONS D7 / D7a), and they are two different kinds of knob.
@@ -381,8 +386,10 @@ Exit codes
      strategy name anywhere.
   3  cannot run: missing credentials (names the exact vars + signup URL), `auth_rejected`,
      `unsupported_feature`, an unreadable `--config` / `--policy` / document / `--trace` /
-     `explain` argument, a `ComplianceRefused` refusal (from `parse`, `strategy plan`, `replay`,
-     `calibrate`, `compare`, `leaderboard`), a plan-exhausted `route --run`, `serve` without its
+     `explain` argument, a `--policy` file that is not a valid policy object (an unknown key, a
+     non-object top level, or a value of the wrong type), a `ComplianceRefused` refusal (from
+     `parse`, `strategy plan`, `replay`, `calibrate`, `compare`, `leaderboard`), a
+     plan-exhausted `route --run`, `serve` without its
      extra, an unresolvable/empty `leaderboard` dataset, a `resume` refusal / unknown run /
      expired payloads, an unknown `backends --check` slug, or a `RetryableError` reaching a
      directly-named backend on `parse` / `compare` (rate-limit exhaustion, or a poll job past its

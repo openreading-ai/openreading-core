@@ -116,9 +116,12 @@ that kind.
 The third table gives each backend's compliance posture, license and signup page. A backend's
 compliance posture is the set of claims its descriptor makes about data handling. A BAA (Business
 Associate Agreement) is the contract a vendor signs under HIPAA before it may handle protected
-health information. The `hipaa_baa` column records whether the vendor offers one. The license
-column quotes each descriptor's `runtime.license` string as written. In the signup column, none
-means the backend runs locally and has nothing to sign up for.
+health information. The `hipaa_baa` column records whether the vendor offers one, never whether
+you signed one. A `require_baa` policy therefore admits a backend on the vendor's published offer,
+which is necessary and not sufficient. Confirm your own executed agreement out of band before you
+send regulated data to a row reading `yes` or `tier_gated`. The license column quotes each
+descriptor's `runtime.license` string as written. In the signup column, none means the backend
+runs locally and has nothing to sign up for.
 
 | id | `hipaa_baa` | `trains_on_customer_data` | `runs_fully_local` | license | signup |
 |---|---|---|---|---|---|
@@ -136,6 +139,43 @@ means the backend runs locally and has nothing to sign up for.
 | `reducto` | tier_gated | no | false | proprietary | https://platform.reducto.ai |
 | `tesseract` | na_local | na_local | true | Apache-2.0 | none |
 
+### Where those compliance claims come from
+
+The compliance cells in the third table are vendor claims, and each descriptor records the pages a
+maintainer read. Each descriptor carries a `sources` list whose entries are `{url, accessed,
+supports}`, where `accessed` is the day a maintainer read the page and `supports` names what that
+page established. Sources are recorded per descriptor, not per compliance field, so a cell can have
+no source that speaks to it. Four `hipaa_baa` cells cite no source for that claim today. Two of them
+read `tier_gated` (`chunkr` and `pulse`) and two read `no` (`nuextract` and `open-ocr`). Filter a
+backend's sources to see what they say about a BAA and when they were read.
+
+```bash
+uv run python -c "
+from openreading.adapters.registry import make_adapter
+for s in make_adapter('azure-document-intelligence').descriptor.to_schema_dict()['sources']:
+    print(s['accessed'], s['url'], s['supports'])
+" | grep -iE "baa|hipaa"
+```
+
+```text
+2026-07-21 https://learn.microsoft.com/azure/ai-services/document-intelligence/ AnalyzeResult shape, LRO, pricing, HIPAA BAA
+```
+
+Change the id for any other backend, and keep the filter so the output stays on the BAA claim.
+Some descriptors carry further citations that this filter hides, including private references that
+are not published here. Vendor terms move after the date in that column, and nothing here re-reads
+them on a schedule, so the table is where your own verification starts rather than where it ends.
+A cell that no longer matches its source is a reportable defect under
+[`SECURITY.md`](../../../SECURITY.md), which names a lying descriptor field as a compliance-filter
+bypass.
+
+Descriptors record four more compliance facts that no policy key gates: `soc2`, `gdpr`, `pci` and
+`phi_path_constraints`. A fifth field, `data_retention`, is read by nothing either. It restates in
+prose what the enforced `max_retention_hours` holds as a number, so it is not counted above. Print
+them with `make_adapter(id).descriptor.to_schema_dict()['compliance']` and use them for your own
+reporting, not for routing. The router guide lists that gap under
+[Not built yet](../router/README.md#not-built-yet).
+
 ## Reading the compliance columns
 
 These rules decide whether your policy admits a backend. A policy is a JSON file of compliance
@@ -147,10 +187,13 @@ openreading route sample.pdf --policy phi.json`.
   (drop code `no_baa`). `no` is always dropped.
 - `trains_on_customer_data: opt_out` is dropped under `no_train_on_data` unless the id is in
   `train_optout_confirmed` (drop code `trains_on_data`).
-- `unverified` is dropped unless `allow_unverified_compliance` is set. Unverified compliance always
-  fails closed, which means the backend is dropped rather than assumed safe.
-- `na_local` backends pass every column. Nothing in a request, a strategy or a fallback can widen
-  this set.
+- `unverified` is dropped unless your policy sets `allow_unverified_compliance`. The default is to
+  drop, so a vendor that said nothing is treated as a no rather than assumed safe.
+- `na_local` backends pass every column.
+- Your policy sets the eligible set, and three of its keys widen it deliberately. Nothing after the
+  policy widens it again, so no request, strategy, fallback or resume can readmit a dropped
+  backend. The three keys are named under
+  [How it decides](../router/README.md#how-it-decides) in the router guide.
 
 ## Override form
 
@@ -179,7 +222,9 @@ python -m pydoc openreading.credentials`.
   use OpenReading from an agent.
 - [`.env.example`](../../../.env.example) lists every var with its signup URL.
 - `uv run python -m pydoc openreading.credentials` prints the precedence and the `.env` rules.
-- `uv run python -m pydoc openreading.router.compliance` prints every drop code.
+- [Routing and keys](../router/README.md#how-it-decides) tabulates every drop code with the policy
+  key that triggers it. `uv run python -m pydoc openreading.router.compliance` prints the stage-1
+  gate itself, meaning the constraints it reads and the attestations it honours.
 - `uv run python -m pydoc openreading.adapters` prints the runbook for adding a backend, and
   [`scripts/new_adapter.py`](../../../scripts/new_adapter.py) scaffolds it.
 - [JSON Schemas](../schemas/README.md) describes the response every backend returns.
