@@ -9,8 +9,10 @@ All notable changes to OpenReading are documented here. The format follows
 > a clean clone. `pyproject.toml` and `openreading.__version__` say `0.3.0`. This repository has no
 > git tags, and nothing is published to PyPI, so install from a clone ([`README.md`](README.md),
 > *Install*). The newest numbered heading below, `[0.4.0]`, is a milestone label, not a published release.
-> The package number and this file are reconciled when the first release is tagged. The road to that
-> release is [`ROADMAP.md`](https://github.com/multiversal-ventures/openreading/blob/main/runs/ROADMAP.md) §1.2 (company repo, members only).
+> The package number and this file are reconciled when the first release is tagged. A codename
+> heading below, such as `Canon (v0.5)`, names a branch rather than a version. The root README's
+> "Status and versioning" table lists all five numbers this project carries and which one to pin.
+> The road to that release is [`ROADMAP.md`](https://github.com/multiversal-ventures/openreading/blob/main/runs/ROADMAP.md) §1.2 (company repo, members only).
 
 ## [Unreleased]
 

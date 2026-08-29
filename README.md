@@ -241,8 +241,9 @@ strategy offline_first  →  pymupdf (ok)
 The trace shows PyMuPDF ran, three gates passed, and the run stopped there, with no second backend
 and no cost. The fourth gate is `skipped` rather than failed: PyMuPDF reports no confidence, so
 there is nothing to test, and a missing measurement never counts as a passing one. Timings vary
-between machines. Write your own strategy with `uv run openreading strategy --help`. An interrupted
-run resumes from its journal, which records every step so far. The
+between machines. Write your own strategy with `uv run openreading strategy --help`. An
+interrupted single-document `--strategy` run resumes from its journal, which records every step so
+far. A `--backend` run writes no journal, and a batch has no resume of its own. The
 [run ledger](src/openreading/ledger/README.md) guide explains it.
 
 **A folder at a time.** Point `parse` at a directory and it batches, which is how you run a whole
@@ -281,9 +282,15 @@ uv run openreading parse examples/john_smith_1000_2026_01.pdf --backend reducto
 # [reducto] missing required credentials/config: REDUCTO_API_KEY. Sign up / configure: https://platform.reducto.ai
 ```
 
-To fix it, run `echo 'REDUCTO_API_KEY=sk_…' > .env` rather than copying `.env.example`, because
-that file pre-fills two localhost endpoints. Then `uv run openreading backends` shows
-`reducto … yes`. From then on every Reducto call is billed to your account.
+To fix it, append the one key you hold to a fresh file with `echo 'REDUCTO_API_KEY=sk_…' >> .env`.
+Never run `cp .env.example .env`. That file ships `DOCLING_SERVE_URL` and `QWEN_VL_ENDPOINT` with
+values rather than blanks, so a copy marks `docling` and `qwen-vl` configured on a machine where
+neither is running. The cost is a different data path rather than extra configuration. Under a
+`require_local` policy the copy makes the router send your scan to `http://localhost:5001`, and the
+envelope records `docling TerminalError (ConnectError)`. Without the copy the same command records
+`docling skipped (missing_credentials)` and the document never reaches a socket. Then
+`uv run openreading backends` shows `reducto … yes`. From then on every Reducto call is billed to
+your account.
 
 ## Python and HTTP
 
@@ -312,11 +319,21 @@ curl -s http://127.0.0.1:8787/healthz     # {"status":"ok","version":"0.3.0"}
 
 **Status: pre-release.** You can build on the JSON shape today, while CLI flags, the Python API
 and the strategy grammar may still change before 1.0. The JSON Schemas are stable, pinned byte
-for byte by `tests/test_schema_evolution.py`. The package version is `0.3.0` in `pyproject.toml`
-and `openreading.__version__`. It is not on PyPI and has no git tags yet, so install from a
-clone. [`CHANGELOG.md`](CHANGELOG.md) records development milestones. Its newest heading,
-`0.4.0`, is a milestone label, not a published release. The two numbers meet when the first
-release is tagged.
+for byte by `tests/test_schema_evolution.py`. Nothing is on PyPI and the repository has no git
+tags, so install from a clone.
+
+Five numbers travel with this project, and only one of them is the code you installed.
+
+| Number | Where you read it | What it identifies | When it changes |
+|---|---|---|---|
+| `schema_version` `0.3` | every response envelope | the JSON contract that response obeys | a new version file lands in [`src/openreading/schemas/`](src/openreading/schemas/README.md) |
+| package `0.3.0` | `uv run openreading --version`, `openreading.__version__`, `pyproject.toml` | the code you installed | the first tagged release, which has not happened |
+| `"version": "0.3.0"` | `GET /healthz` on a running `openreading serve` | the package number of the process answering you | with the package number, never on its own |
+| heading `[0.4.0]` | [`CHANGELOG.md`](CHANGELOG.md) | a development milestone merged to `main` | a milestone merges, so it runs ahead of the package number and meets it at the first tagged release |
+| codename `Canon (v0.5)` | [`CHANGELOG.md`](CHANGELOG.md) | a branch that carried one body of work | never, because it is a label rather than a version |
+
+Pin a commit SHA. None of the five numbers is a pin, because there are no git tags and no PyPI
+release, so a SHA is the only way to name the exact code you tested.
 
 ## Where the docs are
 

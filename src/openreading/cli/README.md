@@ -93,7 +93,9 @@ partial
 ```
 
 **You should see** `partial` and the failed item. Exit 6 prints a run id and a `resume with:` line.
-`uv run openreading resume r_01J8QK` takes only that id ([The run ledger](../ledger/README.md)).
+A run id is a UUIDv4, 36 characters, for example `dcb81857-018f-4e30-8e12-e91d915a1d64`.
+`uv run openreading resume dcb81857-018f-4e30-8e12-e91d915a1d64` takes only that id
+([The run ledger](../ledger/README.md)).
 Without the ledger, `resume` exits 3 and prints this line on stderr:
 
 ```text

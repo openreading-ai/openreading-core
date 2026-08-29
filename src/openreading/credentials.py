@@ -32,8 +32,11 @@ values.
 overriding an already-set process var — an exported shell variable always wins over the file, so a
 value exported in an earlier shell command silently beats the file you just edited. The CLI loads
 `./.env` (or `--env-file`) on every invocation; the web UI's `create_app` loads `./.env` once;
-`openreading.run(env_file=)` / `run_batch(env_file=)` load only when given. Copy `.env.example` and
-fill only the backends you use.
+`openreading.run(env_file=)` / `run_batch(env_file=)` load only when given. Do NOT copy
+`.env.example` wholesale: it pre-fills two localhost endpoints (`DOCLING_SERVE_URL`,
+`QWEN_VL_ENDPOINT`), which marks those backends configured on a machine where neither is running
+and sends a document there before the router falls back to one that works. Write only the keys
+you actually hold, one line at a time: `echo 'REDUCTO_API_KEY=sk_...' >> .env`.
 
 Why the `credentials_ref` allow-list exists (BL-162): before it, `env:<anything>` resolved every
 credential key as `<anything>_<KEY>`, so an unauthenticated request (server auth is off by default)

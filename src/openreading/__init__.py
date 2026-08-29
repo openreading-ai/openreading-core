@@ -61,10 +61,12 @@ when they are unconfigured, so those two name nothing to provision and the only 
 requirement is to attempt a parse and read the error (it names the var).
 
 Do NOT run `cp .env.example .env`. That file pre-fills two localhost endpoints, which flips
-`docling` and `qwen-vl` to CONFIGURED `yes` on a machine where neither is running; a parse then
-dies with a bare connection error. Write only the keys you actually hold:
+`docling` and `qwen-vl` to CONFIGURED `yes` on a machine where neither is running. The router
+still falls back to a working local backend, so the parse succeeds, but only after your document
+is sent to `http://localhost:5001` first, an address you never chose. Write only the keys you
+actually hold:
 
-    echo 'REDUCTO_API_KEY=sk_...' > .env
+    echo 'REDUCTO_API_KEY=sk_...' >> .env
 
 Keys are read from the environment per call, held only in memory, never stored. Credentials
 never travel on the command line: no verb takes a key flag, environment / `.env` only, so a key

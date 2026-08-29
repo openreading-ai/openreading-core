@@ -4,6 +4,8 @@
 
 > **In one sentence.** With `OPENREADING_LEDGER` set, every strategy run leaves a journal you can
 > resume after an interruption, replay with no network, and erase by destroying one key.
+> One strategy run over one document resumes, a batch of them does not, and a `--backend` run
+> writes no journal at all.
 
 ## What this gives you
 
