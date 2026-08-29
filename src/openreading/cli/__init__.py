@@ -17,7 +17,8 @@ Invariants shared by every subcommand
   `strategy:<name>` or `auto` (`[pymupdf] missing credentials ...`); `[parse]` appears only on
   selector misuse, a slug that fails catalog lookup, and the interrupt lines. A batch `parse`
   prints `[batch]` for usage / unexpected errors and the `empty_batch` warning, `[i/N]` for
-  progress, `[preflight]` for the cost preflight, and the run label (not `[batch]`) for its exit-3
+  progress, `[preflight]` for the two pre-run advisories (cost, and a `--jobs` request the named
+  backend's descriptor caps), and the run label (not `[batch]`) for its exit-3
   cannot-run line; a `compare` fan-out prints `[<backend>]` per fanned-out backend. The one
   untagged line is `strategy validate`'s grammar error (below).
 - A printed response/envelope is schema-validated first (`schemas.validate_response` /
@@ -114,8 +115,12 @@ Batch flags (in addition to the single-document ones):
 A file whose format the backend cannot take is a SKIPPED item with a reason (`unsupported_format`
 / `unknown_format`) -- never a crash, never a silent omission. Per-item isolation (M6) means a
 failure never raises out of the batch, so the stderr progress line (`[i/N] <path> <state> <code>:
-<message>`) is the only place a failed item's message is read; a cost preflight prints for >10
-live items on a hosted backend. A source list that resolves to zero documents prints the envelope's
+<message>`) is the only place a failed item's message is read. Two `[preflight]` advisories print
+before the run, for a directly named backend only (`auto` and `strategy:` resolve per item, so
+neither number exists yet): the cost of >10 live items on a `hosted_api` backend, stated per PAGE
+with the single-page total multiplied out; and, whatever the item count, a `--jobs N` above that
+backend's `descriptor.batch.max_concurrency`, naming N and the cap, because only the capped value
+survives into `request.jobs`. A source list that resolves to zero documents prints the envelope's
 `empty_batch` warning to stderr so silence is never mistaken for a hang. Exits: 0 all succeeded;
 4 partial (some items failed); 1 nothing succeeded (an unknown `--strategy` becomes a failed item
 per file, so it lands here with the same hint on stderr AND each item's `error` -- `code:

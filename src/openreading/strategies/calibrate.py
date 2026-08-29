@@ -359,8 +359,15 @@ def calibrate_strategy(
 
 
 def _descriptor_cost(desc: Any) -> float:
-    """A per-doc cost proxy from the descriptor (spec §6.2 basis): 0 for local; else the low
-    per-page-equivalent rate × an assumed page count."""
+    """A per-doc cost proxy from the descriptor (spec §6.2 basis): 0 for local; else the LOW
+    per-page-equivalent rate × an ASSUMED 25 pages. Both halves are modeling choices, not
+    measurements: the low end because a proxy that ranks backends must not move with a vendor's
+    ceiling, and 25 because nothing in this call knows the caller's documents — the descriptor is
+    all it is given. So the number is comparable across backends and wrong as an absolute for any
+    corpus whose average document is not 25 pages. Every consumer (`calibrate`'s sweep points,
+    `evals.leaderboard`'s `cost_per_doc` column) inherits both. Substituting the real page count
+    of scored documents is not a local edit: no page count survives `evals.runner.run_case`, and
+    per-backend measured denominators would make the column rank rows on different bases."""
     if desc.compliance.runs_fully_local:
         return 0.0
     lo = desc.cost.usd_per_page_equiv_low

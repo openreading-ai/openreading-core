@@ -124,7 +124,9 @@ backend for `auto` / `strategy:` — and an unsupported file becomes a `skipped`
 reason, never a crash. `jobs` is bounded BEFORE intake: `<= 0` clamps to 1 (echoed as the
 corrected value), `> max_jobs` raises `JobsLimitError` rather than reaching an unbounded thread
 pool; a named backend may cap it further via `descriptor.batch.max_concurrency` (CPU-bound
-tesseract). `max_items` caps expansion. Dispatch is native iff the whole batch resolved to one
+tesseract), and only the capped value reaches `request.jobs` — the CLI surfaces the reduction on
+stderr, so a Python caller who needs the same signal compares its own `jobs` against that field.
+`max_items` caps expansion. Dispatch is native iff the whole batch resolved to one
 named backend whose descriptor declares `batch.native`, which implements `NativeBatchAdapter`,
 with >= 1 live item and no more than `batch.max_items`; otherwise platform fan-out composes
 `run()` per item. The envelope is observationally equivalent either way (M10), with

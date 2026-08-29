@@ -291,6 +291,13 @@ def _save_batch_items(env: dict, save_dir: str) -> None:
         out.write_text(json.dumps(item["response"], indent=2))
 
 
+def _usd(v: float) -> str:
+    """A dollar amount for the cost preflight. Cents below a dollar-scale total, but four places
+    once rounding to the cent would print `$0.00` for a real (if small) bill — the preflight's
+    whole job is to be a number the reader can multiply, and zero multiplies to zero."""
+    return f"${v:,.2f}" if v >= 0.01 else f"${v:.4f}"
+
+
 def _cmd_parse_batch(args, overrides: dict, label: str) -> int:
     """Batch parse (Manifest v0.6): one envelope over many documents. Progress + cost preflight go
     to stderr; stdout stays the single batch-result JSON. Exit 4 = partial (some items failed)."""
@@ -314,18 +321,53 @@ def _cmd_parse_batch(args, overrides: dict, label: str) -> int:
         print(f"[{done}/{total}] {loc} {item.state} {extra}".rstrip(), file=sys.stderr)
 
     def on_preflight(resolved, backend: str) -> None:
-        live = [r for r in resolved if r.skip_reason is None]
-        if backend == "auto" or backend.startswith("strategy:") or len(live) <= 10:
+        # Both advisories describe what `api.run_batch` is about to do to a DIRECTLY NAMED backend:
+        # `auto` and strategies resolve per item inside the router, so neither the rate nor the
+        # concurrency cap below is knowable here — and run_batch skips the cap for them too.
+        if backend == "auto" or backend.startswith("strategy:"):
             return
         try:
             d = make_adapter(backend).descriptor
         except KeyError:
             return
-        if d.type.value == "hosted_api":
-            lo, hi = d.cost.usd_per_page_equiv_low, d.cost.usd_per_page_equiv_high
-            rng = f"~${lo}-${hi}/page-equiv" if lo is not None else "billed per page"
+
+        # The requested --jobs is silently reduced to min(requested, descriptor.batch
+        # .max_concurrency) inside run_batch, and only the reduced value survives, in
+        # `request.jobs`. Without this line a caller who asks for 16 workers on a backend that
+        # caps at 4 sees no speedup, no error, and no way to learn which of the two numbers the
+        # run actually used. Fires only when the request is genuinely unachievable, so the
+        # default (--jobs 1, under every cap) stays silent.
+        cap = d.batch.max_concurrency if d.batch else None
+        if cap and args.jobs > cap:
             print(
-                f"[preflight] {len(live)} items → hosted backend {backend} ({rng} each)",
+                f"[preflight] --jobs {args.jobs} requested; {backend} caps platform concurrency "
+                f"at {cap} (descriptor.batch.max_concurrency), so this run uses {cap}",
+                file=sys.stderr,
+            )
+
+        live = [r for r in resolved if r.skip_reason is None]
+        if len(live) <= 10 or d.type.value != "hosted_api":
+            return
+        # The rate is per PAGE, and items are documents. Naming the item count beside a per-page
+        # rate invites multiplying the two, which under-reads a real corpus by its average page
+        # count. So: state the basis in words, then multiply out the ONE total that is actually
+        # computable before any file is opened (intake reads no bytes and never fetches a URL, so
+        # page counts do not exist yet) and label it as the single-page floor it is.
+        n = len(live)
+        ends = [v for v in (d.cost.usd_per_page_equiv_low, d.cost.usd_per_page_equiv_high) if v]
+        rate = (
+            "-".join(f"${v}" for v in ends) if ends else "billed per page-equiv"
+        )  # one endpoint published, or two, or none
+        basis = f"~{rate} per page-equiv" if ends else rate
+        print(
+            f"[preflight] {n} items → hosted backend {backend}: {basis}, not per item",
+            file=sys.stderr,
+        )
+        if ends:
+            total = "-".join(_usd(v * n) for v in ends)
+            print(
+                f"[preflight] {n} items would cost ~{total} if every item is one page; multiply by "
+                "your average page count (pages are not counted before the run)",
                 file=sys.stderr,
             )
 

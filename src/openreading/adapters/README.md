@@ -9,12 +9,13 @@ local library such as PyMuPDF. An adapter is the package that wraps one backend.
 is the static record in which the backend declares the formats it reads, the environment
 variables it needs and its compliance posture.
 
-You get three tables. The first lists the formats each backend reads. The second lists the
-install extra and the environment variables each backend needs. The third lists each backend's
-compliance posture, license and signup page. You also get the command that shows which backends
-are ready on this machine. You need the package installed with `uv sync --all-extras --dev`, and
-a key for any hosted backend you want to call. Local backends such as `pymupdf` and `tesseract`
-need no key.
+You get five tables. The first lists the formats each backend reads. The second lists the install
+extra and the environment variables each backend needs. The third lists each backend's compliance
+posture, license and signup page. The fourth lists what each backend charges per page and the
+ceilings it puts on one request. The fifth lists which parts of a response each backend can fill.
+You also get the command that shows which backends are ready on this machine. You need the package
+installed with `uv sync --all-extras --dev`, and a key for any hosted backend you want to call.
+Local backends such as `pymupdf` and `tesseract` need no key.
 
 ## What this is
 
@@ -51,8 +52,10 @@ Using a backend without its key gives exit code 3, not a crash. `uv run openread
 
 ## Catalog
 
-The three tables below tell you what each backend reads, what it needs from your environment, and
-what it promises about your data. A required env var has `required: true` in the backend's
+The five tables below cover what each backend reads, needs, promises, charges, and can put in a
+response. A table cell
+reading none means the descriptor sets no value for that field, which is different from a value of
+zero. A required env var has `required: true` in the backend's
 descriptor (its `AdapterDescriptor`). A backend with no required var uses its SDK's own
 credential chain when nothing is set.
 
@@ -176,6 +179,90 @@ them with `make_adapter(id).descriptor.to_schema_dict()['compliance']` and use t
 reporting, not for routing. The router guide lists that gap under
 [Not built yet](../router/README.md#not-built-yet).
 
+### What each backend charges, and the ceilings on one request
+
+Price is the widest difference between these backends, so settle it before you tune anything else.
+The fourth table gives each backend's published rate and the limits it puts on one request. A
+page-equivalent is the common unit this project uses to compare vendors that bill in different
+things. A vendor that charges per credit or per token declares what its rate works out to for a
+single page. That declaration is a range, and `usd_per_page_equiv_low` and
+`usd_per_page_equiv_high` are its two ends. Both numbers are per page and never per document, so a
+twelve-page document costs twelve times the rate in this table.
+
+The `basis` column says how far to trust that pair. `billed` means the response carries the charge
+the vendor actually made. `estimated` means the adapter projects the rate from a published price
+list. `infra_only` means the backend runs on hardware you already pay for, so the response reports
+a null price rather than an invented one. `unknown` means the vendor publishes no rate at all, and
+the adapter declines to guess one.
+
+The three limit columns say how much work one request may carry. Max pages per request is the page
+count the vendor accepts, quoted from the descriptor, and the router's stage-2 filter reads it. The
+batch concurrency cap is the ceiling that `--jobs` is reduced to for that backend, which the batch
+guide covers under [Sizing a large run](../batch/README.md#sizing-a-large-run). Native batch max
+items is how many documents the vendor's own bulk endpoint accepts in one job.
+
+| id | low $/page-equiv | high $/page-equiv | `basis` | max pages per request | batch concurrency cap | native batch max items |
+|---|---|---|---|---|---|---|
+| `anthropic-claude` | 0.01 | 0.08 | estimated | 100 (<1M ctx) / 600 (1M ctx) | none | 100000 |
+| `aws-textract` | 0.0015 | 0.07 | estimated | 1 sync / 3000 async | none | none |
+| `azure-document-intelligence` | 0.0006 | 0.03 | estimated | 2000 | none | none |
+| `chunkr` | 0.008 | 0.03 | estimated | 2000 (soft) | none | none |
+| `docling` | 0.0 | none | infra_only | none | none | none |
+| `google-document-ai` | 0.0006 | 0.03 | estimated | 15 sync / 500 batch | none | none |
+| `nuextract` | none | none | unknown | none | none | none |
+| `open-ocr` | 0.0005 | none | billed | engine-dependent: 200 (tesseract) / 5-20 (vision LLMs) | none | none |
+| `pulse` | 0.015 | 0.02 | estimated | none | none | none |
+| `pymupdf` | 0.0 | none | infra_only | unbounded | none | none |
+| `qwen-vl` | 0.0 | none | infra_only | none | none | none |
+| `reducto` | 0.015 | 0.06 | billed | unbounded (async) | none | none |
+| `tesseract` | 0.0 | none | infra_only | none | 4 | none |
+
+Source: `Cost`, `Capabilities.max_pages_per_request` and `BatchSupport` in
+`src/openreading/types/descriptor.py`, read through `make_adapter(id).descriptor`. Live truth: `uv
+run python -c "from openreading.adapters.registry import make_adapter, BUILTIN_ADAPTERS; [print(i,
+make_adapter(i).descriptor.to_schema_dict()['cost']) for i in BUILTIN_ADAPTERS]"`, with `['batch']`
+and `['capabilities']['max_pages_per_request']` for the other columns. If the table and that output
+disagree, the output is right and the table needs fixing.
+
+A corpus turns that spread into a decision. Two hundred thousand documents averaging twelve pages
+is 2.4 million page-equivalents. That corpus bills $1,200 at `open-ocr`'s low end and $192,000 at
+`anthropic-claude`'s high end, a factor of 160 between the two. Both are published rates rather
+than quotes you negotiated, so treat the pair as a range and not as a price. Every cost estimate
+elsewhere in this project is built from these two columns. The `cost/doc` figure that `openreading
+leaderboard` prints is one of them, and it multiplies the low end alone by an assumed page count.
+
+### What each backend can put in a response
+
+Check that a backend can fill the part of the response you plan to read. A backend that cannot will
+omit the field rather than invent one. A channel is one part of a response, such as
+`text`, `table_cells` or per-block confidence. Each descriptor grades every channel with one of
+three letters. `N` means the backend emits that channel itself. `D` means this project computes it
+deterministically from what the backend does emit. `X` means there is no faithful way to produce
+it, so the channel is left out and a `warnings[]` entry names it. [The channel
+contract](../derive/README.md) explains the rules that grading enforces, C1 to C11.
+
+| id | `text` | `markdown` | `blocks` | `block_bbox` | `block_confidence` | `table_cells` | `typed_fields` |
+|---|---|---|---|---|---|---|---|
+| `anthropic-claude` | `D` | `N` | `D` | `X` | `X` | `D` | `D` |
+| `aws-textract` | `D` | `D` | `N` | `N` | `N` | `N` | `N` |
+| `azure-document-intelligence` | `N` | `N` | `N` | `N` | `D` | `N` | `N` |
+| `chunkr` | `D` | `N` | `N` | `N` | `N` | `D` | `N` |
+| `docling` | `N` | `N` | `N` | `N` | `X` | `N` | `D` |
+| `google-document-ai` | `N` | `D` | `N` | `N` | `N` | `N` | `N` |
+| `nuextract` | `D` | `N` | `D` | `X` | `X` | `D` | `N` |
+| `open-ocr` | `N` | `D` | `X` | `X` | `X` | `X` | `X` |
+| `pulse` | `D` | `N` | `N` | `N` | `X` | `D` | `D` |
+| `pymupdf` | `N` | `D` | `N` | `N` | `X` | `N` | `X` |
+| `qwen-vl` | `D` | `D` | `D` | `D` | `X` | `D` | `D` |
+| `reducto` | `D` | `N` | `N` | `N` | `D` | `N` | `N` |
+| `tesseract` | `N` | `D` | `N` | `N` | `N` | `X` | `X` |
+
+Source: `OutputChannels` in `src/openreading/types/descriptor.py`, read through
+`make_adapter(id).descriptor.output.channels`. Live truth: `uv run python -c "from
+openreading.adapters.registry import make_adapter, BUILTIN_ADAPTERS; [print(i,
+make_adapter(i).descriptor.to_schema_dict()['output']['channels']) for i in BUILTIN_ADAPTERS]"`. If
+the table and that output disagree, the output is right and the table needs fixing.
+
 ## Reading the compliance columns
 
 These rules decide whether your policy admits a backend. A policy is a JSON file of compliance
@@ -231,12 +318,22 @@ python -m pydoc openreading.credentials`.
 
 ## Maintenance
 
-To add a backend, register it in `BUILTIN_ADAPTERS`. Add one row to each table here from its
-descriptor. Add a block to `.env.example`. Add the extra to `pyproject.toml`.
+This section is the bookkeeping a backend owes this page, and it is not the work of building one.
+Writing the adapter comes first, and it is the larger job. An adapter is a static
+`AdapterDescriptor` plus eight methods. Every method that reaches a vendor builds its own client,
+so a freshly constructed instance can finish a job the first one started. That rule is what
+`protocol_version=2` names. The conformance kit checks it, along with bboxes, channel honesty, cost
+shape and determinism, before a backend may ship. `uv run python -m pydoc openreading.adapters` is
+the runbook for all of that, and it lists twelve touchpoints a new backend lands in. Start with
+[`scripts/new_adapter.py`](../../../scripts/new_adapter.py), which creates every file and makes
+every edit in one run, so the twelve can never land partially.
+
+Once the adapter itself works, register it in `BUILTIN_ADAPTERS`. Add one row to each of the five
+tables here from its descriptor. Add a block to `.env.example`. Add the extra to `pyproject.toml`.
 `scripts/check_extras_parity.py` fails until the extra exists. It also fails until a slug that
-differs from its extra name is in `EXTRA_NAME_EXCEPTIONS`. A changed compliance value, format or
-env var is one cell here. When a Known-gaps line stops being true, delete it. The full table of
-what to update for each kind of change is under *Where a change gets documented* in
-[`AGENTS.md`](../../../AGENTS.md).
+differs from its extra name is in `EXTRA_NAME_EXCEPTIONS`. A changed compliance value, format, env
+var, rate, limit or channel grade is one cell here. When a Known-gaps line stops being true, delete
+it. The full table of what to update for each kind of change is under *Where a change gets
+documented* in [`AGENTS.md`](../../../AGENTS.md).
 
 <sub>[Docs home](../README.md) · [← JSON Schemas](../schemas/README.md)</sub>
