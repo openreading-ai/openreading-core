@@ -10,9 +10,13 @@
 You want to call the parser from a shell script or a CI job and trust what comes back. The worry is
 that a progress line or a library warning lands in the JSON you redirect to a file. A backend is one
 parser, such as the local `pymupdf` library or a hosted API whose key you keep in the environment.
-Every `openreading` verb prints exactly one JSON document on stdout and sends every other line to
-stderr. That document is the envelope, the one response shape every backend returns, so `> out.json`
-is always safe. The exit code tells your script what happened without reading the output. For
+Every verb that returns a result prints exactly one JSON document on stdout and sends every other
+line to stderr. That document is the envelope, the one response shape every backend returns, so
+`> out.json` is safe on `parse`, `route`, `resume`, `replay`, and `compare` in its default JSON
+format. The reporting verbs are the exception, because their output is for you rather than for a
+parser. `backends`, `explain`, `strategy show`, `leaderboard`, and any `--format table` print a
+human table on stdout, which is what the recipes below pipe into `grep` and `head`. The exit code
+tells your script what happened without reading the output. For
 example, `3` means a missing key or a compliance refusal. You need the install from the root
 README, and the first command below builds `sample.pdf` for you. `uv run openreading --help` lists
 every verb, and this page is about scripting around them.
@@ -30,7 +34,8 @@ Consider using the pymupdf_layout package for a greatly improved page layout ana
 ## Mental model
 
 Every run produces three streams, stdout, stderr, and the exit code, and each can be read alone.
-`stdout` carries the envelope and nothing else, so a redirect captures exactly one JSON document.
+`stdout` carries the result and nothing else, so a redirect from a result verb captures exactly one
+JSON document.
 `stderr` carries progress, backend chatter, and every error line tagged with a label such as
 `[preflight]`. The `pymupdf_layout` line in the output above is the library talking, and it never
 reaches stdout. That holds on every verb, `resume` included, so a recovery script may pipe straight
@@ -217,7 +222,7 @@ library returns before any wait. On `reducto` with no key it exits 3 on the cred
 
 ## How it decides
 
-- stdout is the envelope only, because a progress line there would break every `| jq` consumer.
+- stdout carries the result only, because a progress line there would break every `| jq` consumer.
   `openreading.cli.app` enforces this by redirecting stdout during the run.
 - A printed envelope is schema-validated first, so a non-conforming document never reaches stdout.
 - No flag widens compliance. A policy that leaves nothing to run is exit 3 from every verb that

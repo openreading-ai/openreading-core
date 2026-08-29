@@ -263,7 +263,9 @@ These rules are why a report is safe to run in a loop and safe to trust. Each ru
 failure it prevents. The full list is the `Laws` section of
 `uv run python -m pydoc openreading.comparison`.
 
-- Compare is pure. It never runs, retries, or bills, so a report can never quietly cost money.
+- The comparison itself is pure. Over saved files and `--from` it never runs, retries, or bills.
+  Fan-out is the one form that spends: `compare doc.pdf --backends a,b` runs each backend named and
+  bills every hosted one, so a report costs money exactly when you asked for a fan-out.
 - A report never feeds routing or `pick: best`. A feedback loop could widen which backends run.
 - The same inputs produce the same report bytes. A report has no timestamps, randomness, or LLM
   calls, so drift detection over reports is sound. This is a property of compare alone, and not of

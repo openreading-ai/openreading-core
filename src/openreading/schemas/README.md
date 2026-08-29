@@ -94,7 +94,8 @@ outside its list fails validation today, and only a MAJOR release may add to the
 switch on such a field exhaustively. A field declared as a plain string carries its known values
 in prose instead, and a MINOR release may add to that set at any time, so switch on the values you
 know and send the rest to a default branch. `warnings[].code` and `backend.id` are the two open
-sets in a response.
+sets that carry a known list to match against. `status.error.code` is open as well and carries no
+list at all, which [Reading an error](#reading-an-error) explains before you branch on it.
 
 `additionalProperties: false` applies to the top level alone. An unknown key is rejected there,
 and accepted inside `backend`, `usage`, `document`, `status`, a page, and a block. A nested object

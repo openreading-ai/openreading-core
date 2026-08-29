@@ -42,9 +42,15 @@ what that scope bounds and what it does not.
 
 ### What leaves your machine, and to whom
 
-Nothing leaves on a local backend. `pymupdf` and `tesseract` parse in process, and the
-`runs_fully_local` column in [Backend adapters](src/openreading/adapters/README.md) says which
-backend is which. A hosted backend receives the document itself, which is what naming one means.
+`pymupdf` and `tesseract` parse inside this process, so a document they read reaches no socket. The
+`runs_fully_local` column in [Backend adapters](src/openreading/adapters/README.md) marks two more
+backends true, and those two behave differently. `docling` and `qwen-vl` are services you host
+rather than libraries you import, and each sends the document over HTTP to whatever address
+`DOCLING_SERVE_URL` or `QWEN_VL_ENDPOINT` holds. Stage 1 admits them under `require_local` on the
+descriptor's static flag alone. It never reads that address, so an endpoint outside your network
+still passes the gate. Read `require_local` as "no third-party vendor" rather than "nothing leaves
+this machine", and keep the document where you want it through what you put in those two variables.
+A hosted backend receives the document itself, which is what naming one means.
 
 Three paths are easy to miss when reading a single page:
 
@@ -86,8 +92,14 @@ introduced, and lists a coded reason for every backend dropped.
 The three attestation variables are the operator's own assertion, in the words of `.env.example`:
 "TRAIN_OPTOUT / BAA_TIER are ATTESTATIONS, not feature toggles: you assert paperwork exists outside
 the system; the router cannot verify that, which is why the default is to refuse." No request body
-can set any of them, on any surface. `OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE` is the one switch
-that widens the eligible set, and unverified compliance fails closed without it.
+can set any of them, on any surface. All three widen the eligible set, on three different axes.
+`OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE` admits the backends that stayed silent on a fact, and
+without it unverified compliance fails closed. `OPENREADING_BAA_TIER_CONFIRMED` admits a named
+backend whose tier-gated BAA you signed, and `OPENREADING_TRAIN_OPTOUT_CONFIRMED` a named backend
+whose training opt-out you applied. Nothing downstream of the policy widens the set again, and that
+downstream half is the part you can promise an auditor.
+[Routing and keys](src/openreading/router/README.md#how-it-decides) lists the same three keys in
+their policy-file spelling.
 
 ### Non-goals
 

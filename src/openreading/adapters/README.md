@@ -238,8 +238,13 @@ omit the field rather than invent one. A channel is one part of a response, such
 `text`, `table_cells` or per-block confidence. Each descriptor grades every channel with one of
 three letters. `N` means the backend emits that channel itself. `D` means this project computes it
 deterministically from what the backend does emit. `X` means there is no faithful way to produce
-it, so the channel is left out and a `warnings[]` entry names it. [The channel
-contract](../derive/README.md) explains the rules that grading enforces, C1 to C11.
+it, so the channel is left out. An `X` channel is always missing from the response's
+`channel_provenance` map, and only sometimes named in `warnings[]`. `pymupdf` warns about its
+missing confidence on every run, while `tesseract` says nothing at all about its missing
+`table_cells`. So read this table against `channel_provenance` rather than waiting for a warning
+that may never come. [The channel
+contract](../derive/README.md#which-signal-to-trust-when-a-channel-is-missing) explains the rules
+that grading enforces, C1 to C11.
 
 | id | `text` | `markdown` | `blocks` | `block_bbox` | `block_confidence` | `table_cells` | `typed_fields` |
 |---|---|---|---|---|---|---|---|

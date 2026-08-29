@@ -43,8 +43,11 @@ Hold the four facts below in mind, and every command on this page follows from t
 2. A gate is a verdict on one attempt, never on the document. `escalate_when: looks_bad` asks
    openreading's own probe about this backend's output. Is it garbled, near-empty, or a text-layer
    read of a scanned page? A gate that fires keeps the result as best-so-far and moves to the next
-   rung. A rung is one step of a cascade, so the next rung is the next backend in order. The last
-   rung is never gated.
+   rung. A rung is one step of a cascade, so the next rung is the next backend in order. Plain
+   hangs its gate on every rung but the last, so a Plain cascade always accepts what its final
+   backend returned. A gate written on the last rung in longhand does fire. The run then returns
+   the best result it kept, with `orchestration.outcome: degraded` and a
+   `quality_below_threshold` warning, which is the row the docs home tells an agent to escalate on.
 3. Compliance prunes the tree before anything runs. The request's policy, `--policy`, and the file's
    own `policy:` block are combined, and the most restrictive wins. A dropped backend lands in
    `orchestration.dropped[]`. Nothing in the file can bring it back.
@@ -619,9 +622,13 @@ not record. Each rule names the failure it avoids and where it is enforced.
   `OPENREADING_LLM_DECIDER` set, and no request field can enable it
   (`openreading.strategies.decider` §1). A caller cannot talk a service into consulting an LLM its
   operator did not deploy.
-- The cost is honest. `usage.cost_usd` totals every attempt that ran, including winners, losers,
-  shadows, and judges. The engine never estimates a price (`openreading.strategies.plain`,
-  "Guardrails").
+- The cost is honest, and honest is not the same as billed. `usage.cost_usd` totals every attempt
+  that ran, including winners, losers, shadows, and judges, and the engine adds no estimate of its
+  own (`openreading.strategies.plain`, "Guardrails"). What an attempt reported can still be a
+  projection. Six of the thirteen backends declare `basis: estimated`, meaning a published rate
+  applied to a page count rather than money anyone charged. `usage.cost_basis` folds those bases by
+  the priority `billed > estimated > infra_only`, so read that field before you sum a run as spend
+  ([Backend adapters](../adapters/README.md#what-each-backend-charges-and-the-ceilings-on-one-request)).
 
 Every threshold this page prints has a written derivation, and they all live in one document. `uv
 run python -m pydoc openreading.strategies.signals` is that catalog. It gives each signal's formula,

@@ -125,8 +125,11 @@ advice, not an error. Here is `pymupdf.json`, trimmed to the keys you read first
 That page has 21 blocks; one is shown. The listing omits `backend_raw` and `channel_provenance`,
 which [`src/openreading/schemas/README.md`](src/openreading/schemas/README.md) describes. Every
 backend returns this shape. When a backend cannot produce a field, OpenReading leaves it out and
-names it in `warnings[]`. It never invents one, because a made-up confidence looks like a measured
-one, and confidence is exactly the field PyMuPDF is warning about here.
+never invents one, because a made-up confidence looks like a measured one. It names some of those
+gaps in `warnings[]`, as PyMuPDF does for confidence here, and leaves others unannounced.
+`channel_provenance` lists what this run actually produced, so that map is the signal to check
+([The channel
+contract](src/openreading/derive/README.md#which-signal-to-trust-when-a-channel-is-missing)).
 
 Now read the same page the other way. Tesseract ignores the text layer, renders the page to a
 150-DPI bitmap and OCRs it, which is the work it would do on a photograph of the same statement:

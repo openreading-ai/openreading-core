@@ -25,6 +25,12 @@ The batch layer wraps the single-document path and never changes what that path 
 first step, and it expands your sources into one sorted list of files. Each item then runs exactly
 as `parse one.pdf` would, with its own routing and its own compliance check.
 
+That check gates each item against whatever policy reached the request, and `parse` has no
+`--policy` flag, so the command above runs with an empty policy in force. A policy reaches a corpus
+two other ways. Put a `policy:` block in `openreading.yaml` and run the folder under a strategy
+from that file, or call `openreading.run_batch(paths, policy={…})` from Python, which takes one
+directly. [Routing and keys](../router/README.md#recipes) runs both.
+
 ```mermaid
 flowchart LR
   S["sources: dir, glob, files, URLs"] --> I["intake: expand, sort, skip by format"]

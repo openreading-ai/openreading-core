@@ -19,8 +19,11 @@ backend returns the same JSON document, called the envelope, so you write the co
 once. For example, `openreading parse sample.pdf --backend pymupdf` and the same command with
 `--backend tesseract` print envelopes with identical field names. A channel is one kind of output
 inside the envelope, such as plain text, tables, or per-block confidence. When a backend cannot
-produce a channel, the envelope leaves it out and names it in `warnings[]` rather than inventing a
-value. A compliance policy is a short list of rules about which backends may see a document. The
+produce a channel, the envelope leaves it out rather than inventing a value, and
+`channel_provenance` lists the channels this run did produce. A `warnings[]` entry names some of
+those gaps and not others, so read provenance rather than waiting for a warning ([The channel
+contract](derive/README.md#which-signal-to-trust-when-a-channel-is-missing)). A compliance policy
+is a short list of rules about which backends may see a document. The
 router applies that policy before anything runs, and no later step, fallback, or setting can bring a
 dropped backend back.
 

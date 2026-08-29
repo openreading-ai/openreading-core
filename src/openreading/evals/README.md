@@ -248,9 +248,16 @@ uv run openreading leaderboard mydata --backends pymupdf,tesseract,reducto --pol
 ```
 A backend the policy refuses is counted as an error in its own tally and excluded from its mean,
 never silently skipped. `scored 0/3` with three errors is how you read that reducto never ran.
-That is a different row from a backend that ran and scored zero. The cost column is the backend's
-declared price. `--all-ready` replaces `--backends` with every configured backend. Every backend
-makes a real call per case, so with N backends and M cases a hosted key bills N × M calls.
+That is a different row from a backend that ran and scored zero. The `cost/doc` column is a model
+rather than a price anyone quoted. It is the low end of the backend's declared per-page range,
+multiplied by a fixed assumption of 25 pages a document, which is why reducto reads `0.3750` for a
+rate of `$0.015` a page. That figure drops the high end of the range, which is four times the low
+end on reducto and wider still on others, and it is wrong by the ratio of your real average page
+count to 25. Price a corpus
+from the [cost and limits
+table](../adapters/README.md#what-each-backend-charges-and-the-ceilings-on-one-request) and your
+own page counts instead. `--all-ready` replaces `--backends` with every configured backend. Every
+backend makes a real call per case, so with N backends and M cases a hosted key bills N × M calls.
 
 **Tune a strategy's gates from the sample (the calibrate bridge).** A strategy is a named plan over
 one or more backends, and each backend it tries is one rung. A gate is the threshold that decides
