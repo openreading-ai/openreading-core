@@ -371,7 +371,7 @@ the Step column means no step in this guide triggers the code.
 | `retention_unverified` | 1 | `max_retention` set; backend retention unknown | 2 |
 | `retention_unparseable` | 1 | `max_retention` does not parse | 2, failure note |
 | `unsupported_format` | 2 | MIME type not in the backend's `input_formats` | 4 |
-| `missing_<capability>` | 2 | a `features` flag the backend lacks, sent in the request body (`POST /v1/route`) or on a hand-built `OpenReadingRequest`; no CLI flag, and `openreading.route()` takes none (seen: `missing_handwriting`) | — |
+| `missing_<capability>` | 2 | a `features` flag the backend lacks, sent in the request body (`POST /v1/route`) or on a hand-built `OpenReadingRequest`; no CLI flag, and `openreading.route()` takes none (seen: `missing_handwriting`) | - |
 
 ## Reference
 
@@ -394,8 +394,8 @@ the Step column means no step in this guide triggers the code.
 - Webhook wait mode has no push path and degrades to polling (`openreading.router.driver`).
 - Stage 3 has no latency term. No descriptor field exists, so `optimize_for: latency` weights
   quality and cost only (`router/router.py`, `_WEIGHTS`).
-- `MISSING` stays `-` for `anthropic-claude` and `aws-textract` when unconfigured ([Known
-  gaps](../adapters/README.md#known-gaps)).
+- `MISSING` stays `-` for `anthropic-claude` and `aws-textract` when unconfigured ([Not built
+  yet](../adapters/README.md#not-built-yet)).
 - No policy key gates on a descriptor's `soc2`, `gdpr`, `pci` or `phi_path_constraints` fields.
   Backends record them and stage 1 reads none of them, so a SOC 2 or GDPR requirement has no gate
   of its own (`router/compliance.py`, `evaluate`). `data_region` is the nearest thing, and it

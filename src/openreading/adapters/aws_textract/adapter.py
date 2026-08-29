@@ -309,13 +309,10 @@ def _descriptor() -> AdapterDescriptor:
                 accessed="2026-07-21",
                 supports="Block schema, Relationships, 5 API families, error taxonomy, HIPAA eligibility",
             ),
-            Source(
-                url="internal/runs/ledger-defect-worklist.md",
-                accessed="2026-08-22",
-                supports="BL-165: the worklist's own already-verified finding — ClientRequestToken "
-                "existed but was broken (fresh S3 key each attempt, same token) — fixed by keying "
-                "the S3 upload from the document's own content digest instead",
-            ),
+            # BL-165's finding is deliberately uncited here. Its only write-up is in the company
+            # repo, and `sources[]` ships to every caller through `GET /v1/backends`, where a
+            # private path is a pointer nobody outside can follow. The reasoning behind
+            # `idempotency_supported=True` is in the comment on that field instead.
             Source(
                 url="https://docs.aws.amazon.com/textract/latest/dg/API_Operations.html",
                 accessed="2026-08-22",

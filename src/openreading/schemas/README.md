@@ -39,16 +39,17 @@ schemas: request.v0.1.json OK, response.v0.3.json OK, adapter-descriptor.v0.7.js
 fixtures: 0 checked, 0 invalid
 ```
 
-`fixtures: 0 checked` is expected today (see Known gaps). From Python, you validate one instance
-by calling `validate_<family>(instance)`, for example `validate_response`. The families are the
-rows of the table below. Each function returns `None` or raises `jsonschema.ValidationError`.
+`fixtures: 0 checked` is expected today (see "Not built yet"). From Python, you validate one
+instance by calling `validate_<family>(instance)`, for example `validate_response`. The families
+are the rows of the table below. Each function returns `None` or raises
+`jsonschema.ValidationError`.
 
 ## Files
 
 This table tells you which file each schema family lives in and which function validates it. A
 family is one kind of JSON document, such as a request or a response, with its own numbered file.
 
-Source: `src/openreading/schemas/__init__.py` (the `*_SCHEMA_FILE` constants, lines 442–481). Live
+Source: `src/openreading/schemas/__init__.py` (the `*_SCHEMA_FILE` constants). Live
 truth: `uv run python -c "import openreading.schemas as s; print({n: getattr(s, n) for n in dir(s)
 if n.endswith('_SCHEMA_FILE')})"`. If the table and that output disagree, the output is right and
 the table needs fixing.
@@ -104,8 +105,8 @@ Optional fields are described in the Response section of
 `uv run python -m pydoc openreading.schemas`, one entry each with the condition under which it
 appears.
 
-Source: `response.v0.3.json` (top-level `required` lines 6–10, `additionalProperties` line 12,
-`$defs.BBox` lines 14–93, `$defs.Block` lines 94–238, `anyOf` lines 649–682). Live truth: `uv run
+Source: `response.v0.3.json` (the top-level `required` and `additionalProperties` keys, the
+`$defs.BBox` and `$defs.Block` definitions, and the top-level `anyOf`). Live truth: `uv run
 python -c "import json, openreading.schemas as s; print(json.dumps(s.response_schema(),
 indent=1))"`. If the table and that output disagree, the output is right and the table needs
 fixing. In the required column, n/a marks a row that names a whole object rather than one key.
@@ -353,7 +354,7 @@ it, so the warning reaches you before the removal does.
   run `uv run openreading parse sample.pdf --backend pymupdf | python3 -c "import json,sys;
   print(list(json.load(sys.stdin)))"`.
 
-## Known gaps
+## Not built yet
 
 - `openreading.SCHEMA_VERSION` prints `0.1`, the request family's number, unlabelled. Reproduce it
   with `uv run python -c "import openreading; print(openreading.SCHEMA_VERSION)"`.
@@ -380,8 +381,8 @@ To cut a new schema version, copy the current file to `<family>.vX.(Y+1).json`. 
 `*_SCHEMA_FILE` constant at the new file. Add a row to the Files table above. Update the default in
 `openreading.types`. Add a `CHANGELOG.md` line. Leave the old file untouched, because its hash is
 pinned. A new required field, enum value or const goes in the response table above. A new warning
-code needs no edit here. When a Known-gaps line stops being true, delete it. The full table of what
-to update for each kind of change is under *Where a change gets documented* in
+code needs no edit here. When a "Not built yet" line stops being true, delete it. The full table
+of what to update for each kind of change is under *Where a change gets documented* in
 [`AGENTS.md`](../../../AGENTS.md).
 
 <sub>[Docs home](../README.md) · [← Evals](../evals/README.md) · [Backend adapters →](../adapters/README.md)</sub>

@@ -59,7 +59,7 @@ zero. A required env var has `required: true` in the backend's
 descriptor (its `AdapterDescriptor`). A backend with no required var uses its SDK's own
 credential chain when nothing is set.
 
-Source: `src/openreading/adapters/registry.py` (`BUILTIN_ADAPTERS`, lines 27–41) and each
+Source: `src/openreading/adapters/registry.py` (the `BUILTIN_ADAPTERS` mapping) and each
 `make_adapter(id).descriptor` (`credentials_spec`, `config_spec`, `compliance`, `runtime.license`,
 `signup_url`). The install extra is the `pyproject.toml` extra of the same name. The exception is
 the entry in `scripts/check_extras_parity.py` (`EXTRA_NAME_EXCEPTIONS`). Live truth: `uv run
@@ -73,7 +73,7 @@ router drops a backend whose list does not contain that format, with the drop co
 `unsupported_format`. A batch run skips such a file with the same reason. A format marked
 `(rasterized)` means the backend turns each page into an image before it reads it.
 
-Source: `Capabilities.input_formats` in `src/openreading/types/descriptor.py` (line 78), read
+Source: `Capabilities.input_formats` in `src/openreading/types/descriptor.py`, read
 through `make_adapter(id).descriptor.capabilities.input_formats`. Live truth: `uv run python -c
 "from openreading.adapters.registry import make_adapter, BUILTIN_ADAPTERS; [print(i,
 make_adapter(i).descriptor.capabilities.input_formats) for i in BUILTIN_ADAPTERS]"`. If the table
@@ -134,7 +134,7 @@ runs locally and has nothing to sign up for.
 | `chunkr` | tier_gated | opt_out | false | proprietary (AGPL-3.0 self-host available) | https://chunkr.ai |
 | `docling` | na_local | na_local | true | MIT | none |
 | `google-document-ai` | yes | no | false | proprietary | https://cloud.google.com/document-ai |
-| `nuextract` | no | unverified | false | proprietary (open-weight NuExtract 2.0 [MIT 2B/8B] self-hostable via vLLM — different wire protocol, separate adapter) | https://nuextract.ai |
+| `nuextract` | no | unverified | false | proprietary (open-weight NuExtract 2.0 [MIT 2B/8B] is self-hostable via vLLM, but its wire protocol differs and would need a separate adapter) | https://nuextract.ai |
 | `open-ocr` | no | unverified | false | proprietary | https://open-ocr.com |
 | `pulse` | tier_gated | unverified | false | proprietary | https://www.runpulse.com |
 | `pymupdf` | na_local | na_local | true | AGPL-3.0 | none |
@@ -290,7 +290,7 @@ You can set one OpenReading-specific variable and it wins over the vendor's own 
 `REDUCTO_API_KEY`. Source: `credentials.py` (`_slug_env`). The precedence rules are in `uv run
 python -m pydoc openreading.credentials`.
 
-## Known gaps
+## Not built yet
 
 - `uv run openreading backends` prints `-` under MISSING for `anthropic-claude` and `aws-textract`
   while reporting `no`. `GET /v1/backends` names the vars. Reproduce it with `uv run openreading
@@ -332,8 +332,8 @@ Once the adapter itself works, register it in `BUILTIN_ADAPTERS`. Add one row to
 tables here from its descriptor. Add a block to `.env.example`. Add the extra to `pyproject.toml`.
 `scripts/check_extras_parity.py` fails until the extra exists. It also fails until a slug that
 differs from its extra name is in `EXTRA_NAME_EXCEPTIONS`. A changed compliance value, format, env
-var, rate, limit or channel grade is one cell here. When a Known-gaps line stops being true, delete
-it. The full table of what to update for each kind of change is under *Where a change gets
-documented* in [`AGENTS.md`](../../../AGENTS.md).
+var, rate, limit or channel grade is one cell here. When a "Not built yet" line stops being
+true, delete it. The full table of what to update for each kind of change is under *Where a
+change gets documented* in [`AGENTS.md`](../../../AGENTS.md).
 
 <sub>[Docs home](../README.md) · [← JSON Schemas](../schemas/README.md)</sub>

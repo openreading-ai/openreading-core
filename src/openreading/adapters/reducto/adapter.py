@@ -339,13 +339,10 @@ def _descriptor() -> AdapterDescriptor:
                 accessed="2026-07-21",
                 supports="parse chunks/blocks shape, webhooks, credit pricing, tier-gated BAA",
             ),
-            Source(
-                url="internal/runs/ledger-defect-worklist.md",
-                accessed="2026-08-22",
-                supports="BL-166: the worklist's own already-verified finding — Reducto's "
-                "idempotency mentions are about webhook delivery, not submit — reused here rather "
-                "than re-deriving it from a fresh docs fetch",
-            ),
+            # BL-166's finding is deliberately uncited here. Its only write-up is in the company
+            # repo, and `sources[]` ships to every caller through `GET /v1/backends`, where a
+            # private path is a pointer nobody outside can follow. The reasoning behind
+            # `idempotency_supported=False` is in the comment on that field instead.
             Source(
                 url="https://docs.reducto.ai/api-reference/cancel-job.md",
                 accessed="2026-08-22",

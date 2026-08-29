@@ -1487,8 +1487,9 @@ def build_parser() -> argparse.ArgumentParser:
         const="",
         default=None,
         metavar="INSTRUCTIONS",
-        help="request schema-driven field extraction (backends that can't do it report "
-        "unsupported_feature rather than silently dropping the ask)",
+        help="request schema-driven field extraction. A named backend that cannot do it "
+        "refuses the run and exits 3 (unsupported_feature, nothing on stdout) rather than "
+        "silently dropping the ask",
     )
     parse.add_argument(
         "--keep-candidates",
@@ -1519,14 +1520,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         dest="deadline_s",
-        help="absolute time budget override, in seconds. Single document with --backend NAME "
-        "(BL-169): overrides the generic 120s default for that one directly-named backend — "
-        "raise this for a long-running hosted async job (e.g. a large Textract document). "
-        "Batch native dispatch (BL-135): overrides the deadline for a backend dispatched "
-        "natively (internal/design/batch-intake.md §7 — currently anthropic-claude); default there "
-        "is adapter-appropriate (e.g. 1h for anthropic-claude's documented 'most <1h'). Has no "
-        "effect on `auto` or `--strategy` dispatch, which manage their own time budget. A "
-        "non-positive value (0 or negative) means fail fast: don't wait at all (BL-138)",
+        help="absolute time budget override, in seconds. For a single document with "
+        "--backend NAME it overrides the generic 120s default for that one directly-named "
+        "backend, so raise it for a long-running hosted async job (e.g. a large Textract "
+        "document). For a batch dispatched natively (currently anthropic-claude; see "
+        "`pydoc openreading.batch`) it overrides an adapter-appropriate default instead "
+        "(e.g. 1h for anthropic-claude's documented 'most <1h'). It has no effect on `auto` "
+        "or `--strategy` dispatch, which manage their own time budget. A non-positive value "
+        "(0 or negative) means fail fast: don't wait at all",
     )
     parse.add_argument(
         "--save-dir",
@@ -1539,7 +1540,8 @@ def build_parser() -> argparse.ArgumentParser:
     resume = sub.add_parser(
         "resume",
         parents=[common],
-        help="resume an interrupted/failed run from its ledger journal (internal/design/ledger.md §10)",
+        help="resume an interrupted/failed run from its ledger journal "
+        "(see `pydoc openreading.ledger`)",
     )
     resume.add_argument(
         "run_id",
@@ -1720,8 +1722,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         dest="deadline_s",
-        help="absolute time budget override, in seconds, applied to every fanned-out backend "
-        "(BL-169) — raise this for a long-running hosted async job. Default, when omitted, is "
+        help="absolute time budget override, in seconds, applied to every fanned-out backend. "
+        "Raise it for a long-running hosted async job. Default, when omitted, is "
         "the generic 120s single-document deadline. A non-positive value (0 or negative) means "
         "fail fast: don't wait at all",
     )
@@ -1748,7 +1750,7 @@ def build_parser() -> argparse.ArgumentParser:
     calibrate = sub.add_parser(
         "calibrate",
         parents=[common],
-        help="derive gate thresholds from a sample of documents, labels optional (§5)",
+        help="derive gate thresholds from a sample of documents, labels optional",
     )
     calibrate.add_argument(
         "dataset",

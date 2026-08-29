@@ -116,11 +116,15 @@ can only tell you which fields two backends read differently. `leaderboard` scor
 against documents you labeled yourself, so it is the only one that can say which backend is right.
 Label first, run the leaderboard, then use compare to read the disagreements it surfaces.
 
-Every guide has the same eight sections: what it gives you, mental model, walkthrough, recipes, how
-it decides, reference, not built yet, see also. Reference truth stays in docstrings. `uv run python
--m pydoc openreading.<module>` prints a package's contract, and `uv run openreading <cmd> --help`
-prints every flag. A guide demonstrates and points, and it never restates a docstring. The
-maintenance rule is "Where a change gets documented" in [`AGENTS.md`](../../AGENTS.md).
+The nine subsystem guides share one section order: what it gives you, mental model, walkthrough,
+recipes, how it decides, reference, not built yet, see also. The command line and the HTTP server
+add an Operations section to that order. [JSON Schemas](schemas/README.md) and [Backend
+adapters](adapters/README.md) are lookup pages rather than walkthroughs, so they are organized as
+tables. Every page ends with a "Not built yet" section naming what is missing, then a "See also".
+Reference truth stays in docstrings. `uv run python -m pydoc openreading.<module>` prints a
+package's contract, and `uv run openreading <cmd> --help` prints every flag. A guide demonstrates
+and points, and it never restates a docstring. The maintenance rule is "Where a change gets
+documented" in [`AGENTS.md`](../../AGENTS.md).
 
 ## Using OpenReading from an agent
 

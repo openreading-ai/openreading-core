@@ -239,9 +239,9 @@ The request (`request.v0.1`)
 ============================
 Required: `document` + `backend`. `document` is EXACTLY ONE of `bytes_base64` | `url` | `path` |
 `file_id` (+ optional `mime_type`, `filename`). Other top-level fields: `outputs` (markdown /
-text / blocks / typed_fields / tables / chunking), `extraction_schema` (`json_schema`,
-`instructions`, `citations`), `features` (`ocr`, `ocr_languages`, `layout`, `tables`,
-`forms_key_value`, `handwriting`, ..), `pages` (`ranges`, `max_pages`), `routing`
+text / blocks / typed_fields / tables / chunking / include_backend_raw), `extraction_schema`
+(`json_schema`, `instructions`, `citations`), `features` (`ocr`, `ocr_languages`, `layout`,
+`tables`, `forms_key_value`, `handwriting`, ..), `pages` (`ranges`, `max_pages`), `routing`
 (`doc_type_hint`, `optimize_for`, `fallback`), `compliance` (`require_baa`, `no_train_on_data`,
 `data_region`, `require_local`, `max_retention`), `async`, `idempotency_key`. `backend` =
 `{"id": "<slug>|auto|strategy:<name>", "operation"?, "version"?}`. The CLI and Python build it

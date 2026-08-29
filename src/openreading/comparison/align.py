@@ -3,8 +3,8 @@ just content: one's paragraph is another's three lines. `align_pair` matches blo
 validates with canonical-bbox IoU when present, and handles granularity by letting a merged run of
 adjacent same-type blocks on the finer side match a single coarser block. Deterministic: candidate
 pairs are scored, then accepted greedily by (score, IoU, index) — no randomness, no deps beyond
-stdlib. Thresholds are documented constants here, never flags (DESIGN §5; Enterprise calibration
-E5).
+stdlib. Thresholds are documented constants here, never flags (DESIGN §5). Calibrating them
+against adjudicated corpora is company-repo work (E5), not a knob this package exposes.
 """
 
 from __future__ import annotations

@@ -960,7 +960,7 @@ are encoded as titled `oneOf: [string, array, object]` branches so editor comple
 It is served for `# yaml-language-server: $schema=` modelines and submitted to SchemaStore under
 the `openreading.yaml` filename pattern — zero-setup autocomplete and inline validation. Schema
 `description` strings are written at tool-description quality: they are simultaneously editor
-hovers, Enterprise UI labels, and LLM-decider context — one sentence, three consumers.
+hovers, the company web UI's labels, and LLM-decider context — one sentence, three consumers.
 
 
 11. The Plain dialect
