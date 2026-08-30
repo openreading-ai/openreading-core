@@ -4,6 +4,8 @@
 
 > **In one sentence.** With `OPENREADING_LEDGER` set, every strategy run leaves a journal you can
 > resume after an interruption, replay with no network, and erase by destroying one key.
+> One strategy run over one document resumes, a batch of them does not, and a `--backend` run
+> writes no journal at all.
 
 ## What this gives you
 
@@ -13,9 +15,15 @@ network at all. A backend is one parser, such as a local library or a hosted API
 named plan over one or more backends, and only strategy runs are journaled. With
 `OPENREADING_LEDGER` set to a directory, every strategy run writes a journal into it. A journal is
 an append-only record of what was attempted and what came back. Every payload in it is encrypted
-under a key made for that run. `openreading resume <RUN_ID>` re-drives the run from that record
-instead of from scratch. Recorded steps replay byte-identical with zero network calls, and anything
-the first run never reached runs for real. A resume that would amount to a different run, for
+under a key made for that run, and destroying that one key makes those payloads unreadable in every
+copy at once, backups included. The key sits in the same ledger root as the payloads, so the
+encryption buys you erasure rather than protection from someone who can already read that root.
+`openreading resume <RUN_ID>` re-drives the run from that record
+instead of from scratch. A recorded step replays from the journal with zero network calls, and
+returns the payload it returned the first time, byte for byte. Anything the first run never reached
+runs for real. The resumed envelope as a whole is not byte-identical to the original, because it
+records how long the replay took rather than how long the original call took. [Is a resumed run
+byte-identical](#is-a-resumed-run-byte-identical) names the fields that differ. A resume that would amount to a different run, for
 example after the config changed, refuses by name. Payloads expire on a retention clock, and erasing
 a run destroys the key its payloads were encrypted under. You need `sample.pdf` from the root README
 and nothing else, because the walkthrough runs a local strategy.
@@ -40,6 +48,23 @@ Only strategy runs journal, meaning `--strategy NAME` or `auto` with `defaults.s
 surface. A strategy batch journals one run per item rather than one for the whole batch. `--backend
 <id>`, `--no-strategy`, and a native batch journal nothing, even with the variable set. When the
 variable is unset, every surface behaves byte-identically to a build with no ledger at all.
+
+Arming turns the journal into a hard dependency rather than a side-car. A ledger path the process
+cannot write stops the whole parse, and no partial answer reaches stdout:
+
+```bash
+OPENREADING_LEDGER=./sample.pdf uv run openreading parse sample.pdf --strategy offline_first > nd.json; echo "exit=$?"
+```
+
+```text
+[strategy:offline_first] cannot use the run journal at OPENREADING_LEDGER='./sample.pdf': Not a directory. Point it at a writable directory, or unset it to run without a journal (an unjournalled run is not resumable).
+exit=3
+```
+
+**You should see** exit 3 and an empty `nd.json`. A read-only mount, a wrong volume path and a
+directory that is really a file all take this row, and each one fails every parse on that host
+rather than degrading to an unjournalled run. Confirm the path is a writable directory before you
+arm a scheduled job, and treat the ledger volume as part of that job's critical path.
 
 ## Walkthrough
 
@@ -76,14 +101,23 @@ jq -c . .openreading/$RUN_ID.jsonl
 jq -c '{strategy_name, config_hash, plan_hash, journal_version, slim_request}' .openreading/$RUN_ID.header.json
 ```
 ```json
-{"step_id":"ac395956…","status":"attempted","attempt":1,"run_id":"7dbf6b71-…","step_path":"root.steps[0]","step_seq":0,"backend_id":"pymupdf","idempotency_key":"om_bae9f534…","content_key":"om_bae9f534…","started_epoch_ms":1387091881,"journal_seq":0}
-{"step_id":"ac395956…","status":"ok","attempt":1,"run_id":"7dbf6b71-…","step_path":"root.steps[0]","step_seq":0,"backend_id":"pymupdf","idempotency_key":"om_bae9f534…","content_key":"om_bae9f534…","payload":{"run_id":"7dbf6b71-…","digest":"sha256:49e166b7…","size_bytes":17091,"media_type":"application/json","store":"localfs"},"ended_epoch_ms":1387091939,"journal_seq":1}
+{"step_id":"bcfe2aac…","status":"attempted","attempt":1,"run_id":"769d5f06-…","step_path":"root.steps[0]","step_seq":0,"backend_id":"pymupdf","idempotency_key":"om_868044b9…","content_key":"om_868044b9…","started_epoch_ms":1788036714842,"journal_seq":0}
+{"step_id":"bcfe2aac…","status":"ok","attempt":1,"run_id":"769d5f06-…","step_path":"root.steps[0]","step_seq":0,"backend_id":"pymupdf","idempotency_key":"om_868044b9…","content_key":"om_868044b9…","payload":{"run_id":"769d5f06-…","digest":"sha256:49e166b7…","size_bytes":17091,"media_type":"application/json","store":"localfs"},"ended_epoch_ms":1788036714899,"journal_seq":1}
 {"strategy_name":"offline_first","config_hash":"sha256:4b081150…","plan_hash":"sha256:3e0803c8…","journal_version":1,"slim_request":{"backend":{"id":"strategy:offline_first"},"document":{"filename":"sample.pdf","mime_type":"application/pdf"},"schema_version":"0.1"}}
 ```
 
 **You should see** two journal lines that share one `step_id`. The `attempted` line is written
 before the backend call, and the `ok` line after it points at a blob. The header pins what the run
-was, so a later resume can check it. `slim_request` carries no bytes, URL, or password.
+was, so a later resume can check it. `slim_request` records the document's filename and MIME type,
+and never its bytes, a URL, or a password. The header's own `document` block holds the digest and
+size of those bytes, which is what erasure leaves behind.
+
+`started_epoch_ms` and `ended_epoch_ms` are absolute UTC epoch milliseconds, so
+`1788036714842` reads as 2026-08-29T20:51:54.842Z and you can load them as timestamps directly.
+They carry wall time because they leave the process and a later reader has to make sense of them.
+Durations the engine measures for itself use a monotonic clock instead, which no clock adjustment
+can move, so subtracting these two gives elapsed wall time rather than the engine's own
+`duration_ms`.
 
 ### 3. Resume a completed run without a backend call
 
@@ -104,11 +138,16 @@ strategy offline_first  →  pymupdf (ok)
 journal. `resume` takes only the run id, and every option comes from the ledger. From Python,
 `openreading.resume(run_id)` returns the same dict and arms from the environment as the CLI does.
 
+The two files are not byte-identical, and [Is a resumed run
+byte-identical](#is-a-resumed-run-byte-identical) below says which field differs and why.
+
 ### 4. Interrupt a run, then resume it
 
 Make a slower document and a two-rung strategy. A rung is one backend in the order the strategy
 tries them. Press <kbd>Ctrl</kbd>+<kbd>C</kbd> about two seconds in, while tesseract is still
-working.
+working. A scheduler's `SIGTERM` takes the same path and prints the same two lines, so a
+supervised run parks the same way an interactive one does ([The command
+line](../cli/README.md#operations) has the full signal table).
 
 ```bash
 uv run python -c 'import fitz; s=fitz.open("sample.pdf"); o=fitz.open(); [o.insert_pdf(s) for _ in range(8)]; o.save("slow.pdf")'
@@ -137,9 +176,27 @@ exit=0
 
 **You should see** the interrupted rung recorded as `cancelled` at interrupt time. On resume that
 rung replays as `cancelled` rather than running again, and the next rung executes for real.
-`explain` labels the replayed rung `skipped(missing_credentials)`. When a resumed step runs pymupdf
-live, PyMuPDF's advisory line lands on stdout before the JSON. Strip it with
-`tail -n +2 resumed-slow.json`.
+`explain` labels the replayed rung `skipped(missing_credentials)`. A resumed step that runs pymupdf
+live sends PyMuPDF's advisory to stderr like every other verb, so `resume … | jq` is safe.
+
+That replay rule has a consequence worth planning for. The rung that was interrupted never runs, so
+a resumed document is answered by the rung behind it, which is the weaker backend the strategy would
+otherwise have reached only on a failure:
+
+```bash
+uv run openreading parse slow.pdf --strategy slow 2>/dev/null | jq -r '.backend.id'
+jq -r '.backend.id' resumed-slow.json
+```
+
+```text
+tesseract
+pymupdf
+```
+
+**You should see** two different backends for one document. Across a corpus with a few
+interruptions the output is no longer homogeneous, and `backend.id` on each response is the field
+that says which items are affected. Group a finished corpus by that field before you report on it,
+and re-run from scratch the documents that came back from the wrong backend.
 
 ### 5. Refusal by name
 
@@ -162,6 +219,44 @@ not the file's bytes. Two other refusals also exit 3. `resume nope` prints
 `no recorded run 'nope' under .openreading`, and any `resume` with the variable unset prints
 `OPENREADING_LEDGER is not set`.
 
+### Is a resumed run byte-identical
+
+The parsed content is. The whole envelope is not, so do not hash the two files and expect a match.
+Diff them and you get one hunk:
+
+```bash
+diff <(jq -S . run.json) <(jq -S . resumed.json)
+```
+```text
+1311c1311
+<         "duration_ms": 57,
+---
+>         "duration_ms": 1,
+```
+
+**You should see** a single difference, at `orchestration.attempts[].duration_ms`. That field
+records how long this execution took, and a replay from the journal really is faster than the
+original backend call. A resume that reported the original 57ms would be the dishonest answer.
+Everything else matches, including the document, the recorded decisions, the chosen backends, the
+costs, and the per-step statuses.
+
+An audit control that hashes a whole envelope will therefore fire on every resume. Hash
+`.document` for the content alone, or drop the timing first when you want the decisions covered
+too:
+
+```bash
+jq -S 'del(.orchestration.attempts[].duration_ms)' run.json | shasum -a 256
+jq -S 'del(.orchestration.attempts[].duration_ms)' resumed.json | shasum -a 256
+```
+```text
+52785254a9f9a18f15a0c25ef2a60c684086f785b9b2eb1bad82bf1cd1001285  -
+52785254a9f9a18f15a0c25ef2a60c684086f785b9b2eb1bad82bf1cd1001285  -
+```
+
+Byte stability differs by envelope type, and [JSON
+Schemas](../schemas/README.md#clocks-and-byte-stability) carries the table. A `parse --backend`
+response is stable across runs, while a `parse --strategy` response and a batch result are not.
+
 ## Recipes
 
 **Erase a run: by the reaper, or by hand.**
@@ -181,7 +276,30 @@ exit=3
 Deleting the key is exactly what the reaper does. The journal stays, so the run still answers what
 happened, but not with what content. Retention defaults to 24 hours and is read at arm time. A
 hosted backend's own retention limit can only tighten it per step. Raise it before the run, never
-after. Back up `*.jsonl`, `*.header.json`, and `blobs/`, and never back up `keys/` alongside them.
+after.
+
+Read the comment on the `sleep 1` line as a precondition rather than a decoration. The reaper runs
+only when another run arms the ledger, so `OPENREADING_LEDGER_RETENTION_HOURS` sets the earliest
+moment a payload may be destroyed and never the moment it is. Nothing sweeps on a timer, and there
+is no purge verb to call. A run whose window expired on Friday keeps its key and its document bytes
+all weekend if nothing else runs, which is exactly the quiet period a retention promise is written
+for. When you owe someone a deletion deadline, schedule a sweep of your own that does not depend on
+how often the pipeline runs: a cron entry that arms the ledger against the sample every hour is
+enough to fire the reaper, and deleting the file under `keys/` yourself has the same effect as the
+last line above.
+
+Destroying the key deletes one file, the key itself. Every other file stays where it was, and the
+blobs stay on disk as ciphertext nothing can now read. The header keeps `document.digest`, which is
+the SHA-256 of the document's own bytes, along with `document.size_bytes`, `document.media_type`,
+`slim_request.document.filename`, its MIME type, `config_hash`, `plan_hash`, and the pinned backend
+set. The journal keeps each step's backend, status, timing, and cost. What survives is therefore a
+permanent index of which documents this machine processed and when.
+
+Treat that index as regulated data if the documents were. A filename can name a person before
+anything inside the file is read, and this repository's own example document is
+`examples/john_smith_1000_2026_01.pdf`. A digest identifies a document exactly to anyone who already
+holds a copy of it. Back up `*.jsonl`, `*.header.json`, and `blobs/` on those terms, and never back
+up `keys/` alongside them.
 
 **Replay decisions against a new document.**
 `uv run openreading replay other.pdf --trace run.json` re-executes the strategy. It takes each
@@ -195,14 +313,27 @@ are in `uv run python -m pydoc openreading.ledger`. The ones you meet are these.
 
 - Zero delta (L1). When the ledger is unarmed, no file is touched and every byte of output is
   unchanged. Without this rule a ledger would change behaviour for people who never asked for one.
+  L1 says nothing about the armed case, and the armed case is the opposite: a journal that cannot
+  be written fails the parse, as [Mental model](#mental-model) shows.
 - An `attempted` record is written before dispatch and a terminal record after it. A crash between
   the two leaves an orphan, and the idempotency key, one value per identical request, lets a retry
   reconcile it. Without this rule a vendor job could bill and never be recorded.
 - Refuse rather than diverge (L5). A mismatch in `config_hash`, `plan_hash`, or `journal_version`
   refuses the resume outright. Without this rule a resume could silently become a different run.
 - Secrets never enter a payload (L6), so a presigned URL never lands in a backup. Blobs are
-  addressed by `(run_id, digest)` and never shared across runs (L7), so a replay never serves
-  another run's bytes.
+  addressed by `(run_id, digest)` under the run's own directory and encrypted under the run's own
+  key, so a replay reads only the bytes its own run wrote. That isolation comes from the
+  addressing rather than from a check. `BlobStore.get` takes no requesting-run argument and does
+  not yet refuse a foreign `run_id`, which is the cross-run rejection listed under [Not built
+  yet](#not-built-yet).
+- Erasure is crypto-shredding rather than deletion, because a delete would have to reach every
+  replica and backup one file at a time. Each blob is encrypted with a stdlib SHA-256 counter-mode
+  stream cipher under a fresh 32-byte key per run. That cipher is unauthenticated, and integrity
+  comes from the digest the journal recorded rather than from the cipher.
+- The key protects backups, not the ledger root. `keys/` is mode 0700 and each key file is 0600,
+  while the blobs beside them are 0644, all under the one directory `OPENREADING_LEDGER` names.
+  Anyone who can read that whole directory can read the payloads, so give it the filesystem and
+  full-disk protection you would give the documents themselves.
 - A recorded outcome is final. A `skipped` for missing credentials replays as a skip even if the key
   exists now, and the cascade still falls to the next rung. Without this rule a resume could quietly
   dispatch to a vendor the original run never used.
@@ -235,7 +366,10 @@ Each line names the `openreading.ledger` docstring section that records it.
 - `DELETE /v1/jobs/{job_id}`, a durable job store, and `openreading.run(..., ledger=)` ("Surfaces").
 - Whole-path zero-data-retention shipped per step, and cross-run rejection in `BlobStore.get`
   ("Retention, ZDR, erasure").
-- SIGTERM handling, since only Ctrl-C is caught ("Operational contract").
+- A verb that lists resumable runs. After a `SIGKILL` the only way back to a run id is reading
+  `$OPENREADING_LEDGER/*.header.json` by hand ("Operational contract").
+- A retention sweep on a timer. The reaper runs at arm time only, as the recipe above shows
+  ("Retention, ZDR, erasure").
 
 ## See also
 

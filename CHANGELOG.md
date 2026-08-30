@@ -9,10 +9,32 @@ All notable changes to OpenReading are documented here. The format follows
 > a clean clone. `pyproject.toml` and `openreading.__version__` say `0.3.0`. This repository has no
 > git tags, and nothing is published to PyPI, so install from a clone ([`README.md`](README.md),
 > *Install*). The newest numbered heading below, `[0.4.0]`, is a milestone label, not a published release.
-> The package number and this file are reconciled when the first release is tagged. The road to that
-> release is [`ROADMAP.md`](https://github.com/multiversal-ventures/openreading/blob/main/runs/ROADMAP.md) §1.2 (company repo, members only).
+> The package number and this file are reconciled when the first release is tagged. A codename
+> heading below, such as `Canon (v0.5)`, names a branch rather than a version. The root README's
+> "Status and versioning" table lists all five numbers this project carries and which one to pin.
+> The road to that release is [`ROADMAP.md`](https://github.com/multiversal-ventures/openreading/blob/main/runs/ROADMAP.md) §1.2 (company repo, members only).
 
 ## [Unreleased]
+
+### Fixed — a compliance policy is now validated, on every surface
+
+A `--policy` file or a `policy=` argument was an unvalidated dict. `_apply_policy` split it into
+its known compliance and routing keys *before* anything checked it, so an unrecognised key was
+discarded in silence. `{"hipaa": true, "gdpr": "strict", "soc2": ["type2"]}`, or a misspelled
+`require_baaa`, left every backend eligible with an empty `dropped` map and exit 0, and a
+top-level `[]` or `null` ran with no compliance filter at all. A top-level JSON string crashed with
+an uncaught `TypeError`/`AttributeError`. The same keys sent over HTTP as `request.compliance` were
+already refused with a 400, so the answer depended on which surface the policy entered through.
+
+`openreading.api.validate_policy` now runs before any part of a policy is read, from `route`,
+`run`, `run_batch`, `build_request`, `router_config`, every CLI `--policy` flag and the `policy:`
+block of an `openreading.yaml`: the policy must be a JSON object, every key must be one of the ten
+documented names (a near miss gets a `did you mean`), and every value is type-checked, strictly,
+against the model that key feeds. A bad policy is `PolicyError` in Python and exit 3 with
+`[<command>] invalid policy <path>: …` at the CLI. Nothing about a *valid* policy changed, and no
+key was added: the compliance semantics are untouched. The ten key names are derived from
+`Compliance`, `Routing` and `RouterConfig` rather than re-typed beside them, so the policy grammar
+and the router cannot drift apart again.
 
 ### Added — example documents in the clone
 
@@ -310,8 +332,8 @@ router and a fully-local tier. Design research in [`research/openreading/`](http
 - **Compliance-first router** — three stages, compliance never relaxed by fallback, unverified
   claims fail closed; an executable fallback chain (executor with skip-on-missing-credentials, an
   attempt trail, `PlanExhaustedError`, and a bounded idempotency cache).
-- **Local tier** — the `pymupdf` and `tesseract` adapters, HIPAA-by-architecture (documents never
-  leave the environment); the pattern the descriptor-driven hosted adapters follow.
+- **Local tier** — the `pymupdf` and `tesseract` adapters, which make no network calls, so
+  documents never leave the environment; the pattern the descriptor-driven hosted adapters follow.
 - **Tooling** — a conformance kit and secret scrubber shipped in the package for downstream adapter
   authors, and an evaluation harness (scorers, datasets, runner).
 

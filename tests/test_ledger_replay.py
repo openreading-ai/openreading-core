@@ -421,6 +421,74 @@ def test_api_resume_run_reconstructs_the_request_from_a_header_on_disk_and_repla
     assert resumed["document"] == original["document"]
 
 
+def test_an_unusable_ledger_root_fails_with_a_named_config_error_not_a_bare_oserror(
+    tmp_path, monkeypatch, capsys
+):
+    """A45: arming the ledger turns journalling from a side-car into a hard dependency — an
+    unwritable or non-directory `$OPENREADING_LEDGER` takes the whole parse down. That is the
+    right posture (a run that cannot be journalled must not pretend it is resumable), but it used
+    to arrive as the generic `[tag] error: PermissionError: [Errno 13] ...` at exit 1, the CLI's
+    "unexpected error" rung, with the variable that caused it named nowhere. It is an operator
+    config error like a malformed `OPENREADING_API_KEYS`, so it belongs on the same rung: exit 3,
+    one tagged line, and the name of the knob to fix."""
+    monkeypatch.chdir(tmp_path)
+    pdf_path = tmp_path / "doc.pdf"
+    pdf_path.write_bytes(build_sample_pdf())
+    (tmp_path / "openreading.yaml").write_text(
+        "version: 1\nstrategies:\n  s:\n    steps:\n      - backend: pymupdf\n"
+    )
+    not_a_dir = tmp_path / "a-file"
+    not_a_dir.write_text("")
+    monkeypatch.setenv("OPENREADING_LEDGER", str(not_a_dir))
+
+    from openreading.cli.app import main
+
+    rc = main(["parse", str(pdf_path), "--strategy", "s"])
+    cap = capsys.readouterr()
+
+    assert rc == 3
+    assert cap.out == ""
+    assert "OPENREADING_LEDGER" in cap.err  # names the knob, not just an errno and a path
+    assert str(not_a_dir) in cap.err
+    assert "Traceback" not in cap.err
+
+
+def test_cmd_resume_keeps_backend_chatter_off_stdout(tmp_path, monkeypatch, capsys):
+    """`resume` is the one command that let a backend's stdout advisory reach stdout ahead of the
+    envelope, so `openreading resume $ID > out.json` produced a file `jq` refuses. Every other
+    command that dispatches a backend already runs the call inside `redirect_stdout(sys.stderr)`;
+    this pins that `resume` does too, on the recovery path where a broken redirect is discovered
+    at 3 a.m. The advisory is injected rather than coaxed out of PyMuPDF: which library prints,
+    and when, is not the invariant — stdout holding exactly one JSON document is."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENREADING_LEDGER", str(tmp_path / "ledger"))
+    pdf_path = tmp_path / "doc.pdf"
+    pdf_path.write_bytes(build_sample_pdf())
+    (tmp_path / "openreading.yaml").write_text(
+        "version: 1\nstrategies:\n  s:\n    steps:\n      - backend: pymupdf\n"
+    )
+    armed: list[str] = []
+    api.run(str(pdf_path), strategy="s", on_run_armed=armed.append)
+
+    real = api.resume_run
+
+    def _chatty(run_id):
+        print(
+            "Consider using the pymupdf_layout package for a greatly improved page layout analysis."
+        )
+        return real(run_id)
+
+    monkeypatch.setattr("openreading.cli.app.api.resume_run", _chatty)
+    from openreading.cli.app import build_parser, cmd_resume
+
+    rc = cmd_resume(build_parser().parse_args(["resume", armed[0]]))
+    cap = capsys.readouterr()
+
+    assert rc == 0
+    assert json.loads(cap.out)["status"]["state"] == "succeeded"  # stdout is one JSON document
+    assert "pymupdf_layout" in cap.err  # the advisory went somewhere, and that somewhere is stderr
+
+
 def test_cmd_resume_reports_payload_expired_when_the_original_documents_blob_was_shredded(
     tmp_path, monkeypatch, capsys
 ):
@@ -739,7 +807,7 @@ def test_resume_retains_and_replays_a_local_only_run_even_when_an_undispatched_z
     cfg = _cfg([{"backend": "local-solo"}])  # the strategy names ONLY the local backend
     req = _req()
 
-    before_ms = int(RealClock().now_ms())
+    before_ms = int(RealClock().now_wall_ms())  # the base the stamp uses (see ledger.retention)
     run_id, compiled, result = _run_once(ledger_root, reg, cfg, req)
     assert result.response.document.text == "local succeeded"
     # both backends really are eligible — the shape both reviews' repros used, not a narrower one.
@@ -794,7 +862,7 @@ def test_a_dispatched_hosted_backends_own_retention_limit_tightens_the_runs_ceil
     cfg = _cfg([{"backend": "short-hosted"}])
     req = _req()
 
-    before_ms = int(RealClock().now_ms())
+    before_ms = int(RealClock().now_wall_ms())  # the base the stamp uses (see ledger.retention)
     run_id, _compiled, result = _run_once(ledger_root, reg, cfg, req)
     assert result.response.document.text == "short-lived"
 
@@ -804,6 +872,11 @@ def test_a_dispatched_hosted_backends_own_retention_limit_tightens_the_runs_ceil
     # tightened from the (much longer) operator default down to ~1h — this backend's own declared
     # limit, not the un-narrowed arm-time default (`DEFAULT_RETENTION_HOURS` == 24).
     assert stamp["expires_epoch_ms"] - before_ms <= 2 * 3600_000
+    # ...and tightened on the SAME clock base it was stamped with. `tighten_retention` takes a
+    # `min`, so a monotonic `now` here would beat the wall-clock stamp outright and collapse the
+    # ceiling into 1970 — a hosted dispatch shredding its own run. The upper bound above cannot
+    # see that (a far-too-small stamp satisfies it), so assert the floor too.
+    assert stamp["expires_epoch_ms"] > before_ms
 
 
 # ---- AC-12, scoped to open_ocr/aws_textract (§4.6) -----------------------------------------------

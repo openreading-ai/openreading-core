@@ -673,3 +673,119 @@ def test_parallel_branch_recovers_from_a_plain_normalize_crash_and_redacts_it():
     assert res.response.backend.id == "aws-textract"  # the healthy branch still won, not a crash
     assert canary not in str(crash)
     assert "***" in str(crash)
+
+
+# ---- a blown time budget is not a quality problem (B9) -----------------------------------------
+# Both endings retain a result and both are `outcome: degraded`, but they call for opposite
+# responses: a gated-out result says "the document was hard, escalate"; a deadline overrun says
+# "you ran out of time, do not spend more of it". Emitting one code for both made the count of
+# runs that hit their time budget unrecoverable, and pointed the documented triage action
+# ("escalate to a stronger backend") at the one case where escalating is the worst answer.
+
+
+class _SlowScriptedBackend(ScriptedBackend):
+    """A rung that burns real wall time inside `submit`, so a real clock crosses a real deadline.
+    `test_latency_ms` is a parallel-branch knob only — a cascade rung has no virtual latency."""
+
+    def __init__(self, *args, sleep_s: float = 0.0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._sleep_s = sleep_s
+
+    def submit(self, req, ctx):
+        import time as _time
+
+        _time.sleep(self._sleep_s)
+        return super().submit(req, ctx)
+
+
+def _run_realtime(cfg_dict, name, registry):
+    from openreading.router.clock import RealClock
+
+    cfg = StrategyConfig.model_validate(cfg_dict)
+    r = _req()
+    compiled = compile_strategy(r, name, cfg, registry, RouterConfig())
+    return run_strategy(
+        compiled, r, registry=registry, broker=EnvCredentialBroker(), clock=RealClock()
+    )
+
+
+def _deadline_cfg():
+    return {
+        "version": 1,
+        "strategies": {
+            "s": {
+                "steps": ["pymupdf", "reducto"],
+                "escalate_if": "default",
+                "budget": {"max_duration": "10ms"},
+            }
+        },
+    }
+
+
+def test_deadline_overrun_emits_budget_exhausted_not_a_quality_warning():
+    reg = scripted_registry(
+        _SlowScriptedBackend("pymupdf", local=True, text=GARBLED, sleep_s=0.08),
+        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN),
+    )
+    res = _run_realtime(_deadline_cfg(), "s", reg)
+
+    assert res.orchestration["outcome"] == "degraded"  # still degraded, still keep-best
+    assert ("reducto", "succeeded") not in _cats(res)  # the deadline really stopped the walk
+    codes = {w.code for w in (res.response.warnings or [])}
+    assert "budget_exhausted" in codes
+    assert "quality_below_threshold" not in codes  # the two causes are not aliased
+
+
+def test_a_genuine_quality_exhaustion_still_says_quality_below_threshold():
+    # the control: same keep-best ending, no deadline involved — the existing signal is unchanged
+    reg = scripted_registry(
+        ScriptedBackend("pymupdf", local=True, text=GARBLED),
+        ScriptedBackend(
+            "reducto", cost_low=0.01, error=TerminalError("boom", backend_code="server")
+        ),
+    )
+    res = _run(
+        {
+            "version": 1,
+            "strategies": {"s": {"steps": ["pymupdf", "reducto"], "escalate_if": "default"}},
+        },
+        "s",
+        reg,
+    )
+    codes = {w.code for w in (res.response.warnings or [])}
+    assert "quality_below_threshold" in codes
+    assert "budget_exhausted" not in codes
+
+
+def test_a_failing_rung_records_the_backend_s_own_error_code(monkeypatch):
+    """A29: with the `tesseract` binary off PATH, a `try: [tesseract, pymupdf]` strategy exits 0,
+    `outcome: ok`, warning `fallback_used`, and the attempt reads `error(provider_error)` — the
+    same category a rate-limit or a network blip gets, though a missing local binary is permanent
+    and will fail identically on every run until someone installs it.
+
+    The engine's error CLASS is a closed, schema-versioned set with an `on_error` routing contract
+    (`strategy-config` `$defs.on_error`, `additionalProperties: false`), and no uniform, cheap way
+    exists to tell "permanent host fault" from "transient provider fault" without branching on
+    backend type — the one thing the router is forbidden to do. So the class stays
+    `provider_error`, and what ships instead is the discriminator the adapter already computed and
+    the trace was throwing away: `TerminalError.backend_code`, recorded as the attempt's `code`
+    exactly as a compliance drop records its own. `detail` is prose for a human; `code` is what a
+    monitor groups by."""
+    reg = scripted_registry(
+        ScriptedBackend(
+            "tesseract",
+            local=True,
+            error=TerminalError(
+                "tesseract failed: tesseract is not installed or it's not in your PATH.",
+                backend_code="TesseractNotFoundError",
+            ),
+        ),
+        ScriptedBackend("pymupdf", local=True, text=CLEAN),
+    )
+    res = _run({"version": 1, "strategies": {"s": {"steps": ["tesseract", "pymupdf"]}}}, "s", reg)
+
+    failed = res.orchestration["attempts"][0]
+    assert failed["category"] == "error(provider_error)"
+    assert failed["code"] == "TesseractNotFoundError"
+    # the succeeding rung carries no code — the key is present only when there is one
+    assert "code" not in res.orchestration["attempts"][1]

@@ -25,9 +25,11 @@ Environment this module reads itself
 - `OPENREADING_LEDGER` (a directory path; arms the run journal). Read here in exactly one place:
   `_cmd_parse_batch`'s KeyboardInterrupt handler, where it decides between exit 6 ("interrupted,
   per-item runs may be resumable") and re-raising the bare interrupt. Unset, a Ctrl-C in a batch
-  is an ordinary KeyboardInterrupt, byte-for-byte the pre-ledger behavior. The single-document
-  path does not read the variable: it relies on `api.run`'s `on_run_armed` callback, which fires
-  only when the ledger actually armed for THAT run, so a named-backend / `auto` run (which never
+  is an ordinary KeyboardInterrupt, byte-for-byte the pre-ledger behavior (an unset-ledger SIGTERM
+  is caught one level up, by `_terminate_as_interrupt`, and exits 143 with one line). The
+  single-document path does not read the variable: it relies on `api.run`'s `on_run_armed`
+  callback, which fires only when the ledger actually armed for THAT run, so a named-backend /
+  `auto` run (which never
   journals) cannot print a run id that does not exist. Which runs journal is `api._arm_ledger`'s
   call graph, documented in `openreading.api` and internal/design/ledger.md.
 
@@ -41,13 +43,17 @@ in a shell and running the CLI does nothing.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import contextlib
 import json
 import os
+import signal
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
+from openreading import __version__ as openreading_version
 from openreading import api, schemas
 from openreading.adapters.registry import BUILTIN_ADAPTERS, build_registry, make_adapter
 from openreading.batch.runner import MAX_BATCH_JOBS, JobsLimitError
@@ -106,7 +112,7 @@ def _print_exhausted(tag: str, e: PlanExhaustedError, trail_summary: str) -> Non
 
 
 class _PolicyError(Exception):
-    """A `--policy` file that can't be read or parsed."""
+    """A `--policy` file that can't be read, parsed, or validated as a policy."""
 
 
 def _describe_read_error(e: OSError | json.JSONDecodeError) -> str:
@@ -132,16 +138,32 @@ def _describe_read_error(e: OSError | json.JSONDecodeError) -> str:
 
 
 def _load_policy(path: str | None) -> dict[str, Any] | None:
-    """Read a `--policy` JSON file. Raises like `load_config` does for `--config` so each command
-    reports it under its own tag — a bad policy path is a user error, not a crash."""
+    """Read and validate a `--policy` JSON file. Raises like `load_config` does for `--config` so
+    each command reports it under its own tag — a bad policy path is a user error, not a crash.
+
+    Validation is `api.validate_policy`, the same call `route()`/`run()` make, so a policy the
+    library refuses is never accepted here. It is done at LOAD time rather than left to the first
+    reader because every `--policy` subcommand shares this function, and a policy that is wrong is
+    wrong before the document is even opened. `cannot read` covers the file; `invalid policy`
+    covers its content; both are the same soft-failure bucket (exit 3) for the caller.
+    """
     # `is None`, not falsy: only an absent flag means "no policy". An explicit `--policy ""` has to
     # fail loudly rather than silently drop the compliance constraints the caller meant to apply.
     if path is None:
         return None
     try:
-        return json.loads(Path(path).read_text())
+        raw = json.loads(Path(path).read_text())
     except (OSError, json.JSONDecodeError) as e:
         raise _PolicyError(f"cannot read policy {path}: {_describe_read_error(e)}") from e
+    # A file holding `null` parses fine, and `validate_policy(None)` means "no policy" — correct
+    # for the Python default, wrong for a flag the caller typed on purpose. Rejected here, where
+    # the difference between "argument omitted" and "file says null" is still visible.
+    if raw is None:
+        raise _PolicyError(f"invalid policy {path}: policy must be a JSON object, got null")
+    try:
+        return api.validate_policy(raw)
+    except api.PolicyError as e:
+        raise _PolicyError(f"invalid policy {path}: {e}") from e
 
 
 def cmd_parse(args) -> int:
@@ -243,10 +265,17 @@ def cmd_parse(args) -> int:
         # BL-133: the single-document sibling of _cmd_parse_batch's own (SourceLimitError,
         # SourceNotFoundError) handling below — same exit code (2), same one-tagged-line shape.
         # Without this clause, SourceNotFoundError (an OSError subclass) still fell to the generic
-        # except Exception below rather than exit 2 (the openreading.cli docstring's own documented code for `parse`:
-        # an unresolvable source), landing at the wrong-but-clean exit 1 instead.
+        # except Exception below rather than exit 2 (the openreading.cli docstring's own
+        # documented code for `parse`: an unresolvable source), landing at the wrong-but-clean
+        # exit 1 instead.
         print(f"[{label}] {e}", file=sys.stderr)
         return 2
+    except api.PolicyError as e:
+        # A `--policy` file is already refused by _load_policy before we get here; this is the
+        # strategy config's own `policy:` block, refused at the compile boundary. Exit 3 either
+        # way — the caller should not have to know which of the two files carried the bad key.
+        print(f"[{label}] {e}", file=sys.stderr)
+        return 3
     except Exception as e:  # noqa: BLE001
         print(f"[{label}] error: {type(e).__name__}: {e}", file=sys.stderr)
         return 1
@@ -267,6 +296,13 @@ def _save_batch_items(env: dict, save_dir: str) -> None:
         out = root / f"{rel}.json"
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(item["response"], indent=2))
+
+
+def _usd(v: float) -> str:
+    """A dollar amount for the cost preflight. Cents below a dollar-scale total, but four places
+    once rounding to the cent would print `$0.00` for a real (if small) bill — the preflight's
+    whole job is to be a number the reader can multiply, and zero multiplies to zero."""
+    return f"${v:,.2f}" if v >= 0.01 else f"${v:.4f}"
 
 
 def _cmd_parse_batch(args, overrides: dict, label: str) -> int:
@@ -292,18 +328,53 @@ def _cmd_parse_batch(args, overrides: dict, label: str) -> int:
         print(f"[{done}/{total}] {loc} {item.state} {extra}".rstrip(), file=sys.stderr)
 
     def on_preflight(resolved, backend: str) -> None:
-        live = [r for r in resolved if r.skip_reason is None]
-        if backend == "auto" or backend.startswith("strategy:") or len(live) <= 10:
+        # Both advisories describe what `api.run_batch` is about to do to a DIRECTLY NAMED backend:
+        # `auto` and strategies resolve per item inside the router, so neither the rate nor the
+        # concurrency cap below is knowable here — and run_batch skips the cap for them too.
+        if backend == "auto" or backend.startswith("strategy:"):
             return
         try:
             d = make_adapter(backend).descriptor
         except KeyError:
             return
-        if d.type.value == "hosted_api":
-            lo, hi = d.cost.usd_per_page_equiv_low, d.cost.usd_per_page_equiv_high
-            rng = f"~${lo}-${hi}/page-equiv" if lo is not None else "billed per page"
+
+        # The requested --jobs is silently reduced to min(requested, descriptor.batch
+        # .max_concurrency) inside run_batch, and only the reduced value survives, in
+        # `request.jobs`. Without this line a caller who asks for 16 workers on a backend that
+        # caps at 4 sees no speedup, no error, and no way to learn which of the two numbers the
+        # run actually used. Fires only when the request is genuinely unachievable, so the
+        # default (--jobs 1, under every cap) stays silent.
+        cap = d.batch.max_concurrency if d.batch else None
+        if cap and args.jobs > cap:
             print(
-                f"[preflight] {len(live)} items → hosted backend {backend} ({rng} each)",
+                f"[preflight] --jobs {args.jobs} requested; {backend} caps platform concurrency "
+                f"at {cap} (descriptor.batch.max_concurrency), so this run uses {cap}",
+                file=sys.stderr,
+            )
+
+        live = [r for r in resolved if r.skip_reason is None]
+        if len(live) <= 10 or d.type.value != "hosted_api":
+            return
+        # The rate is per PAGE, and items are documents. Naming the item count beside a per-page
+        # rate invites multiplying the two, which under-reads a real corpus by its average page
+        # count. So: state the basis in words, then multiply out the ONE total that is actually
+        # computable before any file is opened (intake reads no bytes and never fetches a URL, so
+        # page counts do not exist yet) and label it as the single-page floor it is.
+        n = len(live)
+        ends = [v for v in (d.cost.usd_per_page_equiv_low, d.cost.usd_per_page_equiv_high) if v]
+        rate = (
+            "-".join(f"${v}" for v in ends) if ends else "billed per page-equiv"
+        )  # one endpoint published, or two, or none
+        basis = f"~{rate} per page-equiv" if ends else rate
+        print(
+            f"[preflight] {n} items → hosted backend {backend}: {basis}, not per item",
+            file=sys.stderr,
+        )
+        if ends:
+            total = "-".join(_usd(v * n) for v in ends)
+            print(
+                f"[preflight] {n} items would cost ~{total} if every item is one page; multiply by "
+                "your average page count (pages are not counted before the run)",
                 file=sys.stderr,
             )
 
@@ -378,7 +449,12 @@ def cmd_resume(args) -> int:
     never falls back to a fresher config. Takes exactly `RUN_ID`; every other option comes from
     the ledger itself (§10)."""
     try:
-        result = api.resume_run(args.run_id)
+        # A resumed walk dispatches live for every step not yet terminal in the journal, so a
+        # backend prints its stdout advisories here exactly as a fresh `parse` does — and `resume`
+        # was the one command not redirecting them, breaking "stdout is one JSON document" on the
+        # recovery path, where the caller is most likely to be a script piping into `jq`.
+        with contextlib.redirect_stdout(sys.stderr):
+            result = api.resume_run(args.run_id)
     except HeaderMismatch as e:
         for field, old, new in e.fields:
             # §10's own transcript names this case "openreading.yaml changed" specifically — every
@@ -468,16 +544,69 @@ def cmd_serve(args) -> int:
             file=sys.stderr,
         )
         return 3
-    from openreading.server import create_app
+    from openreading.server import ServerConfigError, create_app
 
-    app = create_app(cors_origins=args.cors_origin or None)
+    try:
+        app = create_app(cors_origins=args.cors_origin or None)
+    except ServerConfigError as e:
+        # A malformed OPENREADING_API_KEYS / _SCOPES is an operator config error, so it belongs on
+        # the same rung as every other "cannot run" on this CLI (exit 3) and must be readable by
+        # the same log rule: one `[serve] …` line, no traceback. Left uncaught it surfaced as a
+        # 12-line stack with the only useful sentence last, which an operator alerting on the
+        # `[tag]` convention never matched — a server that refuses to start is exactly the moment
+        # that line has to land. Only the message is printed: it names the malformed entry's
+        # POSITION and never its VALUE (BL-159 AC-5), and a startup log must not become the place
+        # a bearer token leaks.
+        print(f"[serve] {e}", file=sys.stderr)
+        return 3
     if args.host != "127.0.0.1":
         print(
             f"[serve] warning: binding {args.host} exposes the server — anyone who can reach it "
             "spends your vendor keys. Put it behind your own auth/proxy.",
             file=sys.stderr,
         )
-    uvicorn.run(app, host=args.host, port=args.port)
+    # Claim the listening socket HERE and hand uvicorn the bound socket, rather than a host/port
+    # for it to claim later. uvicorn's own startup order is lifespan-first, bind-second, so
+    # `INFO: Application startup complete.` is logged BEFORE the port is claimed: a readiness gate
+    # grepping the log for that line passes a server that is about to die of a port conflict, and
+    # the operator reads a healthy startup followed by an exit, with no line joining the two.
+    # Binding first makes every startup line uvicorn prints true at the moment it prints it, and
+    # turns a conflict into what every other "cannot run" on this CLI is — one tagged line, exit 3.
+    # (Even so, no log line is the readiness contract: poll `GET /healthz` until it answers.)
+    #
+    # Done by hand rather than with `uvicorn.Config.bind_socket()` only because that helper logs
+    # its own "Uvicorn running on ..." line, which uvicorn then logs again when it starts serving;
+    # two identical startup lines is a worse thing to hand a responder than these six. Otherwise
+    # it is the same sequence, `listen()` included — `loop.create_server(sock=...)` does that.
+    import socket
+
+    sock = socket.socket(family=socket.AF_INET6 if ":" in args.host else socket.AF_INET)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind((args.host, args.port))
+    except OSError as e:
+        sock.close()
+        print(
+            f"[serve] cannot bind {args.host}:{args.port}: {e.strerror or e} — free it or pass a "
+            "different --port",
+            file=sys.stderr,
+        )
+        return 3
+    sock.set_inheritable(True)
+    # uvicorn suppresses its own "Uvicorn running on ..." line when it is handed a socket (it
+    # assumes `bind_socket()` logged one), so this replaces it — and improves on it: it is printed
+    # only once the port is genuinely claimed, it reports the port the kernel actually gave us
+    # (`--port 0`), and it names the readiness check, because no log line is a readiness contract
+    # and a gate that greps one is a gate that can be fooled.
+    bound_host, bound_port = sock.getsockname()[:2]
+    print(
+        f"[serve] listening on http://{bound_host}:{bound_port} — readiness: GET /healthz",
+        file=sys.stderr,
+    )
+    try:
+        uvicorn.Server(uvicorn.Config(app, host=args.host, port=args.port)).run(sockets=[sock])
+    finally:
+        sock.close()
     return 0
 
 
@@ -727,7 +856,11 @@ def cmd_strategy_plan(args) -> int:
         compiled = compile_strategy(
             req, args.strategy, loaded.config, build_registry(), api.router_config(policy)
         )
-    except (NormalizeError, ComplianceRefused) as e:
+    # PolicyError: the config's own `policy:` block, refused at the compile boundary
+    # (strategies/prune._validated_policy) rather than at load, since the schema leaves that
+    # sub-object open. Same rung as a malformed `--policy` file — a policy that is wrong is wrong
+    # before the document is opened.
+    except (NormalizeError, ComplianceRefused, api.PolicyError) as e:
         print(f"[strategy plan] {e}", file=sys.stderr)
         return 3
     out = {
@@ -873,7 +1006,7 @@ def cmd_replay(args) -> int:
                 clock=RealClock(),
                 replay=decisions,
             )
-    except (NormalizeError, ComplianceRefused) as e:
+    except (NormalizeError, ComplianceRefused, api.PolicyError) as e:
         print(f"[replay] {e}", file=sys.stderr)
         return 3
     except PlanExhaustedError as e:
@@ -979,22 +1112,54 @@ def _render_leaderboard_table(report: Any) -> str:
     lines = [
         f"dataset: {d.path}  ({d.case_count} case(s): {', '.join(d.case_names)})",
         "",
-        f"{'rank':>4}  {'backend':<28} {'mean':>6} {'cost/doc':>10} {'errors':>7}  dimensions",
+        f"{'rank':>4}  {'backend':<28} {'mean':>6} {'scored':>7} {'cost/doc':>10} "
+        f"{'errors':>7}  dimensions",
     ]
     for b in report.backends:
         dims = " ".join(f"{k}={v:.2f}" for k, v in b.dimensions.items())
         nd = "  [non-deterministic: single sample]" if b.non_deterministic else ""
+        # `scored` is the denominator `mean` rests on, and the schema marks n_scored required for
+        # reading mean_score at all. Without it a backend that never scored a case and one that
+        # scored 0.0 on every case it ran are the same row, and `errors` does not separate them —
+        # a case carrying no recognized `expected` dimension is unscored without erroring. A mean
+        # over zero scored cases is not a measurement, so it prints as an em dash rather than a
+        # 0.000 a reader would compare against a measured 0.000.
+        mean = f"{b.mean_score:>6.3f}" if b.n_scored else f"{'—':>6}"
         lines.append(
-            f"{b.rank:>4}  {b.backend_id:<28} {b.mean_score:>6.3f} {b.cost_per_doc:>10.4f} "
-            f"{b.errors:>7}  {dims}{nd}"
+            f"{b.rank:>4}  {b.backend_id:<28} {mean} {f'{b.n_scored}/{b.n_cases}':>7} "
+            f"{b.cost_per_doc:>10.4f} {b.errors:>7}  {dims}{nd}"
         )
     lines.append("")
-    lines.append("per-case winner:")
+    lines.append("per-case result:")
+    tally = {"win": 0, "tie": 0, "all-zero": 0, "no result": 0}
     for c in report.cases:
         scores = ", ".join(
             f"{bid}={s:.2f}" if s is not None else f"{bid}=—" for bid, s in c.scores.items()
         )
-        lines.append(f"  {c.name}: winner={c.winner or '—'}  ({scores})")
+        # The report's `winner` breaks a tie alphabetically (leaderboard-report.v0.1.json), which
+        # is the right rule for a byte-stable JSON field and the wrong thing to print to a human:
+        # naming one backend on a tie, or on a case every backend scored 0.00, invites a per-case
+        # win tally that reads as a sweep when nothing was won. The JSON field is unchanged; the
+        # human block states the outcome it can actually support, and totals it.
+        real = {bid: s for bid, s in c.scores.items() if s is not None}
+        if not real:
+            outcome, bucket = "no result (no backend produced a score)", "no result"
+        else:
+            top = max(real.values())
+            leaders = sorted(bid for bid, s in real.items() if s == top)
+            if top == 0.0:
+                outcome, bucket = "no winner (every scored backend got 0.00)", "all-zero"
+            elif len(leaders) > 1:
+                outcome, bucket = f"tie={','.join(leaders)}", "tie"
+            else:
+                outcome, bucket = f"winner={leaders[0]}", "win"
+        tally[bucket] += 1
+        lines.append(f"  {c.name}: {outcome}  ({scores})")
+    lines.append("")
+    lines.append(
+        f"tally over {len(report.cases)} case(s): "
+        + ", ".join(f"{n} {label}" for label, n in tally.items())
+    )
     return "\n".join(lines)
 
 
@@ -1271,6 +1436,16 @@ def cmd_compare(args) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="openreading", description="Unified document-processing CLI.")
+    # Declared before the required subcommand so `openreading --version` answers instead of failing
+    # the "command is required" check: step zero of every incident is "what is deployed?", and the
+    # version was otherwise reachable only from pyproject.toml, `openreading.__version__`, or
+    # `GET /healthz` on a server that may be the thing that is down.
+    p.add_argument(
+        "--version",
+        action="version",
+        version=f"openreading {openreading_version}",
+        help="print the installed openreading version and exit",
+    )
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
         "--env-file", default=None, help="path to a .env file (default: ./.env if present)"
@@ -1314,8 +1489,9 @@ def build_parser() -> argparse.ArgumentParser:
         const="",
         default=None,
         metavar="INSTRUCTIONS",
-        help="request schema-driven field extraction (backends that can't do it report "
-        "unsupported_feature rather than silently dropping the ask)",
+        help="request schema-driven field extraction. A named backend that cannot do it "
+        "refuses the run and exits 3 (unsupported_feature, nothing on stdout) rather than "
+        "silently dropping the ask",
     )
     parse.add_argument(
         "--keep-candidates",
@@ -1346,14 +1522,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         dest="deadline_s",
-        help="absolute time budget override, in seconds. Single document with --backend NAME "
-        "(BL-169): overrides the generic 120s default for that one directly-named backend — "
-        "raise this for a long-running hosted async job (e.g. a large Textract document). "
-        "Batch native dispatch (BL-135): overrides the deadline for a backend dispatched "
-        "natively (internal/design/batch-intake.md §7 — currently anthropic-claude); default there "
-        "is adapter-appropriate (e.g. 1h for anthropic-claude's documented 'most <1h'). Has no "
-        "effect on `auto` or `--strategy` dispatch, which manage their own time budget. A "
-        "non-positive value (0 or negative) means fail fast: don't wait at all (BL-138)",
+        help="absolute time budget override, in seconds. For a single document with "
+        "--backend NAME it overrides the generic 120s default for that one directly-named "
+        "backend, so raise it for a long-running hosted async job (e.g. a large Textract "
+        "document). For a batch dispatched natively (currently anthropic-claude; see "
+        "`pydoc openreading.batch`) it overrides an adapter-appropriate default instead "
+        "(e.g. 1h for anthropic-claude's documented 'most <1h'). It has no effect on `auto` "
+        "or `--strategy` dispatch, which manage their own time budget. A non-positive value "
+        "(0 or negative) means fail fast: don't wait at all",
     )
     parse.add_argument(
         "--save-dir",
@@ -1366,7 +1542,8 @@ def build_parser() -> argparse.ArgumentParser:
     resume = sub.add_parser(
         "resume",
         parents=[common],
-        help="resume an interrupted/failed run from its ledger journal (internal/design/ledger.md §10)",
+        help="resume an interrupted/failed run from its ledger journal "
+        "(see `pydoc openreading.ledger`)",
     )
     resume.add_argument(
         "run_id",
@@ -1406,8 +1583,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     backends.set_defaults(func=cmd_backends)
 
+    # The epilog names the auth mechanism because this is the last page an operator reads before
+    # a key-holding process starts listening. Help text that mentions authentication nowhere reads
+    # as a server that has none, and the operator binds it wide open.
+    serve_epilog = (
+        "Authentication is OFF by default. With no OPENREADING_API_KEYS set, anyone who can\n"
+        "reach this server spends your vendor credits, which is why the default bind is\n"
+        "127.0.0.1 and any other --host warns.\n"
+        "\n"
+        "Set OPENREADING_API_KEYS to a comma-separated list of bearer tokens to turn auth on.\n"
+        "Every endpoint but GET /healthz and POST /v1/webhooks/{backend_id} then requires an\n"
+        "Authorization: Bearer <token> header and answers 401 without one. Mint a token with\n"
+        "python -c 'import secrets; print(secrets.token_urlsafe(32))'.\n"
+        "\n"
+        "OPENREADING_API_KEY_SCOPES (token=backend1|backend2, comma-separated) narrows one\n"
+        "token to an allow-list of backends. A token absent from it is unscoped and reaches\n"
+        "every backend. Both variables are environment only and are read once at startup, so\n"
+        "rotating a token means restarting the server.\n"
+        "\n"
+        "Full guide: the openreading.server docstring"
+    )
     serve = sub.add_parser(
-        "serve", parents=[common], help="run the HTTP API (needs [server] extra)"
+        "serve",
+        parents=[common],
+        help="run the HTTP API (needs [server] extra)",
+        epilog=serve_epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     serve.add_argument("--host", default="127.0.0.1", help="bind address (default 127.0.0.1)")
     serve.add_argument("--port", type=int, default=8787, help="port (default 8787)")
@@ -1547,8 +1748,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         dest="deadline_s",
-        help="absolute time budget override, in seconds, applied to every fanned-out backend "
-        "(BL-169) — raise this for a long-running hosted async job. Default, when omitted, is "
+        help="absolute time budget override, in seconds, applied to every fanned-out backend. "
+        "Raise it for a long-running hosted async job. Default, when omitted, is "
         "the generic 120s single-document deadline. A non-positive value (0 or negative) means "
         "fail fast: don't wait at all",
     )
@@ -1575,7 +1776,7 @@ def build_parser() -> argparse.ArgumentParser:
     calibrate = sub.add_parser(
         "calibrate",
         parents=[common],
-        help="derive gate thresholds from a sample of documents, labels optional (§5)",
+        help="derive gate thresholds from a sample of documents, labels optional",
     )
     calibrate.add_argument(
         "dataset",
@@ -1622,7 +1823,191 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _is_asyncio_sigint_handler(
+    handler: object,
+) -> TypeGuard[Callable[[int, object], None]]:
+    """True only for the SIGINT handler `asyncio.Runner.run` installs for the duration of a run.
+
+    Delegation is a loaded gun pointed at the stop signal: whatever we hand SIGTERM to becomes the
+    only thing that stops this process. A handler that merely records the signal — an embedder, a
+    test harness, a signal-aware library — returns without unwinding anything, so delegating to it
+    would turn a supervisor's stop into a silent no-op and the run would carry on. Recognising one
+    specific handler, rather than trusting any callable, is the difference between a stop that is
+    safer and a stop that never happens.
+
+    `Runner.run` installs `functools.partial(self._on_sigint, main_task=task)`, so the bound method
+    and the `Runner` it is bound to are both reachable through the partial. Every part of that is
+    CPython's private shape and may change; when it does, this returns False and the caller raises
+    `KeyboardInterrupt` directly — the pre-delegation behaviour, which always stops the process and
+    is only exposed to the narrow teardown window delegation exists to dodge. Fail-safe, not
+    fail-open, is the whole reason the check is written this way round.
+    """
+    bound = getattr(handler, "func", None)  # the partial's wrapped `Runner._on_sigint`
+    return getattr(bound, "__name__", None) == "_on_sigint" and isinstance(
+        getattr(bound, "__self__", None), asyncio.Runner
+    )
+
+
+@contextlib.contextmanager
+def _terminate_as_interrupt(*, enabled: bool = True):
+    """Make SIGTERM arrive as `KeyboardInterrupt`, so a scheduler's stop signal takes the same path
+    Ctrl-C already does, and is restored on the way out.
+
+    Python's default disposition for SIGTERM kills the process outright: no exception, so no
+    `except KeyboardInterrupt` clause runs, no exit code is chosen, nothing is printed. Under the
+    ledger that meant the interrupted step kept its `attempted` record with no terminal record
+    beside it — indistinguishable on resume from a crash before dispatch, so the rung re-dispatched
+    and was billed a second time. Since every supervisor stops a process with SIGTERM (systemd,
+    Kubernetes, a cron timeout wrapper, a cancelled CI job), the resume story was unreachable from
+    every deployment shape that most needs it, and reachable only from a terminal.
+
+    Raising `KeyboardInterrupt` rather than adding a parallel shutdown path is the point: the exit
+    code, the "resumable" line with its run id, and the `cancelled` journal record asyncio writes
+    when the walk unwinds are all existing, tested consequences of Ctrl-C, and a mirror cannot
+    drift away from them.
+
+    Three dispositions are left alone. An inherited `SIG_IGN` means a parent deliberately shielded
+    this process (`nohup`, a shell's asynchronous `&` job, a masking supervisor); reinstalling a
+    handler over that shield would break a contract someone set on purpose. A `getsignal` of `None`
+    reports an unknown handler — one installed from C, before `main()` ran — which the Python API
+    cannot hand back: `signal.signal(SIGTERM, None)` raises `TypeError`, so installing over such a
+    handler both destroys it for the rest of the process and arms our own restore to raise out of a
+    `finally`, replacing whatever was unwinding. Someone else owns that signal. And `signal.signal`
+    only works on the main thread, so an embedded caller driving `main()` from a worker thread gets
+    today's behaviour rather than a `ValueError`. `enabled=False` is the fourth: `serve` hands the
+    process to uvicorn, which installs its own handlers for a graceful drain and then re-raises the
+    captured signal after restoring what was there before — so a handler of ours would fire AFTER a
+    clean shutdown and offer resume advice about a journal a server never arms.
+
+    Where the interrupt is raised matters as much as that it is raised
+    ----------------------------------------------------------------
+    A `KeyboardInterrupt` thrown from a signal handler lands in whatever frame the main thread
+    happened to be executing, and two of those frames belong to asyncio's own event-loop
+    bookkeeping. `BaseEventLoop.run_forever` marks the loop running in `_run_forever_setup()` and
+    unmarks it in `_run_forever_cleanup()`; the setup call sits OUTSIDE `run_forever`'s `try` and
+    the cleanup call is the whole of its `finally`, so an exception raised inside either one leaves
+    `loop.is_running()` true with nothing left to correct it. `asyncio.run`'s teardown then reaches
+    `loop.close()`, which refuses — `RuntimeError: Cannot close a running event loop` — from inside
+    a `finally`, where it REPLACES the interrupt that was unwinding. Every clause keyed on the
+    interrupt is bypassed at once: no exit 6, no run id, no `cancelled` record, no exit 143, no
+    one-line message. What the caller gets instead is `[strategy:<name>] error: RuntimeError: ...`
+    and exit 1, which reads like the document failed to parse. Both rules below exist to keep the
+    interrupt out of those two frames.
+
+    Rule one: the stop is claimed AT MOST ONCE, and the claim covers SIGTERM AND SIGINT together.
+    A second stop signal is not a second decision, it is the same stop arriving down another path —
+    every signal-forwarding parent (`uv run`, tini and the other container init shims, any
+    supervisor whose `killpg` reaches both the wrapper and the wrapped process) delivers it twice
+    by construction, and a responder who runs `kill` and then reaches for Ctrl-C sends two
+    different ones. The first stop is already unwinding by then, and it unwinds THROUGH
+    `_run_forever_cleanup`, so a second interrupt raised on top of it is aimed squarely at the
+    window above. This is the flake that was measured twice: 32 of 40 `uv run` + `killpg` runs died
+    at exit 1 on the RuntimeError, and after a first fix that deduped SIGTERM against SIGTERM only,
+    1 of 160 SIGTERM-then-SIGINT runs still did — because the repeat arrived as the OTHER signal
+    and never reached this handler at all. `asyncio.Runner._on_sigint` counts interrupts and does
+    `raise KeyboardInterrupt()` on every call after the first, so spending asyncio's count on our
+    delegation is what makes a subsequent real Ctrl-C the dangerous one. SIGINT is therefore taken
+    over at the instant the stop is claimed, BEFORE the delegation runs, and dropped from then on.
+    Ignoring repeats costs nothing operationally — a supervisor's escalation is SIGKILL, which is
+    not ours to catch and still works — but it does mean "Ctrl-C twice to force out" ends at the
+    first Ctrl-C once a stop is under way.
+
+    Rule two: hand the stop to `asyncio.Runner`'s own SIGINT handler while one is installed.
+    `Runner` installs one for the whole of `run_until_complete`, and it is interrupt-safe by
+    construction: it cancels the main task and wakes the loop instead of throwing through the
+    loop's internals, and the `KeyboardInterrupt` is then raised by `Runner` itself once the loop
+    has unwound and closed. That covers the frame a run is in for essentially all of its wall time.
+    It is also the more faithful mirror — Ctrl-C reaches exactly this handler — and it keeps the
+    `cancelled` journal record, which is written by the cancellation path and not by the interrupt.
+    Only that handler qualifies (`_is_asyncio_sigint_handler`); anything else, including an ignored
+    SIGINT and a third-party handler that merely sets a flag, gets the direct `KeyboardInterrupt`,
+    because a delegation that does not stop the process is a worse failure than the one being
+    fixed.
+
+    If the delegated call comes back raising, asyncio had already counted an interrupt — a real
+    Ctrl-C beat the SIGTERM by milliseconds. Swallowing it here is rule one seen from the other
+    side, and the claim is re-attributed to SIGINT so the exit code still names the signal that
+    actually started the stop (130, not 143).
+
+    Known gaps. SIGINT arriving twice with no SIGTERM involved is asyncio's own escalation and is
+    untouched: `Runner` refuses to install its handler unless SIGINT is still `default_int_handler`
+    when `run()` is called, so wrapping SIGINT up front would cost the safe cancellation path for
+    every Ctrl-C — a certain loss traded against an unlikely one. Also left: a first stop signal
+    arriving during `asyncio.run`'s own teardown, after `Runner` has restored SIGINT and while it
+    is closing the loop. That is a window of microseconds at the very end of a run, and it is the
+    same window Ctrl-C has had all along — closing either needs a fix in CPython, not here.
+    """
+    if not enabled:
+        yield
+        return
+    try:
+        previous = signal.getsignal(signal.SIGTERM)
+    except (AttributeError, ValueError):  # pragma: no cover - no SIGTERM on this platform
+        yield
+        return
+    if previous is signal.SIG_IGN or previous is None:
+        yield  # someone else owns this signal — see the third paragraph of the docstring
+        return
+
+    fired: list[int] = []
+
+    def _already_stopping(_signum, _frame):
+        return  # rule one, for every stop signal after the first — see this function's docstring
+
+    def _raise(signum, _frame):
+        if fired:
+            return  # rule one: the same stop, arriving again
+        fired.append(signum)
+        sigint = signal.getsignal(signal.SIGINT)
+        if _is_asyncio_sigint_handler(sigint):
+            # rule two: asyncio knows how to unwind itself. Take SIGINT over FIRST, so a real
+            # Ctrl-C landing while the delegation runs cannot reach asyncio's interrupt counter
+            # and be raised into the teardown this call is about to start.
+            # A Python handler only ever runs on the main thread of the main interpreter, so
+            # this cannot raise — but this is the one frame where an escaping exception IS the
+            # bug being fixed, so it is suppressed rather than reasoned about.
+            with contextlib.suppress(OSError, ValueError):
+                signal.signal(signal.SIGINT, _already_stopping)
+            try:
+                sigint(signal.SIGINT, _frame)
+            except KeyboardInterrupt:
+                # asyncio counted this as a repeat: a real Ctrl-C started the stop first, so the
+                # interrupt now unwinding is that one and the exit code belongs to it.
+                fired[0] = signal.SIGINT
+            return
+        raise KeyboardInterrupt
+
+    try:
+        signal.signal(signal.SIGTERM, _raise)
+    except (OSError, ValueError):  # pragma: no cover - not the main thread
+        yield
+        return
+    try:
+        yield
+    except KeyboardInterrupt:
+        if not fired or fired[0] != signal.SIGTERM:
+            raise  # a real Ctrl-C on an unarmed run: pre-ledger behaviour, unchanged
+        # An armed run never reaches here — its handler already returned 6 with a run id. Unarmed
+        # there is nothing to resume, and the mirror has to stop: letting the interrupt unwind
+        # would report 130 (SIGINT) for a signal the caller did not send, over a traceback that
+        # costs a responder their first minute. One line, and the conventional 128 + SIGTERM.
+        print(
+            "[openreading] terminated by SIGTERM; no run journal was armed, so nothing is"
+            " resumable — set OPENREADING_LEDGER to a directory to make the next one resumable",
+            file=sys.stderr,
+        )
+        raise SystemExit(143) from None
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+        if signal.getsignal(signal.SIGINT) is _already_stopping:
+            # `Runner`'s own restore declines to touch a handler it no longer owns, so handing
+            # SIGINT back is ours. `default_int_handler` is both what `Runner` would have restored
+            # and what SIGINT must have held for `Runner` to have installed anything at all.
+            signal.signal(signal.SIGINT, signal.default_int_handler)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     load_dotenv(getattr(args, "env_file", None))  # ./.env or --env-file; never overrides set env
-    return args.func(args)
+    with _terminate_as_interrupt(enabled=args.func is not cmd_serve):
+        return args.func(args)

@@ -2,6 +2,26 @@
 
 The driver never calls time.monotonic()/asyncio.sleep() directly — it goes through a Clock,
 so tests inject a FakeClock that advances virtual time without real waiting.
+
+**Two clocks, and which one a value needs.** `now_ms()` is monotonic and `now_wall_ms()` is the
+Unix epoch; they are not interchangeable and the choice is a correctness decision, not a style
+one.
+
+- `now_ms()` measures elapsed time *inside one process*: deadlines, retry backoff, cache TTLs,
+  `duration_ms`. Wall time is wrong for all of these because it is adjustable — an NTP correction
+  or a DST jump backwards silently extends every live deadline, and one forwards expires healthy
+  runs at once. Monotonic time cannot be stepped, which is the whole reason it exists.
+- `now_wall_ms()` is for any instant that **leaves the process**: written to disk, journaled, or
+  read back by a later process. Monotonic time is wrong for all of these because its zero point
+  is the boot (and Python leaves it formally undefined), so a monotonic reading is meaningless to
+  anyone who did not observe the same boot. Persisting one and comparing it later is the defect
+  this split exists to prevent: the ledger's retention stamp held `time.monotonic()` under a field
+  named `expires_epoch_ms`, so it read as 1970 to a loader and, after a reboot, sat permanently in
+  the future of a reaper whose own clock had restarted near zero — PHI held past the window an
+  operator had attested to. See `openreading.ledger.retention`.
+
+The rule: a number you subtract from another reading of the same clock is `now_ms()`; a number
+that names a moment to anyone else is `now_wall_ms()`.
 """
 
 from __future__ import annotations
@@ -14,12 +34,16 @@ from typing import Protocol
 
 class Clock(Protocol):
     def now_ms(self) -> float: ...
+    def now_wall_ms(self) -> float: ...
     async def sleep(self, seconds: float) -> None: ...
 
 
 class RealClock:
     def now_ms(self) -> float:
         return time.monotonic() * 1000.0
+
+    def now_wall_ms(self) -> float:
+        return time.time() * 1000.0
 
     async def sleep(self, seconds: float) -> None:
         if seconds > 0:
@@ -51,14 +75,28 @@ class FakeClock:
     `asyncio.Future`-backed) — out of scope for the unit that discovered it.
     """
 
-    def __init__(self, start_ms: float = 0.0) -> None:
+    #: An arbitrary fixed instant (2023-11-14T22:13:20Z) so a FakeClock-driven run journals a
+    #: plausible, deterministic wall-clock stamp instead of 1970.
+    DEFAULT_WALL_START_MS = 1_700_000_000_000.0
+
+    def __init__(self, start_ms: float = 0.0, wall_start_ms: float | None = None) -> None:
         self._now = start_ms
+        self._mono_start = start_ms
+        self._wall_start = (
+            self.DEFAULT_WALL_START_MS if wall_start_ms is None else float(wall_start_ms)
+        )
         self._coordinated = False
         self._sleepers: list[tuple[float, int, asyncio.Future]] = []
         self._seq = 0
 
     def now_ms(self) -> float:
         return self._now
+
+    def now_wall_ms(self) -> float:
+        """Virtual wall time: the two bases share one origin and advance together, so a virtual
+        sleep moves both. A reboot is modelled by constructing a NEW FakeClock — small
+        `start_ms`, larger `wall_start_ms` — which is exactly the discontinuity a real one is."""
+        return self._wall_start + (self._now - self._mono_start)
 
     async def sleep(self, seconds: float) -> None:
         if seconds <= 0:

@@ -19,6 +19,10 @@ your documents and never quoted from a vendor, and labeled datasets never land i
 repo ships one synthetic case so the harness proves itself offline, and the walkthrough starts
 there with no key.
 
+What the score measures is narrower than the word accuracy suggests. Most of these scorers ask
+whether the content you expected is present. They do not ask whether the backend added anything
+you did not expect. Step 1 shows which dimension does what, and how to cover the gap.
+
 ## Mental model
 
 A dataset is a directory of case directories, and each case directory holds a `case.json` with the
@@ -32,6 +36,13 @@ number is evidence for you to read.
 
 ## Walkthrough
 
+Build the root README's sample document first, because later steps score against it and no key is
+needed anywhere on this page.
+
+```bash
+uv run python -c 'from openreading.testing.sample_pdf import build_sample_pdf; open("sample.pdf","wb").write(build_sample_pdf())'
+```
+
 ### 1. Rank two backends on the bundled case
 
 ```bash
@@ -40,20 +51,75 @@ uv run openreading leaderboard src/openreading/evals/sample --backends pymupdf,t
 ```text
 dataset: src/openreading/evals/sample  (1 case(s): loan_page1)
 
-rank  backend                        mean   cost/doc  errors  dimensions
-   1  pymupdf                       1.000     0.0000       0  text_contains=1.00 table_cell_accuracy=1.00
-   2  tesseract                     0.500     0.0000       0  text_contains=1.00 table_cell_accuracy=0.00
+rank  backend                        mean  scored   cost/doc  errors  dimensions
+   1  pymupdf                       1.000     1/1     0.0000       0  text_contains=1.00 table_cell_accuracy=1.00
+   2  tesseract                     0.500     1/1     0.0000       0  text_contains=1.00 table_cell_accuracy=0.00
 
-per-case winner:
+per-case result:
   loan_page1: winner=pymupdf  (pymupdf=1.00, tesseract=0.50)
+
+tally over 1 case(s): 1 win, 0 tie, 0 all-zero, 0 no result
 ```
 
 **You should see** the dataset's identity above the ranking, because the verdict is about these
-documents and not a universal one. Both backends found the text, and OCR lost the table grid. Naming
-one backend alone is exit 2. `--format json` prints the schema-valid `leaderboard-report.v0.1` with
-three parts: `dataset {path, case_count, case_names}`, `backends[] {backend_id, rank, mean_score,
-n_cases, n_scored, errors, cost_per_doc, non_deterministic, dimensions}`, and `cases[] {name,
-winner, scores}`.
+documents and not a universal one. Both backends found the text, and OCR lost the table grid. The
+`scored` column is the denominator the mean rests on, written as scored cases over total cases. A
+mean over zero scored cases prints as an em dash rather than a number. So a backend that never ran
+never looks like a backend that ran and scored zero. Naming one backend alone is exit 2.
+
+**What a 1.000 does and does not tell you.** It says pymupdf produced everything this case asked
+for. It does not say pymupdf produced only that. Two of the five expected dimensions count how much
+of what you wrote down came back, and nothing else:
+
+| You write in `expected` | Scored as | Sees content the document does not contain? |
+|---|---|---|
+| `text_contains` | fraction of your strings found in the text | no |
+| `tables` | fraction of your expected cells matched | no, unless you write `"tables": []` |
+| `text` | `difflib` ratio against your full expected text | yes, extra text lowers it |
+| `markdown` | `difflib` ratio against your full expected markdown | yes |
+| `typed_fields` | precision, recall and F1, headline F1 | yes, an extra field lowers precision |
+
+Source: `src/openreading/evals/scorers.py` (`score`). Prove the gap on the shipped case. Doctor a
+good response by adding a total nobody wrote, a table row nobody typed, and four hundred junk
+words, then score it again:
+
+```bash
+cat > halluc.py <<'PY'
+import json, openreading
+from openreading.evals import score
+
+expected = json.load(open("src/openreading/evals/sample/loan_page1/case.json"))["expected"]
+resp = openreading.run("sample.pdf", backend="pymupdf")
+print("as parsed:", score(resp, expected)["overall"])
+
+resp["document"]["text"] += "\nTotal due: 9999999.00\n" + "lorem ipsum " * 200
+for block in resp["document"]["pages"][0]["blocks"]:
+    if block["type"] == "table":
+        block["table"]["rows"].append(["East", "999", "999999"])
+print("with an invented total, a row and 400 junk words:", score(resp, expected)["overall"])
+PY
+uv run python halluc.py
+```
+```text
+as parsed: 1.0
+with an invented total, a row and 400 junk words: 1.0
+```
+
+**You should see** the same 1.0 twice. This is the failure mode of a backend that writes text
+rather than reading it, and two backends in the catalog do that
+([Backend adapters](../adapters/README.md)). Three ways to cover it, cheapest first. Write
+`expected.text` for a handful of documents instead of `text_contains`, because the full-text ratio
+falls when content is added. Score `typed_fields` where a backend can produce them, because that
+dimension carries a real precision term. Run the two top-ranked backends through
+`compare --format diffs` on the same documents. That view names the lines one side has and the
+other does not ([Compare](../comparison/README.md)).
+
+`--format json` prints the schema-valid `leaderboard-report.v0.1` with three parts: `dataset {path,
+case_count, case_names}`, `backends[] {backend_id, rank, mean_score, n_cases, n_scored, errors,
+cost_per_doc, non_deterministic, dimensions}`, and `cases[] {name, winner, scores}`. The JSON
+`winner` field is byte-stable rather than careful. It names one backend on a tie, breaking the tie
+alphabetically, and it names one on a case every backend scored zero. The human `per-case result`
+block distinguishes those, so tally wins from it and never from `cases[].winner`.
 
 ### 2. Read the bundled case
 
@@ -73,32 +139,100 @@ cases use `"input": {"path": "input.pdf"}` next to the file. `expected` may name
 
 ### 3. Write your own dataset
 
+Three cases rather than one, because a one-case dataset can show you neither a tie nor a shared
+failure. You will meet both on real documents.
+
 ```bash
-uv run python -c 'from openreading.testing.sample_pdf import build_sample_pdf; open("sample.pdf","wb").write(build_sample_pdf())'
-mkdir -p mydata/first && cp sample.pdf mydata/first/input.pdf
+for c in first tie neither; do mkdir -p mydata/$c && cp sample.pdf mydata/$c/input.pdf; done
 cat > mydata/first/case.json <<'JSON'
-{
-  "name": "first",
+{ "name": "first",
   "input": {"path": "input.pdf"},
   "expected": {
     "text_contains": ["OpenReading Test Document", "twelve points"],
-    "tables": [[["Region", "Units", "Revenue"], ["North", "120", "4400"]]]
-  }
-}
+    "tables": [[["Region", "Units", "Revenue"], ["North", "120", "4400"]]] } }
+JSON
+cat > mydata/tie/case.json <<'JSON'
+{ "name": "tie",
+  "input": {"path": "input.pdf"},
+  "expected": {"text_contains": ["OpenReading Test Document"]} }
+JSON
+cat > mydata/neither/case.json <<'JSON'
+{ "name": "neither",
+  "input": {"path": "input.pdf"},
+  "expected": {"text_contains": ["Total amount due"]} }
 JSON
 uv run openreading leaderboard mydata --backends pymupdf,tesseract
 ```
 ```text
-dataset: mydata  (1 case(s): first)
-…
-   1  pymupdf                       1.000     0.0000       0  text_contains=1.00 table_cell_accuracy=1.00
-   2  tesseract                     0.500     0.0000       0  text_contains=1.00 table_cell_accuracy=0.00
+dataset: mydata  (3 case(s): first, neither, tie)
+
+rank  backend                        mean  scored   cost/doc  errors  dimensions
+   1  pymupdf                       0.667     3/3     0.0000       0  text_contains=0.67 table_cell_accuracy=1.00
+   2  tesseract                     0.500     3/3     0.0000       0  text_contains=0.67 table_cell_accuracy=0.00
+
+per-case result:
+  first: winner=pymupdf  (pymupdf=1.00, tesseract=0.50)
+  neither: no winner (every scored backend got 0.00)  (pymupdf=0.00, tesseract=0.00)
+  tie: tie=pymupdf,tesseract  (pymupdf=1.00, tesseract=1.00)
+
+tally over 3 case(s): 1 win, 1 tie, 1 all-zero, 0 no result
 ```
 
-**You should see** the same ranking on your own file. Check: `ls mydata/*/case.json`. A case with
-`"expected": {}` is unscored, prints as `—`, and never counts as a zero. A backend with no scored
-case still shows `0.000` in the `mean` column, so read `n_scored` in `--format json` before
-trusting a mean.
+**You should see** one win out of three cases, not three. `tie` asks for a string both backends
+find, and `neither` asks for a string no document here contains. Neither case separates the two
+backends at all. Check: `ls mydata/*/case.json`. A case with `"expected": {}` is unscored, prints
+as `—`, and never counts as a zero.
+
+The `mean` and the `dimensions` on one row do not average to each other, and they are not meant to.
+`mean` is the average of that backend's three per-case overalls. Each dimension is averaged over
+only the cases that named it, so `table_cell_accuracy=1.00` for pymupdf is one case out of three.
+
+### 4. Run a vendor bake-off, in order
+
+The steps above each answer one question. This is the order to run them in when the job is picking
+a backend for real documents and defending the choice afterwards. Every example on this page runs
+at one or three cases, because the repo ships one synthetic document. No number on this page is a
+sample size you should copy.
+
+1. **Sample the documents.** Take them from real traffic rather than from the easy pile, and
+   include the kinds you expect to be hard. A leaderboard is a statement about the documents in it,
+   which is why the dataset path prints above the ranking.
+2. **Decide how many.** Nothing in this repo enforces a minimum, warns at a small one, or reports a
+   spread, so the guard is yours. Two backends a tenth apart on ten documents is one document
+   changing its mind. The tally line tells you how many cases actually separated the backends, and
+   that count, not the case count, is the evidence you have.
+3. **Label them.** A label here is the `expected` object of a `case.json`, written by a person who
+   read the document. Step 2 shows the shape. Write `text` rather than `text_contains` on at least
+   a few, so something on the page can see invented content. The cheapest place to start is the
+   documents where two backends already disagree
+   ([Compare](../comparison/README.md), last recipe).
+4. **Split the labeled set in two before you measure anything.** One slice scores the leaderboard,
+   the other tunes a threshold. Keep the split fixed and write down which case went where.
+5. **Rank on the scoring slice.** `openreading leaderboard <scoring-slice> --backends a,b`. Read
+   the tally and the `scored` column before the mean.
+6. **Read the individual failures, not the mean.** A mean tells you there is a problem and never
+   which document has it.
+   ```bash
+   uv run python -c "
+   from openreading.evals import run_dataset
+   from openreading.adapters.registry import make_adapter
+   print(run_dataset(make_adapter('tesseract'), 'mydata').summary())"
+   ```
+   ```text
+   backend=tesseract  mean_overall=0.500  cases=3  errors=0
+     first: overall=0.500  text_contains=1.00 table_cell_accuracy=0.00
+     neither: overall=0.000  text_contains=0.00
+     tie: overall=1.000  text_contains=1.00
+   ```
+   **You should see** one line per case with its own dimensions, so you can open the worst
+   document and look at it. `leaderboard --format json | jq -c '.cases[]'` gives the same per-case
+   scores across every backend at once.
+7. **Calibrate the gate on the other slice.** `openreading calibrate <tuning-slice> --strategy …`.
+   A threshold picked on the same documents you scored is fitted to those documents. The score you
+   then report cannot tell you whether the gate learned the corpus or learned the noise. Held out,
+   the score is a prediction about documents the threshold never saw.
+8. **Ship, and keep the dataset.** Rerun the leaderboard when a backend releases a new version.
+   That rerun is the whole reason to have written the labels down.
 
 ## Recipes
 
@@ -108,33 +242,58 @@ echo '{"require_local": true}' > local.json
 uv run openreading leaderboard mydata --backends pymupdf,tesseract,reducto --policy local.json
 ```
 ```text
-   3  reducto                       0.000     0.3750       1
+   3  reducto                           —     0/3     0.3750       3  
 …
   first: winner=pymupdf  (pymupdf=1.00, tesseract=0.50, reducto=—)
 ```
 A backend the policy refuses is counted as an error in its own tally and excluded from its mean,
-never silently skipped. The cost column is the backend's declared price. `--all-ready` replaces
-`--backends` with every configured backend. Every backend makes a real call per case, so with N
-backends and M cases a hosted key bills N × M calls.
+never silently skipped. `scored 0/3` with three errors is how you read that reducto never ran.
+That is a different row from a backend that ran and scored zero. The `cost/doc` column is a model
+rather than a price anyone quoted. It is the low end of the backend's declared per-page range,
+multiplied by a fixed assumption of 25 pages a document, which is why reducto reads `0.3750` for a
+rate of `$0.015` a page. That figure drops the high end of the range, which is four times the low
+end on reducto and wider still on others, and it is wrong by the ratio of your real average page
+count to 25. Price a corpus
+from the [cost and limits
+table](../adapters/README.md#what-each-backend-charges-and-the-ceilings-on-one-request) and your
+own page counts instead. `--all-ready` replaces `--backends` with every configured backend. Every
+backend makes a real call per case, so with N backends and M cases a hosted key bills N × M calls.
 
-**Tune a strategy's gates from the sample (the calibrate bridge).**
+**Tune a strategy's gates from the sample (the calibrate bridge).** A strategy is a named plan over
+one or more backends, and each backend it tries is one rung. A gate is the threshold that decides
+whether the strategy escalates from one rung to the next. `calibrate` runs the strategy's first
+rung over the dataset, scores it with these scorers, and proposes `escalate_if:` thresholds. It
+never edits the file. Write the gate as a plain numeric threshold at the top of `escalate_if`,
+because that is the only shape `calibrate` can sweep.
 ```bash
-printf 'version: 1\nstrategies:\n  main:\n    try: [pymupdf, tesseract]\n' > openreading.yaml
-uv run openreading calibrate mydata --strategy main --target-escalation 0.15
+cat > openreading.yaml <<'YAML'
+version: 1
+strategies:
+  main:
+    steps:
+      - backend: pymupdf
+        escalate_if:
+          chars_per_page_below: 200   # flat and numeric, so calibrate can sweep it
+      - tesseract
+YAML
+uv run openreading calibrate mydata --strategy main --target-escalation 0.34 \
+  | jq -c '{n_docs, n_scored, points: (.sweeps[0].points[0:3]), recommended}'
 ```
 ```json
-{ "strategy": "main", "n_docs": 1, "n_scored": 1, "rung1_backend": "pymupdf", "rung2_backend": "tesseract",
-  "target_escalation": 0.15, "max_cost_per_doc": null, "sweeps": [], "recommended": {} }
+{"n_docs":3,"n_scored":3,"points":[{"threshold":0.0,"escalation_rate":0.0,"cost_per_doc":0.0,"scorer_agreement":0.6667},{"threshold":100.0,"escalation_rate":0.0,"cost_per_doc":0.0,"scorer_agreement":0.6667},{"threshold":200.0,"escalation_rate":1.0,"cost_per_doc":0.0,"scorer_agreement":0.3333}],"recommended":{"escalate_if":{"chars_per_page_below":0.0}}}
 ```
-A strategy is a named plan over one or more backends, and each backend it tries is one rung. A gate
-is the threshold that decides whether the strategy escalates from one rung to the next. `calibrate`
-runs the strategy's first rung over the dataset, scores it with these scorers, and proposes
-`escalate_if:` thresholds. It never edits the file. One case is too few to sweep, so `sweeps` is
-empty here. See [Strategies](../strategies/README.md).
+Sample size is not what fills `sweeps`. The gate's shape is. The same strategy written in Plain, as
+`try: [pymupdf, tesseract]` with `escalate_when: looks_bad`, returns `"sweeps": []` on three
+documents and on three thousand. That word compiles to an `any_of` block, and `calibrate` sweeps
+only the flat numeric predicates. [Strategies](../strategies/README.md) §8 lists which predicates
+qualify and how to read the points and the recommendation.
 
-**Score a compare against a golden.** A golden is a file of expected output. `pymupdf.json` and
-`tesseract.json` exist from the root README.
+**Score a compare against a golden.** A golden is a file of expected output. The golden below is the
+`first` case's `expected` block, which describes `sample.pdf`, so parse that document into the two
+envelopes rather than reusing envelopes another page saved from a different document.
 ```bash
+uv run openreading parse sample.pdf --backend pymupdf > pymupdf.json
+uv run openreading parse sample.pdf --backend tesseract > tesseract.json
 jq '.expected' mydata/first/case.json > golden.json
 uv run openreading compare pymupdf.json tesseract.json --truth golden.json --format json | jq -c .truth
 ```
@@ -151,7 +310,7 @@ from openreading.evals import score, run_dataset
 from openreading.adapters.registry import make_adapter
 resp = openreading.run("sample.pdf", backend="pymupdf")
 print(score(resp, json.load(open("golden.json"))))   # {'overall': 1.0, 'dimensions': {'text_contains': 1.0, 'table_cell_accuracy': 1.0}}
-print(run_dataset(make_adapter("tesseract"), "mydata").summary())   # backend=tesseract  mean_overall=0.500  cases=1  errors=0 …
+print(run_dataset(make_adapter("tesseract"), "mydata").summary())   # backend=tesseract  mean_overall=0.500  cases=3  errors=0 …
 ```
 
 ## How it decides
@@ -165,6 +324,12 @@ print(run_dataset(make_adapter("tesseract"), "mydata").summary())   # backend=te
 - Unscored is not zero. A case naming no recognized dimension scores `None` and leaves the mean, so
   a precise-looking number never reports a measurement that did not happen. See `scorers.score`
   and `DatasetReport.mean_overall`.
+- A mean is reported, and a sample size is not judged. The harness accepts one case as readily as
+  five hundred, warns at neither, and reports no spread or interval. Deciding that a gap is real
+  rather than one document's opinion is your job, and step 4 is the order to do it in.
+- Most dimensions measure presence, not absence. `text_contains` and the table scorer count what
+  you asked for and cannot see what the backend added. A leaderboard alone will therefore miss a
+  backend that invents content. Step 1 names the three dimensions that will catch one.
 - Ties break on backend id, so a rerun is byte-identical and rank order never depends on the order
   you typed. Scores never feed the router, so a benchmark never quietly becomes routing policy. See
   `openreading.evals.leaderboard`.
@@ -197,8 +362,9 @@ print(run_dataset(make_adapter("tesseract"), "mydata").summary())   # backend=te
 ## See also
 
 - [Docs home](../README.md)
-- [Compare](../comparison/README.md) for `--truth`.
-- [Strategies](../strategies/README.md) for `calibrate`.
+- [Compare](../comparison/README.md) for `--truth`, and for turning two backends' disagreements
+  into the cases worth labeling first.
+- [Strategies](../strategies/README.md) §8 for reading a `calibrate` sweep and its recommendation.
 - [Batch runs](../batch/README.md) · [Backend adapters](../adapters/README.md) · [JSON
   Schemas](../schemas/README.md)
 

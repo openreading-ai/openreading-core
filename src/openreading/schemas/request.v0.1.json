@@ -142,7 +142,7 @@
       "description": "Hard constraints the router enforces at dispatch. A backend that cannot meet these is not eligible (and is skipped in fallback).",
       "properties": {
         "require_baa": { "type": "boolean", "default": false,
-          "description": "HIPAA: only backends with a signed-BAA path (or fully-local backends where PHI never leaves) are eligible." },
+          "description": "HIPAA: only backends that advertise a BAA (or fully-local backends where PHI never leaves) are eligible. The gate reads what each vendor publishes about its own BAA, so passing it is necessary and not sufficient; the agreement your organisation actually signed is yours to confirm out of band." },
         "no_train_on_data": { "type": "boolean", "default": false,
           "description": "Excludes backends that train on inputs without opt-out (e.g. Textract trains by default; opt-out required)." },
         "data_region": { "type": "string", "description": "e.g. 'us', 'eu'. Enforced against backend data-region options." },

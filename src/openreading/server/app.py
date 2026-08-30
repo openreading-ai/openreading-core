@@ -20,8 +20,10 @@ each (_bad_signature, _unauthorized_response, _scope_denied_response):
   401 unauthorized (BL-159) — caller auth is configured (OPENREADING_API_KEYS non-empty) and this
     request carries no Authorization header, or a bearer value matching no configured key.
   403 scope_denied (BL-159) — the matched API key's backend allow-list (OPENREADING_API_KEY_SCOPES)
-    does not include the backend this request named directly, or the "auto"/"strategy:none"
-    request would otherwise have been routed to.
+    does not include the backend this request named directly, or leaves an "auto"/"strategy:none"
+    request (whose whole router chain it bounds, not just the chosen backend) or a strategy walk
+    with nothing left to run. An `auto` request whose top pick alone is out of scope is rerouted
+    onto the pruned chain, not refused.
 One endpoint deliberately sits OUTSIDE that mapping: POST /v1/backends/{id}/liveness always
 returns 200 with a report, even when the finding is `unreachable` or `unauthorized` — "the backend
 is down" is a SUCCESSFUL diagnostic, not a failure of this API, and a 5xx would conflate the two
@@ -134,6 +136,7 @@ from openreading.types.errors import (
     MissingCredentialsError,
     PlanExhaustedError,
     RetryableError,
+    ScopeRefused,
     TerminalError,
     UnknownStrategyError,
     UnsupportedFeatureError,
@@ -145,6 +148,12 @@ from openreading.types.runtime import ResolvedCredentials, RunContext
 _ADAPTER_ERRORS = (
     PlanExhaustedError,
     ComplianceRefused,
+    # The caller's allow-list left this request nothing to run. Unlike the two cases above it is
+    # raised from INSIDE, past the door, because these request shapes pick their own backends: a
+    # strategy walk in strategies.prune, a plain `auto` chain in api.run_request, and either one's
+    # dispatch-point backstop (strategies.engine._resolve_backend, router.executor.execute_plan).
+    # See _out_of_scope_backend for what the door can and cannot decide.
+    ScopeRefused,
     UnsupportedFeatureError,
     RetryableError,
     TerminalError,
@@ -435,27 +444,76 @@ def _scope_denied_response(backend_id: str) -> JSONResponse:
     )
 
 
-def _out_of_scope_backend(req: OpenReadingRequest, scope: frozenset[str]) -> str | None:
-    """The backend id `req` would actually reach that sits outside `scope`, or None when nothing
-    does — including when the plain router's own plan is already empty, which is ComplianceRefused's
-    call to make, not scope's (BL-159 AC-4: an allow-list only ever subtracts from what compliance/
-    routing already allow, never adds to it).
+def _engages_a_strategy(req: OpenReadingRequest, strategy_config: Any) -> bool:
+    """Would api.run_request take a strategy arm for this request?
 
-    Called BEFORE any adapter is constructed or credential resolved (AC-3), for both a directly-
-    named backend and an "auto" (or "strategy:none", api.run_request's own escape hatch back to
-    plain routing) request the router would otherwise pick one for. A REAL `strategy:<name>` walk
-    is deliberately NOT scope-checked in this version: a strategy can touch more than one backend
-    internally, and scoping that composition raises the same kind of question this spec's own Scope
-    section already cuts for per-token compliance-floor scoping ("deserves its own dedicated pass"
-    rather than folding in here) — see the BL-159 implementation receipt."""
+    Two request shapes reach a strategy walk, and the second is easy to miss: an explicit
+    `strategy:<name>` id, and a plain `auto` id when the operator's config carries a
+    `defaults.strategy` — which is a strategy walk wearing an `auto` id. Both must be left to the
+    walk's own allow-list enforcement rather than gated here against a plain-router pick the
+    request is never going to use.
+    """
+    strat = strip_strategy_prefix(req.backend.id)
+    if strat is not None:
+        return strat != "none"  # `strategy:none` is the escape hatch back to plain routing
+    return bool(
+        req.backend.id == "auto"
+        and strategy_config
+        and strategy_config.defaults
+        and strategy_config.defaults.strategy
+    )
+
+
+def _out_of_scope_backend(
+    req: OpenReadingRequest, scope: frozenset[str], strategy_config: Any = None
+) -> str | None:
+    """A backend id naming why `req` cannot run under `scope`, or None when it can.
+
+    This is the DOOR check. It answers one question — does this request have anything in scope
+    left to run? — and it answers it for the two shapes whose backends are knowable at the door,
+    before any adapter is constructed or credential resolved (AC-3):
+
+    - A directly-named backend: the id IS the request, so scope is a membership test.
+    - An `auto` (or `strategy:none`) request: the plain router's plan is computed here, and the
+      allow-list is applied to the whole CHAIN — chosen plus every fallback — via the same
+      `RoutePlan.restrict_to` that `api.run_request` applies before executing. Reading `chosen`
+      alone was the bug: the executor walks the chain, so a token scoped to the local parser was
+      refused `tesseract` and `docling` by name and then handed both the document the moment the
+      in-scope pick failed on it. Sharing `restrict_to` is what keeps the door and the execution
+      path from ever disagreeing about which backends this request can reach.
+
+    An `auto` request whose first pick is out of scope is NOT refused while an in-scope fallback
+    survives. `auto` asks the router to choose, so a scope bounds what it may choose from rather
+    than vetoing the request over a pick the caller never made — the same prune-then-run outcome a
+    `strategy:` walk already gets, and it costs nothing: only in-scope backends run either way.
+    The refusal is reserved for the chain emptying, which fails closed.
+
+    None is also returned when the plain router's own plan is already empty. That is
+    ComplianceRefused's call to make, not scope's (BL-159 AC-4: an allow-list only ever subtracts
+    from what compliance and routing already allow, and there it subtracted nothing).
+
+    A strategy walk is knowable only from inside, so it is enforced inside: the allow-list travels
+    with the request as `api.run_request(backend_allowlist=...)` and lands in
+    `strategies.prune.compile_strategy`, which prunes every out-of-scope rung and narrows the
+    eligible set an `auto` rung resolves against — still before any adapter is built, and still
+    answering 403 `scope_denied` when it leaves the walk nothing to run. Returning None here is
+    therefore "someone else checks this one", never "this one is unchecked": a `strategy:` id was
+    once genuinely exempt, which made any strategy id a way around the allow-list, and the four
+    presets need no config file, so every caller of every deployment had one.
+    """
     backend_id = req.backend.id
     strat = strip_strategy_prefix(backend_id)
-    if strat is not None and strat != "none":
-        return None  # a real strategy walk — not scope-checked in this version
+    if _engages_a_strategy(req, strategy_config):
+        return None  # checked inside the walk — see above
     if backend_id == "auto" or strat == "none":
         plan = Router(build_registry(), _server_router_config()).route(req)
-        chosen = plan.chosen.descriptor.id if plan.chosen else None
-        return chosen if chosen is not None and chosen not in scope else None
+        if plan.chosen is None:
+            return None  # compliance's refusal, not scope's
+        if plan.restrict_to(scope).chosen is not None:
+            return None  # something the caller may reach survived; the pruned chain runs
+        # Nothing survived. Name the backend the request would have used, which is the one the
+        # operator has to add to the token's allow-list for this request shape to work.
+        return plan.chosen.descriptor.id
     return backend_id if backend_id not in scope else None
 
 
@@ -487,6 +545,17 @@ def _error_envelope(exc: Exception) -> tuple[int, dict[str, Any]]:
     env: dict[str, Any]
     if isinstance(exc, PlanExhaustedError):
         status, env = 502, {"category": "plan_exhausted", "message": str(exc), "trail": exc.trail}
+    elif isinstance(exc, ScopeRefused):
+        # Same 403 and the same `scope_denied` category the door check returns for a directly
+        # named backend, so a caller sees one answer for one cause however the request was
+        # spelled — and deliberately NOT `compliance_refused`, which would send the operator to
+        # edit a policy when the thing to edit is the token's allow-list.
+        status = 403
+        env = {
+            "category": "scope_denied",
+            "message": str(exc),
+            "backend_code": exc.backend_code,
+        }
     elif isinstance(exc, ComplianceRefused):
         status = 403
         env = {
@@ -698,7 +767,7 @@ def create_app(*, cors_origins: list[str] | None = None):
         # an "auto" request the router would otherwise have picked one for.
         scope = getattr(request.state, "api_key_scope", None)
         if scope is not None:
-            denied = _out_of_scope_backend(req, scope)
+            denied = _out_of_scope_backend(req, scope, app.state.strategy_config)
             if denied is not None:
                 return _scope_denied_response(denied)
         try:
@@ -711,9 +780,21 @@ def create_app(*, cors_origins: list[str] | None = None):
                 strategy_config=app.state.strategy_config,
                 keep_candidates=keep,
                 cache=app.state.result_cache,
+                # The half of the gate the door check above cannot do: a strategy walk chooses its
+                # own backends, so the allow-list travels with the request and is enforced where
+                # those choices are made (ScopeRefused → 403 scope_denied, same as the door).
+                backend_allowlist=scope,
             )
         except KeyError as e:
             return _unknown_backend(e)
+        except api.PolicyError as e:
+            # The OPERATOR's `openreading.yaml` `policy:` block, refused at the compile boundary
+            # (strategies/prune._validated_policy). Deliberately not an _ADAPTER_ERRORS member —
+            # it is a server misconfiguration, not a backend outcome, so it takes the table's
+            # "500 anything else" rung rather than a 4xx that would blame the caller's request.
+            # Routed through _error_response so it still answers with the documented envelope
+            # instead of an unhandled 500 with no body.
+            return _error_response(e)
         except _ADAPTER_ERRORS as e:
             return _error_response(e)
         schemas.validate_response(result)  # never emit a non-conforming response
@@ -783,6 +864,23 @@ def create_app(*, cors_origins: list[str] | None = None):
                 f"({MAX_BATCH_DOCUMENTS})"
             )
         backend = body.get("backend", "auto")
+        # `backend` is one shared string for the whole batch here, but it is an OBJECT
+        # (`{"id": ...}`) on /v1/parse and in the vendored request schema, so a client reusing its
+        # own /v1/parse body builder sends the object form — which used to reach `make_adapter`
+        # unstringified and escape as a raw TypeError: HTTP 500, body `Internal Server Error`, the
+        # one response a client written from the documented "every error body has one shape"
+        # ladder cannot parse. Refused rather than reduced to its `id`, because the object also
+        # carries `operation`, `version`, `credentials_ref` and `runtime` — accepting the shape
+        # and keeping only the slug would silently run a different operation than the caller asked
+        # for, which is the failure this project refuses everywhere else.
+        if not isinstance(backend, str):
+            named = (
+                backend.get("id") if isinstance(backend, dict) and backend.get("id") else "pymupdf"
+            )
+            return _bad_request(
+                '"backend" on this endpoint is one string shared by every item, not /v1/parse\'s '
+                f'object — send "backend": "{named}"'
+            )
         # BL-105: `shared` (merged into EVERY per-item request below, in run_one) is an ALLOWLIST
         # of the fields meant to apply batch-wide — not a blocklist of the three batch-envelope-
         # only keys (documents/backend/jobs). A blocklist let `document` (singular) — a genuine
@@ -885,7 +983,7 @@ def create_app(*, cors_origins: list[str] | None = None):
                     # per-item-isolation concern (surfaces there as a `failed` item); it is not a
                     # scope decision, so this pre-check simply defers to that existing path.
                     continue
-                denied = _out_of_scope_backend(item_req, scope)
+                denied = _out_of_scope_backend(item_req, scope, app.state.strategy_config)
                 if denied is not None:
                     return _scope_denied_response(denied)
 
@@ -904,7 +1002,13 @@ def create_app(*, cors_origins: list[str] | None = None):
                 }
             )
             return api.run_request(
-                req, config=_server_router_config(), strategy_config=app.state.strategy_config
+                req,
+                config=_server_router_config(),
+                strategy_config=app.state.strategy_config,
+                # A `strategy:` batch is the highest-volume way to reach an out-of-scope backend —
+                # one request, `documents[]` items of spend — and the top-level `backend` check
+                # above deliberately skips strategy ids, so this is the gate for that shape.
+                backend_allowlist=scope,
             )
 
         echo = BatchRequestEcho(
@@ -939,9 +1043,14 @@ def create_app(*, cors_origins: list[str] | None = None):
                     req,
                     config=_server_router_config(),
                     strategy_config=app.state.strategy_config,
+                    # Same walk, same gate as /v1/parse: wrapping it in a job must not be a way to
+                    # reach a backend the token is refused when it asks synchronously.
+                    backend_allowlist=getattr(request.state, "api_key_scope", None),
                 )
             except KeyError as e:
                 return _unknown_backend(e)
+            except api.PolicyError as e:  # operator config — /v1/parse's sibling above
+                return _error_response(e)
             except _ADAPTER_ERRORS as e:
                 # UnknownStrategyError is a TerminalError, so this catches it too;
                 # _error_response maps it to its own 400 before the generic terminal branch.
@@ -966,7 +1075,7 @@ def create_app(*, cors_origins: list[str] | None = None):
         # constructs an adapter or resolves a vendor credential.
         scope = getattr(request.state, "api_key_scope", None)
         if scope is not None:
-            denied = _out_of_scope_backend(req, scope)
+            denied = _out_of_scope_backend(req, scope, app.state.strategy_config)
             if denied is not None:
                 return _scope_denied_response(denied)
         try:

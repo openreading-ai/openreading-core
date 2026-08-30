@@ -136,3 +136,116 @@ def test_leaderboard_cli_taxonomy_member_exits_3_clean(exc, capsys, monkeypatch)
     assert str(exc) in err
     assert "Traceback" not in err
     assert type(exc).__name__ not in err  # clean [label] line, not the exit-1 crash-handler shape
+
+
+# ---- the human table must carry what the schema calls required to read a mean (C12, A30) -------
+#
+# `_render_leaderboard_table` is a pure function of a BenchmarkReport, so these build the report
+# directly: the cases that matter (a backend that never scored, a tie, a mutual failure) cannot be
+# produced from the shipped one-case sample, and inventing backends to produce them would test the
+# runner rather than the renderer.
+
+
+def _report(backends, cases, path="ds", case_names=None):
+    from openreading.types.leaderboard import (
+        BenchmarkReport,
+        LeaderboardBackend,
+        LeaderboardCase,
+        LeaderboardDataset,
+    )
+
+    names = case_names if case_names is not None else [c["name"] for c in cases]
+    return BenchmarkReport(
+        dataset=LeaderboardDataset(path=path, case_count=len(names), case_names=names),
+        backends=[LeaderboardBackend(**b) for b in backends],
+        cases=[LeaderboardCase(**c) for c in cases],
+    )
+
+
+def _backend(bid, rank, mean, n_cases, n_scored, errors=0, nd=False, dims=None):
+    return {
+        "backend_id": bid,
+        "rank": rank,
+        "mean_score": mean,
+        "n_cases": n_cases,
+        "n_scored": n_scored,
+        "errors": errors,
+        "cost_per_doc": 0.0,
+        "non_deterministic": nd,
+        "dimensions": dims or {},
+    }
+
+
+def test_table_distinguishes_a_never_scored_backend_from_a_genuine_zero():
+    # C12: both rows carry mean_score 0.0. Only n_scored separates "scored 0.0 on every case it
+    # ran" from "never scored a case", and the schema marks n_scored required for reading a mean.
+    # `errors` does not separate them: a case with no recognized `expected` dimension is unscored
+    # without erroring, so the never-scored row can show errors 0 too.
+    from openreading.cli.app import _render_leaderboard_table
+
+    out = _render_leaderboard_table(
+        _report(
+            [
+                _backend("scored-zero", 1, 0.0, 2, 2, dims={"text_contains": 0.0}),
+                _backend("never-ran", 2, 0.0, 2, 0),
+            ],
+            [
+                {
+                    "name": "a",
+                    "winner": "scored-zero",
+                    "scores": {"scored-zero": 0.0, "never-ran": None},
+                },
+                {
+                    "name": "b",
+                    "winner": "scored-zero",
+                    "scores": {"scored-zero": 0.0, "never-ran": None},
+                },
+            ],
+        )
+    )
+    # columns: rank, backend, mean, scored, cost/doc, errors, dimensions...
+    scored_row = next(ln for ln in out.splitlines() if "scored-zero" in ln).split()
+    never_row = next(ln for ln in out.splitlines() if "never-ran" in ln).split()
+    assert (scored_row[2], scored_row[3]) == ("0.000", "2/2")  # a measured zero, over 2 cases
+    assert (never_row[2], never_row[3]) == ("—", "0/2")  # 0/0 is not a measurement, so no number
+    assert "scored" in out.splitlines()[2]  # the column is named in the header
+
+
+def test_table_marks_a_non_deterministic_backend():
+    from openreading.cli.app import _render_leaderboard_table
+
+    out = _render_leaderboard_table(
+        _report(
+            [_backend("generative", 1, 0.9, 1, 1, nd=True), _backend("plain", 2, 0.5, 1, 1)],
+            [{"name": "a", "winner": "generative", "scores": {"generative": 0.9, "plain": 0.5}}],
+        )
+    )
+    assert "non-deterministic" in next(ln for ln in out.splitlines() if "generative" in ln)
+    assert "non-deterministic" not in next(ln for ln in out.splitlines() if " plain" in ln)
+
+
+def test_per_case_block_names_no_winner_on_a_tie_or_a_mutual_failure():
+    # A30: the JSON `winner` breaks ties alphabetically, a rule stated only inside the schema. The
+    # human block must not present that tiebreak as a result: a reader tallying this block would
+    # otherwise read 4-0 where the honest tally is 1 win, 1 tie, 1 mutual failure, 1 no result.
+    from openreading.cli.app import _render_leaderboard_table
+
+    out = _render_leaderboard_table(
+        _report(
+            [_backend("aaa", 1, 0.5, 4, 3), _backend("bbb", 2, 0.5, 4, 3)],
+            [
+                {"name": "win", "winner": "bbb", "scores": {"aaa": 0.2, "bbb": 0.9}},
+                {"name": "tie", "winner": "aaa", "scores": {"aaa": 1.0, "bbb": 1.0}},
+                {"name": "both_zero", "winner": "aaa", "scores": {"aaa": 0.0, "bbb": 0.0}},
+                {"name": "neither", "winner": None, "scores": {"aaa": None, "bbb": None}},
+            ],
+        )
+    )
+    lines = {ln.strip().split(":")[0]: ln for ln in out.splitlines() if ln.startswith("  ")}
+    assert "winner=bbb" in lines["win"]
+    assert "tie" in lines["tie"] and "winner=" not in lines["tie"]
+    assert "winner=" not in lines["both_zero"]
+    assert "winner=" not in lines["neither"]
+    # and the tally, so the block cannot be read as a 4-0 sweep
+    tally = next(ln for ln in out.splitlines() if "tally" in ln)
+    assert "1 win" in tally and "1 tie" in tally

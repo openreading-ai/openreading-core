@@ -14,7 +14,8 @@ from openreading.evals.scorers import canonical_text
 from .ingest import Subject
 
 # A pair whose token similarity falls below this is flagged `text_divergence`. A documented,
-# tunable constant (DESIGN §5: thresholds live in code, not flags); Enterprise calibration E5.
+# tunable constant (DESIGN §5: thresholds live in code, not flags). Calibrating it against
+# adjudicated corpora is company-repo work (E5), not a knob this package exposes.
 TEXT_DIVERGENCE_BELOW = 0.5
 
 

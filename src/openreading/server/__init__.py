@@ -65,8 +65,13 @@ POST /v1/batch
     server takes explicit documents. A per-item failure never aborts the batch: 200 even when
     `status.state` is `partial`; `documents: []` → 200 with one `empty_batch` warning and
     `summary.total == 0`, mirroring the CLI's empty-directory behaviour. Unknown named backend →
-    404; non-list `documents`, non-integer `jobs`, or any unrecognised body key (`max_jobs`
-    included) → 400.
+    404; non-list `documents`, non-integer `jobs`, any unrecognised body key (`max_jobs`
+    included), or a non-string `backend` → 400. That last one is the shape trap: `backend` here is
+    ONE string shared by every item, while /v1/parse and the vendored request schema take the
+    object `{"id": ...}`, so a client reusing its own /v1/parse body builder sends the object and
+    is refused by name. It is refused rather than reduced to its `id` because the object also
+    carries `operation`, `version`, `credentials_ref` and `runtime` — keeping only the slug would
+    silently run a different operation than the caller asked for.
     Limits: `jobs` < 1 is clamped to 1 (no legitimate intent behind a non-positive count);
     `jobs` > MAX_BATCH_JOBS (32, a real ThreadPoolExecutor size) and `documents` longer than
     MAX_BATCH_DOCUMENTS (200 = `batch.sources.DEFAULT_MAX_ITEMS`, the CLI directory-expansion
@@ -142,16 +147,26 @@ HTTP status codes
      (`bad_signature`); or caller auth is on and the request carries no `Authorization` header,
      or a bearer matching no configured key (`unauthorized`)
 403  compliance refused / no eligible backend (`compliance_refused`); or the matched API key's
-     allow-list excludes the backend named directly, or the one an "auto" / "strategy:none"
-     request would be routed to (`scope_denied`)
+     allow-list excludes the backend named directly, or the subtraction leaves nothing an
+     "auto"/"strategy:none" request's fallback chain or a `strategy:<name>` walk could still
+     reach (`scope_denied`) — an out-of-scope top pick is rerouted to an in-scope fallback, not
+     refused, so this fires only when no in-scope backend is left
 404  unknown backend id / unknown job id
 413  document exceeds the size limit (`doc_too_large`)
 422  requested feature the backend cannot produce (`unsupported_feature`)
 424  a directly-named backend is missing credentials (`missing_credentials`; `missing_env[]`
      names them) or its key was found and REJECTED by the provider (`auth_rejected`; the
      message names the var to check, never the key)
-502  plan exhausted — every backend failed (`plan_exhausted`, `trail`) — or other terminal error
+502  plan exhausted — every backend failed (`plan_exhausted`, `trail`) — or other terminal error,
+     which INCLUDES two permanent request-shape refusals a client must not retry:
+     `credentials_ref_alias_not_allowed` and `endpoint_not_request_configurable`. Read
+     `backend_code` before deciding a 502 is a server outage
 504  deadline exceeded, retryables exhausted (`retryable_exhausted`)
+500  an unhandled server error. This is the ONE status that does not carry the error body below:
+     the ASGI framework returns the plain text `Internal Server Error`, so a client parsing every
+     response as the envelope crashes on exactly the response it least expected. Branch on the
+     status before parsing, and treat a 500 as a bug to report rather than a caller-side
+     condition to handle — every condition this server knows about has a coded row above.
 
 Error body — also the shape of a failed job's `error` (`missing_env` only for missing
 credentials, `trail` only for `plan_exhausted`):
@@ -182,10 +197,40 @@ schema/compliance layer sees. Mint one with `secrets.token_urlsafe(32)`.
 `OPENREADING_API_KEY_SCOPES` (`token=backend1|backend2`, comma-separated) narrows a listed token
 to a backend allow-list, checked BEFORE any adapter is constructed or vendor credential resolved,
 so an out-of-scope request never reaches a paid backend. An unlisted token is unscoped. A scope
-only ever NARROWS what compliance and routing already allow; a real `strategy:<name>` walk (which
-may touch several backends) is not scope-checked in this version. A malformed value in either var
-(empty entry, scope for an unlisted key, two scopes for one key, ...) fails startup naming the
-setting — never its value — instead of failing unpredictably on the first request. Token
+only ever NARROWS what compliance and routing already allow, and never widens it: scoping a token
+to a backend the request's compliance already dropped does not put it back.
+
+The allow-list covers every backend a request can reach, and a request reaches more than one. A
+directly named backend is the whole request, so it is a membership test at the door
+(`server.app._out_of_scope_backend`). The other two shapes pick their own backends and are bounded
+by the same subtraction applied one layer in, before any adapter is built or vendor credential
+resolved:
+
+- A plain `auto` / `strategy:none` request is a router PLAN — the chosen backend plus every
+  fallback — and `router.executor.execute_plan` walks all of it. `RoutePlan.restrict_to` prunes
+  that whole chain to the allow-list, at the door and again in `api.run_request` before execution.
+  Checking the chosen backend alone was a live bypass: a token scoped to the local parser was
+  refused `tesseract` and `docling` by name and then delivered the document to both, because a
+  document the in-scope pick could not parse fell through to them. `/v1/batch` did it once per
+  document.
+- A `strategy:<name>` walk — and a plain `auto` request that engages one because the config sets
+  `defaults.strategy` — carries the allow-list into `strategies.prune.compile_strategy`, which
+  drops every out-of-scope rung and narrows the eligible set an `auto` rung resolves against.
+
+Both shapes then run on what is left, the way they already do after a compliance drop; a strategy
+additionally records each removed rung as a `scope_denied` entry in `orchestration.dropped`. An
+`auto` request whose top pick is out of scope is therefore rerouted, not refused — a scope bounds
+what the router may choose from, and only in-scope backends run either way. When the subtraction
+leaves nothing at all, the request is refused with the same 403 `scope_denied` a direct call gets,
+never a 502 and never a success on nothing.
+
+Each path is re-checked at its own dispatch point, so a bug in either prune cannot silently reopen
+it: `router.executor.execute_plan` for the chain, `strategies.engine._resolve_backend` for the
+walk. Both refuse rather than skip, because reaching one means a layer above failed.
+
+A malformed value in either var (empty entry, scope for an unlisted key, two scopes for one key,
+...) fails startup naming the setting and the entry's position — never its value. Over the CLI
+that surfaces as a single `[serve] ...` line on stderr and exit 3, not a traceback. Token
 comparison is constant-time (`hmac.compare_digest`).
 What this does NOT add: rate limiting, spend accounting, transport encryption. A scoped caller can
 still submit a large batch within its backends, and a token over plain HTTP is readable on the
@@ -198,6 +243,9 @@ per-document one, and the wire schema is `extra=forbid`).
 
 from __future__ import annotations
 
-from openreading.server.app import create_app
+from openreading.server.app import ServerConfigError, create_app
 
-__all__ = ["create_app"]
+# ServerConfigError is exported because create_app() raising it IS part of the startup contract:
+# `openreading serve` has to catch it to report a malformed deploy setting as a tagged one-line
+# error instead of a traceback (openreading.cli.app.cmd_serve).
+__all__ = ["ServerConfigError", "create_app"]

@@ -13,7 +13,12 @@ from openreading.credentials import EnvCredentialBroker
 from openreading.router.clock import FakeClock
 from openreading.router.executor import BoundedResultCache, execute_plan
 from openreading.router.router import RoutePlan
-from openreading.types.errors import PlanExhaustedError, RetryableError, TerminalError
+from openreading.types.errors import (
+    PlanExhaustedError,
+    RetryableError,
+    ScopeRefused,
+    TerminalError,
+)
 from openreading.types.request import OpenReadingRequest
 from openreading.types.response import NormalizedResponse
 from tests.fakes import ConfigurableBackend, NeverFinishesFake, ScriptedBackend, make_backend
@@ -45,6 +50,38 @@ def _codes(resp: NormalizedResponse) -> list[str]:
 
 
 # --- fallback on failure ---------------------------------------------------------------
+
+
+def test_executor_refuses_a_dispatch_the_chain_prune_would_have_had_to_miss():
+    """The runtime backstop, mirroring `strategies.engine._resolve_backend`.
+
+    A plan carrying an allow-list has already been pruned to it. This constructs the state that
+    prune is supposed to make impossible — an out-of-scope adapter still sitting in the chain —
+    because a backstop that only holds when the layer above it works is not a backstop. The
+    refusal is a raise, not a skip to the next rung: a spurious refusal is a support ticket, a
+    missed one spends someone else's vendor credits and looks exactly like normal traffic.
+
+    `chosen` is a backend whose `submit` raises, so it would be swallowed by the executor's own
+    fallback handling and the run would quietly succeed on `in-scope` if the check were missing or
+    placed inside the try. It has to fire before the run context is built, since building one
+    resolves the vendor credential this backend is not allowed to spend.
+    """
+    plan = RoutePlan(
+        chosen=_FailingBackend("out-of-scope", TerminalError("never reached", backend_code="x")),
+        fallbacks=[make_backend("in-scope", local=True)],
+        backend_allowlist=frozenset({"in-scope"}),
+    )
+    with pytest.raises(ScopeRefused) as excinfo:
+        execute_plan(plan, _req(), broker=_EMPTY_BROKER)
+    assert excinfo.value.backend_code == "out-of-scope"
+
+
+def test_executor_allowlist_is_inert_for_an_unscoped_plan():
+    """None means unscoped, and must not become an empty allow-list that refuses everything —
+    the failure direction that would take every library and CLI caller down with it."""
+    plan = RoutePlan(chosen=make_backend("good", local=True))
+    assert plan.backend_allowlist is None
+    assert execute_plan(plan, _req(), broker=_EMPTY_BROKER).backend.id == "good"
 
 
 def test_falls_back_on_terminal_and_records_trail():

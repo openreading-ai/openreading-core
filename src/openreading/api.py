@@ -9,7 +9,7 @@ collapse onto, so the three surfaces cannot drift.
     doc = openreading.run("loan.pdf", strategy="main")            # == backend="strategy:main"
     plan = openreading.route("loan.pdf", policy=p)                 # plan only, no execution
     env = openreading.run_batch(["invoices/"], backend="pymupdf", jobs=4)
-    doc = openreading.resume("r_01J8QK")                          # from the ledger alone
+    doc = openreading.resume("7dbf6b71-adb5-4e90-9188-a184fdba9d05")   # a run id is a UUIDv4
 
 Exports and return shapes
 -------------------------
@@ -26,7 +26,8 @@ Exports and return shapes
   `dropped` ({backend_id: DropReason}), `terminal_reason`, `chain`, `eligible_ids`.
 - `resume_run(run_id) -> dict` (exported as `openreading.resume`).
 - Lower seams shared with the CLI/server, public by name: `build_request`, `run_request`,
-  `prepare_named_backend`, `materialize_document`, `router_config`.
+  `prepare_named_backend`, `materialize_document`, `router_config`, `validate_policy`
+  (+ `PolicyError`, `POLICY_KEYS`).
 
 `source` is a path, an http(s):// URL, or raw bytes — never a request dict. A path's MIME type is
 inferred from its extension (pdf/png/jpg/jpeg/tif/tiff/docx/xlsx/pptx), default
@@ -68,9 +69,31 @@ server-only `OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE` / `OPENREADING_TRAIN_OPTOU
 `OPENREADING_BAA_TIER_CONFIRMED` env vars are NOT consulted here; `policy=` is the Python API's
 only spelling of them.
 
+Those ten names are the WHOLE policy grammar (`POLICY_KEYS`), and `validate_policy` refuses
+anything else before a single key is read: a policy must be an object, every key must be one of
+the ten, and every value must type-check against the model that key feeds — `PolicyError`
+(a `ValueError`) otherwise, from `route`/`run`/`run_batch`/`build_request`/`router_config` alike,
+and exit 3 with a `[<command>] invalid policy <path>: …` line from every CLI `--policy` flag.
+An HTTP caller spells the same constraints as `request.compliance` / `request.routing`, which the
+request schema and `Compliance`/`Routing` (`extra="forbid"`) already refuse identically; the
+policy path is checked in the same strict, non-coercing way so the surfaces cannot disagree.
+This is validation of SHAPE only — no key means anything new, and no policy that was enforced
+before is enforced differently now. It exists because the alternative is silent: the split into
+`compliance` / `routing` / `RouterConfig` used to happen before anything validated the dict, so
+an unrecognised key (`require_baaa`, `hipaa`, `gdpr`) was dropped without a word and the
+constraint the operator wrote simply did not exist — every backend eligible, `dropped` empty,
+exit 0. A compliance gate that can be turned off by a typo is not a gate.
+
 Exceptions
 ----------
-`KeyError` unknown backend slug · `ValueError` reserved override · `SourceNotFoundError` ·
+Every class named here is importable from the top level (`from openreading import
+ComplianceRefused`), which is where a caller branching on the type will look for it. The homes are
+unchanged: `openreading.types.errors` defines all of them except `PolicyError`, which is defined
+here because policy parsing raises it before any backend is involved.
+
+`KeyError` unknown backend slug · `ValueError` reserved override · `PolicyError` (a `ValueError`:
+malformed `policy=`; CLI exit 3. Never reaches the server, which has no policy bag — an HTTP
+caller's equivalent mistake is a 400 from the request schema) · `SourceNotFoundError` ·
 `UnknownStrategyError` (server 400 / CLI exit 2) · `ComplianceRefused` (403 / exit 3) ·
 `MissingCredentialsError` (424 / exit 3) · `PlanExhaustedError` (`auto` only: every rung failed;
 carries the attempt trail) · `TerminalError` (any adapter failure, INCLUDING an unexpected
@@ -106,7 +129,9 @@ backend for `auto` / `strategy:` — and an unsupported file becomes a `skipped`
 reason, never a crash. `jobs` is bounded BEFORE intake: `<= 0` clamps to 1 (echoed as the
 corrected value), `> max_jobs` raises `JobsLimitError` rather than reaching an unbounded thread
 pool; a named backend may cap it further via `descriptor.batch.max_concurrency` (CPU-bound
-tesseract). `max_items` caps expansion. Dispatch is native iff the whole batch resolved to one
+tesseract), and only the capped value reaches `request.jobs` — the CLI surfaces the reduction on
+stderr, so a Python caller who needs the same signal compares its own `jobs` against that field.
+`max_items` caps expansion. Dispatch is native iff the whole batch resolved to one
 named backend whose descriptor declares `batch.native`, which implements `NativeBatchAdapter`,
 with >= 1 live item and no more than `batch.max_items`; otherwise platform fan-out composes
 `run()` per item. The envelope is observationally equivalent either way (M10), with
@@ -191,6 +216,7 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+import difflib
 import errno
 import hashlib
 import os
@@ -198,6 +224,8 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+from pydantic import ValidationError
 
 from openreading.adapters._http import error_for_status
 from openreading.adapters.registry import build_registry, make_adapter
@@ -228,7 +256,7 @@ from openreading.ledger.header import (
 from openreading.ledger.inline import InlineExecutor, descriptor_digest
 from openreading.ledger.jsonl import JsonlJournal
 from openreading.ledger.localfs import LocalFsBlobStore, LocalFsKeyStore
-from openreading.ledger.ports import Executor
+from openreading.ledger.ports import Executor, LedgerArmingError
 from openreading.ledger.retention import (
     DEFAULT_RETENTION_HOURS,
     reap,
@@ -246,11 +274,12 @@ from openreading.types.errors import (
     AdapterError,
     ComplianceRefused,
     MissingCredentialsError,
+    ScopeRefused,
     SourceNotFoundError,
     TerminalError,
     UnknownStrategyError,
 )
-from openreading.types.request import OpenReadingRequest
+from openreading.types.request import Compliance, OpenReadingRequest, Routing
 
 # Reserved `backend.id` prefix for a strategy reference (spec §1.3 / loader.STRATEGY_PREFIX).
 # Inlined here so a plain named-backend run never imports the strategy package (guardrail T10).
@@ -267,14 +296,87 @@ _MIME_BY_EXT = {
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 }
-_COMPLIANCE_KEYS = (
-    "require_baa",
-    "no_train_on_data",
-    "data_region",
-    "require_local",
-    "max_retention",
+# The policy key set, DERIVED from the three things a policy key can become — never re-typed
+# beside them. A second, hand-maintained list is how a key gets added to the router and silently
+# dropped by the loader (or the reverse): before this, `_apply_policy` filtered the caller's dict
+# down to its own copy of the compliance names one line BEFORE `Compliance(extra="forbid")` could
+# see it, so a misspelled or invented key was discarded in silence and the constraint the operator
+# wrote simply did not exist. `tests/test_policy_validation.py` pins the derivation.
+COMPLIANCE_POLICY_KEYS = tuple(Compliance.model_fields)  # -> request.compliance
+# A deliberate SUBSET of Routing: `fallback` is a request field (chain order), not a constraint.
+ROUTING_POLICY_KEYS = ("doc_type_hint", "optimize_for")  # -> request.routing
+# -> RouterConfig (D7/D7a). A dataclass, so validate_policy type-checks these three by hand;
+# test_policy_keys_are_derived_from_the_models_they_feed fails if a fourth arrives unchecked.
+ROUTER_CONFIG_POLICY_KEYS = tuple(RouterConfig.__dataclass_fields__)
+POLICY_KEYS = tuple(
+    sorted({*COMPLIANCE_POLICY_KEYS, *ROUTING_POLICY_KEYS, *ROUTER_CONFIG_POLICY_KEYS})
 )
 _MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
+
+
+class PolicyError(ValueError):
+    """A `policy=` / `--policy` value that is not a well-formed policy object.
+
+    A `ValueError`, because a policy is an argument the caller wrote, not a backend outcome: it
+    never belongs in the `AdapterError` ladder. The CLI re-raises it under its own tag for exit 3
+    (`cli.app._load_policy`), and the server never sees it — an HTTP caller spells the same
+    constraints as `request.compliance` / `request.routing`, which the request schema and the
+    pydantic models already refuse the same way.
+    """
+
+
+def validate_policy(policy: Any) -> dict[str, Any] | None:
+    """Refuse a malformed policy before any of it is read, on every non-HTTP surface.
+
+    `None` means "no policy" (the documented Python default) and passes through. Anything else
+    must be an object whose keys are all in `POLICY_KEYS` and whose values type-check against the
+    model each key feeds. Returns the policy unchanged; it validates, it never rewrites.
+
+    Value types are checked by delegating to `Compliance` / `Routing` rather than re-stating them,
+    so the policy surface and the request schema cannot disagree about what `optimize_for` accepts.
+    `RouterConfig` is a dataclass with no validation of its own, so its three keys are checked
+    here — and strictly: `bool("false")` is `True`, so a *string* under
+    `allow_unverified_compliance` used to switch the fail-closed posture ON, and a bare string
+    under `train_optout_confirmed` became a frozenset of its characters, confirming no backend at
+    all while looking like it confirmed one.
+    """
+    if policy is None:
+        return None
+    if not isinstance(policy, dict):
+        raise PolicyError(
+            f"policy must be a JSON object, got {type(policy).__name__}; "
+            f"valid keys: {', '.join(POLICY_KEYS)}"
+        )
+    unknown = sorted(k for k in policy if k not in POLICY_KEYS)
+    if unknown:
+        named = []
+        for key in unknown:
+            near = difflib.get_close_matches(str(key), POLICY_KEYS, n=1)
+            named.append(f"{key!r}" + (f" (did you mean {near[0]!r}?)" if near else ""))
+        plural = "s" if len(unknown) > 1 else ""
+        raise PolicyError(
+            f"unknown policy key{plural}: {', '.join(named)}; valid keys: {', '.join(POLICY_KEYS)}"
+        )
+    try:
+        # strict=: the HTTP surface type-checks the same values against request.v0.1.json BEFORE
+        # pydantic sees them, and JSON Schema does not coerce. Without strict=, `require_baa:
+        # "yes"` would be accepted here and rejected over HTTP — the same divergence in a new place.
+        Compliance.model_validate(
+            {k: policy[k] for k in COMPLIANCE_POLICY_KEYS if k in policy}, strict=True
+        )
+        Routing.model_validate(
+            {k: policy[k] for k in ROUTING_POLICY_KEYS if k in policy}, strict=True
+        )
+    except ValidationError as e:
+        errors = "; ".join(f"{'.'.join(str(p) for p in d['loc'])}: {d['msg']}" for d in e.errors())
+        raise PolicyError(f"invalid policy value: {errors}") from e
+    if not isinstance(policy.get("allow_unverified_compliance", False), bool):
+        raise PolicyError("invalid policy value: allow_unverified_compliance must be true or false")
+    for key in ("train_optout_confirmed", "baa_tier_confirmed"):
+        value = policy.get(key, [])
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            raise PolicyError(f"invalid policy value: {key} must be a list of backend ids")
+    return policy
 
 
 def _document_dict(source: str | bytes, mime_type: str | None) -> dict[str, Any]:
@@ -311,18 +413,23 @@ def _document_dict(source: str | bytes, mime_type: str | None) -> dict[str, Any]
 
 
 def _apply_policy(body: dict[str, Any], policy: dict | None) -> None:
+    # Validate the WHOLE policy first, then split. Splitting first made the split a silent
+    # whitelist: whatever it did not recognize never reached a validator (see validate_policy).
+    policy = validate_policy(policy)
     if not policy:
         return
-    compliance = {k: policy[k] for k in _COMPLIANCE_KEYS if k in policy}
+    compliance = {k: policy[k] for k in COMPLIANCE_POLICY_KEYS if k in policy}
     if compliance:
         body["compliance"] = compliance
-    routing = {k: policy[k] for k in ("optimize_for", "doc_type_hint") if k in policy}
+    routing = {k: policy[k] for k in ROUTING_POLICY_KEYS if k in policy}
     if routing:
         body["routing"] = routing
 
 
 def router_config(policy: dict | None) -> RouterConfig:
-    policy = policy or {}
+    # The other half of the policy read (D7/D7a's three deployment keys). It validates too: a
+    # `route`-shaped call reaches this with a policy that never passed through build_request.
+    policy = validate_policy(policy) or {}
     return RouterConfig(
         allow_unverified_compliance=bool(policy.get("allow_unverified_compliance", False)),
         train_optout_confirmed=frozenset(policy.get("train_optout_confirmed", [])),
@@ -420,7 +527,25 @@ def route(
     return Router(build_registry(), router_config(policy)).route(req)
 
 
-def _arm_ledger(
+def _arm_ledger(*args, **kwargs) -> Executor | None:
+    """`_arm_ledger_unguarded` with one guarantee added: every OSError it raises is reported as the
+    ledger's, by name.
+
+    Arming is entirely filesystem work under `$OPENREADING_LEDGER` — creating the key and blob
+    stores, the reaper sweep, the retention stamp, the header, the document blob — and it happens
+    before any backend runs, so nothing else in this call can raise an OSError to be confused with
+    it. Left bare, an unwritable or non-directory ledger root surfaced as `[strategy:s] error:
+    PermissionError: [Errno 13] ...` at exit 1, the "unexpected error" rung, naming a path and an
+    errno but never the variable that put it there — so an operator who had just turned resume on
+    read it as a bug in the parse.
+    """
+    try:
+        return _arm_ledger_unguarded(*args, **kwargs)
+    except OSError as e:
+        raise LedgerArmingError(os.environ.get("OPENREADING_LEDGER", ""), e) from e
+
+
+def _arm_ledger_unguarded(
     run_id: str,
     req,
     registry,
@@ -477,7 +602,10 @@ def _arm_ledger(
     blobs = LocalFsBlobStore(ledger_root / "blobs", keys)
     journal = JsonlJournal(ledger_root / f"{run_id}.jsonl")
 
-    now_ms = int(clock.now_ms())
+    # Wall clock, never `now_ms()`: the stamp is read back by a LATER process, and a monotonic
+    # reading's zero point is the boot (`openreading.router.clock`). The reaper's own `now` must
+    # come from the same base as the stamp it compares against, so both read `now_wall_ms()`.
+    now_ms = int(clock.now_wall_ms())
     if not resume:
         reap(ledger_root, keys, ledger_root / "blobs", now_epoch_ms=now_ms)
     descriptors = [
@@ -576,10 +704,15 @@ def _run_strategy_request(
     keep_candidates: bool = False,
     plain_info=None,
     on_run_armed: Callable[[str], None] | None = None,
+    backend_allowlist: frozenset[str] | None = None,
 ) -> dict[str, Any]:
     """Compile + run a named strategy, embedding the orchestration block into the response.
     Raises UnknownStrategyError (→ 400 / exit 2) when the name is absent. `plain_info` (from the
-    loader) lets a Plain strategy's gate records carry their source word for `explain` (§9)."""
+    loader) lets a Plain strategy's gate records carry their source word for `explain` (§9).
+    `backend_allowlist` is the caller's ceiling on which backends the walk may reach; it is
+    enforced in compile_strategy (which is what bounds an `auto` rung) and re-checked at every
+    dispatch, and raises ScopeRefused (→ 403 scope_denied) when it leaves the walk nothing to
+    run."""
     from openreading.strategies import compile_strategy, run_strategy
     from openreading.strategies.model import StrategyConfig
     from openreading.strategies.presets import PRESET_NAMES
@@ -597,7 +730,15 @@ def _run_strategy_request(
         # defaults, so compilation sees only the request's own compliance.
         strategy_config = StrategyConfig(version=1)
     registry = build_registry()
-    compiled = compile_strategy(req, name, strategy_config, registry, config, plain_info=plain_info)
+    compiled = compile_strategy(
+        req,
+        name,
+        strategy_config,
+        registry,
+        config,
+        plain_info=plain_info,
+        backend_allowlist=backend_allowlist,
+    )
     # materialize a URL to bytes if any eligible backend can't ingest URLs (mirrors the auto arm)
     if any(
         not (a := registry.get(bid)) or not a.descriptor.accepts_url for bid in compiled.eligible
@@ -702,6 +843,7 @@ def run_request(
     cache: BoundedResultCache | None = None,
     deadline_ms: int | None = None,
     on_run_armed: Callable[[str], None] | None = None,
+    backend_allowlist: frozenset[str] | None = None,
 ) -> dict[str, Any]:
     """Execute a fully-built request (backend.id names a backend, 'auto', or 'strategy:<name>').
     The server calls this with the RouterConfig + strategy config from its env; `run()` calls it
@@ -712,12 +854,29 @@ def run_request(
     wired to a real caller in BL-169) is forwarded to `prepare_named_backend` for the named-backend
     branch only — `run()`'s own `deadline_ms` parameter and the CLI's `--deadline` flag on `parse`
     now originate a real one; `auto`/strategy dispatch is untouched, it manages its own per-node
-    time budget instead. Raises KeyError (unknown
-    backend), UnknownStrategyError, PlanExhaustedError, ComplianceRefused, TerminalError, or
-    RetryableError (a directly-named backend's rate-limit exhaustion, or router.driver's poll loop
-    past its deadline/MAX_CONSECUTIVE_FAULTS — the `auto` path folds this into PlanExhaustedError via
-    execute_plan/D-v2-7.2 instead, since it can fall back to the next backend; a named backend has
-    no next rung, so it surfaces here under its own type)."""
+    time budget instead.
+
+    `backend_allowlist` is the CALLER's ceiling on which backends this request may reach (the
+    server's per-token `OPENREADING_API_KEY_SCOPES` entry); None means unscoped. Every arm that
+    picks its own backends reads it, which is all of them but the directly-named one:
+
+    - Both strategy arms — including the one an `auto` request takes when `defaults.strategy` is
+      configured, which is a strategy walk wearing an `auto` id and would otherwise be gated as
+      though the plain router had chosen.
+    - The plain `auto` arm, which prunes the router's CHAIN to the allow-list before executing it.
+      A caller gating this one at the door can only ever check the router's first pick; the plan
+      is chosen plus every fallback, and `execute_plan` walks all of it, so the backends behind
+      the first pick were reachable by a request that named any of them and got 403.
+
+    Only the directly-named arm needs nothing here, because there the id IS the request and the
+    caller can gate it before the call.
+
+    Raises KeyError (unknown backend), UnknownStrategyError, PlanExhaustedError, ComplianceRefused,
+    ScopeRefused (the caller's allow-list leaves the walk, or the pruned `auto` chain, nothing to
+    run), TerminalError, or RetryableError (a directly-named backend's rate-limit exhaustion, or
+    router.driver's poll loop past its deadline/MAX_CONSECUTIVE_FAULTS — the `auto` path folds this
+    into PlanExhaustedError via execute_plan/D-v2-7.2 instead, since it can fall back to the next
+    backend; a named backend has no next rung, so it surfaces here under its own type)."""
     broker = broker or EnvCredentialBroker()
     config = config or RouterConfig()
     backend = req.backend.id
@@ -736,6 +895,7 @@ def run_request(
             keep_candidates=keep_candidates,
             plain_info=plain_info,
             on_run_armed=on_run_armed,
+            backend_allowlist=backend_allowlist,
         )
     if strat == "none":
         backend = "auto"  # escape hatch: plain router, no defaults.strategy
@@ -755,6 +915,7 @@ def run_request(
             keep_candidates=keep_candidates,
             plain_info=plain_info,
             on_run_armed=on_run_armed,
+            backend_allowlist=backend_allowlist,
         )
 
     if backend == "auto":
@@ -762,11 +923,33 @@ def run_request(
         if plan.chosen is None:
             # the router eliminated every backend on compliance/capability → refused, NOT a
             # runtime failure (PlanExhaustedError is for a non-empty plan whose backends all fail).
+            # Checked BEFORE the allow-list below, so an already-empty plan stays compliance's
+            # call: scope removed nothing there, and only ever subtracts (BL-159 AC-4).
             dropped = ", ".join(f"{i}:{dr.code}" for i, dr in sorted(plan.dropped.items()))
             raise ComplianceRefused(
                 f"no eligible backend for the request (dropped: {dropped})",
                 constraint=plan.terminal_reason or "no_compliant_backend",
             )
+        if backend_allowlist is not None:
+            # The caller's ceiling, applied to the whole CHAIN — chosen plus every fallback — and
+            # applied HERE, between routing and execution, because this is the last moment the set
+            # of backends this request can reach is known and the first adapter has yet to be
+            # built. `auto` names no backend, so a check at the door can only ever speak for the
+            # router's first pick; the twelve behind it were reachable, and a document that pymupdf
+            # fails on walked straight into them.
+            denied = sorted(i for i in plan.eligible_ids if i not in backend_allowlist)
+            first_pick = plan.chosen.descriptor.id
+            plan = plan.restrict_to(backend_allowlist)
+            if plan.chosen is None:
+                # Fail closed. Nothing this caller may reach survived, so this is scope's refusal
+                # to make and not compliance's: the fix is the token's allow-list, and answering
+                # `compliance_refused` would send the operator to edit a policy that is not the
+                # problem. Never a 502 either — no backend was allowed to try, so nothing failed.
+                raise ScopeRefused(
+                    "this API key is not scoped to reach any backend eligible for this request "
+                    f"(denied: {', '.join(denied)})",
+                    backend_code=first_pick,
+                )
         if any(not a.descriptor.accepts_url for a in plan.chain):
             req = materialize_document(req, transport=transport)
         return execute_plan(plan, req, broker=broker, cache=cache).to_schema_dict()
@@ -923,6 +1106,19 @@ def resume_run(run_id: str) -> dict[str, Any]:
     comes from the ledger" (§10) — the original request is reconstructed from the header's own
     `document`/`slim_request` fields via `_request_from_header`.
 
+    A run the SERVER armed for a scoped caller resumes correctly without the caller's allow-list,
+    which is worth stating because the `compile_strategy` call below deliberately passes none. A
+    resume is a CLI/library action with no token concept, so the scope cannot come from the caller;
+    it comes from the ledger, like every other option:
+
+    - A scope that pruned a named rung changed the compiled tree, so `plan_hash` no longer matches
+      and the resume hard-refuses (`plan_hash` is one of the three identity fields, `_HARD_FIELDS`).
+    - A scope that only narrowed the eligible set — the `auto`-rung case, where the tree is
+      identical either way — leaves `plan_hash` matching, and correctly so. The header's
+      `pinned_eligible` carries that narrowed set, and `_arm_ledger(resume=True)` arms the resumed
+      executor's per-step gate from THIS header rather than a freshly recomputed set, so an `auto`
+      rung re-resolves inside the original scope rather than across the whole registry.
+
     Raises `LookupError` when `OPENREADING_LEDGER` is unset or no header exists for `run_id`, or
     `ledger.header.HeaderMismatch` when the live config/plan/journal-version identity no longer
     matches the run's original header (AC-4) — the CLI maps each to its own printed refusal."""
@@ -1052,6 +1248,12 @@ def run_batch(
     from openreading.types.batch import BatchRequestEcho
 
     jobs = _batch_runner.bound_jobs(jobs, max_jobs=max_jobs)
+    # Like `jobs`, `policy` is an argument about the WHOLE batch, so it is checked before intake
+    # rather than per item. On the platform path a per-item failure is isolated into that item's
+    # `error` and never raised (M6) — correct for a document that could not be read, wrong for a
+    # policy the caller mistyped, which would otherwise come back as N identical item errors and a
+    # zero exit instead of one refusal.
+    validate_policy(policy)
 
     if env_file:
         load_dotenv(env_file)

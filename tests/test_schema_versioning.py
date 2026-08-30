@@ -103,3 +103,39 @@ def test_c12_response_v0_2_const_is_known_bad_and_exempted():
     Editing v0.2 in place would be caught by the non-additive schema-diff gate (§7)."""
     doc = json.loads((SCHEMA_DIR / "response.v0.2.json").read_text())
     assert _const_of(doc) == "0.1"  # the known bug, deliberately frozen
+
+
+# ---- open vs closed sets, the MINOR-allowlist's own distinction (A9) ---------------------------
+
+
+def _newest_response() -> dict:
+    newest = max(SCHEMA_DIR.glob("response.v*.json"), key=lambda p: p.name)
+    return json.loads(newest.read_text())
+
+
+def test_the_open_sets_are_declared_open_in_the_schema():
+    """`pydoc openreading.schemas` lets a MINOR add values to the OPEN sets. An open set must
+    therefore be unconstrained in the schema — otherwise the "compatible" addition is a validation
+    failure for anyone pinned to the older file."""
+    resp = _newest_response()
+    code = resp["properties"]["warnings"]["items"]["properties"]["code"]
+    assert code == {"type": "string"}, "warnings[].code is documented OPEN; it must not be an enum"
+    assert resp["properties"]["backend"]["properties"]["id"] == {"type": "string"}, (
+        "backend.id is documented OPEN; it must not be an enum"
+    )
+
+
+def test_block_type_is_a_closed_enum_matching_the_python_vocabulary():
+    """A9: the MINOR allowlist once listed "block types" beside the open sets while the schema
+    declared a 22-value enum, so the contract page and the policy contradicted each other. The
+    enum is the truth — a caller may switch on it exhaustively — and an unmapped native concept
+    reaches them as `other` + `native_type` instead of a new value. Adding one is a MAJOR."""
+    from openreading.types.enums import BlockType
+
+    block_type = _newest_response()["$defs"]["Block"]["properties"]["type"]
+    assert "enum" in block_type, "Block.type is CLOSED; opening it is a MAJOR, not a policy edit"
+    assert block_type["enum"] == [b.value for b in BlockType]
+    assert "other" in block_type["enum"], (
+        "the `other` bucket is what makes a closed vocabulary affordable — without it a new "
+        "native concept would have nowhere honest to land"
+    )

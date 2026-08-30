@@ -201,6 +201,69 @@ def test_on_missing_escalate_makes_confidence_gate_bindable():
     assert not _errors(cfg)
 
 
+def _gate_cfg(gate):
+    return {
+        "version": 1,
+        "strategies": {"x": {"steps": [{"backend": "pymupdf", "escalate_if": gate}, "reducto"]}},
+    }
+
+
+def test_unbindable_predicate_ord_beside_a_live_one_is_reported():
+    # C4: `confidence_below` on pymupdf never fires. Alone it is a hard error; OR'd beside a
+    # binding predicate the gate still works, so the dead half is dead weight, not a dead gate —
+    # a warning at the leaf's own path, and validate must not stay silent about it.
+    issues = _issues(
+        _gate_cfg({"any_of": [{"confidence_below": 0.0}, {"chars_per_page_below": 50}]})
+    )
+    assert not [i for i in issues if i.level == "error"]
+    warns = [i for i in issues if i.level == "warning"]
+    assert _has(warns, "escalate_if.any_of[0].confidence_below", "can never fire on 'pymupdf'")
+    assert any("dead weight" in i.message for i in warns)
+
+
+def test_flat_gate_map_ors_its_keys_so_a_dead_key_is_reported_too():
+    # a gate map ORs its keys, so this is the same shape as any_of with no list syntax.
+    warns = _warnings(_gate_cfg({"confidence_below": 0.0, "chars_per_page_below": 50}))
+    assert _has(warns, "escalate_if.confidence_below", "can never fire on 'pymupdf'")
+
+
+def test_all_of_with_an_unbindable_member_can_never_fire():
+    # C4, the sharp edge: `all_of` fires only when EVERY member fires, so one predicate that can
+    # never fire kills the whole conjunction. Flattening the tree and asking "does ANY leaf bind?"
+    # gets this backwards and passes a gate that is completely dead.
+    errs = _errors(_gate_cfg({"all_of": [{"confidence_below": 0.0}, {"chars_per_page_below": 50}]}))
+    assert _has(errs, "escalate_if", "can never fire on 'pymupdf'")
+    assert any("all_of" in i.message for i in errs)
+
+
+def test_all_of_dead_conjunct_is_still_dead_when_ord_beside_a_live_branch():
+    # the live `garbled` branch keeps the gate alive, so the dead all_of is a warning, not an error.
+    gate = {
+        "any_of": [
+            {"all_of": [{"confidence_below": 0.0}, {"chars_per_page_below": 50}]},
+            {"garbled": True},
+        ]
+    }
+    issues = _issues(_gate_cfg(gate))
+    assert not [i for i in issues if i.level == "error"]
+    assert _has(
+        [i for i in issues if i.level == "warning"],
+        "escalate_if.any_of[0].all_of[0].confidence_below",
+        "can never fire on 'pymupdf'",
+    )
+
+
+def test_default_bundle_reports_no_dead_predicate_on_pymupdf():
+    # the shipped `default` bundle carries `confidence_below` deliberately — a Tier-2 bonus that is
+    # "silently inapplicable on confidence-less backends" (normalize.DEFAULT_BUNDLE). Designed
+    # degradation is not dead weight, so it must stay silent on both levels.
+    cfg = {
+        "version": 1,
+        "strategies": {"x": {"steps": ["pymupdf", "reducto"], "escalate_if": "default"}},
+    }
+    assert not _issues(cfg)
+
+
 def test_preset_name_collision():
     cfg = {"version": 1, "strategies": {"cost_saver": ["pymupdf"]}}
     assert _has(_errors(cfg), "strategies", "collides")
@@ -547,3 +610,99 @@ def test_plain_compare_then_local_produces_no_issues():
         "strategies": {"s": {"compare": ["pymupdf", "docling"], "then": "tesseract"}},
     }
     assert _plain_issues(cfg) == []
+
+
+# ---- unenforced guardrails (B4) ----------------------------------------------------------------
+# `budget.max_attempts`, `defaults.advanced.circuit_breaker` and `defaults.advanced.attempt_timeout`
+# are schema-accepted and read by no engine code (model.py §6.1, §8). Validating them green — and,
+# for max_attempts, narrating them back as enforced — is a kill switch that reports itself armed.
+
+
+def test_max_attempts_is_refused_as_unenforced():
+    cfg = {
+        "version": 1,
+        "strategies": {"x": {"steps": ["pymupdf", "reducto"], "budget": {"max_attempts": 1}}},
+    }
+    errs = _errors(cfg)
+    assert _has(errs, "budget.max_attempts", "not enforced")
+    assert _has(errs, "budget.max_attempts", "max_duration")  # names the enforced alternative
+
+
+def test_circuit_breaker_is_refused_as_unenforced():
+    cfg = {
+        "version": 1,
+        "defaults": {"advanced": {"circuit_breaker": {"max_fails": 5, "cooldown": "30s"}}},
+        "strategies": {"x": ["pymupdf"]},
+    }
+    assert _has(_errors(cfg), "defaults.advanced.circuit_breaker", "not enforced")
+
+
+def test_attempt_timeout_is_refused_as_unenforced():
+    cfg = {
+        "version": 1,
+        "defaults": {"advanced": {"attempt_timeout": "1s"}},
+        "strategies": {"x": ["pymupdf"]},
+    }
+    assert _has(_errors(cfg), "defaults.advanced.attempt_timeout", "not enforced")
+
+
+def test_nested_max_attempts_is_refused_at_its_own_path():
+    cfg = {
+        "version": 1,
+        "strategies": {
+            "x": {
+                "steps": [
+                    {"steps": ["pymupdf", "reducto"], "budget": {"max_attempts": 2}},
+                    "tesseract",
+                ],
+                "budget": {"max_attempts": 5},
+            }
+        },
+    }
+    errs = _errors(cfg)
+    paths = {i.path for i in errs if "max_attempts" in i.path}
+    assert "strategies.x.budget.max_attempts" in paths
+    assert "strategies.x.steps[0].budget.max_attempts" in paths
+
+
+def test_max_duration_still_validates_clean():
+    # the enforced budget key is untouched by the refusal
+    cfg = {
+        "version": 1,
+        "strategies": {"x": {"steps": ["pymupdf", "reducto"], "budget": {"max_duration": "30s"}}},
+    }
+    assert _errors(cfg) == []
+
+
+def test_cli_validate_refuses_unenforced_guardrails_and_never_affirms_them(_clean_cwd, capsys):
+    f = _clean_cwd / "openreading.yaml"
+    f.write_text(
+        "version: 1\n"
+        "defaults:\n"
+        "  advanced:\n"
+        "    circuit_breaker: {max_fails: 5, cooldown: 30s}\n"
+        "    attempt_timeout: 1s\n"
+        "strategies:\n"
+        "  guarded:\n"
+        "    steps: [tesseract, pymupdf]\n"
+        "    budget: {max_attempts: 1}\n"
+    )
+    rc = main(["strategy", "validate", "--config", str(f)])
+    cap = capsys.readouterr()
+    assert rc == 3
+    assert "not enforced" in cap.err
+    # the summary must never narrate an unenforced ceiling as a real one
+    assert "at most 1 attempt" not in cap.out
+
+
+def test_cli_validate_with_no_config_anywhere_exits_3_not_0(_clean_cwd, capsys):
+    """A CI job whose whole purpose is `openreading strategy validate` must not pass when there is
+    nothing to validate. Reported as exiting 0 (a false green) and re-measured at 3 in every
+    invocation form — auto-discovery, an explicit `--config` naming a missing file, with and
+    without `--policy`. This pins that, since the finding would have been real if it were true."""
+    for argv in (
+        ["strategy", "validate"],
+        ["strategy", "validate", "--config", str(_clean_cwd / "nope.yaml")],
+    ):
+        assert main(argv) == 3, argv
+        assert capsys.readouterr().out == ""  # and never an "OK" on stdout

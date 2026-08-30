@@ -76,9 +76,8 @@ decider:                      # optional — LLM decider configuration; inert wi
 
 defaults:                     # optional — deployment defaults
   strategy: cost_saver        #   applied ONLY when backend.id == "auto" and no strategy is named
-  advanced:                   #   engine machinery; documented defaults, rarely touched (§8)
-    circuit_breaker: { max_fails: 5, cooldown: 30s }
-    attempt_timeout: 120s
+                              # `advanced:` (circuit_breaker, attempt_timeout) parses and is
+                              # refused by `strategy validate` — nothing reads it (§8)
 
 strategies:                   # the library of named strategies (§2)
   cheap_first:
@@ -89,7 +88,9 @@ strategies:                   # the library of named strategies (§2)
 Secrets never appear in this file — backends resolve credentials from the environment exactly as
 on the direct path (`credentials_ref` indirection only). Any key matching a credential pattern is
 a `strategy validate` error (`validate._scan_secrets`) — the schema's open sub-trees (`policy`,
-`with.*`) do not lock it down, so such a file still loads on the run path (§9).
+`with.*`) do not lock it down, so such a file still parses (§9). Under `with.*` it then runs;
+under `policy:` it does not, because a secret-looking key is also an unknown policy key and
+`prune._validated_policy` refuses the whole block before any of it becomes a constraint.
 
 1.2 Discovery order (first hit wins; sources are never merged)
 --------------------------------------------------------------
@@ -137,6 +138,12 @@ request's value if set, else the file adds it (request-wins-else-file — there 
 on regions, and the request is the more specific choice); deployment keys map to `RouterConfig`
 (`allow_unverified_compliance` ORs; `train_optout_confirmed` / `baa_tier_confirmed` union). The
 effective compliance is what prunes the tree AND what the route `compliance` facts read.
+
+The block is refused whole (`api.PolicyError`, via `prune._validated_policy`) if it names a key
+outside `api.POLICY_KEYS` or gives one the wrong type. The schema declares this sub-object
+`additionalProperties: true`, so that check is the only thing standing between a typo and a run
+with no constraint: `require_locall` used to be dropped in silence, and a quoted
+`allow_unverified_compliance: "false"` was truthy enough to switch the fail-closed tolerance ON.
 
 
 2. The node grammar — five node types, closed, recursive
@@ -277,7 +284,8 @@ Step-by-step semantics (normative evaluation order: `openreading.strategies.engi
 4. A gate on the **final** step is legal: there is nothing left to escalate to, but a fired gate
    makes the result Deficient like any other and it enters the keep-best resolution — the
    returned result may therefore be an earlier rung's higher-scoring retained result, and
-   `on_quality_exhausted: fail` applies. The winner carries a `quality_below_threshold` warning.
+   `on_quality_exhausted: fail` applies. The winner carries a `quality_below_threshold` warning
+   (or `budget_exhausted`, when a deadline rather than a gate ended the walk — §6.3.3).
 5. Exhaustion — the keep-best law and when `PlanExhaustedError` is raised — is the engine's
    contract: best retained result with honest warnings if anything was retained, else
    `PlanExhaustedError` with the full attempt trail; never silence, never a fabricated status.
@@ -773,7 +781,9 @@ result while a failed step has none. Forcing one syntax onto both made both wors
   (skips, driver-internal retries and `decider_call`/`judge_call` not counted). **Designed, not
   shipped:** the grammar accepts the key and `validate` reads it for one static warning (§9), but
   the engine never reads it — `_enter_budget` consumes only `max_duration`; nothing counts
-  attempts or stops dispatch on an attempt count. `max_duration` is the only enforced budget.
+  attempts or stops dispatch on an attempt count. `max_duration` is the only enforced budget,
+  and `strategy validate` **refuses** a file that declares `max_attempts` (§9) rather than
+  reporting a ceiling nothing holds.
 
 6.3 Propagation laws
 --------------------
@@ -784,15 +794,16 @@ result while a failed step has none. Forcing one syntax onto both made both wors
    only per-attempt bound the driver receives.
 2. **Attempts (spec only):** the spec's law — children draw from the innermost enclosing attempt
    budget, `child_effective = min(child_declared, parent_remaining)` — is not implemented; the
-   engine never reads `max_attempts` (§6.1). What ships is the static check: `validate` warns
-   when a child `max_attempts` exceeds the enclosing budget's (its text says "it will be clamped
-   down" — a clamp the engine does not perform). A child `max_duration` above its parent's gets
-   no static warning — the deadline law clamps it at run time.
+   engine never reads `max_attempts` (§6.1). What ships is a refusal: `validate` errors on any
+   node declaring `max_attempts`, at that node's own path. A child `max_duration` above its
+   parent's is legal and gets no static warning — the deadline law clamps it at run time.
 3. **Exhaustion (deadline):** stop dispatching. With a retained result and
    `on_quality_exhausted: best_effort` (the default) the node resolves deficient on that result
-   and the response carries `quality_below_threshold` — the engine has no `budget_exhausted`
-   *warning* emitter (the spec named one). With nothing retained, or `on_quality_exhausted:
-   fail`, a deadline-ended walk resolves `Err(budget_exhausted)` (the error class of §5).
+   and the response carries a `budget_exhausted` warning — distinct from the
+   `quality_below_threshold` a gated-out exhaustion carries, because the two ask the caller for
+   opposite things and a corpus run has to be able to count the deadline misses. With nothing
+   retained, or `on_quality_exhausted: fail`, a deadline-ended walk resolves
+   `Err(budget_exhausted)` (the error class of §5).
 4. **Decider and judge calls** run inside the enclosing node deadline like any attempt, but no
    per-call deadline is applied to them yet (`.decider` §3.4); with no attempt counter in the
    engine there is nothing for them to be excluded from.
@@ -866,7 +877,10 @@ NO code reads it in v0.3: the block is schema-validated and then ignored. Concre
   implemented — and neither is the leaf `timeout:` it would default (§2.1): every leaf is bounded
   only by the enclosing deadline (§6).
 
-Setting either key is therefore harmless and inert; do not rely on it for protection.
+Setting either key is inert, and inert is not harmless when the key is a safety limit: an author
+writes a breaker or a per-attempt timeout precisely to bound a run that spends money at a vendor.
+`strategy validate` therefore **refuses** a file declaring either key (§9), so it fails on the
+bench instead of failing open in production.
 
 
 9. Validation catalog
@@ -898,8 +912,11 @@ run-time attempt outcome):
 
 unknown backend id · unknown `strategy:`/`use:` reference · `use` cycle (path printed) ·
 `otherwise:` not a member of `among:` · two `among:` entries resolving to the same candidate
-name, or one named `otherwise` (§2.6; `NormalizeError`) · secrets-pattern key · sibling parallel
-branches whose subtrees can dispatch the same backend id (§2.3) · user-written gate whose
+name, or one named `otherwise` (§2.6; `NormalizeError`) · secrets-pattern key · any of the three
+unenforced guardrails — `budget.max_attempts` (§6.1), `defaults.advanced.circuit_breaker` and
+`defaults.advanced.attempt_timeout` (§8) — refused rather than warned about, because each is a
+safety limit and a limit that validates green while enforcing nothing is worse than none ·
+sibling parallel branches whose subtrees can dispatch the same backend id (§2.3) · user-written gate whose
 predicates can all never bind on its step's backend (§3.3) · `disagreement_over` on any gate
 other than a `pick: best` parallel step's (§3.2) · strategy named after a built-in preset
 (`NormalizeError`) · `strategy:none` used as a node.
@@ -908,11 +925,10 @@ other than a `pick: best` parallel step's (§3.2) · strategy named after a buil
 `openreading.strategies.validate` is normative):
 
 shadowed route rule — a rule whose `when` exactly duplicates an earlier rule's and can never fire
-· child `max_attempts` exceeding the enclosing budget (the message says "it will be clamped down",
-but the engine never reads `max_attempts` — §6.1; a child `max_duration` above its parent's is
-clamped by the deadline law without a static warning) · leaf `timeout` exceeding the effective
-deadline (the message says "it will be clamped", but the engine never reads leaf `timeout` —
-§2.1) · a final cascade rung that is a `pick: fastest` node
+(a child `max_duration` above its parent's is clamped by the deadline law without a static
+warning) · leaf `timeout` exceeding the effective deadline (the message says "it will be
+clamped", but the engine never reads leaf `timeout` — §2.1) · a final cascade rung that is a
+`pick: fastest` node
 whose branches carry their own gates (branch gates are not evaluated in a race — gate the
 enclosing cascade step instead, §2.3) · `granularity: page` with a non-first rung whose backend
 lacks native page-range selection (that rung re-parses the whole document, §2.7) · `review_if`
@@ -944,7 +960,7 @@ are encoded as titled `oneOf: [string, array, object]` branches so editor comple
 It is served for `# yaml-language-server: $schema=` modelines and submitted to SchemaStore under
 the `openreading.yaml` filename pattern — zero-setup autocomplete and inline validation. Schema
 `description` strings are written at tool-description quality: they are simultaneously editor
-hovers, Enterprise UI labels, and LLM-decider context — one sentence, three consumers.
+hovers, the company web UI's labels, and LLM-decider context — one sentence, three consumers.
 
 
 11. The Plain dialect

@@ -180,3 +180,17 @@ def test_v01_descriptor_still_validates_against_v02_schema():
         "runtime": {"offline_capable": False},
     }
     schemas.validate_descriptor(v01)
+
+
+def test_descriptor_sources_cite_nothing_from_the_company_repo():
+    """A descriptor's `sources[]` is public: it reaches users verbatim through
+    `descriptor.to_schema_dict()` and `GET /v1/backends`. AGENTS.md sanctions an `internal/<path>`
+    reference in a comment or docstring, where the reader is an agent editing this repo; on the
+    wire it is a citation nobody outside the company can resolve, and it advertises the private
+    repo's layout to every caller. The rationale itself belongs in the comment beside the field it
+    justifies — only the pointer is dropped."""
+    for adapter in build_registry():
+        desc = adapter.descriptor
+        for src in desc.to_schema_dict().get("sources", []):
+            url = src.get("url") or ""
+            assert not url.startswith("internal/"), f"{desc.id} cites a private path: {url}"

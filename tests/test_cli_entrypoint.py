@@ -68,3 +68,16 @@ def test_explain_renders_orchestration_story(tmp_path, capsys):
     assert "strategy s" in out and "pymupdf" in out
     assert "confidence_below" in out  # the gate-rendering inner loop ran
     assert "dropped aws-textract" in out
+
+
+def test_version_flag_prints_the_package_version_and_exits_0(capsys):
+    """Step zero of every incident is "what is deployed?". `openreading --version` used to answer
+    with argparse's "the following arguments are required: command" at exit 2 — it did not even
+    reject the flag by name — leaving the version reachable only from `pyproject.toml`,
+    `openreading.__version__`, or `GET /healthz` on a server that may be the thing that is down."""
+    from openreading import __version__
+
+    with pytest.raises(SystemExit) as exc:
+        main(["--version"])
+    assert exc.value.code == 0
+    assert capsys.readouterr().out.strip() == f"openreading {__version__}"

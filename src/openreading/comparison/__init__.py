@@ -33,8 +33,8 @@ Laws (non-negotiable)
   (``orchestration.candidates[]``) is an opt-in additive key inside a block that is already
   ``additionalProperties: true``.
 - L3 no influence: report output never feeds routing, ranking, gating or ``pick: best``. ``pick``
-  decides during a run; compare explains after it. A feedback loop is an Enterprise feature,
-  never ambient community behaviour, so a comparison can never widen the compliance-eligible set.
+  decides during a run; compare explains after it. No feedback loop is built here and none is
+  ambient, so a comparison can never widen the compliance-eligible set.
 - L4 determinism: same inputs => byte-identical report. No timestamps, randomness, network or
   LLM; fixed iteration order (page asc, reading_order asc, subjects in given order); fixed
   documented thresholds. Determinism is what makes drift detection on top of it sound.
@@ -129,7 +129,8 @@ may not):
    one and provenance keeps constituent indices;
 5. unmatched blocks become ``block_missed`` / ``block_unique`` per dimension D.
 
-Thresholds are module constants, not flags (tune with evidence; calibration is Enterprise).
+Thresholds are module constants, not flags. Threshold flags are not built, so retune them
+against evidence in code rather than per run.
 The report's ``alignment`` object records ``{method: "text_first/v1", tau_text, iou_min,
 merge_lookahead, capable_subjects}`` plus ``unaligned_ratio`` whenever alignment was attempted,
 so a consumer can judge how far to trust dimension D; ``unaligned_ratio`` is a first-class honesty
@@ -241,8 +242,8 @@ no second execution API to maintain. Fan-out exists only as CLI sugar and, outsi
 repo, as the company web UI's ``/compare`` page (L1).
 
 Server: ``POST /v1/compare`` with ``{"responses": [...], "baseline"?, "truth"?}`` returns the
-report. Pure (L1): it never executes a backend. Fan-out over the JSON API is not offered
-(Enterprise batch territory); the only HTTP fan-out is the company web UI's page, not here.
+report. Pure (L1): it never executes a backend. Fan-out over the JSON API is not offered. The
+only HTTP fan-out is the company web UI's page, not here.
 
 Corpus compare -- two batch runs
 --------------------------------
@@ -281,10 +282,11 @@ What compare is NOT
 - not a router input (L3 -- no ambient feedback loop);
 - not a quality oracle (symmetric mode reports difference, not correctness -- bring a baseline
   or a golden);
-- not a storage/history system (community compares what you hand it, statelessly).
+- not a storage/history system (this package compares what you hand it, statelessly).
 
-Enterprise builds on top, never instead: a run store with drift detection keyed by (doc hash x
-backend x adapter/provider version); a visual bbox-overlay delta UI; disagreement-driven labelling
+The private company repo builds on top of this package, never instead of it: a run store with
+drift detection keyed by (doc hash x backend x adapter/provider version); a visual bbox-overlay
+delta UI; disagreement-driven labelling
 (disagreements are the highest-value annotation targets and grow golden datasets); an LLM
 equivalence judge (inert without an explicit operator gate, every judgment logged/replayable);
 alignment calibration against adjudicated corpora; governed per-tenant router feedback (the only

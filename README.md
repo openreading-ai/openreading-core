@@ -33,7 +33,9 @@ of them. You can ask for four things, each of which answers a problem you alread
   and where each block sits on the page. One command returns one JSON.
 - **[compare](src/openreading/comparison/README.md)**: you have two backends and want to know
   which one reads your documents better. You get a verdict naming what differs, for example a
-  table that one backend lost.
+  table that one backend lost. Compare deliberately names no winner, so when you want a ranking
+  instead, `leaderboard` scores backends against documents you labeled yourself
+  ([Evals](src/openreading/evals/README.md), openreading's benchmark harness).
 - **[route](src/openreading/router/README.md)**: some documents may only go to vendors that meet
   a policy. A policy is a short JSON file that lists what a backend must guarantee before it may
   run. The router applies it and drops every failing backend before anything runs.
@@ -94,9 +96,9 @@ tesseract                      oss_library        no          tesseract binary (
 ## Your first parse
 
 Your first JSON is one command away, because the document is already in the clone.
-[`examples/`](examples/README.md) holds two synthetic one-page bank statements — invented name,
-invented bank, invented balances — each with a header, an account block, a balance summary and a
-dated transaction table. Parse the January one with PyMuPDF:
+[`examples/`](examples/README.md) holds two synthetic one-page bank statements, with an invented
+name, an invented bank and invented balances. Each has a header, an account block, a balance
+summary and a dated transaction table. Parse the January one with PyMuPDF:
 
 ```bash
 uv run openreading parse examples/john_smith_1000_2026_01.pdf --backend pymupdf > pymupdf.json
@@ -123,8 +125,11 @@ advice, not an error. Here is `pymupdf.json`, trimmed to the keys you read first
 That page has 21 blocks; one is shown. The listing omits `backend_raw` and `channel_provenance`,
 which [`src/openreading/schemas/README.md`](src/openreading/schemas/README.md) describes. Every
 backend returns this shape. When a backend cannot produce a field, OpenReading leaves it out and
-names it in `warnings[]`. It never invents one, because a made-up confidence looks like a measured
-one — which is exactly the field PyMuPDF is warning about here.
+never invents one, because a made-up confidence looks like a measured one. It names some of those
+gaps in `warnings[]`, as PyMuPDF does for confidence here, and leaves others unannounced.
+`channel_provenance` lists what this run actually produced, so that map is the signal to check
+([The channel
+contract](src/openreading/derive/README.md#which-signal-to-trust-when-a-channel-is-missing)).
 
 Now read the same page the other way. Tesseract ignores the text layer, renders the page to a
 150-DPI bitmap and OCRs it, which is the work it would do on a photograph of the same statement:
@@ -143,11 +148,11 @@ uv run openreading parse examples/john_smith_1000_2026_01.pdf --backend tesserac
 ```
 
 Three differences, and each one is the contract doing its job. The page is 1275×1650 `pixel`
-rather than 612×792 `pdf_point`, because that is what Tesseract actually measured — `bbox.x/y/w/h`
-stay page-relative fractions either way, so code that positions a block works against both. Every
-block carries a `confidence`, and no `confidence_unavailable` warning appears, because Tesseract
-genuinely measures one per word. And OCR misread `Account Holder:` as `; Account Hotder-` — with
-`confidence: 0.0`, so it told you where it was unsure.
+rather than 612×792 `pdf_point`, because that is what Tesseract actually measured. The
+`bbox.x/y/w/h` values stay page-relative fractions either way, so code that positions a block works
+against both. Every block carries a `confidence`, and no `confidence_unavailable` warning appears,
+because Tesseract genuinely measures one per word. And OCR misread `Account Holder:` as
+`; Account Hotder-` with `confidence: 0.0`, so it told you where it was unsure.
 
 The generated document the subsystem guides use is a different file, with tables, columns and an
 image. Build it whenever a guide asks for `sample.pdf`:
@@ -182,15 +187,15 @@ DIFF — pymupdf vs tesseract   (1 page(s))
 
 The two agree on 98% of the page and disagree on one line, which the report names on both sides
 instead of handing you a score to go investigate. Compare does not know which backend is right,
-so it does not claim to — but you can see at a glance that the OCR line is the mangled one. The
+so it does not claim to, and you can still see at a glance that the OCR line is the mangled one. The
 one-word headline for this pair is `equivalent`, because a single misread label is not enough to
 call one backend better; `--format diffs` is where the disagreement itself lives.
 
 **Route.** Route hands a sensitive document only to backends that meet your policy. A bank
 statement is the everyday case: it names a person, an account and every place they spent money,
-and plenty of teams may not ship one to an arbitrary vendor. `require_baa` demands a BAA, the
-HIPAA contract a vendor signs before handling regulated data. `no_train_on_data` refuses vendors
-that train on what you send:
+and plenty of teams may not ship one to an arbitrary vendor. `require_baa` keeps out every vendor
+that does not publish a BAA, the HIPAA contract a vendor signs before handling regulated data.
+`no_train_on_data` refuses vendors that train on what you send:
 
 ```bash
 echo '{"require_baa": true, "no_train_on_data": true}' > phi.json
@@ -205,8 +210,18 @@ uv run openreading route examples/john_smith_1000_2026_01.pdf --policy phi.json
 ```
 
 Reducto is dropped because its BAA is offered only on some tiers and none is confirmed here. The
-`fallbacks` list is the order OpenReading tries next if `pymupdf` fails. A dropped backend never
-joins that list, because a fallback that readmits it would leak the statement silently.
+three hosted vendors that survive are there because each one publishes a BAA, which its descriptor
+records. That is a vendor's advertised offer read on a date, not an agreement you hold, so
+`require_baa` narrows the field without finishing the job. Confirm your own signed paperwork before
+real data moves, and see [the catalog](src/openreading/adapters/README.md#catalog) for where each
+claim came from.
+
+The `fallbacks` list is the order OpenReading tries next if `pymupdf` fails. A dropped backend
+never joins that list, because a fallback that readmits it would leak the statement silently. Your
+policy file is the only thing that sets the eligible set, and three of its keys widen that set on
+purpose, which [Routing and keys](src/openreading/router/README.md#how-it-decides) names. A key the
+router does not recognise is refused rather than ignored, so a typo cannot leave you with a clean
+exit code and no filter.
 
 **Strategy.** A strategy gives you the cheap result when it is good enough and the stronger one
 when it is not. It checks each output against quality gates. A gate is one test on a result, for
@@ -226,11 +241,12 @@ strategy offline_first  →  pymupdf (ok)
       confidence_below           obs=None thr=0.6  skipped
 ```
 
-The trace shows PyMuPDF ran, three gates passed, and the run stopped there — no second backend, no
-cost. The fourth gate is `skipped` rather than failed: PyMuPDF reports no confidence, so there is
-nothing to test, and a missing measurement never counts as a passing one. Timings vary between
-machines. Write your own strategy with `uv run openreading strategy --help`. An interrupted run
-resumes from its journal, which records every step so far. The
+The trace shows PyMuPDF ran, three gates passed, and the run stopped there, with no second backend
+and no cost. The fourth gate is `skipped` rather than failed: PyMuPDF reports no confidence, so
+there is nothing to test, and a missing measurement never counts as a passing one. Timings vary
+between machines. Write your own strategy with `uv run openreading strategy --help`. An
+interrupted single-document `--strategy` run resumes from its journal, which records every step so
+far. A `--backend` run writes no journal, and a batch has no resume of its own. The
 [run ledger](src/openreading/ledger/README.md) guide explains it.
 
 **A folder at a time.** Point `parse` at a directory and it batches, which is how you run a whole
@@ -253,6 +269,12 @@ Three, because `examples/README.md` is in that folder too. It is skipped with
 always accounts for every file you pointed at. `scripts/batch_demo.sh path/to/docs` runs the same
 sweep with both local backends and compares the two corpora.
 
+`parse` takes no `--policy`, so the command above runs with no compliance filter in force. A
+corpus reaches the router's policy gate two other ways: a `policy:` block in `openreading.yaml`
+under `parse <dir> --strategy <name> --config openreading.yaml`, or
+`openreading.run_batch(paths, policy={…})` from Python.
+[Routing and keys](src/openreading/router/README.md#recipes) runs both.
+
 ## Bring your own key
 
 A hosted backend works as soon as its vendor key is in `.env`. Without one, the command exits with
@@ -263,9 +285,21 @@ uv run openreading parse examples/john_smith_1000_2026_01.pdf --backend reducto
 # [reducto] missing required credentials/config: REDUCTO_API_KEY. Sign up / configure: https://platform.reducto.ai
 ```
 
-To fix it, run `echo 'REDUCTO_API_KEY=sk_…' > .env` rather than copying `.env.example`, because
-that file pre-fills two localhost endpoints. Then `uv run openreading backends` shows
-`reducto … yes`. From then on every Reducto call is billed to your account.
+To fix it, append the one key you hold to a fresh file with `echo 'REDUCTO_API_KEY=sk_…' >> .env`.
+Never run `cp .env.example .env`. That file ships `DOCLING_SERVE_URL` and `QWEN_VL_ENDPOINT` with
+values rather than blanks, so a copy marks `docling` and `qwen-vl` configured on a machine where
+neither is running. The cost is a different data path rather than extra configuration. Under a
+`require_local` policy the copy makes the router send your scan to `http://localhost:5001`, and the
+envelope records `docling TerminalError (ConnectError)`. Without the copy the same command records
+`docling skipped (missing_credentials)` and the document never reaches a socket. Then
+`uv run openreading backends` shows `reducto … yes`. From then on every Reducto call is billed to
+your account.
+
+Two things about that `echo`. `.env` is already in this repo's `.gitignore`, so the file you just
+wrote inside a clone will not be committed by accident. Your shell records the line itself, though,
+which puts the key in `~/.zsh_history` or `~/.bash_history` in plain text. Prefix the command with
+a space if your shell is set to skip those, or open `.env` in an editor and type the key there
+instead.
 
 ## Python and HTTP
 
@@ -294,11 +328,21 @@ curl -s http://127.0.0.1:8787/healthz     # {"status":"ok","version":"0.3.0"}
 
 **Status: pre-release.** You can build on the JSON shape today, while CLI flags, the Python API
 and the strategy grammar may still change before 1.0. The JSON Schemas are stable, pinned byte
-for byte by `tests/test_schema_evolution.py`. The package version is `0.3.0` in `pyproject.toml`
-and `openreading.__version__`. It is not on PyPI and has no git tags yet, so install from a
-clone. [`CHANGELOG.md`](CHANGELOG.md) records development milestones. Its newest heading,
-`0.4.0`, is a milestone label, not a published release. The two numbers meet when the first
-release is tagged.
+for byte by `tests/test_schema_evolution.py`. Nothing is on PyPI and the repository has no git
+tags, so install from a clone.
+
+Five numbers travel with this project, and only one of them is the code you installed.
+
+| Number | Where you read it | What it identifies | When it changes |
+|---|---|---|---|
+| `schema_version` `0.3` | every response envelope | the JSON contract that response obeys | a new version file lands in [`src/openreading/schemas/`](src/openreading/schemas/README.md) |
+| package `0.3.0` | `uv run openreading --version`, `openreading.__version__`, `pyproject.toml` | the code you installed | the first tagged release, which has not happened |
+| `"version": "0.3.0"` | `GET /healthz` on a running `openreading serve` | the package number of the process answering you | with the package number, never on its own |
+| heading `[0.4.0]` | [`CHANGELOG.md`](CHANGELOG.md) | a development milestone merged to `main` | a milestone merges, so it runs ahead of the package number and meets it at the first tagged release |
+| codename `Canon (v0.5)` | [`CHANGELOG.md`](CHANGELOG.md) | a branch that carried one body of work | never, because it is a label rather than a version |
+
+Pin a commit SHA. None of the five numbers is a pin, because there are no git tags and no PyPI
+release, so a SHA is the only way to name the exact code you tested.
 
 ## Where the docs are
 

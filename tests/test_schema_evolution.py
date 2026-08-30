@@ -94,8 +94,16 @@ def test_response_envelope_tolerates_unknown_future_fields():
 # openmanifold.dev -> openreading.ai), title, and the `billing_target` enum value in place across
 # every released file. Deliberate identity change, not schema evolution — pre-1.0, never published
 # to PyPI, so no consumer had pinned the old $ids. §8 immutability resumes from these digests.
+# Re-pinned a second time, 2026-08-29, for request.v0.1.json alone: the `require_baa` field's own
+# `description` said the gate admits "backends with a signed-BAA path". The router cannot see any
+# agreement an organisation signed; it reads what a vendor publishes about its own BAA. Every prose
+# page was corrected to "advertises a BAA, necessary and not sufficient" during the documentation
+# repair, and this string was the last site still telling a reader the opposite in the file
+# AGENTS.md names as the source of truth. Validation behaviour is byte-for-byte unchanged (a
+# description is inert), so this is a documentation correction inside a schema rather than schema
+# evolution, and a new version would have made every consumer migrate for a sentence.
 _FROZEN_RELEASED = {
-    "request.v0.1.json": "8191ccb76d1adf3f6d5c08d1038d5bbb36e9c65d7eacaaba7fbea62117fa7a1b",
+    "request.v0.1.json": "c3fdc3ee4e3fcf5eddc3a7d6be4ef3fb938479f1f982f47d0f72a6b2e4f42a26",
     "response.v0.1.json": "41a1506091027f894508327b50d27f47205dd689f9d5dcfc48b3375ea19d0772",
     "response.v0.2.json": "aad609e0ad1e1d09891bd1a19649b352532ef12443dfc44cc08342cefa9f6d69",
     "adapter-descriptor.v0.1.json": "fb5f5f366ae06c8f8c536e1a2300b8a5b17387308050e4ac0c2e4b7ae03818f8",

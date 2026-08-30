@@ -136,6 +136,26 @@ class ComplianceRefused(AdapterError):
         )
 
 
+class ScopeRefused(AdapterError):
+    """The CALLER's backend allow-list excludes every backend this request could reach.
+
+    A sibling of ComplianceRefused, not a subclass, and deliberately its own category on the wire
+    (403 `scope_denied`, never 403 `compliance_refused`). The two answer different questions and
+    have different fixes: compliance refuses because the DOCUMENT may not go to that backend, and
+    the fix is the policy or the deployment's attestations; scope refuses because THIS CREDENTIAL
+    may not spend at that backend, and the fix is the token's allow-list. Reporting one as the
+    other sends the operator to the wrong file.
+
+    Like compliance, an allow-list only ever SUBTRACTS from the eligible set, so a walk with any
+    in-scope backend left is pruned rather than refused; this is raised only when the subtraction
+    leaves nothing to run. `backend_code` names one backend that was denied, so the message is
+    actionable — never the token, which is the secret.
+    """
+
+    def __init__(self, message: str = "", *, backend_code: str | None = None) -> None:
+        super().__init__(message, backend_code=backend_code)
+
+
 class MissingCredentialsError(TerminalError):
     """A directly-named backend is missing required credentials/config. Carries the exact env var
     names (`missing`) so the CLI/server can tell the user precisely what to set."""

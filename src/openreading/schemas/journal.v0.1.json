@@ -57,8 +57,8 @@
     },
     "error": { "anyOf": [{ "$ref": "#/$defs/StepError" }, { "type": "null" }] },
     "cost": { "anyOf": [{ "$ref": "#/$defs/StepCost" }, { "type": "null" }] },
-    "started_epoch_ms": { "type": ["integer", "null"] },
-    "ended_epoch_ms": { "type": ["integer", "null"] },
+    "started_epoch_ms": { "type": ["integer", "null"], "description": "Absolute UTC epoch milliseconds (wall clock, Clock.now_wall_ms) at which the dispatch was issued. Not a monotonic reading: this value is written by one process and read by another, so it must name a moment, not measure an interval." },
+    "ended_epoch_ms": { "type": ["integer", "null"], "description": "Absolute UTC epoch milliseconds (wall clock, Clock.now_wall_ms) at which the step reached a terminal outcome. Subtracting started_epoch_ms gives elapsed wall time, which a clock adjustment can distort; the engine measures its own durations off the monotonic clock instead." },
     "resolved_version": { "type": ["string", "null"] },
     "journal_seq": { "type": ["integer", "null"], "description": "Ledger T3 (§4.1/§7.4): a per-run monotonic append count, assigned by Journal.append — the record's own replay-stable completion order." }
   }

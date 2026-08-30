@@ -99,7 +99,10 @@ so every adapter batches correctly on day one.
   pool; items are I/O-bound and every item gets a fresh adapter instance (`make_adapter()`
   constructs per call), so there is no shared mutable adapter state. A named backend's
   `descriptor.batch.max_concurrency` caps the pool (`min(requested, cap)`; tesseract declares 4
-  because it is CPU-bound). Results are index-placed, so input order survives `as_completed`.
+  because it is CPU-bound). Only the capped value reaches `request.jobs`, so the CLI prints a
+  `[preflight]` notice naming both numbers when the request exceeds the cap -- otherwise a caller
+  who asks for 16 workers sees no speedup and no explanation for the 4 in their envelope.
+  Results are index-placed, so input order survives `as_completed`.
 - Retries/backoff: none added by the batch layer -- per item, inside the existing driver
   (`RetryableError`, `next_poll_at`).
 - Idempotency: with a caller key `K`, item keys derive as `f"{K}:{sha256[:16]}"`; without `K`
@@ -110,8 +113,13 @@ so every adapter batches correctly on day one.
   reaches N -- keeping stdout pure JSON.
 - Cost preflight (advisory, stderr, CLI): when more than 10 live items target a directly named
   `hosted_api` backend, print the count and the descriptor's `usd_per_page_equiv` range before
-  starting. Never an interactive prompt: batches must stay scriptable; the M4 guard is the real
-  spend protection.
+  starting. The rate is per PAGE and an item is a document, so the line says so in words and
+  multiplies out the one total that exists before any file is opened -- items x one page x rate --
+  labelled as the single-page floor it is. Intake reads no bytes and never fetches a URL (M5), so
+  real page counts are not knowable here and no truer total can be printed; a line naming the item
+  count beside a per-page rate reads as a per-item price and under-states a real corpus by its
+  average page count. Never an interactive prompt: batches must stay scriptable; the M4 guard is
+  the real spend protection.
 - Interplay: `--strategy X` batches fine (each item runs the strategy; native batch never
   applies to strategies). `--extract`, `--pages`, `features` are request-level and apply to
   every item. Materialization stays per item inside the existing pipeline.

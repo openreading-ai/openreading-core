@@ -1,4 +1,4 @@
-"""Stage-1 compliance hard-filter (routing_and_compliance.md §4.4).
+"""Stage-1 compliance hard-filter (internal/research/openreading/routing_and_compliance.md §4.4).
 
 This is a pass/fail gate applied FIRST and never traded off against quality/cost. Any field
 relevant to an active constraint that is UNVERIFIED (None/absent) fails closed unless the
@@ -12,13 +12,28 @@ Request-side constraints come from `request.compliance` (the vendored wire schem
 no_train_on_data, data_region, require_local, max_retention. Backend-side facts come from the
 adapter's descriptor.compliance, whose `extra="allow"` lets an adapter carry the richer §4.3
 fields (max_retention_hours, train_opt_out_precondition, zdr_flag, phi_path_constraints).
+
+`runs_fully_local=True` is a static architectural claim (no code path in this adapter makes a
+third-party network call), not a promise about a specific deployment's configuration. A backend
+whose descriptor declares a `config_spec` field named `endpoint` (docling, qwen-vl: containers
+the OPERATOR points somewhere) is only trusted as local if that endpoint actually resolves to
+loopback right now — read the same way the credential broker reads it, override env first, the
+descriptor's own `env` list second. An adapter with no such field (pymupdf, tesseract: in-process
+libraries with nothing to point anywhere) is trusted on the static claim alone. This closes a real
+gap: pointing `DOCLING_SERVE_URL` at a remote host previously still passed `require_local`, and
+every OTHER stage-1 check this module skips for a "local" backend (BAA, training, region,
+retention) skipped right along with it.
 """
 
 from __future__ import annotations
 
+import ipaddress
+import os
 import re
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
+from openreading.credentials import _slug_env
 from openreading.types.descriptor import AdapterDescriptor
 from openreading.types.request import Compliance
 
@@ -71,6 +86,44 @@ def _extra(desc: AdapterDescriptor, key: str, default=None):
     return (desc.compliance.model_extra or {}).get(key, default)
 
 
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _is_loopback_host(host: str) -> bool:
+    if host in _LOOPBACK_HOSTS:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False  # a real hostname, not a loopback literal — trust neither
+
+
+def _endpoint_config_field(desc: AdapterDescriptor):
+    return next((f for f in desc.config_spec if f.key == "endpoint"), None)
+
+
+def _resolves_to_loopback(desc: AdapterDescriptor) -> bool:
+    """Whether a backend claiming runs_fully_local, and whose descriptor names an operator-set
+    `endpoint` config field, is actually configured to reach one right now. True when: the backend
+    has no such field (an in-process library has nothing to point anywhere); the field is unset
+    (not yet configured, so nothing has proven it points off-box); or the configured value's host
+    is loopback. False only when a real, non-loopback host is configured — the one state where the
+    static `runs_fully_local=True` claim and this deployment's actual wiring disagree."""
+    field = _endpoint_config_field(desc)
+    if field is None:
+        return True
+    value = os.environ.get(_slug_env(desc.id, field.key))
+    if not value:
+        for name in field.env:
+            value = os.environ.get(name)
+            if value:
+                break
+    if not value:
+        return True
+    host = urlsplit(value).hostname
+    return host is not None and _is_loopback_host(host)
+
+
 def evaluate(
     req: Compliance | None, desc: AdapterDescriptor, config: RouterConfig | None = None
 ) -> DropReason | None:
@@ -79,7 +132,7 @@ def evaluate(
     if req is None:
         return None
     c = desc.compliance
-    local = bool(c.runs_fully_local)
+    local = bool(c.runs_fully_local) and _resolves_to_loopback(desc)
     allow_unverified = cfg.allow_unverified_compliance
 
     # offline / local-only: data may never leave the caller's environment.
@@ -169,7 +222,7 @@ def baa_tier_confirmation(
     never silently rests on a BAA nobody signed."""
     cfg = config or RouterConfig()
     c = desc.compliance
-    if req is None or not req.require_baa or c.runs_fully_local:
+    if req is None or not req.require_baa or (c.runs_fully_local and _resolves_to_loopback(desc)):
         return None
     if c.hipaa_baa != _BAA_TIER_GATED or desc.id not in cfg.baa_tier_confirmed:
         return None

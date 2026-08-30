@@ -15,8 +15,10 @@ backend returns, and prints a scoreboard, a verdict, and findings. A verdict is 
 whole comparison, and it is `equivalent`, `mixed`, or `divergent`. A finding is one specific
 difference, named by a code and sorted by severity. For example, `table_shape_mismatch` means the
 backends found different numbers of tables in the document. Compare picks no winner unless you name
-one output as the baseline or bring a golden file of expected values. You need two saved envelopes,
-such as `pymupdf.json` and `tesseract.json` from the root README, and no key.
+one output as the baseline or bring a golden file of expected values. Your question may really be
+which backend is correct rather than where the two differ. `leaderboard` answers that one
+([Evals](../evals/README.md)), and the last recipe here is the cheapest way to reach it. You need
+two saved envelopes, such as the `pymupdf.json` and `tesseract.json` step 1 below writes, and no key.
 
 ## Mental model
 
@@ -90,6 +92,11 @@ WARNINGS
 line says pymupdf reports no confidence, so it is not faulted for missing confidences. JSON is
 the default format, and every report is schema-validated before it is printed.
 
+`text similarity: 0.93` is a `difflib` ratio over the two texts split into words, so it counts
+words that line up in the same order. Moving a paragraph lowers it even when every word survives.
+It is the one similarity number that also reaches `--format json`, rounded there to four places
+under `text.matrix`. The next step prints a second, different number on the same pair.
+
 ### 2. Read the JSON, the diff, and the diffs
 
 ```bash
@@ -128,6 +135,14 @@ uv run openreading compare pymupdf.json tesseract.json --format diffs
 **You should see** pymupdf emitting one cell per line and tesseract one row per line in the
 diff, then `EQUIVALENT` under CONTENT. Neither backend lost a word, but tesseract lost the grid.
 `diffs` (plural) separates content from packaging, two axes a raw finding list mixes together.
+
+`content shared by all: 1.00` is a different measurement from step 1's `0.93`, on the same two
+files. It is the share of the vocabulary both sides have, counted as sets of words. Order and
+repetition are thrown away before the count, which is why it reads 1.00 where the ordered number
+reads 0.93. That blindness matters, because reading order is exactly what a backend that flattens
+a table gets wrong. A backend that returns every correct word in scrambled order still scores
+1.00 here. The renderer computes this number and puts it in no `--format json` field. A script that
+wants a similarity therefore reads `text.matrix` and gets the ordered one.
 
 ### 3. Fan out, save, and re-render
 
@@ -209,6 +224,22 @@ When every subject is a batch result, documents pair by `relpath`, then `filenam
 `unpaired`, not an error. `--format diffs` prints the values one run captured and the other missed.
 `--format diff` is refused (exit 2).
 
+**Turn two backends' disagreements into a labeled evals dataset.** Runs on the two batch reports
+from the recipe above.
+```bash
+uv run openreading compare runA.json runB.json --format json \
+  | jq -r '.documents[] | select(.verdict != "equivalent") | .source.relpath'
+```
+```text
+invoice.pdf
+letter.pdf
+```
+Each name is a document the two backends read differently, so it is a document where at most one
+of them is right. Copy those files into `mydata/<name>/input.pdf`, write a `case.json` beside each
+one, and fill `expected` by reading the document yourself ([Evals](../evals/README.md)). Label
+these before the documents both backends agreed on, because agreement already tells you the two
+would rank the same there.
+
 **Branch on a verdict in Python.**
 ```python
 import openreading
@@ -232,10 +263,16 @@ These rules are why a report is safe to run in a loop and safe to trust. Each ru
 failure it prevents. The full list is the `Laws` section of
 `uv run python -m pydoc openreading.comparison`.
 
-- Compare is pure. It never runs, retries, or bills, so a report can never quietly cost money.
+- The comparison itself is pure. Over saved files and `--from` it never runs, retries, or bills.
+  Fan-out is the one form that spends: `compare doc.pdf --backends a,b` runs each backend named and
+  bills every hosted one, so a report costs money exactly when you asked for a fan-out.
 - A report never feeds routing or `pick: best`. A feedback loop could widen which backends run.
-- The same inputs produce the same bytes. A report has no timestamps, randomness, or LLM calls, so
-  drift detection is sound.
+- The same inputs produce the same report bytes. A report has no timestamps, randomness, or LLM
+  calls, so drift detection over reports is sound. This is a property of compare alone, and not of
+  the envelopes you feed it. A `parse --backend` response is byte-stable too, while a
+  `parse --strategy` response and a batch result carry timing that moves between runs, so hashing
+  one of those to detect change gives you a false positive every time ([JSON
+  Schemas](../schemas/README.md#clocks-and-byte-stability)).
 - A backend that cannot produce a dimension is `not_capable`, never `missed`. Blaming pymupdf
   for missing confidences would make every report about it wrong.
 - There is one metric stack. Truth mode imports the evals scorer rather than writing a second one.
@@ -286,7 +323,7 @@ table and that output disagree, the output is right. Fix the table.
 | `type_conflict` | blocks | one says `title`, another `text` |
 | `position_conflict` | blocks | text matched, bbox overlap below 0.3 |
 | `table_shape_mismatch` | tables | table counts or grid shapes differ |
-| `confidence_gap` | blocks | matched blocks, confidences 0.2 or more apart |
+| `confidence_gap` | blocks | matched blocks, confidences 0.2 or more apart, on two backends' own scales ([why that is not a ranking](../derive/README.md#a-confidence-is-comparable-inside-one-backend-not-across-two)) |
 | `page_count_mismatch` | pages | subjects disagree on page count |
 | `cost_outlier` | facts | one subject cost at least 3 times the others' mean |
 | `empty_output` | facts | a subject produced no text, blocks, or fields |
@@ -315,6 +352,7 @@ From the `openreading.comparison` docstring (`Deliberately deferred`):
 - [Docs home](../README.md)
 - [Strategies](../strategies/README.md): `--keep-candidates` and the parallel constructs.
 - [Batch runs](../batch/README.md): the batch-result envelope corpus mode consumes.
-- [Evals](../evals/README.md): the scorer behind `--truth`.
+- [Evals](../evals/README.md): the scorer behind `--truth`, and `leaderboard`, the verb that does
+  rank backends against labels you wrote.
 
 <sub>[Docs home](../README.md) · [← Strategies](../strategies/README.md) · [Batch runs →](../batch/README.md)</sub>

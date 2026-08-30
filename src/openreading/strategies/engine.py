@@ -81,7 +81,8 @@ the default-bundle Tier-1 predicates (`_branch_quality`), so comparison is never
 - Law 1 (retention): a `Deficient` response is never discarded — it is best-so-far for the
   enclosing walk and may ultimately be returned.
 - Law 2 (status honesty): a returned `Deficient` keeps the `status.state` the backend reported.
-  Degradation is `orchestration.outcome: "degraded"` plus a `quality_below_threshold` warning —
+  Degradation is `orchestration.outcome: "degraded"` plus a warning naming the cause:
+  `budget_exhausted` when the deadline ended the walk, else `quality_below_threshold` —
   the engine never fabricates a status the backend did not produce.
 
 Cascade evaluation (`steps:`)
@@ -378,10 +379,11 @@ spec's T6 floor (never bench a request's last compliance-eligible backend) is de
 shipped. Warnings this module puts on the final response: the compile-time warnings
 (`strategy_overrides_fallback` among them),
 `fallback_used` and `quality_escalated` (one per rung walked past, naming from → to),
-`quality_below_threshold` (a degraded result), plus the BAA-tier note for the chosen backend.
+`quality_below_threshold` or `budget_exhausted` (a degraded result — the second when a deadline,
+not a gate, ended the walk), plus the BAA-tier note for the chosen backend.
 The spec's wider warning vocabulary is NOT emitted as warnings here: `raced_lost` / `judged_lost`
 / `merge_base` are attempt categories, `decider_downgraded` is the decision record's
-`downgraded` field, and `hedged_start` / `budget_exhausted` / `idempotent_replay` have no
+`downgraded` field, and `hedged_start` / `idempotent_replay` have no
 emitter in this module (the
 `idempotent_replay` warning belongs to the legacy chain's server cache). The response schema
 carries `orchestration` and `pages[].source_backend` as an additive
@@ -516,6 +518,7 @@ from openreading.types.errors import (
     ComplianceRefused,
     PlanExhaustedError,
     RetryableError,
+    ScopeRefused,
     TerminalError,
     UnsupportedFeatureError,
 )
@@ -600,14 +603,20 @@ class Outcome:
     error_class: str | None = None
     # cross-branch disagreement of a pick:best parallel (§11); the enclosing step's gate reads it.
     disagreement: float | None = None
+    # Why this ending is deficient: the deadline stopped the walk, rather than every rung being
+    # gated out. Both keep the best result and both report `degraded`, but they ask the caller for
+    # opposite things, so the two must not share one warning code (see `run_strategy`).
+    budget_exhausted: bool = False
 
     @classmethod
     def ok(cls, resp: NormalizedResponse, quality: float = 1.0) -> Outcome:
         return cls("ok", resp, quality)
 
     @classmethod
-    def deficient(cls, resp: NormalizedResponse, quality: float) -> Outcome:
-        return cls("deficient", resp, quality)
+    def deficient(
+        cls, resp: NormalizedResponse, quality: float, *, budget_exhausted: bool = False
+    ) -> Outcome:
+        return cls("deficient", resp, quality, budget_exhausted=budget_exhausted)
 
     @classmethod
     def err(cls, error_class: str) -> Outcome:
@@ -629,6 +638,12 @@ class _WalkCtx:
     trace: Trace
     trees: dict[str, dict[str, Any] | None]
     eligible: list[str]
+    # The caller's backend allow-list (the server's OPENREADING_API_KEY_SCOPES entry for the
+    # presented token), or None when the caller is unscoped. compile_strategy has already pruned
+    # the tree and shortened `eligible` with it; this copy exists so the id the walk is ABOUT to
+    # dispatch is re-checked against the allow-list itself rather than trusted because an earlier
+    # pass was supposed to have handled it (_resolve_backend).
+    backend_allowlist: frozenset[str] | None = None
     facts: Facts = field(default_factory=Facts)
     attempted: set[str] = field(default_factory=set)
     deadline_ms: float | None = None
@@ -778,6 +793,7 @@ def run_strategy(
         router_config=compiled.router_config,
         env=os.environ if env is None else env,
         port=decider_llm,
+        backend_allowlist=compiled.backend_allowlist,
     )
 
     ctx = _WalkCtx(
@@ -788,6 +804,7 @@ def run_strategy(
         trace=trace,
         trees=compiled.trees,
         eligible=list(compiled.eligible),
+        backend_allowlist=compiled.backend_allowlist,
         facts=compute_facts(req, compiled.effective_compliance or None),
         deadline_ms=clock.now_ms()
         + _resolve_outer_budget_ms(compiled.max_duration_ms, deadline_ms),
@@ -827,7 +844,21 @@ def run_strategy(
             resp.add_warning(BAA_TIER_CONFIRMED_WARNING, baa_note, chosen)
         degraded = outcome.kind == "deficient"
         if degraded:
-            resp.add_warning("quality_below_threshold", "all rungs gated; returning best result")
+            # A deadline overrun and a quality exhaustion are both `degraded` keep-best endings,
+            # and the right reaction to each is the opposite of the other: a gated-out result
+            # invites escalation to a stronger backend, while spending more time and money is the
+            # worst possible answer to having run out of time. Sharing one code also made "how
+            # many runs hit their time budget" — the primary health metric of a corpus run —
+            # uncountable, since nothing in `warnings[]` separated the two.
+            if outcome.budget_exhausted:
+                resp.add_warning(
+                    "budget_exhausted",
+                    "the time budget ended the walk; returning the best result so far",
+                )
+            else:
+                resp.add_warning(
+                    "quality_below_threshold", "all rungs gated; returning best result"
+                )
         orch = trace.orchestration(chosen_backend=chosen, outcome="degraded" if degraded else "ok")
         if ctx.keep_candidates and ctx.candidates:
             orch["candidates"] = ctx.candidates
@@ -1625,6 +1656,7 @@ async def _select_best(
         router_config=ctx.router_config,
         env=ctx.env,
         port=ctx.judge_llm,
+        backend_allowlist=ctx.backend_allowlist,
     )
     downgraded = status.reason
     if status.mode == "engine":
@@ -2222,7 +2254,10 @@ async def _eval_cascade(
     cascade_on_error = node.get("on_error")
 
     deadline_ms = _enter_budget(node, ctx)
-    best: tuple[float, int, NormalizedResponse] | None = None
+    # (quality, step index, response, "this rung's own subtree ran out of time"). The fourth
+    # member exists so a NESTED cascade with a tighter budget than its parent's still reports the
+    # deadline as the cause when the outer walk then exhausts its steps normally.
+    best: tuple[float, int, NormalizedResponse, bool] | None = None
     ran = 0
     deadline_hit = False
     billed_total = (
@@ -2271,7 +2306,7 @@ async def _eval_cascade(
                     if winner is not None:
                         winner.recategorize(g.hard_category)
                     if best is None or g.quality > best[0]:
-                        best = (g.quality, i, outcome.response)
+                        best = (g.quality, i, outcome.response, outcome.budget_exhausted)
                     continue
                 if billed_total > 0:
                     _set_total_cost(outcome.response, billed_total, billed_basis)
@@ -2359,7 +2394,7 @@ async def _eval_cascade(
         if escalated:
             leaf_attempt.recategorize(escalated)  # "quality_escalated" | "review_escalated"
             if best is None or g.quality > best[0]:
-                best = (g.quality, i, resp)
+                best = (g.quality, i, resp, False)
             continue
         if billed_total > 0:
             _set_total_cost(
@@ -2371,7 +2406,7 @@ async def _eval_cascade(
     if best is not None and on_quality_exhausted == "best_effort":
         if billed_total > 0:
             _set_total_cost(best[2], billed_total, billed_basis)
-        return Outcome.deficient(best[2], best[0])
+        return Outcome.deficient(best[2], best[0], budget_exhausted=deadline_hit or best[3])
     if deadline_hit:
         return Outcome.err("budget_exhausted")
     return Outcome.err("exhausted")
@@ -2438,6 +2473,7 @@ async def _run_leaf(
                 path,
                 duration_ms=int(ctx.clock.now_ms() - started),
                 detail=str(e),
+                code=getattr(e, "backend_code", None) or None,
             )
         )
         return _RunResult("error", backend, error_class=cls)
@@ -2457,6 +2493,7 @@ async def _run_leaf(
                 path,
                 duration_ms=int(ctx.clock.now_ms() - started),
                 detail=str(e),
+                code=getattr(e, "backend_code", None) or None,
             )
         )
         return _RunResult("error", backend, error_class=cls)
@@ -2668,12 +2705,31 @@ def _child_ctx(ctx: _WalkCtx, deadline_ms: float) -> _WalkCtx:
 
 
 def _resolve_backend(slug: str, ctx: _WalkCtx) -> str | None:
-    if slug != "auto":
-        return slug
-    for candidate in ctx.eligible:  # stage-3 order, first not-yet-attempted
-        if candidate not in ctx.attempted:
-            return candidate
-    return None
+    """The concrete backend id this step will dispatch, or None when `auto` has nothing left.
+
+    The last point at which the id is known and nothing has been built yet — every leaf-dispatch
+    site (`_run_leaf`, `_run_branch`, `_eval_paged_cascade`) passes through here before the
+    registry lookup, so it is also the last place the caller's allow-list can be enforced.
+
+    That enforcement is redundant with compile_strategy's prune, and is here anyway. An allow-list
+    is a security control, and the cost of the two layers disagreeing is asymmetric: a spurious
+    refusal is a support ticket, while a missed one spends someone else's vendor credits and looks
+    exactly like normal traffic. `auto` in particular is bounded only by the CONTENTS of
+    `ctx.eligible`, so anything that ever puts an id into that list by another route — or a node
+    type added later that resolves a backend without going through the prune — silently reopens
+    the hole. Failing closed here means it cannot.
+    """
+    resolved = slug
+    if slug == "auto":
+        resolved = next((c for c in ctx.eligible if c not in ctx.attempted), None)
+        if resolved is None:
+            return None
+    if ctx.backend_allowlist is not None and resolved not in ctx.backend_allowlist:
+        raise ScopeRefused(
+            f"this API key is not scoped to reach backend {resolved!r}",
+            backend_code=resolved,
+        )
+    return resolved
 
 
 def _actual_cost(resp: NormalizedResponse) -> float | None:

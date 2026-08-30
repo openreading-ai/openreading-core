@@ -292,12 +292,12 @@ stays ungated and takes the router's stage-3 best among backends not yet attempt
 (none left → `Err(exhausted)`, reason `no_untried_backend`). On exhaustion — the ladder ran out
 or the `max_duration` deadline ended the walk — keep-best returns the best retained `Deficient`
 result — ties keep the EARLIEST-retained rung, the comparison being strict-greater (engine Law
-4; the cookbook's highest-rung-index tiebreak is not implemented) — with
-`quality_below_threshold`, the only warning the
-engine adds for a degraded result (`engine._eval_cascade`; the cookbook's promised
-`budget_exhausted` *warning* has no emitter). `budget_exhausted` is an error class: nothing
-retained and the deadline ended the walk → `Err(budget_exhausted)`; nothing retained otherwise
-→ `Err(exhausted)`; both raise `PlanExhaustedError`.
+4; the cookbook's highest-rung-index tiebreak is not implemented) — carrying
+`budget_exhausted` when the deadline ended the walk and `quality_below_threshold` when the ladder
+ran out (`engine.run_strategy`): the two are separate codes because escalating to a stronger
+backend answers the second and is exactly wrong for the first. `budget_exhausted` is also an
+error class: nothing retained and the deadline ended the walk → `Err(budget_exhausted)`; nothing
+retained otherwise → `Err(exhausted)`; both raise `PlanExhaustedError`.
 
 8. Compliance-constrained cascade with a guaranteed local floor
 ---------------------------------------------------------------

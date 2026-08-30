@@ -24,7 +24,10 @@ uv run openreading serve
 ```
 
 ```text
-INFO:     Uvicorn running on http://127.0.0.1:8787 (Press CTRL+C to quit)
+[serve] listening on http://127.0.0.1:8787 — readiness: GET /healthz
+INFO:     Started server process [85094]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
 ```
 
 ## Mental model
@@ -131,10 +134,12 @@ until `state` is not `running`. An empty `documents: []` returns 200 with an `em
 
 ### 4. Read the error ladder
 
-Every error body has one shape, so a client needs one parser for all of them. The shape is
-`{"error": {"category", "message", "backend_code"?, "missing_env"?, "trail"?}}`. A failed job's
-`error` is that same body, fetched with 200. Each row in the table below was triggered against the
-running server.
+Every error the server raises deliberately has one shape, so one parser reads all of them. The
+shape is `{"error": {"category", "message", "backend_code"?, "missing_env"?, "trail"?}}`. A failed
+job's `error` is that same body, fetched with 200. Give your client one branch outside that parser
+all the same, because an error no handler catches falls through to the web framework, which answers
+`500` with the plain text `Internal Server Error`. Each row in the table below was triggered
+against the running server, except where the row says otherwise.
 
 ```bash
 curl -s -w '\nHTTP %{http_code}\n' -X POST localhost:8787/v1/parse -H 'content-type: application/json' \
@@ -155,14 +160,48 @@ right, so fix the table.
 |---|---|---|---|
 | `200` | none | success; also `GET /v1/jobs/{id}` of a failed job, and every liveness probe result | any step above |
 | `400` | `bad_request`, `unknown_strategy` | body not JSON, fails the request schema, unknown `strategy:<name>`, bad `jobs` or `timeout_s`, `/v1/jobs` with `auto` | `"backend": {"id": "strategy:nope"}` |
-| `401` | `unauthorized`, `bad_signature` | auth on and no valid bearer; webhook signature invalid or its secret unset | `POST /v1/webhooks/reducto` with any body and no `REDUCTO_WEBHOOK_SECRET` |
-| `403` | `compliance_refused`, `scope_denied` | the policy leaves nothing to run; the token is not scoped to that backend | `"backend": {"id": "reducto"}, "compliance": {"require_baa": true}` |
+| `401` | `unauthorized`, `bad_signature` | auth on and no valid bearer, on every endpoint but the two named below; webhook signature invalid or its secret unset | `POST /v1/webhooks/reducto` with any body and no `REDUCTO_WEBHOOK_SECRET` |
+| `403` | `compliance_refused`, `scope_denied` | the policy leaves nothing to run; the token is not scoped to the backend it named, or scope empties that request's router chain or strategy walk | `"backend": {"id": "reducto"}, "compliance": {"require_baa": true}` |
 | `404` | `unknown_backend`, `unknown_job` | the id names nothing | `"backend": {"id": "nope"}`; `GET /v1/jobs/j_nope` |
 | `413` | `terminal` (`doc_too_large`) | document over the backend's size limit | needs a hosted key; shape shown, not run |
 | `422` | `unsupported_feature` | the named backend cannot produce what you asked for | `"backend": {"id": "pymupdf"}, "extraction_schema": {"instructions": "totals"}` |
 | `424` | `terminal` (`missing_credentials`, `auth_rejected`) | named backend has no key (`missing_env[]`), or the provider rejected it | `"backend": {"id": "reducto"}` with no `REDUCTO_API_KEY` |
-| `502` | `plan_exhausted`, `terminal` | every backend in the plan failed (`trail` lists them) | needs a hosted key; shape shown, not run |
+| `502` | `plan_exhausted`, `terminal` | every backend in the plan failed (`trail` lists them). Two request-shape refusals also land here rather than at 400: `credentials_ref_alias_not_allowed` (the body's `credentials_ref` named an alias the operator has not allow-listed) and `endpoint_not_request_configurable` (the body set `runtime.endpoint`). Both are permanent, so read `backend_code` before retrying a 502 | `"credentials_ref": "env:OPENREADING_REDUCTO"`; `"runtime": {"endpoint": "https://example.com"}` |
 | `504` | `retryable_exhausted` | deadline passed or retries exhausted | needs a hosted key; shape shown, not run |
+| `500` | none; the body is the plain text `Internal Server Error`, not JSON | an error no handler caught | no trigger known today; it is the framework's own fallback, so parse defensively anyway |
+
+`/v1/batch` takes `backend` as one bare string where `/v1/parse` takes an object, which is the
+easiest mistake to make when moving between the two endpoints. The refusal names the fix:
+
+```bash
+curl -s -w '\nHTTP %{http_code}\n' -X POST localhost:8787/v1/batch -H 'content-type: application/json' \
+  -d '{"documents": [{"path": "'"$PWD"'/sample.pdf"}], "backend": {"id": "pymupdf"}}'
+```
+
+```json
+{"error":{"category":"bad_request","message":"\"backend\" on this endpoint is one string shared by every item, not /v1/parse's object — send \"backend\": \"pymupdf\""}}
+HTTP 400
+```
+
+**You should see** 400 in the enveloped shape rather than a bare 500. Sending
+`"backend": "pymupdf"` answers 200 for the same documents.
+
+Two endpoints answer without a bearer even when auth is on: `GET /healthz` and
+`POST /v1/webhooks/{backend_id}`. A vendor holds no token of yours, so a callback could never
+present one. With auth on and no bearer, `/healthz` returns 200, and
+`POST /v1/webhooks/chunkr -d '{"task_id":"forged-1"}'` returns 404 `unknown_job`. That 404 means the
+request reached the handler and looked the job up rather than being challenged for a token.
+
+A webhook is closed instead by its signature, and only `reducto` declares a signing secret today.
+The same unauthenticated call to `POST /v1/webhooks/reducto` returns 401 `bad_signature`, which is
+the row above. For `chunkr` and `open-ocr` the `openreading.server` docstring says both "verify
+nothing (neither has a signature mechanism), so treat webhook mode on either as unauthenticated
+until real verification ships". On a server reachable beyond loopback that is an unauthenticated and
+unverified write path into the job store for those two backends. The same docstring states what
+contains it: the lookup only considers jobs for the URL's own `{backend_id}` that are already
+waiting in webhook mode, so "a forged chunkr/open-ocr event can only settle a chunkr/open-ocr
+webhook-mode job whose id it names". It can reach no other backend's job and no polled job. Decide
+your network policy for those two paths before you bind beyond loopback.
 
 ### 5. Turn on caller auth
 
@@ -191,8 +230,33 @@ HTTP 403
 ```
 
 **You should see** 401 without a bearer token, 200 with it, and 403 outside the scope. `/healthz`
-stays open without a bearer. A malformed scope entry stops the server at startup with a
-`ServerConfigError` that names the entry position, never the value.
+and `POST /v1/webhooks/{backend_id}` stay open without a bearer, as the note under the ladder
+explains. A malformed entry in either variable stops the server before it binds a socket:
+
+```bash
+OPENREADING_API_KEYS="$TOK" OPENREADING_API_KEY_SCOPES="$TOK=pymupdf,=tesseract" \
+  uv run openreading serve; echo "exit=$?"
+```
+```text
+[serve] OPENREADING_API_KEY_SCOPES entry 2 has an empty key before '='
+exit=3
+```
+
+The line goes to stderr under the `[serve]` tag every other CLI failure uses, so one log rule
+catches it. It names the entry's position and never its value, which keeps a startup log from
+becoming the place a token leaks. A second scope for one key and a scope for a key that
+`OPENREADING_API_KEYS` never listed are refused the same way.
+
+A token listed in `OPENREADING_API_KEYS` but absent from `OPENREADING_API_KEY_SCOPES` is
+unscoped, meaning it reaches every backend. That is deliberate, because a second key added for a
+colleague is otherwise dead on arrival, and it is also the way an operator mints an unrestricted
+token by accident. Give every token you add its own scope entry unless you mean it to reach
+everything.
+
+Startup checks the shape of a scope and not the backend ids inside it. A typo such as `pymupfd`
+binds the socket with no warning and leaves that token able to reach nothing, so every request
+under it answers 403 naming a backend you believe you allowed. Check each id against the `slug`
+values `GET /v1/backends` returns.
 
 ## Recipes
 
@@ -204,11 +268,20 @@ stays open without a bearer. A malformed scope entry stops the server at startup
 Reducto signs the callback. The server verifies it with `REDUCTO_WEBHOOK_SECRET` and answers 401
 when the secret is unset. You always supply the callback URL.
 
-**Expose the server beyond localhost.** `uv run openreading serve --host 0.0.0.0` prints:
-```text
-[serve] warning: binding 0.0.0.0 exposes the server — anyone who can reach it spends your vendor keys. Put it behind your own auth/proxy.
+**Expose the server beyond localhost.** Any `--host` other than the literal `127.0.0.1` warns on
+stderr, so the check is broader than a genuinely reachable address. Spelling the loopback address
+differently is enough to see it:
+```bash
+uv run openreading serve --host localhost
 ```
-Set `OPENREADING_API_KEYS` first, and terminate TLS in front of it.
+```text
+[serve] warning: binding localhost exposes the server — anyone who can reach it spends your vendor keys. Put it behind your own auth/proxy.
+[serve] listening on http://127.0.0.1:8787 — readiness: GET /healthz
+…
+```
+`--host 0.0.0.0` prints the same line with its own address, and that one really does reach every
+interface. Set `OPENREADING_API_KEYS` before you bind anywhere but the default, and terminate TLS
+in front of it.
 
 **Probe whether a backend answers.**
 `curl -s -X POST localhost:8787/v1/backends/pymupdf/liveness -d '{}'` returns
@@ -227,10 +300,127 @@ sample through `/v1/parse` and `/v1/batch`, asserts schema-valid responses, and 
   flag. A compliance attestation is the operator's declaration that a backend meets a requirement,
   such as a signed business associate agreement (BAA). Nothing lands in `ps` or shell history, and
   no caller can attest on the operator's behalf.
-- A scope only narrows what compliance and routing already allow. It is checked before any adapter
-  is built, so an out-of-scope request never resolves a vendor credential.
+- A scope only narrows what compliance and routing already allow. A directly named backend is
+  checked at the door, before any adapter is built, so an out-of-scope name never resolves a
+  vendor credential.
+- An `auto` request runs on the router's fallback chain pruned to the token's backends. That chain
+  is the backend the router picks plus every backend it would fall back to, and an out-of-scope
+  member is removed before the run rather than reached. A token scoped to `pymupdf` and
+  `tesseract` is refused `docling` by name, and its `auto` request on a file neither can parse
+  fails with a trail naming those two backends alone.
+- An `auto` request whose top pick alone is out of scope is rerouted, not refused. That is a
+  change in behaviour. The old check read the router's first pick and nothing behind it, which
+  refused the request over a choice the caller never made. Worse, it left every fallback behind
+  that pick unchecked. A token scoped to `tesseract` is still refused `pymupdf` by name, and the
+  same token's `auto` request answers 200 on `tesseract`.
+- A `strategy:<name>` request is checked too, from inside the walk, because a walk chooses its own
+  backends and cannot be judged at the door. Every out-of-scope rung is pruned before it runs, and
+  an `auto` rung resolves only against what is left. A token scoped to `pymupdf` that names
+  `strategy:offline_first` therefore runs `pymupdf` alone, and the response's
+  `orchestration.dropped` lists `docling` and `tesseract` with code `scope_denied` at stage 0.
+- Pruning a walk or a chain down to nothing is a refusal, never a 502 and never a silent run on
+  nothing. A token scoped to `reducto` that names `strategy:offline_first` answers 403 with `this
+  API key is not scoped to reach any backend strategy 'offline_first' can run (denied: docling,
+  pymupdf, tesseract)`. The same token sending `auto` under `require_local` answers 403 with `this
+  API key is not scoped to reach backend 'pymupdf'`, which names the backend the router would have
+  used rather than the ones the token allows.
+- Only a strategy records what the scope removed. A pruned `auto` chain leaves no
+  `orchestration.dropped` block on the envelope. You see what survived, in `backend.id` on success
+  or in a 502 `trail`, but never a list of what was pruned.
 - `/v1/parse`, `/v1/batch` and `/v1/compare` responses are schema-validated before they leave the
   process. The server owns the only result cache, so a replayed item never hides a billed call.
+
+## Operations
+
+This section is for whoever runs the process and watches it. It covers where the log lines go, what
+a restart does to work already in flight, and what there is to measure.
+
+### Read the logs
+
+The server writes to both streams and splits them by kind, which a log-shipping config has to
+account for. Start it with the streams apart and drive one request through:
+
+```bash
+uv run openreading serve --port 8901 > access.log 2> lifecycle.log &
+sleep 3
+curl -s -o /dev/null -X POST localhost:8901/v1/parse -H 'content-type: application/json' \
+  -d '{"document": {"path": "'"$PWD"'/sample.pdf"}, "backend": {"id": "pymupdf"}}'
+sleep 1; cat access.log; echo '--- stderr ---'; cat lifecycle.log
+```
+
+```text
+Consider using the pymupdf_layout package for a greatly improved page layout analysis.
+INFO:     127.0.0.1:58618 - "POST /v1/parse HTTP/1.1" 200 OK
+--- stderr ---
+[serve] listening on http://127.0.0.1:8901 — readiness: GET /healthz
+INFO:     Started server process [85067]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+```
+
+**You should see** one access line per request on stdout and the whole lifecycle on stderr. Three
+properties follow. A backend's own chatter lands in the stdout access log between access lines, so
+that stream is not uniform and a strict parser will choke on the advisory. There is no request id
+and no timestamp on an access line, so a slow request cannot be traced back to a caller. There is
+no log-level knob and no structured output, so filtering happens in your shipper rather than here.
+
+The `[serve] listening on …` line prints only once the port is genuinely claimed, and it names the
+readiness check for the same reason. A port already in use produces one tagged line and exit 3
+rather than a healthy-looking startup followed by a silent death:
+
+```bash
+uv run openreading serve --port 8901; echo "exit=$?"
+```
+
+```text
+[serve] cannot bind 127.0.0.1:8901: Address already in use — free it or pass a different --port
+exit=3
+```
+
+Gate readiness on `GET /healthz` answering 200 all the same, because no log line is a readiness
+contract and the uvicorn lines below it are still printed by the library rather than by this
+process.
+
+### Restart, and what it costs a client
+
+The job store lives in the process, so a restart erases it. A job id that answered `succeeded` a
+moment ago answers 404 afterwards, with the same category a typo gets:
+
+```bash
+curl -s localhost:8901/v1/jobs/omjob_bad0f7e7accf4b528a55c88496545946
+```
+
+```json
+{"error":{"category":"unknown_job","message":"omjob_bad0f7e7accf4b528a55c88496545946"}}
+```
+
+**You should see** `unknown_job` for both a dropped job and an id that never existed. A client
+cannot tell "we lost your finished result, resubmit" from "you asked for something that never
+existed, do not retry", and no field distinguishes them today. Treat 404 on an id your own code
+minted as a resubmit, and reserve the do-not-retry reading for an id you did not mint.
+
+That matters more than it looks, because each `GET /v1/jobs/{id}` is what advances a poll-mode job
+by one slice. Nothing progresses the job in the background. A rolling restart in the middle of a
+poll therefore strands work a vendor has already accepted and will still bill, and no record of it
+survives the process.
+
+### Measure what you can
+
+There is no metrics or tracing surface here, and the "Not built yet" list says so. Three things are
+worth collecting instead. The stdout access log gives request counts and status codes. `uv run
+openreading backends --check <slug>` measures whether a backend really answers and belongs on a
+schedule as a vendor-degradation canary ([Routing and keys](../router/README.md)). Each envelope
+carries `usage.cost_usd`, which is the only per-request spend figure the process produces, so a
+consumer that wants a spend total sums it as responses arrive.
+
+### Load and time budgets
+
+One `openreading serve` is one uvicorn process, and it exposes no worker count and no queue depth.
+Concurrency inside a request is bounded per backend, which [Batch runs](../batch/README.md#sizing-a-large-run)
+measures along with the memory a corpus costs. A request over HTTP is capped at the generic 120
+second budget with no field to raise it, so a long hosted document answers 504 here and needs the
+CLI or the Python API instead. Nothing rate-limits callers and nothing caps spend, so put your own
+proxy in front before more than one client can reach the port.
 
 ## Reference
 
@@ -238,23 +428,31 @@ sample through `/v1/parse` and `/v1/batch`, asserts schema-valid responses, and 
   "Timeouts", and "Security". `uv run python -m pydoc openreading.server.app` lists every
   environment variable.
 - `uv run openreading serve --help` documents `--host`, `--port`, `--cors-origin`, and `--env-file`.
-- [JSON Schemas](../schemas/README.md), and the OpenAPI page at `/docs` (200).
+  It says nothing about authentication, which is off until `OPENREADING_API_KEYS` names at least
+  one token. Read step 5 above before you start a key-holding process.
+- [JSON Schemas](../schemas/README.md), and the OpenAPI page at `/docs`. It answers 200 while auth
+  is off. Once step 5 turns auth on, `/docs` and `/openapi.json` both answer 401 without a bearer,
+  so a browser tab cannot open them and a client must send the header itself.
 
 ## Not built yet
 
 - Rate limiting, spend accounting, and TLS are not provided here by design. Put your own reverse
   proxy in front (`openreading.server` docstring, "Security": "What this does NOT add: rate
   limiting, spend accounting, transport encryption").
+- A metrics or tracing surface. There is no `/metrics`, no counters, no request id, and no trace
+  hook, and with auth on an unknown path answers 401 rather than 404, so a probe cannot tell "not
+  implemented" from "wrong token". [Measure what you can](#measure-what-you-can) names what to
+  collect instead.
 - A durable job store and server-side resume. The `openreading.server` docstring says under
   "Endpoints", `POST /v1/jobs`: "there is no server-side resume". The `openreading.ledger`
   docstring says under "The substrate contract": "The `/v1/jobs` store stays in-memory,
-  per-process".
+  per-process". [Restart, and what it costs a client](#restart-and-what-it-costs-a-client) shows
+  what a client sees when that store goes away.
 - A `deadline_ms` field over HTTP, so a long hosted job hits 504 at 120 s (`openreading.server`
   docstring, "HTTP status codes", the Timeouts paragraph: "no `deadline_ms` field or query param").
 - Webhook signature verification for `chunkr` and `open-ocr` (`openreading.server` docstring,
-  "Endpoints", `POST /v1/webhooks/{backend_id}`: "verify nothing").
-- Scope checks across a `strategy:<name>` walk (`openreading.server` docstring, "Security": "not
-  scope-checked in this version").
+  "Endpoints", `POST /v1/webhooks/{backend_id}`: "verify nothing"). What that exposes today, and
+  what contains it, is under the error ladder above.
 
 ## See also
 

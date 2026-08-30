@@ -1,6 +1,6 @@
-"""The 3-stage router (routing_and_compliance.md §4.1): compliance hard-filter → capability
-filter → cost/quality/latency scoring. It reads AdapterDescriptors only and never branches on
-backend type.
+"""The 3-stage router (internal/research/openreading/routing_and_compliance.md §4.1): compliance
+hard-filter → capability filter → cost/quality/latency scoring. It reads AdapterDescriptors only
+and never branches on backend type.
 
 Invariants enforced here:
 - Stages 1 & 2 are boolean gates; stage 3 only reorders survivors.
@@ -16,7 +16,7 @@ Invariants enforced here:
 from __future__ import annotations
 
 import mimetypes
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from openreading.adapters.base import BackendAdapter
 from openreading.router import compliance as comp
@@ -85,6 +85,13 @@ class RoutePlan:
     # eligible backend id -> the operator confirmation its require_baa eligibility rests on. The
     # executor turns each into a BAA_TIER_CONFIRMED_WARNING on the response it actually returns.
     baa_tier_notes: dict[str, str] = field(default_factory=dict)
+    # The CALLER's backend allow-list (the server's OPENREADING_API_KEY_SCOPES entry for the
+    # presented token), or None when the caller is unscoped. Set by restrict_to() below, which is
+    # also what prunes the chain to it — the two are one operation on purpose, so a plan cannot be
+    # pruned without arming executor.execute_plan's re-check, and cannot arm that re-check without
+    # having been pruned. It travels ON the plan rather than as an execute_plan kwarg so the
+    # executor keeps its "consumes ONLY the RoutePlan" invariant and no call site can forget it.
+    backend_allowlist: frozenset[str] | None = None
 
     @property
     def eligible_ids(self) -> list[str]:
@@ -95,6 +102,37 @@ class RoutePlan:
     @property
     def chain(self) -> list[BackendAdapter]:
         return ([self.chosen] if self.chosen else []) + self.fallbacks
+
+    def restrict_to(self, allowlist: frozenset[str] | None) -> RoutePlan:
+        """This plan with every chain member outside `allowlist` removed. None = unscoped, and
+        returns self unchanged.
+
+        The whole CHAIN, not just `chosen`. A plan is chosen plus every fallback the compliance
+        router computed, and `executor.execute_plan` walks all of it, so a caller ceiling applied
+        to `chosen` alone bounds the first backend and none of the rest: the moment the first one
+        fails on a document, the request walks the remaining eligible registry and delivers the
+        document to backends the same caller is refused by name.
+
+        Only ever a subtraction, over a list the compliance filter has already produced, so no
+        allow-list can readmit a backend compliance dropped (the never-relaxed invariant above).
+        The `fallbacks[1:]` reshuffle is not a re-rank: removing a member promotes the next
+        surviving one in the router's own stage-3 order, which is what "try the next fallback"
+        already means.
+
+        An emptied chain is a `chosen=None` plan, and the caller decides what that means — for a
+        scoped request it is 403 `scope_denied`, never a silent success on nothing, and never the
+        compliance refusal an already-empty router plan gives (that one's fix is the policy; this
+        one's is the token's allow-list).
+        """
+        if allowlist is None:
+            return self
+        kept = [a for a in self.chain if a.descriptor.id in allowlist]
+        return replace(
+            self,
+            chosen=kept[0] if kept else None,
+            fallbacks=kept[1:],
+            backend_allowlist=allowlist,
+        )
 
 
 class Router:

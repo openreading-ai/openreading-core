@@ -9,6 +9,10 @@ Invariants shared by every subcommand
 -------------------------------------
 - `--env-file PATH` is accepted everywhere (default `./.env` when present). It never overrides an
   already-set process variable, so an exported value always beats the file.
+- `openreading --version` prints `openreading <version>` on stdout and exits 0, with no
+  subcommand -- the same string as `openreading.__version__` and the `version` field of the
+  server's `GET /healthz`, so an incident's first question has an answer that does not require a
+  running server.
 - stdout carries ONLY the JSON envelope (or the rendered report). Progress, cost preflight,
   backend chatter (stdout is redirected during the run) and every error line go to stderr, so
   `> out.json` is always safe. stderr lines carry a bracket tag. `[<command>]` (`[route]`,
@@ -17,7 +21,8 @@ Invariants shared by every subcommand
   `strategy:<name>` or `auto` (`[pymupdf] missing credentials ...`); `[parse]` appears only on
   selector misuse, a slug that fails catalog lookup, and the interrupt lines. A batch `parse`
   prints `[batch]` for usage / unexpected errors and the `empty_batch` warning, `[i/N]` for
-  progress, `[preflight]` for the cost preflight, and the run label (not `[batch]`) for its exit-3
+  progress, `[preflight]` for the two pre-run advisories (cost, and a `--jobs` request the named
+  backend's descriptor caps), and the run label (not `[batch]`) for its exit-3
   cannot-run line; a `compare` fan-out prints `[<backend>]` per fanned-out backend. The one
   untagged line is `strategy validate`'s grammar error (below).
 - A printed response/envelope is schema-validated first (`schemas.validate_response` /
@@ -27,9 +32,10 @@ Invariants shared by every subcommand
   non-conforming response surfaces as an uncaught traceback, not a coded exit.
 - A `<file>` starting with `http(s)://` is a URL: backends that ingest URLs natively get it
   as-is, the rest download to bytes first.
-- Compliance is never widened by any flag. A policy that leaves nothing compliant to run is a
-  `ComplianceRefused` refusal, exit 3, from every command that EXECUTES under `--policy`; bare
-  `route` prints the empty plan and exits 4 (internal/decisions/DECISIONS.md D7, D7a).
+- No flag widens the eligible set; the policy file sets it, and three of its keys widen it
+  deliberately. A policy that leaves nothing compliant to run is a `ComplianceRefused` refusal,
+  exit 3, from every command that EXECUTES under `--policy`; bare `route` prints the empty plan
+  and exits 4 (internal/decisions/DECISIONS.md D7, D7a).
 - `internal/<path>` pointers in this package name files of the private `openreading` company
   context repo (its `decisions/` and `design/` trees), not a directory of this package.
 - The CLI passes no result cache (DECISIONS D-v3-3): silent memoization inside a library call is
@@ -113,15 +119,19 @@ Batch flags (in addition to the single-document ones):
 A file whose format the backend cannot take is a SKIPPED item with a reason (`unsupported_format`
 / `unknown_format`) -- never a crash, never a silent omission. Per-item isolation (M6) means a
 failure never raises out of the batch, so the stderr progress line (`[i/N] <path> <state> <code>:
-<message>`) is the only place a failed item's message is read; a cost preflight prints for >10
-live items on a hosted backend. A source list that resolves to zero documents prints the envelope's
+<message>`) is the only place a failed item's message is read. Two `[preflight]` advisories print
+before the run, for a directly named backend only (`auto` and `strategy:` resolve per item, so
+neither number exists yet): the cost of >10 live items on a `hosted_api` backend, stated per PAGE
+with the single-page total multiplied out; and, whatever the item count, a `--jobs N` above that
+backend's `descriptor.batch.max_concurrency`, naming N and the cap, because only the capped value
+survives into `request.jobs`. A source list that resolves to zero documents prints the envelope's
 `empty_batch` warning to stderr so silence is never mistaken for a hang. Exits: 0 all succeeded;
 4 partial (some items failed); 1 nothing succeeded (an unknown `--strategy` becomes a failed item
 per file, so it lands here with the same hint on stderr AND each item's `error` -- `code:
 unknown_strategy` -- in the envelope); 2 unresolvable source, `--max-items` or
 `--max-jobs` exceeded; 3 cannot run at all (missing credentials, `ComplianceRefused`, or -- for a
 native-batch backend -- a `RetryableError` / deadline from `submit_many`, which has no next rung
-and does not retry; `parse` has no `--policy` flag, so an unreadable policy is not a `parse` exit);
+and does not retry; `parse` has no `--policy` flag, so a bad policy is not a `parse` exit);
 6 interrupted while `OPENREADING_LEDGER` was set -- per-item runs may be individually resumable,
 but batch-level resume is not supported, so no single run id is named.
 
@@ -131,22 +141,22 @@ Re-drive a run recorded under `OPENREADING_LEDGER` from its own journal: every s
 terminal there replays byte-identical with zero network calls; anything genuinely unreached
 executes for real. Takes ONLY `RUN_ID` -- every other option comes from the ledger, not the command
 line. A run is resumable once the ledger was armed for it, whether the original `parse` went on to
-succeed, was interrupted (exit 6) or crashed; the id is printed by `parse` on interrupt or read
-from the run's own header under `$OPENREADING_LEDGER`.
+succeed, was interrupted (exit 6) or crashed; the id is a UUIDv4, 36 characters, printed by `parse`
+on interrupt or read from the run's own header under `$OPENREADING_LEDGER`.
 
     export OPENREADING_LEDGER=./.openreading
     openreading parse big-batch.pdf --strategy cheap_first    # Ctrl-C: exit 6, prints the run id
-    openreading resume r_01J8QK
+    openreading resume 7dbf6b71-adb5-4e90-9188-a184fdba9d05
 
-    [parse] interrupted; run r_01J8QK is resumable
-    [parse] resume with: openreading resume r_01J8QK
+    [parse] interrupted; run 7dbf6b71-adb5-4e90-9188-a184fdba9d05 is resumable
+    [parse] resume with: openreading resume 7dbf6b71-adb5-4e90-9188-a184fdba9d05
 
 A resumed run REFUSES BY NAME (exit 3) rather than falling back to a fresher config when
 `openreading.yaml` (`config_hash`), the compiled plan, or the journal's record format no longer
 match what the original run saw -- a resumed run replays recorded decisions; a changed config would
 silently mean a different run:
 
-    [resume] refused: openreading.yaml changed since r_01J8QK (sha256 3f9a... -> c21b...)
+    [resume] refused: openreading.yaml changed since 7dbf6b71-adb5-4e90-9188-a184fdba9d05 (sha256 3f9a... -> c21b...)
     [resume] a resumed run replays recorded decisions; start a new run instead
 
 Also exit 3: an unknown `RUN_ID`, `OPENREADING_LEDGER` unset, or a run whose payloads the
@@ -161,12 +171,16 @@ Print the compliance-first plan; with `--run`, execute the whole chain (chosen, 
 
 `policy.json` keys: `require_baa`, `no_train_on_data`, `data_region`, `require_local`,
 `max_retention`, `optimize_for`, `doc_type_hint`, `allow_unverified_compliance`,
-`train_optout_confirmed`, `baa_tier_confirmed`. Output is `{chosen, fallbacks, dropped: {id:
+`train_optout_confirmed`, `baa_tier_confirmed`. Those ten are the whole grammar: the file must be
+a JSON object, any other key is refused by name (with a `did you mean` for a near miss), and a
+value of the wrong type is refused too -- exit 3, `[route] invalid policy <path>: ...`, from every
+`--policy` flag in this CLI, because a compliance constraint that can be turned off by a typo is
+not a constraint (`api.validate_policy`). Output is `{chosen, fallbacks, dropped: {id:
 {stage, code, reason}}, terminal_reason}` plus, with `--run`, a `result`. `--run` never widens the
 plan; a fallback actually used is recorded in the result's `warnings[]`. Exits: 0; 4 no compliant
-backend (the empty plan is still printed as JSON); 3 unreadable policy or document, or a
-plan-exhausted `--run` (the plan is still printed; the stderr trail names each backend's failure
-and a `check <VAR>` hint for every rejected key).
+backend (the empty plan is still printed as JSON); 3 an unreadable or invalid policy, an
+unreadable document, or a plan-exhausted `--run` (the plan is still printed; the stderr trail
+names each backend's failure and a `check <VAR>` hint for every rejected key).
 
 The last three keys are router configuration, not request fields (`api.router_config` folds them
 into `RouterConfig`, DECISIONS D7 / D7a), and they are two different kinds of knob.
@@ -278,7 +292,7 @@ Rank N registered backends on ONE dataset -- measured, not vendor-claimed. Runs 
 `openreading/evals/sample`) through the unchanged `openreading.evals.runner.run_case` path for
 every named backend -- the same per-case compliance gate, the same five-dimension scorer, no second
 scoring or gating path -- and prints one ranked `BenchmarkReport`: measured mean score,
-per-dimension breakdown, per-case winner table, error tally, and each backend's cost basis
+per-dimension breakdown, per-case result table, error tally, and each backend's cost basis
 alongside its score (never a rank without the price that produced it).
 
     openreading leaderboard datasets/paystubs/ --backends aws-textract,google-document-ai
@@ -288,7 +302,17 @@ alongside its score (never a rank without the price that produced it).
 `--format table` (default) prints the dataset's own identity (path, case count, case names) above
 the ranking so a screenshot is never read as a universal verdict rather than "on these N
 documents"; `--format json` is the schema-valid `BenchmarkReport` (`leaderboard-report.v0.1.json`
-in `openreading.schemas`) a script or CI job consumes. A backend's per-case compliance refusal,
+in `openreading.schemas`) a script or CI job consumes.
+
+The table carries `scored` (`n_scored/n_cases`) beside `mean`, and prints `mean` as an em dash when
+`n_scored` is 0, because a mean over no scored case is not a measurement and a printed `0.000` is
+indistinguishable from a backend that measured 0.00 on every case it ran. `errors` does not
+separate them either: a case naming no recognized `expected` dimension is unscored without
+erroring. A non-deterministic backend's row is marked in place -- its mean is one labeled sample.
+The per-case block states `winner=`, `tie=`, `no winner (every scored backend got 0.00)` or
+`no result (no backend produced a score)`, and totals the four, because the report's own `winner`
+field breaks a tie alphabetically for byte-stability and printing that as a result turns ties and
+mutual failures into a clean sweep for anyone tallying the block. The JSON `winner` is unchanged. A backend's per-case compliance refusal,
 or any other per-case fault, is that backend's own scored, error-carrying case -- in its error
 tally, excluded from its mean -- never a silently skipped case,
 never a crash. Every backend makes a REAL call per case: `--all-ready` over a large dataset is N x M
@@ -369,6 +393,20 @@ depends on this one.) Binding any host other than `127.0.0.1` prints a warning: 
 behind your own auth/proxy. The server never reads the working directory for a config -- pass
 `OPENREADING_CONFIG`.
 
+Startup and readiness. The listening socket is claimed BEFORE uvicorn is handed control, so a
+port conflict is one `[serve] cannot bind ...` line and exit 3 with nothing served, and every
+uvicorn startup line that follows is true when it prints. (Left to uvicorn, the order is
+lifespan-then-bind: `INFO: Application startup complete.` is logged before the port is claimed,
+so a readiness gate grepping the log passed a server that was about to die of a conflict.) The
+one line this CLI prints is `[serve] listening on http://HOST:PORT -- readiness: GET /healthz`,
+after the bind, naming the port the kernel actually gave (`--port 0` resolves to a real one).
+Do not gate on any log line: poll `GET /healthz` until it answers 200. Logging otherwise is
+uvicorn's own -- access logs on stdout, lifecycle on stderr, no request id, no level knob.
+
+Signals. SIGTERM is uvicorn's while the server runs: it drains in-flight requests, logs the
+shutdown, and the process exits 143. `serve` is the one command excluded from this CLI's own
+SIGTERM handling, which would otherwise fire after that clean shutdown.
+
 Exit codes
 ----------
   0  success.
@@ -381,21 +419,49 @@ Exit codes
      strategy name anywhere.
   3  cannot run: missing credentials (names the exact vars + signup URL), `auth_rejected`,
      `unsupported_feature`, an unreadable `--config` / `--policy` / document / `--trace` /
-     `explain` argument, a `ComplianceRefused` refusal (from `parse`, `strategy plan`, `replay`,
-     `calibrate`, `compare`, `leaderboard`), a plan-exhausted `route --run`, `serve` without its
-     extra, an unresolvable/empty `leaderboard` dataset, a `resume` refusal / unknown run /
-     expired payloads, an unknown `backends --check` slug, or a `RetryableError` reaching a
-     directly-named backend on `parse` / `compare` (rate-limit exhaustion, or a poll job past its
-     deadline / `openreading.router.driver.MAX_CONSECUTIVE_FAULTS` -- a named backend has no next
-     rung to fall back to).
+     `explain` argument, a `--policy` file that is not a valid policy object (an unknown key, a
+     non-object top level, or a value of the wrong type), a `ComplianceRefused` refusal (from
+     `parse`, `strategy plan`, `replay`, `calibrate`, `compare`, `leaderboard`), a
+     plan-exhausted `route --run`, `serve` without its extra or with a malformed
+     `OPENREADING_API_KEYS` / `OPENREADING_API_KEY_SCOPES` (one `[serve] ...` line naming the
+     bad entry's position, never its value), an unresolvable/empty `leaderboard` dataset, a
+     `resume` refusal / unknown run / expired payloads, an `OPENREADING_LEDGER` pointing at a
+     path this process cannot journal to (`ledger_unavailable`; an armed ledger is a hard
+     dependency, so the run fails rather than parsing unjournalled), an unknown
+     `backends --check` slug, or
+     a `RetryableError` reaching a directly-named backend on `parse` / `compare` (rate-limit
+     exhaustion, or a poll job past its deadline /
+     `openreading.router.driver.MAX_CONSECUTIVE_FAULTS` -- a named backend has no next rung to
+     fall back to).
   4  `route`: no compliant backend for the policy (the empty plan is printed as JSON);
      batch `parse`: partial -- some items failed.
   5  `compare`: inputs are not schema-valid responses, or `--from` on a run that kept no
      candidates.
-  6  interrupted, resumable: `parse` was interrupted (Ctrl-C) while `OPENREADING_LEDGER` was
-     armed. The run did not fail; it parked mid-walk. A single-document run names its own
-     `RUN_ID` for `openreading resume`; a batch names none (batch-level resume is out of scope).
-     Unarmed, an interrupt stays an ordinary interrupt.
+  6  interrupted, resumable: `parse` was interrupted while `OPENREADING_LEDGER` was armed --
+     Ctrl-C or SIGTERM, which the CLI turns into the same interrupt so a supervisor's stop
+     signal parks a run the way an interactive one does. The run did not fail; it parked
+     mid-walk. A single-document run names its own `RUN_ID` for `openreading resume`; a batch
+     names none (batch-level resume is out of scope).
+143  terminated by SIGTERM with no ledger armed: nothing was resumable, so one `[openreading]`
+     line says so and names `OPENREADING_LEDGER`. Unarmed Ctrl-C is unchanged -- it stays an
+     ordinary `KeyboardInterrupt` (traceback, 130), byte-for-byte the pre-ledger behaviour.
+
+Signals: SIGINT and SIGTERM both reach the interrupt path above; SIGKILL cannot be caught and
+journals nothing. Only the FIRST stop signal acts, and that first one claims BOTH signals: once a
+stop is under way, a further SIGTERM or SIGINT is dropped, whichever kind started it. The exit
+code belongs to the signal that arrived first, so `kill` followed by Ctrl-C is 143 (or 6 when
+armed) and Ctrl-C followed by `kill` is 130 (or 6). Two stop signals are in practice one stop
+arriving twice -- a forwarding parent such as `uv run` or a container init shim, a `killpg` that
+reaches both a wrapper and the process it wraps, or a responder who runs `kill` and then reaches
+for Ctrl-C -- and raising a second interrupt into the shutdown the first one started is what
+strands the run mid-teardown at exit 1. A stop that must not wait escalates to SIGKILL, never to
+another catchable signal. The one pair not covered is two SIGINTs with no SIGTERM involved:
+that is asyncio's own "Ctrl-C twice to force out" escalation, deliberately left alone, because
+taking SIGINT over before a run starts would cost every Ctrl-C the safe cancellation path.
+A process started with SIGINT already ignored -- a shell's asynchronous `&` job
+in a non-interactive shell, `nohup`, a masking supervisor -- keeps ignoring it, because a parent
+that shielded this process said so on purpose and reinstalling a handler over that shield would
+break it for everyone downstream. Send SIGTERM to such a process, or run it in the foreground.
 """
 
 from __future__ import annotations

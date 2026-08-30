@@ -6,8 +6,8 @@ capable subject has it). Subjects with no blocks are `not_capable` here and excl
 shared `evals.scorers.table_grid`.
 
 Two-subject alignment is symmetric via `align_pair`. For N>2 subjects, alignment is anchored on
-the first capable subject (D-v4-13): full N-way clustering with cross-granularity merge is deferred
-to Enterprise (E5); `unaligned_ratio` surfaces how much the heuristic left unmatched.
+the first capable subject (D-v4-13). Full N-way clustering with cross-granularity merge is not
+built (E5), and `unaligned_ratio` surfaces how much the heuristic left unmatched.
 """
 
 from __future__ import annotations
