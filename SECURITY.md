@@ -46,11 +46,14 @@ what that scope bounds and what it does not.
 `runs_fully_local` column in [Backend adapters](src/openreading/adapters/README.md) marks two more
 backends true, and those two behave differently. `docling` and `qwen-vl` are services you host
 rather than libraries you import, and each sends the document over HTTP to whatever address
-`DOCLING_SERVE_URL` or `QWEN_VL_ENDPOINT` holds. Stage 1 admits them under `require_local` on the
-descriptor's static flag alone. It never reads that address, so an endpoint outside your network
-still passes the gate. Read `require_local` as "no third-party vendor" rather than "nothing leaves
-this machine", and keep the document where you want it through what you put in those two variables.
-A hosted backend receives the document itself, which is what naming one means.
+`DOCLING_SERVE_URL` or `QWEN_VL_ENDPOINT` holds. Stage 1 checks that address before trusting the
+descriptor's static flag: `require_local` reads the same environment variable the adapter itself
+uses, and drops the backend, `not_local`, unless that address resolves to loopback right now. An
+unset endpoint still passes, since nothing has proven it points off-box yet; a real hostname does
+not. `require_local` means "nothing leaves this machine", provided the two variables in the
+[Backend adapters](src/openreading/adapters/README.md) table point at a container on this machine,
+which the gate now verifies rather than assumes. A hosted backend receives the document itself,
+which is what naming one means.
 
 Three paths are easy to miss when reading a single page:
 
