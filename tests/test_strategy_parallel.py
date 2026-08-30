@@ -263,11 +263,9 @@ def test_multiple_losers_are_cancelled_concurrently_not_serially():
     # unwrapped call per loser inside `_eval_parallel` (an async function) would block THIS
     # process's entire event loop for the sum of every loser's round trip, serially, stalling
     # every other concurrent request on the same worker. Simulates that round trip with a real
-    # (not virtual-clock) `time.sleep` in two losers' `cancel()` and asserts the wall-clock cost of
-    # cancelling BOTH is close to ONE sleep, not the sum of two — proving they're dispatched
-    # concurrently (via asyncio.to_thread + gather), not one after another.
-    import time
-
+    # (not virtual-clock) `time.sleep` in two losers' `cancel()` and asserts the two round trips
+    # were in flight AT THE SAME TIME — proving they're dispatched concurrently (via
+    # asyncio.to_thread + gather), not one after another.
     SLEEP_S = 0.3
     loser_a = PollFaultBackend("reducto", cancel_sleep_s=SLEEP_S)
     loser_b = PollFaultBackend("azure-document-intelligence", cancel_sleep_s=SLEEP_S)
@@ -279,19 +277,20 @@ def test_multiple_losers_are_cancelled_concurrently_not_serially():
         "pick": "fastest",
         "budget": {"max_cost_usd": 1.0},
     }
-    start = time.monotonic()
     res = _run({"version": 1, "strategies": {"s": node}}, reg)
-    elapsed = time.monotonic() - start
     assert res.response.backend.id == "pymupdf"
     assert len(loser_a.cancelled) == 1 and len(loser_b.cancelled) == 1  # both genuinely cancelled
-    # Serial dispatch costs >= 2 * SLEEP_S (0.60s) plus whatever fixed engine overhead this test
-    # also pays; concurrent dispatch costs ~1 * SLEEP_S (0.30s) plus that same fixed overhead.
-    # The threshold sits well above the concurrent case (including generous jitter headroom) and
-    # well below the serial one, so it fails hard under either dispatch shape without being flaky.
-    assert elapsed < SLEEP_S * 1.8, (
-        f"cancelling two losers took {elapsed:.3f}s — looks serial, not concurrent "
-        f"(2x{SLEEP_S}={2 * SLEEP_S:.2f}s expected if serial, ~1x{SLEEP_S}={SLEEP_S:.2f}s "
-        "expected if concurrent)"
+    # Overlap, not a stopwatch. A total-elapsed budget has to bound the whole walk — engine
+    # overhead included — against a fixed number, and on a contended runner that overhead alone
+    # pushed a genuinely CONCURRENT run past the threshold (0.65-0.88s against a 0.54s budget, on
+    # three separate CI runs). What the test actually means is a property, not a duration: two
+    # cancels dispatched together are inside their vendor round trips at the same instant, and two
+    # dispatched one after another cannot be, however slow or however loaded the machine is.
+    (a_in, a_out), (b_in, b_out) = loser_a.cancel_windows[0], loser_b.cancel_windows[0]
+    assert a_in < b_out and b_in < a_out, (
+        f"the two cancels never overlapped — looks serial, not concurrent: "
+        f"reducto held [{a_in:.3f}, {a_out:.3f}], azure held [{b_in:.3f}, {b_out:.3f}] "
+        f"(each vendor round trip is {SLEEP_S}s)"
     )
 
 
