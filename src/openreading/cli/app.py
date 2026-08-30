@@ -51,7 +51,7 @@ import signal
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import Any, Literal, TypeGuard
 
 from openreading import __version__ as openreading_version
 from openreading import api, schemas
@@ -1848,6 +1848,40 @@ def _is_asyncio_sigint_handler(
     )
 
 
+def _asyncio_sigint_verdict(handler: object) -> Literal["cancel", "stopping", "declines"]:
+    """What `Runner._on_sigint` will DO if this stop is handed to it — asked before it is called,
+    because after it raises the answer is no longer recoverable.
+
+    `_on_sigint` cancels the main task only on the first interrupt of a run whose task is still
+    running; every other call is `raise KeyboardInterrupt()` straight out of the handler. Two
+    opposite situations end at that one raise:
+
+    - `"stopping"` — an interrupt is already counted for this run, so a real Ctrl-C is unwinding it
+      right now and the raise is asyncio's escalation, aimed into the teardown already under way.
+      Swallowing it is rule one seen from the other side, and the exit code belongs to the SIGINT
+      that started the stop (130, not 143).
+    - `"declines"` — nothing is counted, but the walk has already finished and the loop is a few
+      frames from returning. Nothing is unwinding, so a swallowed raise here loses the stop
+      outright: the command runs to a clean exit 0 with a supervisor's SIGTERM already delivered,
+      and a batch keeps parsing its remaining items. That is the exact failure delegation exists to
+      avoid ("a delegation that does not stop the process is a worse failure"), reached down the
+      delegation itself. It was measured as a green run on three CPythons and one `assert 0 == 143`
+      on the fourth, because the window is one loop teardown wide per item and a batch has one per
+      document. So `"declines"` takes the direct raise instead — by then `_run_forever_cleanup` has
+      unmarked the loop as running, which is what makes the raise safe here and not in the startup
+      window next door.
+
+    Read through the same private `functools.partial` shape `_is_asyncio_sigint_handler` recognises
+    (which is why this is only ever called after that returned True). An unreadable shape — a
+    future CPython — answers `"declines"`, so an unknown asyncio falls back to the raise that
+    always stops rather than to the swallow that might not."""
+    runner = getattr(getattr(handler, "func", None), "__self__", None)
+    if getattr(runner, "_interrupt_count", None):
+        return "stopping"
+    task = (getattr(handler, "keywords", None) or {}).get("main_task")
+    return "cancel" if isinstance(task, asyncio.Task) and not task.done() else "declines"
+
+
 @contextlib.contextmanager
 def _terminate_as_interrupt(*, enabled: bool = True):
     """Make SIGTERM arrive as `KeyboardInterrupt`, so a scheduler's stop signal takes the same path
@@ -1924,10 +1958,19 @@ def _terminate_as_interrupt(*, enabled: bool = True):
     because a delegation that does not stop the process is a worse failure than the one being
     fixed.
 
-    If the delegated call comes back raising, asyncio had already counted an interrupt — a real
-    Ctrl-C beat the SIGTERM by milliseconds. Swallowing it here is rule one seen from the other
-    side, and the claim is re-attributed to SIGINT so the exit code still names the signal that
-    actually started the stop (130, not 143).
+    Rule three: ask that handler what it will do BEFORE handing it the stop
+    (`_asyncio_sigint_verdict`), because it answers two opposite situations with the same
+    `KeyboardInterrupt` and once it has raised they are indistinguishable. Raising because an
+    interrupt is already counted means a real Ctrl-C beat the SIGTERM by milliseconds and its
+    teardown is under way: swallow, and re-attribute the claim to SIGINT so the exit code names the
+    signal that actually started the stop (130, not 143). Raising because the main task is already
+    DONE means the opposite — nothing is unwinding, asyncio has nothing left to cancel, and
+    swallowing loses the supervisor's stop entirely. A batch then parses its remaining documents
+    and exits 0 with the SIGTERM already delivered, which is a process that ignores SIGTERM, dressed
+    as a clean run. That case takes the direct raise, which is safe in that particular frame:
+    `_run_forever_cleanup` unmarks the loop as running before the last statement, so the interrupt
+    unwinds through `Runner.close()` intact rather than stranding the loop the way the startup
+    window next door does.
 
     Known gaps. SIGINT arriving twice with no SIGTERM involved is asyncio's own escalation and is
     untouched: `Runner` refuses to install its handler unless SIGINT is still `default_int_handler`
@@ -1968,13 +2011,21 @@ def _terminate_as_interrupt(*, enabled: bool = True):
             # bug being fixed, so it is suppressed rather than reasoned about.
             with contextlib.suppress(OSError, ValueError):
                 signal.signal(signal.SIGINT, _already_stopping)
-            try:
-                sigint(signal.SIGINT, _frame)
-            except KeyboardInterrupt:
-                # asyncio counted this as a repeat: a real Ctrl-C started the stop first, so the
-                # interrupt now unwinding is that one and the exit code belongs to it.
+            verdict = _asyncio_sigint_verdict(sigint)
+            if verdict == "stopping":
+                # a real Ctrl-C started the stop first, so the interrupt already unwinding is
+                # that one and the exit code belongs to it. Nothing to add — least of all a
+                # second interrupt aimed into its teardown.
                 fired[0] = signal.SIGINT
-            return
+                return
+            if verdict == "cancel":
+                try:
+                    sigint(signal.SIGINT, _frame)
+                except KeyboardInterrupt:
+                    fired[0] = signal.SIGINT  # asyncio counted a stop between the ask and the call
+                return
+            # "declines": the walk is over and asyncio has nothing left to cancel, so nobody else
+            # is going to stop this process — fall through to the raise that always does.
         raise KeyboardInterrupt
 
     try:

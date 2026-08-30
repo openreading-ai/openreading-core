@@ -17,17 +17,21 @@ and a program that reinstalls a handler over it breaks the shield for everyone d
 Half of what is pinned here is about WHERE the interrupt is raised, not whether. An interrupt
 raised inside asyncio's own loop bookkeeping strands the loop, and the `RuntimeError` that falls
 out of the teardown replaces the interrupt — so a stop signal reports itself as a parse failure
-at exit 1. `openreading.cli.app._terminate_as_interrupt` carries the mechanism; the two rules it
-follows -- claim the stop at most once across BOTH signals, and hand it to `asyncio.Runner`'s own
-SIGINT handler while one is installed -- each have a test below, because each one alone leaves the
-other half of the race open. The first rule is per-stop, not per-signal-kind, and the tests say so
-in both orderings: deduping SIGTERM against SIGTERM leaves the mixed pair reproducing the original
-crash, since asyncio counts interrupts of its own and raises out of the second one.
+at exit 1. `openreading.cli.app._terminate_as_interrupt` carries the mechanism; the three rules it
+follows -- claim the stop at most once across BOTH signals, hand it to `asyncio.Runner`'s own
+SIGINT handler while one is installed, and ask that handler what it will do before handing it
+anything -- each have a test below, because each one alone leaves another half of the race open.
+The first rule is per-stop, not per-signal-kind, and the tests say so in both orderings: deduping
+SIGTERM against SIGTERM leaves the mixed pair reproducing the original crash, since asyncio counts
+interrupts of its own and raises out of the second one. The third exists because that same raise
+also means "the walk already finished, there is nothing to cancel" -- and reading it as the first
+meaning drops the stop on the floor, which a batch reports as a clean exit 0.
 """
 
 from __future__ import annotations
 
 import asyncio
+import functools
 import os
 import signal
 import subprocess
@@ -188,6 +192,93 @@ def test_sigterm_delegates_to_asyncio_runners_own_sigint_handler():
     assert len(seen) == 2, "the SIGTERM handler raised instead of delegating"
     assert seen[0] is not seen[1]  # SIGINT was taken over, not left pointing at asyncio's counter
     assert signal.getsignal(signal.SIGINT) is before_int  # and handed back on the way out
+
+
+def _sigterm_inside_the_loop_cleanup_window(monkeypatch) -> list[int]:
+    """Arrange for one real SIGTERM to land inside `BaseEventLoop._run_forever_cleanup`, while the
+    walk's task is already done but `Runner` has not yet handed SIGINT back.
+
+    Same hook as the startup helper above, one call later: `run_forever` calls
+    `sys.set_asyncgen_hooks` once on the way in (`_run_forever_setup`) and once on the way out
+    (`_run_forever_cleanup`), so firing on the SECOND call lands the signal in the window where our
+    handler still sees `Runner`'s SIGINT handler but that handler will no longer cancel anything.
+    The counter is returned so the test can refuse to pass vacuously if a future CPython stops
+    calling the hook in either place."""
+    calls: list[int] = []
+    real_hooks = sys.set_asyncgen_hooks
+
+    def _hooks(*args, **kwargs):
+        calls.append(len(calls) + 1)
+        if len(calls) == 2:  # 1 = the run's setup, 2 = the same run's cleanup
+            signal.raise_signal(signal.SIGTERM)
+        return real_hooks(*args, **kwargs)
+
+    monkeypatch.setattr(sys, "set_asyncgen_hooks", _hooks)
+    return calls
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX signals")
+def test_sigterm_after_the_walk_finished_is_never_swallowed_by_the_delegation(monkeypatch):
+    """The measured CI failure: `parse <dir>` ran to a clean exit 0 with a supervisor's SIGTERM
+    already delivered — the stop signal did nothing at all.
+
+    `Runner._on_sigint` cancels only the FIRST interrupt of a run whose main task is still running;
+    every other call raises `KeyboardInterrupt` straight out of the handler. Two very different
+    situations reach that raise, and the raise alone cannot tell them apart. One is a real Ctrl-C
+    already unwinding this run (the test below), where swallowing is right. The other is this one:
+    the walk is finished and the loop is a few frames from returning, so nothing is unwinding and a
+    swallowed raise drops the supervisor's stop on the floor. A batch then runs its remaining items
+    to a successful exit 0 — a process that ignores SIGTERM outright, which is the failure the
+    delegation exists to avoid, arriving down the delegation itself.
+
+    So the two are separated before the handler is called, not after it raises: asyncio is asked
+    only for a cancellation it can still perform, and a run past that point takes the direct raise.
+    By then `_run_forever_cleanup` has already unmarked the loop as running, so the raise is not
+    the loop-strand the startup test pins — it unwinds through `Runner.close()` intact."""
+    from openreading.cli.app import _terminate_as_interrupt
+
+    calls = _sigterm_inside_the_loop_cleanup_window(monkeypatch)
+
+    async def _work():
+        await asyncio.sleep(0)
+
+    with pytest.raises(SystemExit) as exc, _terminate_as_interrupt():
+        asyncio.run(_work())
+
+    assert len(calls) >= 2, "the signal never reached the window — this test proved nothing"
+    assert exc.value.code == 143
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX signals")
+def test_sigterm_is_raised_when_asyncio_would_decline_to_cancel():
+    """The same rule pinned at the seam rather than through a CPython window, so it keeps failing
+    if `_run_forever_cleanup` stops calling the asyncgen hook: handed `Runner`'s own SIGINT handler
+    bound to a task that has already finished, the SIGTERM handler must raise rather than delegate.
+
+    The handler is rebuilt exactly as `Runner.run` installs it (`functools.partial(self._on_sigint,
+    main_task=task)`) — the private shape the production recogniser reads — because a stand-in
+    would let both sides of that shape rot together without a failing test."""
+    from openreading.cli.app import _terminate_as_interrupt
+
+    finished: list[object] = []
+
+    async def _capture():
+        finished.append(asyncio.current_task())
+
+    before_int = signal.getsignal(signal.SIGINT)
+    with asyncio.Runner() as runner:
+        runner.run(_capture())
+        task = finished[0]
+        assert task is not None and task.done()
+        signal.signal(signal.SIGINT, functools.partial(runner._on_sigint, main_task=task))
+        try:
+            with _terminate_as_interrupt():
+                handler = signal.getsignal(signal.SIGTERM)
+                assert callable(handler)
+                with pytest.raises(KeyboardInterrupt):
+                    handler(signal.SIGTERM, None)  # never `return None`: that loses the stop
+        finally:
+            signal.signal(signal.SIGINT, before_int)
 
 
 def test_sigterm_never_delegates_to_a_third_party_sigint_handler():
