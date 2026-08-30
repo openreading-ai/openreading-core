@@ -18,8 +18,11 @@ Half of what is pinned here is about WHERE the interrupt is raised, not whether.
 raised inside asyncio's own loop bookkeeping strands the loop, and the `RuntimeError` that falls
 out of the teardown replaces the interrupt — so a stop signal reports itself as a parse failure
 at exit 1. `openreading.cli.app._terminate_as_interrupt` carries the mechanism; the two rules it
-follows (raise at most once, and delegate to asyncio's own SIGINT handler while one is installed)
-each have a test below, because each one alone leaves the other half of the race open.
+follows -- claim the stop at most once across BOTH signals, and hand it to `asyncio.Runner`'s own
+SIGINT handler while one is installed -- each have a test below, because each one alone leaves the
+other half of the race open. The first rule is per-stop, not per-signal-kind, and the tests say so
+in both orderings: deduping SIGTERM against SIGTERM leaves the mixed pair reproducing the original
+crash, since asyncio counts interrupts of its own and raises out of the second one.
 """
 
 from __future__ import annotations
@@ -155,24 +158,148 @@ def test_a_ctrl_c_that_was_not_our_sigterm_passes_through_untouched():
         raise KeyboardInterrupt
 
 
-def test_sigterm_delegates_to_the_installed_sigint_handler():
+@pytest.mark.skipif(os.name != "posix", reason="POSIX signals")
+def test_sigterm_delegates_to_asyncio_runners_own_sigint_handler():
     """Whoever holds SIGINT holds the interrupt-safe path — for a run, that is `asyncio.Runner`'s
     own handler, which cancels the walk's task instead of throwing through the loop's internals.
     Delegating there is both the safer raise and the more faithful mirror, since it is the exact
-    handler Ctrl-C reaches."""
+    handler Ctrl-C reaches.
+
+    The delegation is pinned against the REAL handler rather than a stand-in, because the
+    production check recognises that handler specifically (see the third-party test below) and a
+    stand-in would let the recogniser rot without a failing test."""
     from openreading.cli.app import _terminate_as_interrupt
 
-    seen: list[int] = []
+    seen: list[object] = []
+    before_int = signal.getsignal(signal.SIGINT)
+
+    async def _work():
+        seen.append(signal.getsignal(signal.SIGINT))  # asyncio.Runner's, installed for this run
+        handler = signal.getsignal(signal.SIGTERM)
+        assert callable(handler)
+        assert handler(signal.SIGTERM, None) is None  # delegated, not raised
+        seen.append(signal.getsignal(signal.SIGINT))  # and SIGINT is spent from here on
+        await asyncio.sleep(30)  # the delegation cancelled this task; never actually waits
+
+    with pytest.raises(SystemExit) as exc, _terminate_as_interrupt():
+        asyncio.run(_work())
+
+    assert exc.value.code == 143
+    assert len(seen) == 2, "the SIGTERM handler raised instead of delegating"
+    assert seen[0] is not seen[1]  # SIGINT was taken over, not left pointing at asyncio's counter
+    assert signal.getsignal(signal.SIGINT) is before_int  # and handed back on the way out
+
+
+def test_sigterm_never_delegates_to_a_third_party_sigint_handler():
+    """Delegation is restricted to a handler that is known to stop the process. A SIGINT handler
+    that merely records the signal — an embedder, a test harness, a signal-aware library — returns
+    without unwinding anything, so handing a supervisor's SIGTERM to it would make the stop a
+    silent no-op and the process would keep running. Unrecognised means raise, which always stops.
+    """
+    from openreading.cli.app import _terminate_as_interrupt
+
+    flag: list[int] = []
     before = signal.getsignal(signal.SIGINT)
-    signal.signal(signal.SIGINT, lambda signum, frame: seen.append(signum))
+    signal.signal(signal.SIGINT, lambda signum, frame: flag.append(signum))
     try:
         with _terminate_as_interrupt():
             handler = signal.getsignal(signal.SIGTERM)
             assert callable(handler)
-            assert handler(signal.SIGTERM, None) is None  # delegated, not raised
+            with pytest.raises(KeyboardInterrupt):
+                handler(signal.SIGTERM, None)
     finally:
         signal.signal(signal.SIGINT, before)
-    assert seen == [signal.SIGINT]
+    assert flag == []  # the stop was never handed to a handler that cannot stop anything
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX signals")
+def test_a_real_sigint_after_our_sigterm_is_never_raised_into_the_unwinding():
+    """The mixed-signal half of rule one: SIGTERM, then a responder reaching for Ctrl-C.
+
+    `asyncio.Runner._on_sigint` counts interrupts and, on every call after the first, does
+    `raise KeyboardInterrupt()` straight out of the handler — into whatever frame the main thread
+    is running, which after a stop has begun is the loop's own teardown. Delegating SIGTERM to
+    that handler spends interrupt number one, so the responder's real SIGINT is number two and
+    lands in exactly the window rule one exists to keep clear. Measured at roughly 1 run in 160.
+
+    Deduping SIGTERM against SIGTERM does not cover this: the second signal never reaches our
+    handler at all. The stop has to be taken over for BOTH signals, so SIGINT is neutralised at
+    the moment the stop is claimed."""
+    from openreading.cli.app import _terminate_as_interrupt
+
+    seen: list[str] = []
+
+    async def _work():
+        handler = signal.getsignal(signal.SIGTERM)
+        assert callable(handler)
+        handler(signal.SIGTERM, None)  # the supervisor's stop
+        signal.raise_signal(signal.SIGINT)  # the responder's Ctrl-C, milliseconds later
+        seen.append("survived")  # unreachable if the second signal raised
+        await asyncio.sleep(30)
+
+    with pytest.raises(SystemExit) as exc, _terminate_as_interrupt():
+        asyncio.run(_work())
+
+    assert seen == ["survived"], "the second stop signal raised into the frame it was aimed at"
+    assert exc.value.code == 143  # still the supervisor's stop, reported as the supervisor's
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX signals")
+def test_a_sigterm_after_a_real_ctrl_c_is_never_raised_into_the_unwinding():
+    """The same mechanism with the signals reversed: Ctrl-C, then a supervisor's SIGTERM.
+
+    Here asyncio's counter is already at one when our handler runs, so delegating drives it to two
+    and `_on_sigint` raises inside OUR handler — the same strand, reached from the other side. The
+    handler therefore treats a `KeyboardInterrupt` coming back out of the delegation as proof that
+    a stop was already in flight, swallows it, and hands ownership of the exit code back to the
+    signal that really started the stop: a Ctrl-C on an unarmed run still ends at 130, not 143."""
+    from openreading.cli.app import _terminate_as_interrupt
+
+    seen: list[str] = []
+
+    async def _work():
+        signal.raise_signal(signal.SIGINT)  # asyncio cancels the task, interrupt count 1
+        handler = signal.getsignal(signal.SIGTERM)
+        assert callable(handler)
+        handler(signal.SIGTERM, None)  # the supervisor's stop, milliseconds later
+        seen.append("survived")  # unreachable if the delegation raised through us
+        await asyncio.sleep(30)
+
+    with pytest.raises(KeyboardInterrupt), _terminate_as_interrupt():
+        asyncio.run(_work())
+
+    assert seen == ["survived"], "the delegation raised out of the SIGTERM handler"
+
+
+def test_an_unknown_c_level_sigterm_handler_is_left_alone(monkeypatch):
+    """`signal.getsignal` returns `None` when an unknown handler is in effect — one installed from
+    C, by an extension module or an embedding host, before `main()` ran. The Python API cannot put
+    such a handler back: `signal.signal(SIGTERM, None)` raises `TypeError`. Installing over it
+    would therefore destroy it for the rest of the process, and the restore in our own `finally`
+    would raise on the way out, replacing whatever was unwinding — inside the one function whose
+    entire purpose is to keep an exception out of a teardown path.
+
+    So an unknown handler is treated exactly like an inherited `SIG_IGN`: someone else owns this
+    signal, and we leave it alone."""
+    from openreading.cli.app import _terminate_as_interrupt
+
+    installed: list[tuple[int, object]] = []
+
+    def _fake_signal(signum, handler):
+        # faithful to CPython: anything but a callable, SIG_DFL or SIG_IGN is a TypeError
+        if not (callable(handler) or handler in (signal.SIG_DFL, signal.SIG_IGN)):
+            raise TypeError(
+                "signal handler must be signal.SIG_IGN, signal.SIG_DFL, or a callable object"
+            )
+        installed.append((signum, handler))
+
+    monkeypatch.setattr(signal, "getsignal", lambda signum: None)
+    monkeypatch.setattr(signal, "signal", _fake_signal)
+
+    with _terminate_as_interrupt():
+        pass
+
+    assert installed == []  # nothing installed over a disposition we could not hand back
 
 
 def test_sigterm_still_raises_when_sigint_is_ignored():

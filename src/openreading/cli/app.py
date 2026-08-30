@@ -43,13 +43,15 @@ in a shell and running the CLI does nothing.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import contextlib
 import json
 import os
 import signal
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 from openreading import __version__ as openreading_version
 from openreading import api, schemas
@@ -1581,8 +1583,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     backends.set_defaults(func=cmd_backends)
 
+    # The epilog names the auth mechanism because this is the last page an operator reads before
+    # a key-holding process starts listening. Help text that mentions authentication nowhere reads
+    # as a server that has none, and the operator binds it wide open.
+    serve_epilog = (
+        "Authentication is OFF by default. With no OPENREADING_API_KEYS set, anyone who can\n"
+        "reach this server spends your vendor credits, which is why the default bind is\n"
+        "127.0.0.1 and any other --host warns.\n"
+        "\n"
+        "Set OPENREADING_API_KEYS to a comma-separated list of bearer tokens to turn auth on.\n"
+        "Every endpoint but GET /healthz and POST /v1/webhooks/{backend_id} then requires an\n"
+        "Authorization: Bearer <token> header and answers 401 without one. Mint a token with\n"
+        "python -c 'import secrets; print(secrets.token_urlsafe(32))'.\n"
+        "\n"
+        "OPENREADING_API_KEY_SCOPES (token=backend1|backend2, comma-separated) narrows one\n"
+        "token to an allow-list of backends. A token absent from it is unscoped and reaches\n"
+        "every backend. Both variables are environment only and are read once at startup, so\n"
+        "rotating a token means restarting the server.\n"
+        "\n"
+        "Full guide: the openreading.server docstring"
+    )
     serve = sub.add_parser(
-        "serve", parents=[common], help="run the HTTP API (needs [server] extra)"
+        "serve",
+        parents=[common],
+        help="run the HTTP API (needs [server] extra)",
+        epilog=serve_epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     serve.add_argument("--host", default="127.0.0.1", help="bind address (default 127.0.0.1)")
     serve.add_argument("--port", type=int, default=8787, help="port (default 8787)")
@@ -1797,6 +1823,31 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _is_asyncio_sigint_handler(
+    handler: object,
+) -> TypeGuard[Callable[[int, object], None]]:
+    """True only for the SIGINT handler `asyncio.Runner.run` installs for the duration of a run.
+
+    Delegation is a loaded gun pointed at the stop signal: whatever we hand SIGTERM to becomes the
+    only thing that stops this process. A handler that merely records the signal — an embedder, a
+    test harness, a signal-aware library — returns without unwinding anything, so delegating to it
+    would turn a supervisor's stop into a silent no-op and the run would carry on. Recognising one
+    specific handler, rather than trusting any callable, is the difference between a stop that is
+    safer and a stop that never happens.
+
+    `Runner.run` installs `functools.partial(self._on_sigint, main_task=task)`, so the bound method
+    and the `Runner` it is bound to are both reachable through the partial. Every part of that is
+    CPython's private shape and may change; when it does, this returns False and the caller raises
+    `KeyboardInterrupt` directly — the pre-delegation behaviour, which always stops the process and
+    is only exposed to the narrow teardown window delegation exists to dodge. Fail-safe, not
+    fail-open, is the whole reason the check is written this way round.
+    """
+    bound = getattr(handler, "func", None)  # the partial's wrapped `Runner._on_sigint`
+    return getattr(bound, "__name__", None) == "_on_sigint" and isinstance(
+        getattr(bound, "__self__", None), asyncio.Runner
+    )
+
+
 @contextlib.contextmanager
 def _terminate_as_interrupt(*, enabled: bool = True):
     """Make SIGTERM arrive as `KeyboardInterrupt`, so a scheduler's stop signal takes the same path
@@ -1815,11 +1866,15 @@ def _terminate_as_interrupt(*, enabled: bool = True):
     when the walk unwinds are all existing, tested consequences of Ctrl-C, and a mirror cannot
     drift away from them.
 
-    Two dispositions are left alone. An inherited `SIG_IGN` means a parent deliberately shielded
+    Three dispositions are left alone. An inherited `SIG_IGN` means a parent deliberately shielded
     this process (`nohup`, a shell's asynchronous `&` job, a masking supervisor); reinstalling a
-    handler over that shield would break a contract someone set on purpose. And `signal.signal`
+    handler over that shield would break a contract someone set on purpose. A `getsignal` of `None`
+    reports an unknown handler — one installed from C, before `main()` ran — which the Python API
+    cannot hand back: `signal.signal(SIGTERM, None)` raises `TypeError`, so installing over such a
+    handler both destroys it for the rest of the process and arms our own restore to raise out of a
+    `finally`, replacing whatever was unwinding. Someone else owns that signal. And `signal.signal`
     only works on the main thread, so an embedded caller driving `main()` from a worker thread gets
-    today's behaviour rather than a `ValueError`. `enabled=False` is the third: `serve` hands the
+    today's behaviour rather than a `ValueError`. `enabled=False` is the fourth: `serve` hands the
     process to uvicorn, which installs its own handlers for a graceful drain and then re-raises the
     captured signal after restoring what was there before — so a handler of ours would fire AFTER a
     clean shutdown and offer resume advice about a journal a server never arms.
@@ -1839,31 +1894,48 @@ def _terminate_as_interrupt(*, enabled: bool = True):
     and exit 1, which reads like the document failed to parse. Both rules below exist to keep the
     interrupt out of those two frames.
 
-    Rule one: the interrupt is raised AT MOST ONCE. A repeat SIGTERM is not a second decision, it
-    is the same stop arriving down a second path — every signal-forwarding parent (`uv run`, tini
-    and the other container init shims, any supervisor whose `killpg` reaches both the wrapper and
-    the wrapped process) delivers it twice by construction. The first interrupt is already
-    unwinding by then, and it unwinds THROUGH `_run_forever_cleanup`, so a second interrupt raised
-    on top of it is aimed squarely at the window above. This is the flake that was measured: 32 of
-    40 `uv run` + `killpg` runs died at exit 1 on the RuntimeError, against 0 of 119 when the
-    signal reached the process by one path only. Ignoring the repeat costs nothing operationally —
-    a supervisor's escalation is SIGKILL, which is not ours to catch and still works.
+    Rule one: the stop is claimed AT MOST ONCE, and the claim covers SIGTERM AND SIGINT together.
+    A second stop signal is not a second decision, it is the same stop arriving down another path —
+    every signal-forwarding parent (`uv run`, tini and the other container init shims, any
+    supervisor whose `killpg` reaches both the wrapper and the wrapped process) delivers it twice
+    by construction, and a responder who runs `kill` and then reaches for Ctrl-C sends two
+    different ones. The first stop is already unwinding by then, and it unwinds THROUGH
+    `_run_forever_cleanup`, so a second interrupt raised on top of it is aimed squarely at the
+    window above. This is the flake that was measured twice: 32 of 40 `uv run` + `killpg` runs died
+    at exit 1 on the RuntimeError, and after a first fix that deduped SIGTERM against SIGTERM only,
+    1 of 160 SIGTERM-then-SIGINT runs still did — because the repeat arrived as the OTHER signal
+    and never reached this handler at all. `asyncio.Runner._on_sigint` counts interrupts and does
+    `raise KeyboardInterrupt()` on every call after the first, so spending asyncio's count on our
+    delegation is what makes a subsequent real Ctrl-C the dangerous one. SIGINT is therefore taken
+    over at the instant the stop is claimed, BEFORE the delegation runs, and dropped from then on.
+    Ignoring repeats costs nothing operationally — a supervisor's escalation is SIGKILL, which is
+    not ours to catch and still works — but it does mean "Ctrl-C twice to force out" ends at the
+    first Ctrl-C once a stop is under way.
 
-    Rule two: when asyncio has installed its own SIGINT handler, re-raise as SIGINT and let that
-    handler do the work. `asyncio.Runner` installs one for the whole of `run_until_complete`, and
-    it is interrupt-safe by construction: it cancels the main task and wakes the loop instead of
-    throwing through the loop's internals, and the `KeyboardInterrupt` is then raised by `Runner`
-    itself once the loop has unwound and closed. That covers the frame a run is in for essentially
-    all of its wall time. It is also the more faithful mirror — Ctrl-C reaches exactly this
-    handler — and it keeps the `cancelled` journal record, which is written by the cancellation
-    path and not by the interrupt. We delegate only to a handler that is genuinely installed and
-    callable: delegating to an ignored SIGINT (`nohup`, an asynchronous `&` job) would silently
-    turn SIGTERM into a no-op, which is a worse failure than the one being fixed.
+    Rule two: hand the stop to `asyncio.Runner`'s own SIGINT handler while one is installed.
+    `Runner` installs one for the whole of `run_until_complete`, and it is interrupt-safe by
+    construction: it cancels the main task and wakes the loop instead of throwing through the
+    loop's internals, and the `KeyboardInterrupt` is then raised by `Runner` itself once the loop
+    has unwound and closed. That covers the frame a run is in for essentially all of its wall time.
+    It is also the more faithful mirror — Ctrl-C reaches exactly this handler — and it keeps the
+    `cancelled` journal record, which is written by the cancellation path and not by the interrupt.
+    Only that handler qualifies (`_is_asyncio_sigint_handler`); anything else, including an ignored
+    SIGINT and a third-party handler that merely sets a flag, gets the direct `KeyboardInterrupt`,
+    because a delegation that does not stop the process is a worse failure than the one being
+    fixed.
 
-    What is left: a first SIGTERM arriving during `asyncio.run`'s own teardown, after `Runner` has
-    restored SIGINT and while it is closing the loop. That is a window of microseconds at the very
-    end of a run, and it is the same window Ctrl-C has had all along — closing it needs a fix in
-    CPython, not here.
+    If the delegated call comes back raising, asyncio had already counted an interrupt — a real
+    Ctrl-C beat the SIGTERM by milliseconds. Swallowing it here is rule one seen from the other
+    side, and the claim is re-attributed to SIGINT so the exit code still names the signal that
+    actually started the stop (130, not 143).
+
+    Known gaps. SIGINT arriving twice with no SIGTERM involved is asyncio's own escalation and is
+    untouched: `Runner` refuses to install its handler unless SIGINT is still `default_int_handler`
+    when `run()` is called, so wrapping SIGINT up front would cost the safe cancellation path for
+    every Ctrl-C — a certain loss traded against an unlikely one. Also left: a first stop signal
+    arriving during `asyncio.run`'s own teardown, after `Runner` has restored SIGINT and while it
+    is closing the loop. That is a window of microseconds at the very end of a run, and it is the
+    same window Ctrl-C has had all along — closing either needs a fix in CPython, not here.
     """
     if not enabled:
         yield
@@ -1873,22 +1945,35 @@ def _terminate_as_interrupt(*, enabled: bool = True):
     except (AttributeError, ValueError):  # pragma: no cover - no SIGTERM on this platform
         yield
         return
-    if previous is signal.SIG_IGN:
-        yield
+    if previous is signal.SIG_IGN or previous is None:
+        yield  # someone else owns this signal — see the third paragraph of the docstring
         return
 
     fired: list[int] = []
 
+    def _already_stopping(_signum, _frame):
+        return  # rule one, for every stop signal after the first — see this function's docstring
+
     def _raise(signum, _frame):
         if fired:
-            return  # rule one: the same stop, arriving again — see this function's docstring
+            return  # rule one: the same stop, arriving again
         fired.append(signum)
         sigint = signal.getsignal(signal.SIGINT)
-        if callable(sigint) and sigint is not signal.default_int_handler:
-            # rule two: asyncio (or whoever else took SIGINT over) knows how to unwind itself.
-            # `raise_signal` runs that handler before returning, so control comes back here only
-            # when it chose not to raise — which is precisely the safe outcome we want.
-            signal.raise_signal(signal.SIGINT)
+        if _is_asyncio_sigint_handler(sigint):
+            # rule two: asyncio knows how to unwind itself. Take SIGINT over FIRST, so a real
+            # Ctrl-C landing while the delegation runs cannot reach asyncio's interrupt counter
+            # and be raised into the teardown this call is about to start.
+            # A Python handler only ever runs on the main thread of the main interpreter, so
+            # this cannot raise — but this is the one frame where an escaping exception IS the
+            # bug being fixed, so it is suppressed rather than reasoned about.
+            with contextlib.suppress(OSError, ValueError):
+                signal.signal(signal.SIGINT, _already_stopping)
+            try:
+                sigint(signal.SIGINT, _frame)
+            except KeyboardInterrupt:
+                # asyncio counted this as a repeat: a real Ctrl-C started the stop first, so the
+                # interrupt now unwinding is that one and the exit code belongs to it.
+                fired[0] = signal.SIGINT
             return
         raise KeyboardInterrupt
 
@@ -1900,7 +1985,7 @@ def _terminate_as_interrupt(*, enabled: bool = True):
     try:
         yield
     except KeyboardInterrupt:
-        if not fired:
+        if not fired or fired[0] != signal.SIGTERM:
             raise  # a real Ctrl-C on an unarmed run: pre-ledger behaviour, unchanged
         # An armed run never reaches here — its handler already returned 6 with a run id. Unarmed
         # there is nothing to resume, and the mirror has to stop: letting the interrupt unwind
@@ -1914,6 +1999,11 @@ def _terminate_as_interrupt(*, enabled: bool = True):
         raise SystemExit(143) from None
     finally:
         signal.signal(signal.SIGTERM, previous)
+        if signal.getsignal(signal.SIGINT) is _already_stopping:
+            # `Runner`'s own restore declines to touch a handler it no longer owns, so handing
+            # SIGINT back is ours. `default_int_handler` is both what `Runner` would have restored
+            # and what SIGINT must have held for `Runner` to have installed anything at all.
+            signal.signal(signal.SIGINT, signal.default_int_handler)
 
 
 def main(argv: list[str] | None = None) -> int:

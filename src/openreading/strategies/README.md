@@ -609,7 +609,10 @@ not record. Each rule names the failure it avoids and where it is enforced.
   decider's tool schema is that list as an enum (`openreading.strategies.decider` §3). An out-of-set
   choice is impossible, not merely discouraged.
 - The engine keeps the best result. A result that fails a gate is retained, never discarded. When
-  rungs run out, the best retained result returns with a `quality_below_threshold` warning. If
+  rungs run out, the best retained result returns with a `quality_below_threshold` warning. When
+  the time budget ends the walk instead, the same result returns with a `budget_exhausted` warning.
+  The two codes are distinct, so you can count each cause separately, and escalating to a stronger
+  backend is right for the first and wrong for the second. If
   nothing is retained, the engine raises `PlanExhaustedError` with the full trail
   (`openreading.strategies.engine`, Laws 1 to 4). Silence is never an outcome.
 - A missing signal is never guessed. A criterion the backend cannot report is skipped and traced,
@@ -680,8 +683,6 @@ The category column in `explain` is the closed vocabulary `CATEGORIES` in
   as `downgraded=unavailable` (`openreading.strategies.decider`, "Status").
 - A `compare_degraded` warning when a `compare` branch fails. Today only the attempt trail shows
   the failure (`openreading.strategies.plain`, "Semantics").
-- A `budget_exhausted` warning on deadline. Today the engine emits `quality_below_threshold` only
-  (`openreading.strategies.plain`, "Semantics").
 - A `hedged_start` warning, and a hedge that launches early when the primary fails
   (`openreading.strategies.presets`, cookbook 6).
 - A bespoke message when one body mixes Plain and advanced keys. Today it is the generic located

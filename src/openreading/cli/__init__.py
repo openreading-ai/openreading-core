@@ -141,22 +141,22 @@ Re-drive a run recorded under `OPENREADING_LEDGER` from its own journal: every s
 terminal there replays byte-identical with zero network calls; anything genuinely unreached
 executes for real. Takes ONLY `RUN_ID` -- every other option comes from the ledger, not the command
 line. A run is resumable once the ledger was armed for it, whether the original `parse` went on to
-succeed, was interrupted (exit 6) or crashed; the id is printed by `parse` on interrupt or read
-from the run's own header under `$OPENREADING_LEDGER`.
+succeed, was interrupted (exit 6) or crashed; the id is a UUIDv4, 36 characters, printed by `parse`
+on interrupt or read from the run's own header under `$OPENREADING_LEDGER`.
 
     export OPENREADING_LEDGER=./.openreading
     openreading parse big-batch.pdf --strategy cheap_first    # Ctrl-C: exit 6, prints the run id
-    openreading resume r_01J8QK
+    openreading resume 7dbf6b71-adb5-4e90-9188-a184fdba9d05
 
-    [parse] interrupted; run r_01J8QK is resumable
-    [parse] resume with: openreading resume r_01J8QK
+    [parse] interrupted; run 7dbf6b71-adb5-4e90-9188-a184fdba9d05 is resumable
+    [parse] resume with: openreading resume 7dbf6b71-adb5-4e90-9188-a184fdba9d05
 
 A resumed run REFUSES BY NAME (exit 3) rather than falling back to a fresher config when
 `openreading.yaml` (`config_hash`), the compiled plan, or the journal's record format no longer
 match what the original run saw -- a resumed run replays recorded decisions; a changed config would
 silently mean a different run:
 
-    [resume] refused: openreading.yaml changed since r_01J8QK (sha256 3f9a... -> c21b...)
+    [resume] refused: openreading.yaml changed since 7dbf6b71-adb5-4e90-9188-a184fdba9d05 (sha256 3f9a... -> c21b...)
     [resume] a resumed run replays recorded decisions; start a new run instead
 
 Also exit 3: an unknown `RUN_ID`, `OPENREADING_LEDGER` unset, or a run whose payloads the
@@ -447,12 +447,18 @@ Exit codes
      ordinary `KeyboardInterrupt` (traceback, 130), byte-for-byte the pre-ledger behaviour.
 
 Signals: SIGINT and SIGTERM both reach the interrupt path above; SIGKILL cannot be caught and
-journals nothing. Only the FIRST stop signal acts. A second SIGTERM is ignored, because in
-practice it is the same stop arriving twice (a forwarding parent such as `uv run` or a container
-init shim, or a `killpg` that reaches both a wrapper and the process it wraps), and raising a
-second interrupt into the shutdown the first one started is what strands the run mid-teardown.
-A stop that must not wait escalates to SIGKILL, not to another SIGTERM. A process started with
-SIGINT already ignored -- a shell's asynchronous `&` job
+journals nothing. Only the FIRST stop signal acts, and that first one claims BOTH signals: once a
+stop is under way, a further SIGTERM or SIGINT is dropped, whichever kind started it. The exit
+code belongs to the signal that arrived first, so `kill` followed by Ctrl-C is 143 (or 6 when
+armed) and Ctrl-C followed by `kill` is 130 (or 6). Two stop signals are in practice one stop
+arriving twice -- a forwarding parent such as `uv run` or a container init shim, a `killpg` that
+reaches both a wrapper and the process it wraps, or a responder who runs `kill` and then reaches
+for Ctrl-C -- and raising a second interrupt into the shutdown the first one started is what
+strands the run mid-teardown at exit 1. A stop that must not wait escalates to SIGKILL, never to
+another catchable signal. The one pair not covered is two SIGINTs with no SIGTERM involved:
+that is asyncio's own "Ctrl-C twice to force out" escalation, deliberately left alone, because
+taking SIGINT over before a run starts would cost every Ctrl-C the safe cancellation path.
+A process started with SIGINT already ignored -- a shell's asynchronous `&` job
 in a non-interactive shell, `nohup`, a masking supervisor -- keeps ignoring it, because a parent
 that shielded this process said so on purpose and reinstalling a handler over that shield would
 break it for everyone downstream. Send SIGTERM to such a process, or run it in the foreground.

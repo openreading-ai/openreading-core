@@ -139,6 +139,7 @@ fixing. In the required column, n/a marks a row that names a whole object rather
 | `usage.cost_usd` | no | a number, and `null` for every local backend. Never sum it without checking `cost_basis` first | n/a | 539–542 |
 | `usage.cost_basis` | no | `billed` means the backend charged this run, so the number is real money. `estimated` means a published rate was applied to a page count, so it is a projection and not spend. `infra_only` means a local backend ran and `cost_usd` is `null`, so your only cost is your own compute. `unknown` means the backend reported no basis at all | closed, `MAJOR` only | 543–550 |
 | `warnings[]` | no | items are `{code, message, field}`, all strings. The key is **absent** when nothing warned, never present and empty | `code` is open, `MINOR` | 580–597 |
+| `orchestration` | no | object, present only for a run a strategy or a fallback chain drove. It is declared `additionalProperties: true` with no properties of its own, so the schema names nothing inside it and a validator checks nothing you read there. Every closed set within it is a promise made by code instead, listed field by field in the docs home's [open and closed register](../README.md#what-is-closed-and-what-only-looks-closed) | nothing inside it is closed at the schema level | 627–631 |
 | `channel_provenance` | no | map of channel name to `native` or `derived`. Marked `x-stability: experimental` | experimental, so outside the guarantees entirely | 632–642 |
 
 `warnings[].code` is an open set, so switch on the codes you know and tolerate the rest. The first
@@ -350,6 +351,11 @@ it, so the warning reaches you before the removal does.
   and may change shape without a version bump. To drop it, set `outputs.include_backend_raw` to
   `false` in a Python `run()` call or an HTTP request body, which every adapter honors and no CLI
   flag exposes today.
+- `orchestration` is an empty box as far as this contract is concerned. The schema declares the
+  object and nothing in it, so a field you read there is guaranteed by the code that writes it and
+  by no validator. Before you build an agent on one of its fields, check that field's row in the
+  docs home's [open and closed register](../README.md#what-is-closed-and-what-only-looks-closed),
+  which names where each set actually lives and marks the ones that only look closed.
 - `channel_provenance` is experimental and excluded from backward-compatibility guarantees.
 - A `pymupdf` run also carries `usage`, `backend_raw` and `channel_provenance` today. To see them,
   run `uv run openreading parse sample.pdf --backend pymupdf | python3 -c "import json,sys;

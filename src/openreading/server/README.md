@@ -166,7 +166,7 @@ right, so fix the table.
 | `413` | `terminal` (`doc_too_large`) | document over the backend's size limit | needs a hosted key; shape shown, not run |
 | `422` | `unsupported_feature` | the named backend cannot produce what you asked for | `"backend": {"id": "pymupdf"}, "extraction_schema": {"instructions": "totals"}` |
 | `424` | `terminal` (`missing_credentials`, `auth_rejected`) | named backend has no key (`missing_env[]`), or the provider rejected it | `"backend": {"id": "reducto"}` with no `REDUCTO_API_KEY` |
-| `502` | `plan_exhausted`, `terminal` | every backend in the plan failed (`trail` lists them) | needs a hosted key; shape shown, not run |
+| `502` | `plan_exhausted`, `terminal` | every backend in the plan failed (`trail` lists them). Two request-shape refusals also land here rather than at 400: `credentials_ref_alias_not_allowed` (the body's `credentials_ref` named an alias the operator has not allow-listed) and `endpoint_not_request_configurable` (the body set `runtime.endpoint`). Both are permanent, so read `backend_code` before retrying a 502 | `"credentials_ref": "env:OPENREADING_REDUCTO"`; `"runtime": {"endpoint": "https://example.com"}` |
 | `504` | `retryable_exhausted` | deadline passed or retries exhausted | needs a hosted key; shape shown, not run |
 | `500` | none; the body is the plain text `Internal Server Error`, not JSON | an error no handler caught | no trigger known today; it is the framework's own fallback, so parse defensively anyway |
 
@@ -246,6 +246,12 @@ The line goes to stderr under the `[serve]` tag every other CLI failure uses, so
 catches it. It names the entry's position and never its value, which keeps a startup log from
 becoming the place a token leaks. A second scope for one key and a scope for a key that
 `OPENREADING_API_KEYS` never listed are refused the same way.
+
+A token listed in `OPENREADING_API_KEYS` but absent from `OPENREADING_API_KEY_SCOPES` is
+unscoped, meaning it reaches every backend. That is deliberate, because a second key added for a
+colleague is otherwise dead on arrival, and it is also the way an operator mints an unrestricted
+token by accident. Give every token you add its own scope entry unless you mean it to reach
+everything.
 
 Startup checks the shape of a scope and not the backend ids inside it. A typo such as `pymupfd`
 binds the socket with no warning and leaves that token able to reach nothing, so every request

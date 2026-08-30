@@ -174,7 +174,8 @@ Strategies (optional `openreading.yaml` orchestration):
 
 Resume a journalled run (needs `OPENREADING_LEDGER`, see `openreading.api`):
 
-    resp = openreading.resume("r_01J8QK")   # CLI: openreading resume r_01J8QK (no other flags)
+    resp = openreading.resume("7dbf6b71-adb5-4e90-9188-a184fdba9d05")   # a run id is a UUIDv4
+    # CLI: openreading resume 7dbf6b71-adb5-4e90-9188-a184fdba9d05      (no other flags)
 
 HTTP server (`[server]` extra; binds 127.0.0.1:8787; NO built-in caller auth unless
 `OPENREADING_API_KEYS` is set. Anyone reaching the port spends your vendor credits, so keep it
@@ -375,8 +376,16 @@ prose. Branch on:
       backoff), `TerminalError` (do not retry), `UnsupportedFeatureError`, `ComplianceRefused`,
       `MissingCredentialsError`, `PlanExhaustedError`, `UnknownStrategyError`, `PolicyError`,
       `SourceNotFoundError`. This is the only surface that separates every condition, so prefer it
-      when an agent must branch. `MissingCredentialsError` SUBCLASSES `TerminalError`, so catch it
-      first or a broad `except TerminalError` swallows it.
+      when an agent must branch. ALL NINE import from the top level:
+
+          from openreading import ComplianceRefused, RetryableError, TerminalError
+
+      Their home modules are `openreading.types.errors` (all but `PolicyError`) and
+      `openreading.api` (`PolicyError`, raised by policy parsing, not by a backend); importing
+      from either still works. THREE of them SUBCLASS `TerminalError` -- `MissingCredentialsError`,
+      `PlanExhaustedError` and `UnknownStrategyError` -- so catch those first or a broad
+      `except TerminalError` swallows all three. Handling them as `TerminalError` is not WRONG
+      (none is retryable), it just loses which one happened.
     * HTTP returns `error.category`, machine-readable: `compliance_refused` (403),
       `unsupported_feature` (422), `terminal` (424 and 502), `plan_exhausted` (502),
       `retryable_exhausted` (504), `scope_denied` (403), `unauthorized`, `unknown_backend`,
@@ -530,11 +539,46 @@ at `src/openreading/README.md`. Those are files in this repo that a reader can o
 
 from __future__ import annotations
 
+from openreading.api import PolicyError, route, run, run_batch
 from openreading.api import resume_run as resume
-from openreading.api import route, run, run_batch
 from openreading.comparison import compare
+
+# The triage above tells an agent to branch on the exception TYPE, because Python is the only
+# surface that separates every failure condition. That advice is only executable if the type can
+# be imported, and every one of these classes used to live two packages down, so the import an
+# agent actually writes -- `from openreading import ComplianceRefused` -- raised ImportError on the
+# very surface the briefing recommends. They are re-exported here and their home is unchanged:
+# `openreading.types.errors` defines all but `PolicyError`, which `openreading.api` defines
+# because it is raised by policy parsing rather than by a backend.
+from openreading.types.errors import (
+    ComplianceRefused,
+    MissingCredentialsError,
+    PlanExhaustedError,
+    RetryableError,
+    SourceNotFoundError,
+    TerminalError,
+    UnknownStrategyError,
+    UnsupportedFeatureError,
+)
 
 __version__ = "0.3.0"
 SCHEMA_VERSION = "0.1"
 
-__all__ = ["compare", "resume", "route", "run", "run_batch", "__version__", "SCHEMA_VERSION"]
+__all__ = [
+    "compare",
+    "resume",
+    "route",
+    "run",
+    "run_batch",
+    "__version__",
+    "SCHEMA_VERSION",
+    "ComplianceRefused",
+    "MissingCredentialsError",
+    "PlanExhaustedError",
+    "PolicyError",
+    "RetryableError",
+    "SourceNotFoundError",
+    "TerminalError",
+    "UnknownStrategyError",
+    "UnsupportedFeatureError",
+]

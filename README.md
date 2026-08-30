@@ -295,6 +295,12 @@ envelope records `docling TerminalError (ConnectError)`. Without the copy the sa
 `uv run openreading backends` shows `reducto … yes`. From then on every Reducto call is billed to
 your account.
 
+Two things about that `echo`. `.env` is already in this repo's `.gitignore`, so the file you just
+wrote inside a clone will not be committed by accident. Your shell records the line itself, though,
+which puts the key in `~/.zsh_history` or `~/.bash_history` in plain text. Prefix the command with
+a space if your shell is set to skip those, or open `.env` in an editor and type the key there
+instead.
+
 ## Python and HTTP
 
 From Python or over HTTP you get the same shapes that the command line prints.

@@ -275,13 +275,13 @@ missing credentials and the batch exits 1, after the preflight has printed.
 
 A corpus larger than a few hundred documents needs a number before it needs a command. One
 invocation holds every response in memory until the last item finishes. Peak memory is therefore a
-straight line in the item count. On this machine it measured 82 MB of base plus 1.47 MB per
+straight line in the item count. On this machine it measured 81 MB of base plus 1.47 MB per
 twelve-page PDF. That line predicted 269.2 MB at 128 documents where the run measured 269.1 MB, so
 it is worth planning against. Each document also adds about 274 KiB to the single JSON document on
 stdout. A very large batch is therefore awkward to read back as well as to run.
 
 Turn that into a ceiling by subtracting the base from your budget and dividing by the per-document
-cost. For a 4 GB budget, `(4096 - 82) / 1.47` is about 2,700 documents. For 16 GB it is about
+cost. For a 4 GB budget, `(4096 - 81) / 1.47` is about 2,700 documents. For 16 GB it is about
 11,000. Halve those if your documents run to twenty-five pages rather than twelve. Better still,
 measure your own figure with `/usr/bin/time -l` over a few hundred of your real files. Nothing
 warns you when you pass the ceiling, and `--max-items 100000` is accepted in silence. The ceiling

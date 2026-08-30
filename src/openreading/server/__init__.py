@@ -157,7 +157,10 @@ HTTP status codes
 424  a directly-named backend is missing credentials (`missing_credentials`; `missing_env[]`
      names them) or its key was found and REJECTED by the provider (`auth_rejected`; the
      message names the var to check, never the key)
-502  plan exhausted — every backend failed (`plan_exhausted`, `trail`) — or other terminal error
+502  plan exhausted — every backend failed (`plan_exhausted`, `trail`) — or other terminal error,
+     which INCLUDES two permanent request-shape refusals a client must not retry:
+     `credentials_ref_alias_not_allowed` and `endpoint_not_request_configurable`. Read
+     `backend_code` before deciding a 502 is a server outage
 504  deadline exceeded, retryables exhausted (`retryable_exhausted`)
 500  an unhandled server error. This is the ONE status that does not carry the error body below:
      the ASGI framework returns the plain text `Internal Server Error`, so a client parsing every

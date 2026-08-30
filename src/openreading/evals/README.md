@@ -288,9 +288,12 @@ documents and on three thousand. That word compiles to an `any_of` block, and `c
 only the flat numeric predicates. [Strategies](../strategies/README.md) §8 lists which predicates
 qualify and how to read the points and the recommendation.
 
-**Score a compare against a golden.** A golden is a file of expected output. `pymupdf.json` and
-`tesseract.json` exist from the root README.
+**Score a compare against a golden.** A golden is a file of expected output. The golden below is the
+`first` case's `expected` block, which describes `sample.pdf`, so parse that document into the two
+envelopes rather than reusing envelopes another page saved from a different document.
 ```bash
+uv run openreading parse sample.pdf --backend pymupdf > pymupdf.json
+uv run openreading parse sample.pdf --backend tesseract > tesseract.json
 jq '.expected' mydata/first/case.json > golden.json
 uv run openreading compare pymupdf.json tesseract.json --truth golden.json --format json | jq -c .truth
 ```

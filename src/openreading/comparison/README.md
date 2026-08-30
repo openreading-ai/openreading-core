@@ -18,7 +18,7 @@ backends found different numbers of tables in the document. Compare picks no win
 one output as the baseline or bring a golden file of expected values. Your question may really be
 which backend is correct rather than where the two differ. `leaderboard` answers that one
 ([Evals](../evals/README.md)), and the last recipe here is the cheapest way to reach it. You need
-two saved envelopes, such as `pymupdf.json` and `tesseract.json` from the root README, and no key.
+two saved envelopes, such as the `pymupdf.json` and `tesseract.json` step 1 below writes, and no key.
 
 ## Mental model
 

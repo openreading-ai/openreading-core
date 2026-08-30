@@ -333,11 +333,12 @@ from "escalate when the winner looks bad" to "… or when the branches disagree"
 Time — `max_time` has one placement: `budget.max_duration` on the body root, one pool for the
 whole strategy (the duel and the `then:` rung share it), clamping under `limits:` as always
 (children clamp, never extend). On deadline, keep-best returns the best retained result as
-`Deficient` with the `quality_below_threshold` warning (`budget_exhausted` when a deadline ended
-the walk) — the same as any exhaustion — never
-silence. The design's `budget_exhausted` *warning* has no emitter in the engine;
-`budget_exhausted` is the error class (`PlanExhaustedError`) only when the deadline ended the
-walk with nothing retained.
+`Deficient`, never silence. A quality exhaustion (every rung gated) carries the
+`quality_below_threshold` warning, and a deadline overrun carries `budget_exhausted` instead. The
+two are separate codes so each cause is countable on its own, and because escalating to a stronger
+backend is the right answer to the first and the worst answer to the second. `budget_exhausted` is
+also the error class (`PlanExhaustedError`) when the deadline ended the walk with nothing
+retained.
 
 Missing signals and `missing:` — a criterion the backend can't report doesn't fire, is traced as
 skipped, and is never guessed; no `on_missing` wrapper exists in Plain. `missing: [name]` is a

@@ -513,9 +513,10 @@ rotation (per-document data failures, not infrastructure). Shipped: the CLI rais
 so a supervisor's stop signal ends the same way an interactive one does -- exit 6, the resumable
 line and its run id, and the in-flight step recorded `cancelled` rather than left an
 `attempted`-only orphan that re-dispatches and is billed again on resume. Only the first stop
-signal does that: a duplicate from a forwarding parent (`uv run`, a container init shim, a
-`killpg` that reaches a wrapper too) is ignored, because raising a second interrupt into the
-teardown the first one started is what strands the event loop. The escalation is unchanged and
+signal does that, of either kind: a repeat from a forwarding parent (`uv run`, a container init
+shim, a `killpg` that reaches a wrapper too) and a Ctrl-C landing on top of a supervisor's SIGTERM
+are both dropped, because raising a second interrupt into the teardown the first one started is
+what strands the event loop. The escalation is unchanged and
 still works -- SIGKILL journals nothing, and a kill landing between vendor-accept and the terminal
 record leaves the orphan the journal contract above reconciles by idempotency key. Paging
 guidance, likewise design: cost-per-run p99 against `budget:`, steps in

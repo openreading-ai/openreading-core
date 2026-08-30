@@ -74,9 +74,9 @@ disagree, the text is right. Fix the table.
 | Code | Means | Whose fault | Safe to retry | Triggered here by |
 |---|---|---|---|---|
 | `0` | envelope printed | nobody's | nothing to retry | `uv run openreading parse sample.pdf --backend pymupdf` |
-| `1` | unexpected error; a batch where nothing succeeded; a document this process may not read; an armed ledger on an unwritable path | yours | no, fix the cause | `mkdir -p bad && printf 'not a pdf' > bad/bad.pdf && uv run openreading parse bad/ --backend pymupdf` |
+| `1` | unexpected error; a batch where nothing succeeded; a document this process may not read | yours | no, fix the cause | `mkdir -p bad && printf 'not a pdf' > bad/bad.pdf && uv run openreading parse bad/ --backend pymupdf` |
 | `2` | usage: bad selector, unknown backend or strategy, a source path that resolves to no document, over `--max-items` or `--max-jobs`, compare misuse | yours | no, fix the command | `uv run openreading parse sample.pdf` (no selector) |
-| `3` | cannot run: missing key, `auth_rejected`, `unsupported_feature`, compliance refusal, unreadable policy or config, a document the backend cannot open, `serve` on a port already bound, a `RetryableError` on a directly named backend | read stderr, both happen | only the `RetryableError` line | `uv run openreading parse sample.pdf --backend reducto` |
+| `3` | cannot run: missing key, `auth_rejected`, `unsupported_feature`, compliance refusal, unreadable policy or config, a document the backend cannot open, an armed ledger on an unwritable path, `serve` on a port already bound, a `RetryableError` on a directly named backend | read stderr, both happen | only the `RetryableError` and ledger lines | `uv run openreading parse sample.pdf --backend reducto` |
 | `4` | batch partial (some items failed); `route` with no compliant backend | per item, read `.items[]` | per failed item | `mkdir -p docs && cp sample.pdf docs/ && printf 'not a pdf' > docs/bad.pdf && uv run openreading parse docs/ --backend pymupdf > run.json` |
 | `5` | `compare` inputs are not schema-valid responses | yours | no, fix the inputs | `echo '{"hello": 1}' > not-an-envelope.json && uv run openreading compare not-an-envelope.json out.json` |
 | `6` | interrupted while `OPENREADING_LEDGER` was set; the run is resumable | whoever stopped it | yes, with `resume` | Ctrl-C or SIGTERM during a `parse` with the ledger armed ([Operations](#operations)) |
@@ -225,7 +225,8 @@ library returns before any wait. On `reducto` with no key it exits 3 on the cred
 - stdout carries the result only, because a progress line there would break every `| jq` consumer.
   `openreading.cli.app` enforces this by redirecting stdout during the run.
 - A printed envelope is schema-validated first, so a non-conforming document never reaches stdout.
-- No flag widens compliance. A policy that leaves nothing to run is exit 3 from every verb that
+- No flag widens the eligible set; the policy file sets it, and three of its keys widen it
+  deliberately. A policy that leaves nothing to run is exit 3 from every verb that
   executes. Bare `route` prints the empty plan and exits 4 ([Routing and
   keys](../router/README.md)).
 - Keys never travel on the command line, so they never land in shell history or `ps`.
@@ -269,10 +270,15 @@ way, two seconds into the same run.
 | `SIGTERM` | no | `143` | 0 bytes | one `[openreading]` line naming `OPENREADING_LEDGER` | nothing is written |
 | `SIGKILL` (`kill -9`, the OOM killer) | either | `137` | 0 bytes | 0 bytes | an `attempted` record with no terminal line, when armed |
 
-A second SIGTERM while the first is still shutting down is ignored, not queued: the same stop
-signal often arrives twice (a supervisor forwarding it, or `uv run` relaying it to this process),
-and reacting to each one separately can corrupt the shutdown in progress. Escalate with SIGKILL if
-the process has not exited.
+Only the first stop signal acts, and it claims both signals: once a stop is under way, a further
+SIGTERM or SIGINT is dropped, whichever kind it is, because the same stop often arrives twice (a
+supervisor forwarding it, or `uv run` relaying it to this process), and reacting to a second one
+separately can corrupt the shutdown already in progress. The exit code names whichever signal
+started the stop: `kill` then Ctrl-C ends at `143` (`6` with the ledger armed), and Ctrl-C then
+`kill` ends at `130` (`6` with the ledger armed). Escalate with SIGKILL, never with another
+catchable signal. Two SIGINTs with no SIGTERM between them are the one exception, left to Python's
+own "Ctrl-C twice to force out" behaviour, because taking SIGINT over before a run starts would
+cost every plain Ctrl-C its safe shutdown path.
 
 SIGKILL cannot be caught, so nothing prints and no rung is closed. That run is still resumable, and
 no verb lists runs, so recovery means reading `$OPENREADING_LEDGER/*.header.json` and choosing by
@@ -356,7 +362,7 @@ versions. CLI flags, the Python API and the strategy grammar may still change be
 
 An armed ledger writes the document and the response for every strategy run. Three runs of
 `offline_first` over the 8.7 KB sample left 87 KB behind, about 29 KB a run. Size the volume from
-your own document and response sizes. An armed ledger that cannot write stops the parse at exit 1
+your own document and response sizes. An armed ledger that cannot write stops the parse at exit 3
 rather than continuing unjournalled, which [The run ledger](../ledger/README.md) demonstrates on an
 unwritable directory, so treat a full volume as an outage. Behaviour on a volume that fills
 mid-run was not measured.

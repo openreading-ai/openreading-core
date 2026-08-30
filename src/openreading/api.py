@@ -9,7 +9,7 @@ collapse onto, so the three surfaces cannot drift.
     doc = openreading.run("loan.pdf", strategy="main")            # == backend="strategy:main"
     plan = openreading.route("loan.pdf", policy=p)                 # plan only, no execution
     env = openreading.run_batch(["invoices/"], backend="pymupdf", jobs=4)
-    doc = openreading.resume("r_01J8QK")                          # from the ledger alone
+    doc = openreading.resume("7dbf6b71-adb5-4e90-9188-a184fdba9d05")   # a run id is a UUIDv4
 
 Exports and return shapes
 -------------------------
@@ -86,6 +86,11 @@ exit 0. A compliance gate that can be turned off by a typo is not a gate.
 
 Exceptions
 ----------
+Every class named here is importable from the top level (`from openreading import
+ComplianceRefused`), which is where a caller branching on the type will look for it. The homes are
+unchanged: `openreading.types.errors` defines all of them except `PolicyError`, which is defined
+here because policy parsing raises it before any backend is involved.
+
 `KeyError` unknown backend slug · `ValueError` reserved override · `PolicyError` (a `ValueError`:
 malformed `policy=`; CLI exit 3. Never reaches the server, which has no policy bag — an HTTP
 caller's equivalent mistake is a 400 from the request schema) · `SourceNotFoundError` ·

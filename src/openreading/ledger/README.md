@@ -57,11 +57,11 @@ OPENREADING_LEDGER=./sample.pdf uv run openreading parse sample.pdf --strategy o
 ```
 
 ```text
-[strategy:offline_first] error: NotADirectoryError: [Errno 20] Not a directory: 'sample.pdf/keys'
-exit=1
+[strategy:offline_first] cannot use the run journal at OPENREADING_LEDGER='./sample.pdf': Not a directory. Point it at a writable directory, or unset it to run without a journal (an unjournalled run is not resumable).
+exit=3
 ```
 
-**You should see** exit 1 and an empty `nd.json`. A read-only mount, a wrong volume path and a
+**You should see** exit 3 and an empty `nd.json`. A read-only mount, a wrong volume path and a
 directory that is really a file all take this row, and each one fails every parse on that host
 rather than degrading to an unjournalled run. Confirm the path is a writable directory before you
 arm a scheduled job, and treat the ledger volume as part of that job's critical path.
@@ -321,8 +321,11 @@ are in `uv run python -m pydoc openreading.ledger`. The ones you meet are these.
 - Refuse rather than diverge (L5). A mismatch in `config_hash`, `plan_hash`, or `journal_version`
   refuses the resume outright. Without this rule a resume could silently become a different run.
 - Secrets never enter a payload (L6), so a presigned URL never lands in a backup. Blobs are
-  addressed by `(run_id, digest)` and never shared across runs (L7), so a replay never serves
-  another run's bytes.
+  addressed by `(run_id, digest)` under the run's own directory and encrypted under the run's own
+  key, so a replay reads only the bytes its own run wrote. That isolation comes from the
+  addressing rather than from a check. `BlobStore.get` takes no requesting-run argument and does
+  not yet refuse a foreign `run_id`, which is the cross-run rejection listed under [Not built
+  yet](#not-built-yet).
 - Erasure is crypto-shredding rather than deletion, because a delete would have to reach every
   replica and backup one file at a time. Each blob is encrypted with a stdlib SHA-256 counter-mode
   stream cipher under a fresh 32-byte key per run. That cipher is unauthenticated, and integrity
