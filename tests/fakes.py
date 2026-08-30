@@ -319,6 +319,10 @@ class PollFaultBackend(_NormalizeMixin, BackendAdapter):
         # was genuinely dispatched, even though it deliberately doesn't wait for it to finish.
         self._cancel_sleep_s = cancel_sleep_s
         self.cancel_started: list[Job] = []
+        # (entered, returned) monotonic bounds of each cancel(), so a test can prove CONCURRENT
+        # dispatch by overlap instead of by a wall-clock budget: two cancels that overlap were in
+        # flight together, and two dispatched serially cannot overlap however slow the machine is.
+        self.cancel_windows: list[tuple[float, float]] = []
 
     def submit(self, req: OpenReadingRequest, ctx: RunContext) -> Job:
         job = self.new_job(WaitMode.POLL, state=JobState.RUNNING, backend_job_id="job-1")
@@ -329,11 +333,13 @@ class PollFaultBackend(_NormalizeMixin, BackendAdapter):
         raise TerminalError("status endpoint returned 500", backend_code="server")
 
     def cancel(self, job: Job, ctx: RunContext) -> Job:
-        self.cancel_started.append(job)
-        if self._cancel_sleep_s:
-            import time
+        import time
 
+        self.cancel_started.append(job)
+        entered = time.monotonic()
+        if self._cancel_sleep_s:
             time.sleep(self._cancel_sleep_s)  # simulates a real synchronous vendor HTTP call
+        self.cancel_windows.append((entered, time.monotonic()))
         self.cancelled.append(job)
         return super().cancel(job, ctx)
 

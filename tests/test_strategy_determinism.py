@@ -9,6 +9,8 @@ a full walk with a race and a paged cascade, journal diff empty).
 from __future__ import annotations
 
 import base64
+import difflib
+import json
 import os
 import subprocess
 import sys
@@ -252,7 +254,17 @@ def test_a_walk_with_a_race_and_a_paged_cascade_produces_a_byte_identical_journa
     the public API always builds its own real production registry internally
     (`_run_strategy_request`'s own `registry = build_registry()`) with no way to inject a fake
     one, so a `ScriptedBackend`-based registry has to be wired in by hand, mirroring exactly what
-    `_arm_ledger` does for a real caller."""
+    `_arm_ledger` does for a real caller.
+
+    The loser's `test_latency_ms` is a wall-clock margin, not a duration: under `RealClock` it is a
+    real `asyncio.sleep` that runs BEFORE `ctx.exec()`, so it decides whether the loser is still
+    pre-dispatch when the winner is picked — and therefore whether it journals two records or none.
+    At the 5ms it used to carry, a contended runner sometimes let it wake first: 48 concurrent
+    copies of this walk produced two different journals (37 without the loser's records, 11 with),
+    which this test then reported as a hash-seed failure it never was. The margin has to be wider
+    than any scheduling jitter, and costs nothing at any width because the branch is cancelled
+    while it sleeps — the walk never waits it out. It is only ever waited out if `on_win: cancel`
+    stops cancelling, which is the one regression that should be slow and loud here."""
     script = textwrap.dedent("""
         import json
         import sys
@@ -278,7 +290,7 @@ def test_a_walk_with_a_race_and_a_paged_cascade_produces_a_byte_identical_journa
 
         reg = scripted_registry(
             ScriptedBackend("fast_a", local=True, text=GARBLED, latency_ms=0),
-            ScriptedBackend("fast_b", local=True, text=GARBLED, latency_ms=5),
+            ScriptedBackend("fast_b", local=True, text=GARBLED, latency_ms=5000),
             ScriptedBackend(
                 "page_ocr",
                 local=True,
@@ -338,4 +350,20 @@ def test_a_walk_with_a_race_and_a_paged_cascade_produces_a_byte_identical_journa
         assert result.returncode == 0, result.stderr
         outputs.append(result.stdout)
     assert len(outputs[0].strip()) > 0  # sanity: the journal actually had content
-    assert len(set(outputs)) == 1, outputs
+    # Report the DIFF, not the journals: five full journals overflow pytest's own truncation, and
+    # the one failure this test ever had arrived as five elided blobs with the difference cut out
+    # of the middle. A record-level unified diff names the records that moved instead.
+    odd = next((i for i, out in enumerate(outputs) if out != outputs[0]), None)
+    assert odd is None, "seed 0 and seed {} produced different journals:\n{}".format(
+        odd,
+        "\n".join(
+            difflib.unified_diff(
+                [json.dumps(rec, sort_keys=True) for rec in json.loads(outputs[0])],
+                [json.dumps(rec, sort_keys=True) for rec in json.loads(outputs[odd or 0])],
+                "seed-0",
+                f"seed-{odd}",
+                lineterm="",
+                n=0,
+            )
+        ),
+    )
