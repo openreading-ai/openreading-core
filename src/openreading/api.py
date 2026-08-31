@@ -166,6 +166,15 @@ Environment variables read by this module
   run: after the key is reaped, replay reports `payload_expired` and nothing brings the content
   back. A fresh run also sweeps the whole ledger root at arm time, so stale runs are collected by
   ordinary use.
+- `OPENREADING_ALLOW_PRIVATE_URLS` — read by `_download` (`materialize_document`'s own URL
+  fetch). Unset (default): before any request leaves this process, `_assert_public_http_url`
+  refuses a non-http(s) scheme and a host that resolves to a loopback/private/link-local/reserved
+  address (cloud metadata endpoints included) — `unsupported_input` / `url_not_public`
+  respectively. Set (any non-empty value): skips that whole check, scheme included, for a
+  deployment whose document store is deliberately intranet-only; the operator is trusted to have
+  already constrained which URLs can reach `run()`/`route()` in that case. Pre-resolution only — a
+  DNS answer that changes between this check and the actual connect (rebinding) is out of scope;
+  an operator needing that guarantee puts egress policy in front.
 - `env_file=` -> `credentials.load_dotenv`: loads `KEY=VALUE` lines WITHOUT overriding an
   already-set process variable (an exported shell var always beats the file); a missing file is
   a no-op. Loaded ONLY when the argument is given (`if env_file:` in `run()` / `run_batch()`):
@@ -476,22 +485,69 @@ def build_request(
     return OpenReadingRequest.model_validate(body)
 
 
+def _assert_public_http_url(url: str) -> None:
+    """Refuse URL schemes and destinations a hosted parse must never fetch on a caller's behalf:
+    non-http(s), and hosts resolving to loopback/private/link-local/reserved addresses (cloud
+    metadata endpoints included). Pre-resolution check only — a DNS answer that changes between
+    this check and the connect (rebinding) is out of scope here; deployments needing that
+    guarantee put egress policy in front, per the server docstring's Security section.
+    OPENREADING_ALLOW_PRIVATE_URLS=1 disables the address check for intranet document stores."""
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise TerminalError(
+            f"unsupported URL scheme {parsed.scheme!r}", backend_code="unsupported_input"
+        )
+    host = parsed.hostname
+    if not host:
+        raise TerminalError("URL has no host", backend_code="unsupported_input")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except OSError as exc:
+        raise TerminalError(f"cannot resolve {host!r}", backend_code="url_not_public") from exc
+    for info in infos:
+        addr = ipaddress.ip_address(info[4][0])
+        if not addr.is_global or addr.is_multicast:
+            raise TerminalError(
+                f"URL host {host!r} resolves to a non-public address",
+                backend_code="url_not_public",
+            )
+
+
 def _download(url: str, *, transport=None) -> bytes:
     import httpx  # lazy — only when a URL is actually materialized
 
+    if not os.environ.get("OPENREADING_ALLOW_PRIVATE_URLS"):
+        _assert_public_http_url(url)
     client = (
         httpx.Client(transport=transport, timeout=60.0) if transport else httpx.Client(timeout=60.0)
     )
-    with client:
-        r = client.get(url)
+    with client, client.stream("GET", url) as r:
         if r.status_code >= 400:
             raise error_for_status(r.status_code, r.headers, message=f"fetch {url}")
-        data = r.content
-    if len(data) > _MAX_DOWNLOAD_BYTES:
-        raise TerminalError(
-            f"document at {url} exceeds {_MAX_DOWNLOAD_BYTES} bytes", backend_code="doc_too_large"
-        )
-    return data
+        declared = r.headers.get("content-length", "")
+        if declared.isdigit() and int(declared) > _MAX_DOWNLOAD_BYTES:
+            raise TerminalError(
+                f"document at {url} exceeds {_MAX_DOWNLOAD_BYTES} bytes",
+                backend_code="doc_too_large",
+            )
+        chunks: list[bytes] = []
+        total = 0
+        # Stream with a running count: buffering the whole body first (r.content) would let an
+        # oversized or endless response exhaust memory before the limit was ever consulted.
+        for chunk in r.iter_bytes():
+            total += len(chunk)
+            if total > _MAX_DOWNLOAD_BYTES:
+                raise TerminalError(
+                    f"document at {url} exceeds {_MAX_DOWNLOAD_BYTES} bytes",
+                    backend_code="doc_too_large",
+                )
+            chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def materialize_document(req: OpenReadingRequest, descriptor=None, *, transport=None):
