@@ -31,16 +31,26 @@ and nothing else, because the walkthrough runs a local strategy.
 ## Mental model
 
 ```mermaid
-flowchart LR
-  W["strategy walk"] --> X["each backend call"]
-  X --> J["journal: attempted, then ok / skipped / failed / cancelled"]
-  X --> B["blob store: payload encrypted under the run key"]
-  H["header: config_hash, plan_hash, pinned backends"] --> R["resume RUN_ID"]
-  J --> R
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif","fontSize":"14px","lineColor":"#94a3b8","textColor":"#334155","primaryTextColor":"#0f172a","edgeLabelBackground":"#eef2f7","clusterBkg":"#f8fafc","clusterBorder":"#cbd5e1","titleColor":"#334155"},"flowchart":{"curve":"basis","nodeSpacing":36,"rankSpacing":44,"padding":8,"useMaxWidth":true}}}%%
+flowchart TD
+  W[/"strategy walk"/]:::src --> X["each backend call"]:::work
+  X --> J[("journal<br>attempted, then ok / skipped / failed / cancelled")]:::store
+  X --> B[("blob store<br>payload encrypted<br>under the run key")]:::store
+  H[/"header<br>config_hash, plan_hash,<br>pinned backends"/]:::src --> R
+  J --> R{{"resume RUN_ID"}}:::gate
   B --> R
-  R -->|"hashes match"| P["replay recorded steps, execute the rest"]
-  R -->|"hash changed"| F["refuse by name, exit 3"]
-  K["retention reaper, at every fresh arm"] -->|"destroys the key"| B
+  R -- "hashes match" --> P(["replay recorded steps,<br>execute the rest"]):::good
+  R -- "hash changed" --> F(["refuse by name, exit 3"]):::bad
+  K["retention reaper<br>at every fresh arm"]:::bad -. "destroys the key" .-> B
+  classDef src fill:#eef2ff,stroke:#6366f1,stroke-width:1.5px,color:#1e1b4b;
+  classDef work fill:#e0f2fe,stroke:#0284c7,stroke-width:1.5px,color:#082f49;
+  classDef gate fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#451a03;
+  classDef good fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#052e16;
+  classDef bad fill:#fee2e2,stroke:#dc2626,stroke-width:1.5px,color:#450a0a;
+  classDef store fill:#ccfbf1,stroke:#0d9488,stroke-width:1.5px,color:#042f2e;
+  classDef out fill:#f3e8ff,stroke:#9333ea,stroke-width:1.5px,color:#3b0764;
+  classDef hero fill:#1e293b,stroke:#94a3b8,stroke-width:2px,color:#f8fafc;
+  linkStyle default stroke-width:1.6px;
 ```
 
 Arming means setting `OPENREADING_LEDGER=<dir>` in the environment, and there is no flag for it.

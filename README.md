@@ -14,10 +14,23 @@ machine or Reducto's hosted API.
 Whichever backend reads your document, you get one shape that you can read, compare, or replay.
 
 ```mermaid
-flowchart LR
-  D["your document"] --> B["choose a backend<br>yourself, by policy, or by strategy"]
-  B --> P["the backend reads it"] --> J["one JSON<br>same shape every time"]
-  J --> T["read the text and tables"] & C["compare two backends"] & E["explain or replay a run"]
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif","fontSize":"14px","lineColor":"#94a3b8","textColor":"#334155","primaryTextColor":"#0f172a","edgeLabelBackground":"#eef2f7","clusterBkg":"#f8fafc","clusterBorder":"#cbd5e1","titleColor":"#334155"},"flowchart":{"curve":"basis","nodeSpacing":36,"rankSpacing":44,"padding":8,"useMaxWidth":true}}}%%
+flowchart TD
+  D[/"your document"/]:::src --> B["choose a backend<br>yourself, by policy, or by strategy"]:::gate
+  B --> P["the backend reads it"]:::work
+  P --> J(["one JSON<br>same shape every time"]):::hero
+  J --> T["read the text<br>and tables"]:::out
+  J --> C["compare two backends"]:::out
+  J --> E["explain or replay a run"]:::out
+  classDef src fill:#eef2ff,stroke:#6366f1,stroke-width:1.5px,color:#1e1b4b;
+  classDef work fill:#e0f2fe,stroke:#0284c7,stroke-width:1.5px,color:#082f49;
+  classDef gate fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#451a03;
+  classDef good fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#052e16;
+  classDef bad fill:#fee2e2,stroke:#dc2626,stroke-width:1.5px,color:#450a0a;
+  classDef store fill:#ccfbf1,stroke:#0d9488,stroke-width:1.5px,color:#042f2e;
+  classDef out fill:#f3e8ff,stroke:#9333ea,stroke-width:1.5px,color:#3b0764;
+  classDef hero fill:#1e293b,stroke:#94a3b8,stroke-width:2px,color:#f8fafc;
+  linkStyle default stroke-width:1.6px;
 ```
 
 **The problem.** Every document parser has its own API and its own output shape. Swapping one

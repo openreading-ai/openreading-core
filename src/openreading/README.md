@@ -75,16 +75,26 @@ Source: `src/openreading/__init__.py` (The 3x3). Live truth: `uv run python -m p
 Every document follows the path below, whichever backend answers.
 
 ```mermaid
-flowchart LR
-  Q["request plus policy"] --> R1["router stage 1<br>compliance filter"]
-  R1 --> R2["router stages 2 and 3<br>capability, score"]
-  R2 --> AD["adapter<br>submit, poll, normalize"]
-  AD --> DV["derive<br>text, tables, geometry"]
-  DV --> EN["envelope<br>response.v0.3"]
-  EN --> CP["compare<br>typed verdict"]
-  EN --> ST["strategy gates<br>accept or escalate"]
-  ST -->|"next rung"| R2
-  ST --> LG["ledger journal<br>resume, replay"]
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif","fontSize":"14px","lineColor":"#94a3b8","textColor":"#334155","primaryTextColor":"#0f172a","edgeLabelBackground":"#eef2f7","clusterBkg":"#f8fafc","clusterBorder":"#cbd5e1","titleColor":"#334155"},"flowchart":{"curve":"basis","nodeSpacing":36,"rankSpacing":44,"padding":8,"useMaxWidth":true}}}%%
+flowchart TD
+  Q[/"request plus policy"/]:::src --> R1{{"router stage 1<br>compliance filter"}}:::gate
+  R1 -- "pass" --> R2["router stages 2 and 3<br>capability, score"]:::work
+  R2 --> AD["adapter<br>submit, poll, normalize"]:::work
+  AD --> DV["derive<br>text, tables, geometry"]:::work
+  DV --> EN(["envelope<br>response.v0.3"]):::hero
+  EN --> CP["compare<br>typed verdict"]:::out
+  EN --> ST{{"strategy gates<br>accept or escalate"}}:::gate
+  ST -- "next rung" --> R2
+  ST --> LG[("ledger journal<br>resume, replay")]:::store
+  classDef src fill:#eef2ff,stroke:#6366f1,stroke-width:1.5px,color:#1e1b4b;
+  classDef work fill:#e0f2fe,stroke:#0284c7,stroke-width:1.5px,color:#082f49;
+  classDef gate fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#451a03;
+  classDef good fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#052e16;
+  classDef bad fill:#fee2e2,stroke:#dc2626,stroke-width:1.5px,color:#450a0a;
+  classDef store fill:#ccfbf1,stroke:#0d9488,stroke-width:1.5px,color:#042f2e;
+  classDef out fill:#f3e8ff,stroke:#9333ea,stroke-width:1.5px,color:#3b0764;
+  classDef hero fill:#1e293b,stroke:#94a3b8,stroke-width:2px,color:#f8fafc;
+  linkStyle default stroke-width:1.6px;
 ```
 
 The router reads adapter descriptions only and never branches on backend type. `derive` computes
