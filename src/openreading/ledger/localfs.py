@@ -16,10 +16,12 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import secrets
 from pathlib import Path
 
 from openreading.ledger.ports import PayloadExpired
+from openreading.ledger.retention import VALID_RUN_ID
 from openreading.ledger.step import BlobRef
 
 _KEY_BYTES = 32
@@ -54,6 +56,8 @@ class LocalFsKeyStore:
         self._root.chmod(0o700)
 
     def _path(self, run_id: str) -> Path:
+        if not VALID_RUN_ID.fullmatch(run_id):
+            raise ValueError(f"malformed run_id {run_id!r}")
         return self._root / f"{run_id}.key"
 
     def get_or_create(self, run_id: str) -> bytes:
@@ -90,7 +94,11 @@ class LocalFsBlobStore:
         self._root.mkdir(parents=True, exist_ok=True)
 
     def _path(self, run_id: str, digest: str) -> Path:
+        if not VALID_RUN_ID.fullmatch(run_id):
+            raise ValueError(f"malformed run_id {run_id!r}")
         safe_digest = digest.split(":", 1)[-1]
+        if not re.fullmatch(r"[A-Fa-f0-9]{16,128}", safe_digest):
+            raise ValueError(f"malformed digest {digest!r}")
         d = self._root / run_id
         d.mkdir(parents=True, exist_ok=True)
         return d / f"{safe_digest}.bin"

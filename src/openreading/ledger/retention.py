@@ -43,11 +43,17 @@ live "ok" branch (the one place a real dispatch is known to have happened).
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 from typing import Any
 
 DEFAULT_RETENTION_HOURS = 24.0  # placeholder (plan §7) — founder-overridable, see FOUNDER-INBOX.md
+
+# Canonical run-id shape (matches what _arm generates). Persisted stamps are data, not
+# trusted input: retention deletes recursively, so anything joined onto blobs_root must be
+# provably a single, well-formed path segment before it is used.
+VALID_RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
 
 def compute_retention_ceiling_hours(
@@ -145,8 +151,13 @@ def reap(root: Path, keys: Any, blobs_root: Path, *, now_epoch_ms: int) -> list[
         if stamp["expires_epoch_ms"] > now_epoch_ms:
             continue
         run_id = stamp["run_id"]
+        if not isinstance(run_id, str) or not VALID_RUN_ID.fullmatch(run_id):
+            continue  # malformed/tampered stamp: leave it for a human, delete nothing
+        target = (blobs_root / run_id).resolve()
+        if not (target.is_relative_to(blobs_root.resolve()) and target != blobs_root.resolve()):
+            continue
         keys.destroy(run_id)
-        shutil.rmtree(blobs_root / run_id, ignore_errors=True)
+        shutil.rmtree(target, ignore_errors=True)
         stamp_file.unlink(missing_ok=True)
         reaped.append(run_id)
     return reaped

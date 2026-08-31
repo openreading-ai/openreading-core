@@ -384,6 +384,32 @@ def test_reap_destroys_keys_and_blobs_for_stamped_runs_past_their_ceiling_only()
         assert (root / "blobs" / "fresh-run").exists()
 
 
+def test_reap_refuses_traversal_run_id(tmp_path):
+    """A stamp whose run_id escapes blobs_root must be skipped, never deleted."""
+    root = tmp_path / "ledger"
+    blobs = root / "blobs"
+    (root / "retention").mkdir(parents=True)
+    blobs.mkdir(parents=True)
+    keys = LocalFsKeyStore(root / "keys")
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "keep.txt").write_text("x")
+    for bad in ("../../victim", str(victim)):
+        (root / "retention" / "evil.json").write_text(
+            json.dumps({"run_id": bad, "expires_epoch_ms": 0})
+        )
+        reaped = reap(root, keys, blobs, now_epoch_ms=10)
+        assert bad not in reaped
+        assert (victim / "keep.txt").exists()
+
+
+def test_blobstore_path_refuses_traversal(tmp_path):
+    keys = LocalFsKeyStore(tmp_path / "keys")
+    store = LocalFsBlobStore(tmp_path / "blobs", keys)
+    with pytest.raises(ValueError):
+        store.put("../escape", "sha256:" + "a" * 64, b"data", "application/octet-stream")
+
+
 # ---- golden fixture (§12's convention) --------------------------------------------------------
 
 
