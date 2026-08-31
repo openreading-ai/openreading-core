@@ -189,6 +189,17 @@ behaves as it always has, and anyone who can reach the server spends your vendor
 - CORS is off unless `--cors-origin` names the origins you trust;
 - a fresh adapter instance is built per request, so a credential-bound client never leaks across
   requests (DECISIONS D-v2-8.1).
+
+`document.path` names a file for the SERVER process to open, not the caller — over HTTP that is a
+remote file-read primitive, a second and independent risk from the credit-spend one above, and it
+is refused by default on every caller-body ingress (`/v1/parse`, `/v1/route`, `/v1/jobs`,
+`/v1/batch`): send `bytes_base64` or `url` instead. An operator who needs it sets
+`OPENREADING_SERVER_PATH_ROOT=<dir>` to serve files beneath one directory; the check resolves
+symlinks before proving containment, so a link inside that directory pointing outside it is
+refused the same as a literal `..` (`server.app._document_path_refusal`). This gate is HTTP-only —
+the CLI and `openreading.api` still accept `document.path` unchanged, because there the caller and
+the machine granting file access are the same trust domain.
+
 Setting `OPENREADING_API_KEYS` (comma-separated bearer tokens) turns auth on: every endpoint
 except GET /healthz and POST /v1/webhooks/{backend_id} then rejects a request without a valid
 `Authorization: Bearer <token>` with 401. Environment only, read once at startup, never a CLI

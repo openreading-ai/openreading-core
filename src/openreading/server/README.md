@@ -65,8 +65,11 @@ sequenceDiagram
 
 ## Walkthrough
 
-Start a server in a second terminal with `uv run openreading serve`. Every command below ran
-against that server. Generate the root README's sample first:
+Start a server in a second terminal with
+`OPENREADING_SERVER_PATH_ROOT="$PWD" uv run openreading serve`. This walkthrough sends
+`document.path`, which the server refuses over HTTP unless rooted (`openreading.server` docstring,
+"Security"); rooting it at `$PWD` covers every path below. Every command below ran against that
+server. Generate the root README's sample first:
 
 ```bash
 uv run python -c 'from openreading.testing.sample_pdf import build_sample_pdf; open("sample.pdf","wb").write(build_sample_pdf())'
@@ -222,7 +225,8 @@ backends that token may reach. A token is never a flag, so it never lands in she
 
 ```bash
 export TOK=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
-OPENREADING_API_KEYS="$TOK" OPENREADING_API_KEY_SCOPES="$TOK=pymupdf" uv run openreading serve
+OPENREADING_API_KEYS="$TOK" OPENREADING_API_KEY_SCOPES="$TOK=pymupdf" \
+  OPENREADING_SERVER_PATH_ROOT="$PWD" uv run openreading serve
 ```
 
 ```bash
@@ -308,6 +312,11 @@ sample through `/v1/parse` and `/v1/batch`, asserts schema-valid responses, and 
 
 - Auth is off by default and the server binds to loopback only. This avoids a default token nobody
   rotates and an open port that spends your credits. `openreading.server.app` enforces it.
+- `document.path` is refused by default, whether or not caller auth is configured at all. This
+  avoids a caller turning a JSON field naming a file into a way to read anything the server
+  process can open. `OPENREADING_SERVER_PATH_ROOT` is the explicit opt-in, and containment is
+  proved on the resolved path, so a symlink pointing outside that directory cannot escape it
+  either. `openreading.server.app._document_path_refusal` enforces it.
 - Tokens, keys and compliance attestations come from the environment only, never a body or a
   flag. A compliance attestation is the operator's declaration that a backend meets a requirement,
   such as a signed business associate agreement (BAA). Nothing lands in `ps` or shell history, and
@@ -353,7 +362,7 @@ The server writes to both streams and splits them by kind, which a log-shipping 
 account for. Start it with the streams apart and drive one request through:
 
 ```bash
-uv run openreading serve --port 8901 > access.log 2> lifecycle.log &
+OPENREADING_SERVER_PATH_ROOT="$PWD" uv run openreading serve --port 8901 > access.log 2> lifecycle.log &
 sleep 3
 curl -s -o /dev/null -X POST localhost:8901/v1/parse -H 'content-type: application/json' \
   -d '{"document": {"path": "'"$PWD"'/sample.pdf"}, "backend": {"id": "pymupdf"}}'

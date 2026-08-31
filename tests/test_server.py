@@ -13,6 +13,7 @@ pytest.importorskip("fastapi", reason="server extra not installed")
 pytest.importorskip("fitz", reason="pymupdf not installed")
 
 from datetime import UTC
+from pathlib import Path
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -157,6 +158,61 @@ def test_parse_corrupt_document_is_502_terminal_not_a_bare_500(client):
     err = r.json()["error"]
     assert err["category"] == "terminal"
     assert err["backend_code"] == "FileDataError"
+
+
+# --- document.path gating over HTTP (H1) -----------------------------------------------
+
+
+def test_parse_rejects_document_path_by_default(client, monkeypatch):
+    monkeypatch.delenv("OPENREADING_SERVER_PATH_ROOT", raising=False)
+    r = client.post(
+        "/v1/parse",
+        json={"document": {"path": "/etc/hosts"}, "backend": {"id": "pymupdf"}},
+    )
+    assert r.status_code == 400
+    assert "document.path" in r.json()["error"]["message"]
+
+
+def test_parse_allows_path_under_configured_root(client, monkeypatch, tmp_path):
+    src = Path("examples")  # repo ships two synthetic PDFs
+    pdf = next(src.glob("*.pdf"))
+    doc = tmp_path / pdf.name
+    doc.write_bytes(pdf.read_bytes())
+    monkeypatch.setenv("OPENREADING_SERVER_PATH_ROOT", str(tmp_path))
+    r = client.post(
+        "/v1/parse",
+        json={"document": {"path": str(doc)}, "backend": {"id": "pymupdf"}},
+    )
+    assert r.status_code == 200
+
+
+def test_parse_rejects_symlink_escaping_root(client, monkeypatch, tmp_path):
+    outside = tmp_path / "outside.pdf"
+    outside.write_bytes(b"%PDF-1.4")
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "link.pdf").symlink_to(outside)
+    monkeypatch.setenv("OPENREADING_SERVER_PATH_ROOT", str(root))
+    r = client.post(
+        "/v1/parse",
+        json={
+            "document": {"path": str(root / "link.pdf")},
+            "backend": {"id": "pymupdf"},
+        },
+    )
+    assert r.status_code == 400
+
+
+def test_route_rejects_document_path_by_default(client, monkeypatch):
+    # _parse_request (shared by /v1/route and /v1/jobs) raises ValueError(refusal) so this
+    # endpoint's existing except->400 handles it exactly like any other bad body.
+    monkeypatch.delenv("OPENREADING_SERVER_PATH_ROOT", raising=False)
+    r = client.post(
+        "/v1/route",
+        json={"document": {"path": "/etc/hosts"}, "backend": {"id": "pymupdf"}},
+    )
+    assert r.status_code == 400
+    assert "document.path" in r.json()["error"]["message"]
 
 
 def test_route_returns_plan_shape(client):
@@ -339,6 +395,16 @@ def test_submit_job_cost_report_warning_redacts_a_secret(monkeypatch):
 def test_jobs_auto_backend_rejected(client):
     r = client.post("/v1/jobs", json=_pdf_body("auto"))
     assert r.status_code == 400
+
+
+def test_jobs_rejects_document_path_by_default(client, monkeypatch):
+    monkeypatch.delenv("OPENREADING_SERVER_PATH_ROOT", raising=False)
+    r = client.post(
+        "/v1/jobs",
+        json={"document": {"path": "/etc/hosts"}, "backend": {"id": "pymupdf"}},
+    )
+    assert r.status_code == 400
+    assert "document.path" in r.json()["error"]["message"]
 
 
 def test_jobs_strategy_id_wraps_the_walk_as_a_synthetic_job(tmp_path, monkeypatch):
@@ -1556,6 +1622,20 @@ def test_batch_endpoint_per_item_isolation(client):
     env = r.json()
     assert env["status"]["state"] == "partial"
     assert (env["summary"]["succeeded"], env["summary"]["failed"]) == (1, 1)
+
+
+def test_batch_endpoint_rejects_document_path_by_default(client, monkeypatch):
+    # M6 per-item isolation (see test_batch_endpoint_per_item_isolation): a refused document.path
+    # fails that ONE item rather than the whole batch, the same as any other bad item.
+    monkeypatch.delenv("OPENREADING_SERVER_PATH_ROOT", raising=False)
+    r = client.post(
+        "/v1/batch",
+        json={"documents": [{"path": "/etc/hosts"}], "backend": "pymupdf"},
+    )
+    assert r.status_code == 200
+    env = r.json()
+    assert env["summary"]["failed"] == 1
+    assert "document.path" in env["items"][0]["error"]["message"]
 
 
 def test_batch_endpoint_duration_ms_is_not_the_fabricated_zero(client, monkeypatch):

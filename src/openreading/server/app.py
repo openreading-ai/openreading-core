@@ -50,9 +50,9 @@ OPTIONS still gets a CORS answer instead of a 401). RouterConfig comes from the 
 is offloaded with run_in_threadpool, and why fastapi is imported at module level).
 
 Environment variables this module reads. Server-only (the CLI and Python API ignore them):
-OPENREADING_API_KEYS, OPENREADING_API_KEY_SCOPES and the three compliance attestation knobs.
-OPENREADING_CONFIG and the backend credential vars are shared with the CLI / Python API, which
-read them through the same strategy loader and EnvCredentialBroker.
+OPENREADING_API_KEYS, OPENREADING_API_KEY_SCOPES, OPENREADING_SERVER_PATH_ROOT and the three
+compliance attestation knobs. OPENREADING_CONFIG and the backend credential vars are shared with
+the CLI / Python API, which read them through the same strategy loader and EnvCredentialBroker.
   OPENREADING_API_KEYS — comma-separated bearer tokens (_load_api_key_config, once at startup).
     Unset/empty ⇒ caller auth OFF, every endpoint open. An empty ENTRY (stray/trailing comma)
     raises ServerConfigError at startup rather than being dropped: a key is security-bearing and
@@ -63,6 +63,14 @@ read them through the same strategy loader and EnvCredentialBroker.
     a token OPENREADING_API_KEYS never listed, two scopes for one token, or set while
     OPENREADING_API_KEYS is empty) ⇒ ServerConfigError at startup, naming the setting and the
     entry position, never the value.
+  OPENREADING_SERVER_PATH_ROOT — a directory `document.path` may resolve beneath, checked per
+    request by `_document_path_refusal`. Unset (the default) refuses every `document.path` at
+    every caller-body ingress (/v1/parse, /v1/route, /v1/jobs, /v1/batch): HTTP turns a local
+    field naming a file into a remote file-read primitive, so it stays off until an operator
+    opts in. When set, a path must resolve (symlinks followed first) to a regular file under this
+    directory; a link that escapes it is refused the same as a literal `..`. The CLI and Python
+    API never read this var — `document.path` there names a file the SAME process already
+    trusts, which is why the gate is HTTP-only.
   OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE — `1`/`true`/`yes` lets UNVERIFIED compliance fields
     survive the router's compliance stage. Unset (or anything else) ⇒ fail closed: unverified
     is eliminated. The one switch that widens the eligible set; leave it off without a reason.
@@ -100,6 +108,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 # fastapi lives in the [server] extra; this module is only imported when serving/testing, so a
@@ -302,6 +311,30 @@ def _server_router_config() -> RouterConfig:
         train_optout_confirmed=optout,
         baa_tier_confirmed=baa_tier,
     )
+
+
+def _document_path_refusal(req: OpenReadingRequest) -> str | None:
+    """`document.path` names a file on the SERVER — on the HTTP surface that is a remote
+    file-read primitive, so it is off unless the operator names a directory to serve from.
+    Containment is proved on the resolved path (symlinks followed first), so a link that
+    escapes the root is refused the same as a literal `..`."""
+    p = req.document.path
+    if p is None:
+        return None
+    root = os.environ.get("OPENREADING_SERVER_PATH_ROOT")
+    if not root:
+        return (
+            "document.path is not accepted over HTTP; send bytes_base64 or url, or set "
+            "OPENREADING_SERVER_PATH_ROOT to serve files beneath a directory of your choosing"
+        )
+    root_resolved = Path(root).resolve()
+    try:
+        target = Path(p).resolve(strict=True)
+    except OSError:
+        return f"document.path {p!r} does not resolve to a readable file"
+    if not (target.is_relative_to(root_resolved) and target.is_file()):
+        return "document.path must resolve to a regular file under OPENREADING_SERVER_PATH_ROOT"
+    return None
 
 
 class ServerConfigError(Exception):
@@ -678,7 +711,13 @@ def create_app(*, cors_origins: list[str] | None = None):
     async def _parse_request(request: Request) -> OpenReadingRequest:
         body = await request.json()  # raises on invalid JSON → caught by caller
         schemas.validate_request(body)  # vendored request schema (raises → 400)
-        return OpenReadingRequest.model_validate(body)
+        req = OpenReadingRequest.model_validate(body)
+        # Shared by /v1/route and /v1/jobs — a ValueError here lands in each caller's own
+        # existing except→400, so this one gate covers both ingress points.
+        refusal = _document_path_refusal(req)
+        if refusal is not None:
+            raise ValueError(refusal)
+        return req
 
     @app.get("/healthz")
     def healthz() -> dict[str, Any]:
@@ -762,6 +801,9 @@ def create_app(*, cors_origins: list[str] | None = None):
             req = OpenReadingRequest.model_validate(body)
         except Exception as e:  # noqa: BLE001 — any validation failure is a 400
             return _bad_request(str(e))
+        refusal = _document_path_refusal(req)
+        if refusal is not None:
+            return _bad_request(refusal)
         # BL-159 AC-3: scope-gate BEFORE run_request ever constructs an adapter or resolves a
         # vendor credential — for both a directly-named backend outside the key's allow-list and
         # an "auto" request the router would otherwise have picked one for.
@@ -979,6 +1021,9 @@ def create_app(*, cors_origins: list[str] | None = None):
                     item_req = OpenReadingRequest.model_validate(
                         {"document": doc, "backend": {"id": backend}, **shared}
                     )
+                    refusal = _document_path_refusal(item_req)
+                    if refusal is not None:
+                        raise ValueError(refusal)
                 except Exception:  # noqa: BLE001 — an unbuildable item is run_batch's own M6
                     # per-item-isolation concern (surfaces there as a `failed` item); it is not a
                     # scope decision, so this pre-check simply defers to that existing path.
@@ -1001,6 +1046,12 @@ def create_app(*, cors_origins: list[str] | None = None):
                     **shared,
                 }
             )
+            # M6: raising here (rather than checking earlier) lets _run_item's own per-item
+            # isolation turn a refused document.path into a `failed` item, never aborting the
+            # rest of the batch — the same containment as any other bad item.
+            refusal = _document_path_refusal(req)
+            if refusal is not None:
+                raise ValueError(refusal)
             return api.run_request(
                 req,
                 config=_server_router_config(),
