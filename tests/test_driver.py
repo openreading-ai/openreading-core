@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 
 from openreading.router import FakeClock, await_result, backoff_ms
-from openreading.types import JobState
+from openreading.types import Job, JobState, WaitMode
 from openreading.types.errors import RetryableError
 from openreading.types.request import OpenReadingRequest
 from openreading.types.runtime import RunContext
@@ -54,6 +54,31 @@ async def test_deadline_exceeded_raises_retryable():
     # deadline is soon; each poll pushes next_poll_at +1000ms so the clock crosses it fast
     with pytest.raises(RetryableError, match="deadline exceeded"):
         await await_result(a, job, ctx=CTX, deadline_ms=5000.0, clock=clock)
+
+
+async def test_poll_scheduled_past_deadline_never_polls():
+    """A next_poll_at far beyond the deadline must expire the slice, not sleep-then-poll: an
+    uncapped sleep lets a backend-scheduled (or retry_after-inflated) next_poll_at park the
+    driver — and whatever thread/lock the caller tied to this slice — arbitrarily long (H4)."""
+    clk = FakeClock(start_ms=0.0)
+    polls = []
+
+    class Adapter:
+        def poll(self, job, ctx):
+            polls.append(clk.now_ms())
+            return job  # never reached if the fix holds
+
+    job = Job(
+        id="omjob_test",
+        backend_id="never-fake",
+        wait_mode=WaitMode.POLL,
+        state=JobState.RUNNING,
+        next_poll_at=60_000.0,
+    )
+    with pytest.raises(RetryableError):  # _DriveSliceExpired subclasses RetryableError
+        await await_result(Adapter(), job, ctx=CTX, deadline_ms=1_000.0, clock=clk)
+    assert polls == []  # zero polls after budget
+    assert clk.now_ms() <= 1_000.0  # slept at most to the deadline, not to 60s
 
 
 async def test_max_consecutive_faults_cap_is_enforced():

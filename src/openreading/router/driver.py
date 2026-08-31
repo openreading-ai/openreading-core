@@ -87,8 +87,15 @@ async def await_result(
 
         # POLL path (a WEBHOOK-wait-mode job degrades straight to this — see docstring above).
         if job.next_poll_at is not None:
-            wait_s = max(0.0, (job.next_poll_at - clk.now_ms()) / 1000.0)
+            # Sleep at most to the deadline: next_poll_at is backend-scheduled (and a backend's
+            # retry_after wins uncapped in backoff_ms), so an unclamped sleep lets a backend hold
+            # this slice — and whatever thread/lock the caller tied to it — arbitrarily long.
+            wait_s = max(0.0, (min(job.next_poll_at, deadline_ms) - clk.now_ms()) / 1000.0)
             await clk.sleep(wait_s)
+            if clk.now_ms() >= deadline_ms:
+                raise _DriveSliceExpired(
+                    message="deadline exceeded", backend_code="deadline_exceeded", retry_after=None
+                )
 
         try:
             job = adapter.poll(job, ctx)
