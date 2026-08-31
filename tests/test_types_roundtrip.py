@@ -4,6 +4,9 @@ JSON Schemas."""
 
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
+
 from openreading import schemas
 from openreading.types import (
     AdapterDescriptor,
@@ -40,6 +43,7 @@ from openreading.types import (
     WaitMode,
     to_canonical,
 )
+from openreading.types.request import PageRange
 
 
 def _title_bbox() -> BBox:
@@ -129,6 +133,13 @@ def test_request_roundtrips_including_async_alias():
     dumped = req.to_schema_dict()
     assert "async" in dumped and dumped["async"]["mode"] == "async"
     schemas.validate_request(dumped)
+
+
+def test_page_range_end_before_start_rejected():
+    # M3: cross-field numeric comparison is inexpressible in the vendored JSON Schema draft, so
+    # this is enforced only in pydantic — see PageRange._end_not_before_start.
+    with pytest.raises(ValidationError):
+        PageRange(start=5, end=2)
 
 
 def test_descriptor_roundtrips_through_json_schema():

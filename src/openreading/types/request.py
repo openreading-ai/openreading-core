@@ -109,6 +109,14 @@ class PageRange(BaseModel):
     start: int = Field(ge=1)
     end: int | None = Field(default=None, ge=1)
 
+    @model_validator(mode="after")
+    def _end_not_before_start(self) -> PageRange:
+        # Cross-field numeric comparison is inexpressible in the vendored JSON Schema draft, so
+        # this lives only here; the schema stays the wire contract for shapes, pydantic for this.
+        if self.end is not None and self.end < self.start:
+            raise ValueError(f"pages range end {self.end} is before start {self.start}")
+        return self
+
 
 class Pages(BaseModel):
     model_config = ConfigDict(extra="forbid")

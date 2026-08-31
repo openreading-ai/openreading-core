@@ -246,6 +246,19 @@ def test_source_page_numbers_preserved_under_subsetting():
     assert title.bbox.page == 2
 
 
+def test_selected_pages_huge_end_is_cheap():
+    """M3: end=10**12 must clamp to the document's page count, not iterate the span.
+    (Unfixed code hangs here — that IS the failure mode.)"""
+    req = OpenReadingRequest.model_validate(
+        {
+            "document": {"bytes_base64": "aGk="},
+            "backend": {"id": "qwen-vl", "type": "self_hosted_model"},
+            "pages": {"ranges": [{"start": 1, "end": 10**12}]},
+        }
+    )
+    assert QwenVLAdapter()._selected(3, req) == [0, 1, 2]
+
+
 def test_extract_mode_warns_channels_it_cannot_produce():
     """P2/C6 mode-exclusivity: extract mode cannot produce text/markdown/blocks; requested-but-
     unproducible channels must be named in machine-readable warnings (never silently dropped)."""

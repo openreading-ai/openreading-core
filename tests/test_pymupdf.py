@@ -140,6 +140,25 @@ def test_page_selection_limits_pages():
     assert resp.document.pages[0].page_number == 2
 
 
+class _StubDoc:
+    """page_count-only stand-in: the clamp path never opens a real page."""
+
+    page_count = 3
+
+
+def test_selected_pages_huge_end_is_cheap():
+    """M3: end=10**12 must clamp to the document's page count, not iterate the span.
+    (Unfixed code hangs here — that IS the failure mode.)"""
+    req = OpenReadingRequest.model_validate(
+        {
+            "document": {"bytes_base64": "aGk="},
+            "backend": {"id": "pymupdf", "type": "oss_library"},
+            "pages": {"ranges": [{"start": 1, "end": 10**12}]},
+        }
+    )
+    assert PyMuPDFAdapter()._selected_pages(_StubDoc(), req) == [0, 1, 2]
+
+
 # --- Phase B.5: derive adoption — escape, interleave, real Table.header ----------------
 
 

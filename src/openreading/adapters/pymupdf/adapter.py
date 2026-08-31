@@ -250,8 +250,10 @@ class PyMuPDFAdapter(BackendAdapter):
         else:
             idx = []
             for rng in req.pages.ranges or []:
-                end = rng.end or rng.start
-                idx += [p - 1 for p in range(rng.start, end + 1) if 1 <= p <= n]
+                # Clamp BEFORE building the list: the requested span is caller-controlled and
+                # unbounded, the document's page count is not.
+                end = min(rng.end or rng.start, n)
+                idx += [p - 1 for p in range(rng.start, end + 1)]
             if not idx:
                 idx = list(range(n))
             if req.pages.max_pages:

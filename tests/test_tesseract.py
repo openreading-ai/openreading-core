@@ -172,6 +172,19 @@ def test_source_page_numbers_preserved_under_subsetting():
     assert block.bbox is not None and block.bbox.page == 2
 
 
+def test_selected_pages_huge_end_is_cheap():
+    """M3: end=10**12 must clamp to the document's page count, not iterate the span.
+    (Unfixed code hangs here — that IS the failure mode.)"""
+    req = OpenReadingRequest.model_validate(
+        {
+            "document": {"bytes_base64": "aGk="},
+            "backend": {"id": "tesseract", "type": "oss_library"},
+            "pages": {"ranges": [{"start": 1, "end": 10**12}]},
+        }
+    )
+    assert TesseractAdapter()._selected_pages(3, req) == [0, 1, 2]
+
+
 def test_channel_provenance_populated():
     adapter = TesseractAdapter(runner=FakeRunner())
     resp = _run(adapter, _req())
