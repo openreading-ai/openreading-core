@@ -410,6 +410,47 @@ def test_blobstore_path_refuses_traversal(tmp_path):
         store.put("../escape", "sha256:" + "a" * 64, b"data", "application/octet-stream")
 
 
+def test_blobstore_path_refuses_malformed_digest(tmp_path):
+    """A run_id alone passing validation is not enough: the above test's malformed run_id makes
+    `LocalFsKeyStore._path` (via `get_or_create`) raise before `LocalFsBlobStore._path`'s own
+    digest check is ever reached. Here run_id is well-formed so the digest regex is the thing
+    that must do the refusing."""
+    keys = LocalFsKeyStore(tmp_path / "keys")
+    store = LocalFsBlobStore(tmp_path / "blobs", keys)
+    with pytest.raises(ValueError):
+        store.put("fine-run-id", "sha256:../../evil", b"x", "application/octet-stream")
+
+
+def test_reap_refuses_run_id_whose_blobs_entry_resolves_outside_blobs_root(tmp_path):
+    """A run_id can be well-formed (passes VALID_RUN_ID, so the regex alone lets it through) and
+    still escape if the entry it names under blobs_root is a symlink to somewhere else — proves
+    the resolve()/is_relative_to containment check earns its keep independent of the regex."""
+    root = tmp_path / "ledger"
+    blobs = root / "blobs"
+    (root / "retention").mkdir(parents=True)
+    blobs.mkdir(parents=True)
+    keys = LocalFsKeyStore(root / "keys")
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "keep.txt").write_text("x")
+    (blobs / "goodname").symlink_to(victim)
+    (root / "retention" / "goodname.json").write_text(
+        json.dumps({"run_id": "goodname", "expires_epoch_ms": 0})
+    )
+    reaped = reap(root, keys, blobs, now_epoch_ms=10)
+    assert "goodname" not in reaped
+    assert (victim / "keep.txt").exists()
+
+
+def test_header_path_refuses_traversal_run_id(tmp_path):
+    """`openreading resume <RUN_ID>` (api.resume_run -> read_header) hands an operator-typed
+    run_id straight to header_path; a traversal-shaped one must never reach the join."""
+    from openreading.ledger.header import header_path
+
+    with pytest.raises(ValueError):
+        header_path(tmp_path, "../../etc/evil")
+
+
 # ---- golden fixture (§12's convention) --------------------------------------------------------
 
 

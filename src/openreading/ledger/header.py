@@ -62,6 +62,7 @@ from typing import Any
 
 from openreading.adapters.registry import BUILTIN_ADAPTERS, make_adapter
 from openreading.ledger.inline import descriptor_digest
+from openreading.ledger.retention import VALID_RUN_ID
 from openreading.ledger.sanitizer import Sanitizer
 from openreading.ledger.step import BlobRef
 from openreading.types.request import OpenReadingRequest
@@ -141,6 +142,11 @@ class RunHeader:
 
 
 def header_path(ledger_root: Path, run_id: str) -> Path:
+    # `resume <RUN_ID>` (api.resume_run -> read_header) hands this straight from the operator's
+    # own CLI argument -- the same H3 traversal class as retention.reap's stamped run_id, just
+    # arriving from a different caller. Refuse before the join, not after.
+    if not VALID_RUN_ID.fullmatch(run_id):
+        raise ValueError(f"malformed run_id {run_id!r}")
     return ledger_root / f"{run_id}.header.json"
 
 
