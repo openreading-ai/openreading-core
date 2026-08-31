@@ -132,8 +132,14 @@ def test_download_rejects_non_public_host(monkeypatch):
         "socket.getaddrinfo",
         lambda *a, **k: [(2, 1, 6, "", ("169.254.169.254", 80))],
     )
+    # A transport, even though the guard is expected to reject before ever using it: without one,
+    # a pre-fix/broken guard would fall through to a REAL connect against the address above, and
+    # this test's own failure mode would then depend on this machine's network reachability
+    # (fast local ConnectError, a long hang, or — on infra where that address is actually routed —
+    # a real metadata-endpoint request) instead of on `_download`'s own behavior.
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=b"unreachable"))
     with pytest.raises(TerminalError) as e:
-        api._download("http://metadata.internal/doc.pdf")
+        api._download("http://metadata.internal/doc.pdf", transport=transport)
     assert e.value.backend_code == "url_not_public"
 
 
@@ -143,11 +149,43 @@ def test_download_rejects_file_scheme():
 
 
 def test_download_streams_and_stops_at_limit(monkeypatch):
+    # `content=` makes httpx auto-set Content-Length, so this always resolves at _download's
+    # declared-length precheck and never reaches the per-chunk iter_bytes loop below it — see
+    # test_download_streams_and_stops_at_limit_with_no_declared_length for that path.
     monkeypatch.setattr("openreading.api._MAX_DOWNLOAD_BYTES", 1024)
     monkeypatch.setattr(
         "socket.getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 80))]
     )
     transport = httpx.MockTransport(lambda req: httpx.Response(200, content=b"x" * 4096))
+    with pytest.raises(TerminalError) as e:
+        api._download("http://example.com/big.pdf", transport=transport)
+    assert e.value.backend_code == "doc_too_large"
+
+
+class _UndeclaredLengthBody(httpx.SyncByteStream):
+    """A response body with no Content-Length at all — the only way to reach `_download`'s
+    per-chunk running-total loop instead of short-circuiting at its declared-length precheck.
+    Two chunks, each under the cap on its own, so only the RUNNING total (not any single
+    chunk's size) can be what trips the limit."""
+
+    def __iter__(self):
+        yield b"x" * 700
+        yield b"x" * 700
+
+
+def test_download_streams_and_stops_at_limit_with_no_declared_length(monkeypatch):
+    monkeypatch.setattr("openreading.api._MAX_DOWNLOAD_BYTES", 1024)
+    monkeypatch.setattr(
+        "socket.getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 80))]
+    )
+
+    def handler(request):
+        response = httpx.Response(200, stream=_UndeclaredLengthBody())
+        # Confirms the precheck this test exists to bypass truly has nothing to short-circuit on.
+        assert "content-length" not in response.headers
+        return response
+
+    transport = httpx.MockTransport(handler)
     with pytest.raises(TerminalError) as e:
         api._download("http://example.com/big.pdf", transport=transport)
     assert e.value.backend_code == "doc_too_large"

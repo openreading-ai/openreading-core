@@ -489,8 +489,8 @@ def _assert_public_http_url(url: str) -> None:
     """Refuse URL schemes and destinations a hosted parse must never fetch on a caller's behalf:
     non-http(s), and hosts resolving to loopback/private/link-local/reserved addresses (cloud
     metadata endpoints included). Pre-resolution check only — a DNS answer that changes between
-    this check and the connect (rebinding) is out of scope here; deployments needing that
-    guarantee put egress policy in front, per the server docstring's Security section.
+    this check and the connect (rebinding) is out of scope here; a deployment needing that
+    guarantee enforces egress policy at the network layer, outside this process.
     OPENREADING_ALLOW_PRIVATE_URLS=1 disables the address check for intranet document stores."""
     import ipaddress
     import socket
