@@ -329,7 +329,8 @@ delta = openreading.compare([resp, openreading.run(doc, backend="tesseract")])
 print(delta["headline"]["verdict"])                              # equivalent
 ```
 ```bash
-uv run openreading serve         # one terminal; listens on http://127.0.0.1:8787 ([server] extra, included above)
+# document.path is refused over HTTP unless rooted (openreading.server docstring, "Security")
+OPENREADING_SERVER_PATH_ROOT="$PWD" uv run openreading serve   # one terminal; listens on http://127.0.0.1:8787 ([server] extra, included above)
 # in another terminal, from the same clone:
 curl -s -X POST http://127.0.0.1:8787/v1/parse -H 'content-type: application/json' \
   -d '{"document": {"path": "'"$PWD"'/examples/john_smith_1000_2026_01.pdf"}, "backend": {"id": "pymupdf"}}' | head -c 80

@@ -237,7 +237,8 @@ keyword forms of the flags.
 
 **Batch over HTTP.**
 ```bash
-uv run openreading serve &      # http://127.0.0.1:8787
+# document.path is refused over HTTP unless rooted (openreading.server docstring, "Security")
+OPENREADING_SERVER_PATH_ROOT="$PWD" uv run openreading serve &      # http://127.0.0.1:8787
 curl -s -X POST http://127.0.0.1:8787/v1/batch -H 'content-type: application/json' \
   -d '{"documents": [{"path": "'"$PWD"'/corpus/a.pdf"}, {"path": "'"$PWD"'/corpus/b.pdf"}], "backend": "pymupdf", "jobs": 2}' \
   | jq -c '{state: .status.state, request, transports: [.items[].transport]}'
