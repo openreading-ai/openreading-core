@@ -621,15 +621,22 @@ def test_get_job_metered_redacts_a_secret_in_a_plain_normalize_crash(monkeypatch
 
 
 def test_get_job_deadline_exceeded_keeps_running_then_reaches_succeeded(monkeypatch):
-    # BL-77: `_drive_job` used to compute its deadline fresh from "now" on every call (never
-    # anchored to the job's own submission), and `get_job` latched ANY RetryableError reaching it —
-    # including its own per-call deadline check — as a permanent `rec.error`, with nothing anywhere
-    # ever clearing it. A still-healthy POLL job whose GET has to span more than one internal
-    # backoff cycle would get stuck "failed" forever even though the backend never claimed anything
-    # worse than "still processing". Anchoring `deadline_ms` on the JobRecord (refreshed only when
-    # THIS specific per-call slice — not a real backend failure, not MAX_CONSECUTIVE_FAULTS exhaustion —
-    # elapses) fixes both halves: repeated GETs must keep reporting "running", never "failed", and
-    # the same job must still be able to finish once its backend actually does.
+    # BL-77: `get_job` used to latch ANY RetryableError reaching it — including the driver's OWN
+    # per-call deadline check — as a permanent `rec.error`, with nothing anywhere ever clearing it.
+    # A still-healthy POLL job whose GETs span more than one internal backoff cycle would get stuck
+    # "failed" forever even though the backend never claimed anything worse than "still processing".
+    # The fix tells the driver's own slice-expiry (`_DriveSliceExpired`) apart by TYPE and leaves
+    # the job "running" instead of latching it failed, and each GET drives a fresh slice — so the
+    # two halves this test guards still hold: repeated GETs whose slice expires mid-backoff must
+    # keep reporting "running", never "failed", and the SAME job must still finish once its backend
+    # actually does.
+    #
+    # No-overshoot (H4) cadence: the corrected driver caps every sleep at the deadline and never
+    # polls past it, so a GET makes contact only when the next poll is genuinely due within its
+    # slice. DEFAULT_DEADLINE_MS is set below the driver's 500ms base backoff, so the first GET's
+    # slice expires right after a single transient poll (mid-backoff); each subsequent tiny slice
+    # advances the virtual clock one DEFAULT_DEADLINE_MS until it reaches that pending next-poll
+    # time, at which the final GET polls again and the job succeeds.
     from openreading.router.clock import FakeClock
     from openreading.server import app as app_module
     from openreading.server.app import JobRecord
@@ -639,10 +646,13 @@ def test_get_job_deadline_exceeded_keeps_running_then_reaches_succeeded(monkeypa
 
     clock = FakeClock()
     monkeypatch.setattr(app_module, "RealClock", lambda: clock)
-    monkeypatch.setattr(app_module, "DEFAULT_DEADLINE_MS", 100.0)  # tiny -> one slice elapses fast
+    monkeypatch.setattr(app_module, "DEFAULT_DEADLINE_MS", 150.0)  # below the 500ms base backoff
 
-    # 4 RetryableError("transient", ...) — never a claim of death — then succeeds on the 5th poll.
-    adapter = PollFake(polls_needed=1, flaky=4)
+    # One RetryableError("transient", ...) — never a claim of death — then succeeds on the 2nd poll.
+    # Just one transient fault: under the no-overshoot driver the 500ms backoff it schedules already
+    # outruns the tiny slice, so a second transient would only be reached many empty slices later —
+    # the exponential backoff, not the fault count, is what paces this test now.
+    adapter = PollFake(polls_needed=1, flaky=1)
     req = OpenReadingRequest.model_validate(
         {"document": {"path": "/x"}, "backend": {"id": "poll-fake"}}
     )
@@ -655,35 +665,51 @@ def test_get_job_deadline_exceeded_keeps_running_then_reaches_succeeded(monkeypa
         job.id, "poll-fake", adapter, job, req, 0, deadline_ms=deadline_ms
     )
 
-    # Each of these GETs drives the job far enough that its own internal slice elapses mid-backoff
-    # (the vendor is still only ever reporting "transient") — none of them may latch "failed".
-    for _ in range(3):
+    # First GET: makes genuine backend contact (one transient poll), then its tiny slice expires
+    # while the job is still mid-backoff. Genuine contact followed by a slice-expiry must report
+    # "running" with no error — never latch "failed" (the BL-77 property).
+    r = client.get(f"/v1/jobs/{job.id}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["state"] == "running"
+    assert body.get("error") is None
+    assert adapter.poll_calls > 0  # the slice that expired had actually reached the vendor
+
+    # Further GETs keep expiring mid-backoff — the backend's next poll isn't due within the tiny
+    # slice yet, so these correctly make no contact under the no-overshoot driver — and every one
+    # must still report "running", never latch "failed".
+    for _ in range(2):
         r = client.get(f"/v1/jobs/{job.id}")
         assert r.status_code == 200
         body = r.json()
         assert body["state"] == "running"
         assert body.get("error") is None
 
-    # ...and once the backend actually finishes, the SAME job still reaches "succeeded" — the
-    # per-call deadline elapsing never permanently disabled future driving of this job.
+    # ...and once the clock has reached the backend's next-poll time, the SAME job polls again and
+    # reaches "succeeded" — the earlier slice-expiries never permanently disabled driving it.
     r = client.get(f"/v1/jobs/{job.id}")
     assert r.status_code == 200
     assert r.json()["state"] == "succeeded"
 
 
 def test_get_job_deadline_survives_a_caller_gap_between_polls(monkeypatch):
-    # BL-92: extends the test above with the ONE dimension none of the four existing BL-77/BL-88
-    # tests exercise — a caller-side gap BETWEEN two `client.get()` calls, modeling an ordinary,
-    # considerate "don't hammer the endpoint" polling cadence rather than back-to-back calls (grep
-    # -n "_now +=" this file, pre-fix, returns nothing). Pre-fix, `get_job` handed `_drive_job` the
-    # JobRecord's own anchored `deadline_ms` — renewed only when a slice actually expires, to
-    # `now + DEFAULT_DEADLINE_MS` as of the END of the call that renewed it. If the caller's own
-    # gap since that renewal already exceeds DEFAULT_DEADLINE_MS by the time the NEXT GET arrives,
-    # the anchor is already stale before the call starts: driver.py's deadline check is the first
-    # thing the loop body does, so it raises before `adapter.poll()` is ever invoked. `get_job`
-    # then rolls the anchor forward again and reports "running" — zero actual contact with the
-    # backend. The fix (server/app.py:618-620, `None` instead of `rec.deadline_ms`) measures every
-    # call's own slice from THAT call's own start instead, regardless of any prior gap.
+    # BL-92: extends the test above with the ONE dimension the other BL-77/BL-88 tests don't — a
+    # caller-side gap BETWEEN two `client.get()` calls, modeling a considerate "don't hammer the
+    # endpoint" polling cadence rather than back-to-back calls. `get_job` used to hand `_drive_job`
+    # the JobRecord's own anchored `deadline_ms` (renewed to `now + DEFAULT_DEADLINE_MS` at the END
+    # of the call that last renewed it); once the caller's gap since that renewal outran the anchor,
+    # the NEXT GET began already past its deadline — driver.py's deadline check is the first thing
+    # the loop body does, so it raised before `adapter.poll()` ran, `get_job` rolled the anchor
+    # forward, and the GET reported "running" having made ZERO contact with the backend. The fix:
+    # `get_job` passes `None` to `_drive_job`, never `rec.deadline_ms`, so every call measures its
+    # own slice from THAT call's own start, regardless of any prior gap.
+    #
+    # No-overshoot (H4) cadence: the corrected driver never polls past the deadline, so the honest
+    # way to exercise "contact resumes after a gap" is to make the backend genuinely DUE at the
+    # second GET — advance the caller-side clock PAST the pending next_poll_at (the driver's base
+    # backoff after the first transient poll), not merely past DEFAULT_DEADLINE_MS. The strict-
+    # increase `poll_calls` assertion is the guard: it tells a real poll apart from a "running"
+    # result that never reached the vendor at all.
     from openreading.router.clock import FakeClock
     from openreading.server import app as app_module
     from openreading.server.app import JobRecord
@@ -693,12 +719,13 @@ def test_get_job_deadline_survives_a_caller_gap_between_polls(monkeypatch):
 
     clock = FakeClock()
     monkeypatch.setattr(app_module, "RealClock", lambda: clock)
-    monkeypatch.setattr(app_module, "DEFAULT_DEADLINE_MS", 100.0)  # tiny -> easy to outrun
+    monkeypatch.setattr(app_module, "DEFAULT_DEADLINE_MS", 100.0)  # tiny; backoff outruns it
 
-    # 2 RetryableError("transient", ...) then succeeds on the 3rd poll — enough that the first GET
-    # below reliably hits _DriveSliceExpired (and renews the anchor) after two genuine polls,
-    # without resolving the job outright, leaving exactly one more genuine poll to reach terminal.
-    adapter = PollFake(polls_needed=1, flaky=2)
+    # One RetryableError("transient", ...) then succeeds on the 2nd poll. Under the no-overshoot
+    # driver the first GET makes exactly ONE genuine poll (the transient fault) before the 500ms
+    # backoff it schedules outruns the tiny slice and it expires _DriveSliceExpired, without
+    # resolving — leaving exactly one more genuine poll, made by the post-gap second GET, to finish.
+    adapter = PollFake(polls_needed=1, flaky=1)
     req = OpenReadingRequest.model_validate(
         {"document": {"path": "/x"}, "backend": {"id": "poll-fake"}}
     )
@@ -711,26 +738,28 @@ def test_get_job_deadline_survives_a_caller_gap_between_polls(monkeypatch):
         job.id, "poll-fake", adapter, job, req, 0, deadline_ms=deadline_ms
     )
 
-    # First GET: drives the job until its own internal backoff outruns the tiny slice — makes
-    # genuine contact (poll_calls > 0) but does not resolve; the anchor gets renewed to
-    # `now + DEFAULT_DEADLINE_MS` as of THIS call's end.
+    # First GET: makes genuine contact (one transient poll, poll_calls > 0) then its slice expires
+    # once the 500ms backoff outruns the tiny deadline — the job does not resolve and stays running.
     r1 = client.get(f"/v1/jobs/{job.id}")
     assert r1.status_code == 200
     assert r1.json()["state"] == "running"
     polls_after_first_call = adapter.poll_calls
     assert polls_after_first_call > 0
 
-    # An ordinary caller gap — bigger than DEFAULT_DEADLINE_MS — elapses before the NEXT GET, just
-    # like a considerate "poll every couple minutes" client against a job the openreading.server docstring itself
-    # frames as potentially slow. This is real elapsed time on the caller's side, not something
-    # `_drive_job`'s own `clock.sleep()` calls would ever produce.
-    clock._now += app_module.DEFAULT_DEADLINE_MS * 2
+    # An ordinary caller gap elapses before the NEXT GET — real elapsed time on the caller's side,
+    # not something `_drive_job`'s own `clock.sleep()` calls would ever produce. It must reach PAST
+    # the backend's pending next_poll_at (the driver's base backoff after GET1's transient poll) so
+    # the backend is genuinely DUE at the second GET; a gap merely bigger than DEFAULT_DEADLINE_MS
+    # would leave it not-yet-due, which the corrected driver correctly reports as a contact-free
+    # slice expiry. Read the pending time off the record so this stays correct if the backoff moves.
+    pending_next_poll = app.state.jobs[job.id].job.next_poll_at
+    clock._now = pending_next_poll + app_module.DEFAULT_DEADLINE_MS
 
     # Second GET: pre-fix, the renewed-but-now-stale anchor makes this raise _DriveSliceExpired on
     # its very first loop check, before adapter.poll() ever runs again — poll_calls does not move,
     # and the job reports "running" having made zero contact with the backend this call. Post-fix,
     # this call measures a fresh slice from ITS OWN start regardless of the gap, so it reaches the
-    # backend — and since only one more genuine poll was ever needed, resolves.
+    # now-due backend — and since only one more genuine poll was ever needed, resolves.
     r2 = client.get(f"/v1/jobs/{job.id}")
     assert r2.status_code == 200
     assert adapter.poll_calls > polls_after_first_call  # genuine contact was made this call
