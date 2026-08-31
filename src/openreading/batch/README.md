@@ -32,15 +32,25 @@ from that file, or call `openreading.run_batch(paths, policy={…})` from Python
 directly. [Routing and keys](../router/README.md#recipes) runs both.
 
 ```mermaid
-flowchart LR
-  S["sources: dir, glob, files, URLs"] --> I["intake: expand, sort, skip by format"]
-  I --> R1["item 1: single-document pipeline"]
-  I --> R2["item N"]
-  R1 --> E["one batch-result envelope"]
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif","fontSize":"14px","lineColor":"#94a3b8","textColor":"#334155","primaryTextColor":"#0f172a","edgeLabelBackground":"#eef2f7","clusterBkg":"#f8fafc","clusterBorder":"#cbd5e1","titleColor":"#334155"},"flowchart":{"curve":"basis","nodeSpacing":36,"rankSpacing":44,"padding":8,"useMaxWidth":true}}}%%
+flowchart TD
+  S[/"sources<br>dir, glob, files, URLs"/]:::src --> I["intake<br>expand, sort, skip by format"]:::work
+  I --> R1["item 1<br>the single-document pipeline"]:::work
+  I --> R2["item N<br>the same pipeline again"]:::work
+  R1 --> E(["one batch-result envelope"]):::hero
   R2 --> E
-  E --> C["corpus compare: pair by relpath, then filename, then sha256"]
-  E2["second envelope, same folder"] --> C
-  C --> V["verdict per document + rollup"]
+  E --> C["corpus compare<br>pair by relpath, then filename,<br>then sha256"]:::gate
+  E2[/"second envelope, same folder"/]:::src --> C
+  C --> V["verdict per document<br>plus a rollup"]:::out
+  classDef src fill:#eef2ff,stroke:#6366f1,stroke-width:1.5px,color:#1e1b4b;
+  classDef work fill:#e0f2fe,stroke:#0284c7,stroke-width:1.5px,color:#082f49;
+  classDef gate fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#451a03;
+  classDef good fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#052e16;
+  classDef bad fill:#fee2e2,stroke:#dc2626,stroke-width:1.5px,color:#450a0a;
+  classDef store fill:#ccfbf1,stroke:#0d9488,stroke-width:1.5px,color:#042f2e;
+  classDef out fill:#f3e8ff,stroke:#9333ea,stroke-width:1.5px,color:#3b0764;
+  classDef hero fill:#1e293b,stroke:#94a3b8,stroke-width:2px,color:#f8fafc;
+  linkStyle default stroke-width:1.6px;
 ```
 
 Whether a run is a batch is decided by the form of the input and never by the count. A directory or

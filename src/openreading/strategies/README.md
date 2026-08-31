@@ -27,11 +27,26 @@ walkthrough needs no key.
 ## Mental model
 
 ```mermaid
-flowchart LR
-  Y["openreading.yaml"] --> S["schema gate"] --> P["Plain desugar"] --> N["normalize"] --> C["compliance prune"] --> E["engine walk"] --> T["orchestration trace"]
-  T --> X["explain"]
-  T --> R["replay from the trace"]
-  T --> F["compare from candidates"]
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif","fontSize":"14px","lineColor":"#94a3b8","textColor":"#334155","primaryTextColor":"#0f172a","edgeLabelBackground":"#eef2f7","clusterBkg":"#f8fafc","clusterBorder":"#cbd5e1","titleColor":"#334155"},"flowchart":{"curve":"basis","nodeSpacing":36,"rankSpacing":44,"padding":8,"useMaxWidth":true}}}%%
+flowchart TD
+  Y[/"openreading.yaml"/]:::src --> S{{"schema gate"}}:::gate
+  S --> P["Plain desugar"]:::work
+  P --> N["normalize"]:::work
+  N --> C{{"compliance prune"}}:::gate
+  C --> E["engine walk"]:::work
+  E --> T(["orchestration trace"]):::hero
+  T --> X["explain"]:::out
+  T --> R["replay from the trace"]:::out
+  T --> F["compare from candidates"]:::out
+  classDef src fill:#eef2ff,stroke:#6366f1,stroke-width:1.5px,color:#1e1b4b;
+  classDef work fill:#e0f2fe,stroke:#0284c7,stroke-width:1.5px,color:#082f49;
+  classDef gate fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#451a03;
+  classDef good fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#052e16;
+  classDef bad fill:#fee2e2,stroke:#dc2626,stroke-width:1.5px,color:#450a0a;
+  classDef store fill:#ccfbf1,stroke:#0d9488,stroke-width:1.5px,color:#042f2e;
+  classDef out fill:#f3e8ff,stroke:#9333ea,stroke-width:1.5px,color:#3b0764;
+  classDef hero fill:#1e293b,stroke:#94a3b8,stroke-width:2px,color:#f8fafc;
+  linkStyle default stroke-width:1.6px;
 ```
 
 Hold the four facts below in mind, and every command on this page follows from them.
@@ -644,14 +659,25 @@ cut. Read the catalog before you change one of these numbers, and before you def
 This is the ladder a `try` with `escalate_when` walks for each rung:
 
 ```mermaid
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif","fontSize":"14px","lineColor":"#94a3b8","textColor":"#334155","primaryTextColor":"#0f172a","edgeLabelBackground":"#eef2f7","clusterBkg":"#f8fafc","clusterBorder":"#cbd5e1","titleColor":"#334155"},"flowchart":{"curve":"basis","nodeSpacing":36,"rankSpacing":44,"padding":8,"useMaxWidth":true}}}%%
 flowchart TD
-  R["run rung n"] --> OK{"succeeded?"}
-  OK -- "error" --> NEXT["on_error: next or fail"]
-  OK -- "yes" --> G{"gate fires?"}
-  G -- "no" --> ACC["accept, stop"]
-  G -- "yes" --> KEEP["retain as best-so-far"] --> LAST{"last rung?"}
+  R["run rung n"]:::work --> OK{"succeeded?"}:::gate
+  OK -- "error" --> NEXT["on_error: next or fail"]:::bad
+  OK -- "yes" --> G{"gate fires?"}:::gate
+  G -- "no" --> ACC(["accept, stop"]):::good
+  G -- "yes" --> KEEP[("retain as best-so-far")]:::store
+  KEEP --> LAST{"last rung?"}:::gate
   LAST -- "no" --> R
-  LAST -- "yes" --> BEST["return best retained + warning"]
+  LAST -- "yes" --> BEST(["return best retained<br>plus a warning"]):::hero
+  classDef src fill:#eef2ff,stroke:#6366f1,stroke-width:1.5px,color:#1e1b4b;
+  classDef work fill:#e0f2fe,stroke:#0284c7,stroke-width:1.5px,color:#082f49;
+  classDef gate fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#451a03;
+  classDef good fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#052e16;
+  classDef bad fill:#fee2e2,stroke:#dc2626,stroke-width:1.5px,color:#450a0a;
+  classDef store fill:#ccfbf1,stroke:#0d9488,stroke-width:1.5px,color:#042f2e;
+  classDef out fill:#f3e8ff,stroke:#9333ea,stroke-width:1.5px,color:#3b0764;
+  classDef hero fill:#1e293b,stroke:#94a3b8,stroke-width:2px,color:#f8fafc;
+  linkStyle default stroke-width:1.6px;
 ```
 
 The category column in `explain` is the closed vocabulary `CATEGORIES` in

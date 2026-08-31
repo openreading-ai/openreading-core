@@ -39,16 +39,28 @@ request. `POST /v1/parse` blocks until the envelope is ready, which is the simpl
 when the submit request names that URL.
 
 ```mermaid
-flowchart LR
-  C["client"] -->|"POST /v1/jobs"| S["server"]
-  S -->|"submit"| B["hosted backend"]
-  S -->|"handle: running"| C
-  C -->|"GET /v1/jobs/ID"| S
-  S -->|"poll mode: one slice per GET"| B
-  B -->|"webhook mode: POST /v1/webhooks/reducto"| V{"signature valid?"}
-  V -->|"yes"| S
-  V -->|"no"| E["401 bad_signature"]
-  S -->|"handle: succeeded or failed"| C
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif","fontSize":"14px","actorBkg":"#e0f2fe","actorBorder":"#0284c7","actorTextColor":"#082f49","actorLineColor":"#94a3b8","signalColor":"#94a3b8","signalTextColor":"#64748b","labelBoxBkgColor":"#fef3c7","labelBoxBorderColor":"#d97706","labelTextColor":"#451a03","loopTextColor":"#64748b","noteBkgColor":"#f3e8ff","noteBorderColor":"#9333ea","noteTextColor":"#3b0764","sequenceNumberColor":"#f8fafc","altSectionBkgColor":"#f8fafc80","activationBkgColor":"#ccfbf1","activationBorderColor":"#0d9488"}}}%%
+sequenceDiagram
+  autonumber
+  participant C as client
+  participant S as openreading serve
+  participant B as hosted backend
+  C->>S: POST /v1/jobs
+  S->>B: submit
+  S-->>C: handle: running
+  alt poll mode
+    C->>S: GET /v1/jobs/ID
+    S->>B: one slice of work per GET
+    B-->>S: progress, then the result
+  else webhook mode
+    B->>S: POST /v1/webhooks/reducto
+    alt signature valid
+      S->>S: record the result
+    else signature bad
+      S-->>B: 401 bad_signature
+    end
+  end
+  S-->>C: handle: succeeded or failed
 ```
 
 ## Walkthrough

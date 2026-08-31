@@ -28,14 +28,25 @@ The router works in three stages, and the first two are gates while the third on
 survivors. A gate means each backend either passes or is dropped with a coded reason.
 
 ```mermaid
-flowchart LR
-  R["request plus policy"] --> S1{"stage 1: compliance"}
-  S1 -- "no_baa, not_local, region_mismatch, ..." --> D["dropped, with stage and code"]
-  S1 -- pass --> S2{"stage 2: capability"}
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif","fontSize":"14px","lineColor":"#94a3b8","textColor":"#334155","primaryTextColor":"#0f172a","edgeLabelBackground":"#eef2f7","clusterBkg":"#f8fafc","clusterBorder":"#cbd5e1","titleColor":"#334155"},"flowchart":{"curve":"basis","nodeSpacing":36,"rankSpacing":44,"padding":8,"useMaxWidth":true}}}%%
+flowchart TD
+  R[/"request plus policy"/]:::src --> S1{{"stage 1: compliance"}}:::gate
+  S1 -- "no_baa, not_local, region_mismatch, ..." --> D["dropped, with<br>its stage and code"]:::bad
+  S1 -- "pass" --> S2{{"stage 2: capability"}}:::gate
   S2 -- "unsupported_format, missing_handwriting" --> D
-  S2 -- pass --> S3["stage 3: score and order"]
-  S3 --> C["chosen"] --> F["fallbacks, in order"]
-  F -. "run: chosen first, then each fallback" .-> X["result plus warnings"]
+  S2 -- "pass" --> S3["stage 3: score and order"]:::work
+  S3 --> C(["chosen"]):::good
+  C --> F["fallbacks, in order"]:::out
+  F -. "run: chosen first, then each fallback" .-> X(["result plus warnings"]):::hero
+  classDef src fill:#eef2ff,stroke:#6366f1,stroke-width:1.5px,color:#1e1b4b;
+  classDef work fill:#e0f2fe,stroke:#0284c7,stroke-width:1.5px,color:#082f49;
+  classDef gate fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#451a03;
+  classDef good fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#052e16;
+  classDef bad fill:#fee2e2,stroke:#dc2626,stroke-width:1.5px,color:#450a0a;
+  classDef store fill:#ccfbf1,stroke:#0d9488,stroke-width:1.5px,color:#042f2e;
+  classDef out fill:#f3e8ff,stroke:#9333ea,stroke-width:1.5px,color:#3b0764;
+  classDef hero fill:#1e293b,stroke:#94a3b8,stroke-width:2px,color:#f8fafc;
+  linkStyle default stroke-width:1.6px;
 ```
 
 Stage 1 asks whether a backend may see the document at all, and it fails closed. Failing closed
