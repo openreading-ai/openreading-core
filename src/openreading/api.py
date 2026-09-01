@@ -766,7 +766,10 @@ def reap_expired_now() -> list[str]:
     at `<root>/blobs`, the wall clock for the epoch `reap` compares stamps against — so the two
     sweeps can never disagree about where a run's content lives. No-op (`[]`) when
     `OPENREADING_LEDGER` is unset, the same "arming is env-only, no flag" contract documented on
-    `_arm_ledger_unguarded`.
+    `_arm_ledger_unguarded` — and equally a no-op when it is SET but names something other than a
+    directory (M7 review finding): `LocalFsKeyStore.__init__`'s own `mkdir` raises
+    `NotADirectoryError` given a file for a parent, and a misconfigured startup call must not take
+    the whole server down over a knob a single run-arm request would otherwise just fail on its own.
 
     Deliberately outside this module's documented Python API surface (no `__all__` entry, no row
     in the "Exports and return shapes" section above): it is a server operational concern, not a
@@ -776,6 +779,8 @@ def reap_expired_now() -> list[str]:
     if not root:
         return []
     ledger_root = Path(root)
+    if ledger_root.exists() and not ledger_root.is_dir():
+        return []
     keys = LocalFsKeyStore(ledger_root / "keys")
     return reap(
         ledger_root, keys, ledger_root / "blobs", now_epoch_ms=int(RealClock().now_wall_ms())

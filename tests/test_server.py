@@ -2465,6 +2465,45 @@ def test_create_app_reaps_expired_ledger_content_at_startup(tmp_path, monkeypatc
     assert journal.exists()
 
 
+def test_create_app_survives_a_malformed_retention_stamp_at_startup(tmp_path, monkeypatch):
+    """Important finding on the M7 review: moving the reap into `create_app` means a single
+    corrupted `retention/*.json` — untrusted, persisted input, same as a run_id — could otherwise
+    take the ENTIRE server down at boot (nothing reachable, not even /healthz) instead of just
+    failing one run-arm request the way an unarmed `_arm_ledger` call used to. `create_app()` must
+    still succeed, leave the malformed stamp in place for a human, and still reap anything else
+    that legitimately expired."""
+    from openreading.ledger.localfs import LocalFsBlobStore, LocalFsKeyStore
+    from openreading.ledger.retention import stamp_run
+
+    ledger_root = tmp_path / "ledger"
+    monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
+
+    keys = LocalFsKeyStore(ledger_root / "keys")
+    blobs = LocalFsBlobStore(ledger_root / "blobs", keys)
+    blobs.put("expired-run", "sha256:" + "a" * 64, b"data", "application/json")
+    stamp_run(ledger_root, "expired-run", expires_epoch_ms=1, zdr=False)  # already expired
+    bad_stamp = ledger_root / "retention" / "corrupted.json"
+    bad_stamp.write_text("{not valid json", encoding="utf-8")
+
+    create_app()  # must not raise
+
+    assert bad_stamp.read_text(encoding="utf-8") == "{not valid json"  # left for a human, untouched
+    assert not (ledger_root / "keys" / "expired-run.key").exists()  # the valid stamp still reaps
+    assert not (ledger_root / "blobs" / "expired-run").exists()
+
+
+def test_create_app_survives_ledger_root_configured_as_a_file(tmp_path, monkeypatch):
+    """Second M7-review crash path: `OPENREADING_LEDGER` pointing at a FILE, not a directory (a
+    plausible copy-paste/typo misconfiguration), must not crash server startup either —
+    `LocalFsKeyStore.__init__`'s own mkdir would otherwise raise `NotADirectoryError` before a
+    single request is ever served."""
+    not_a_dir = tmp_path / "ledger-is-a-file"
+    not_a_dir.write_text("oops", encoding="utf-8")
+    monkeypatch.setenv("OPENREADING_LEDGER", str(not_a_dir))
+
+    create_app()  # must not raise
+
+
 def test_caller_auth_multiple_keys_some_scoped_some_not(monkeypatch):
     monkeypatch.setenv("OPENREADING_API_KEYS", "scoped-key-0013,unscoped-key-0013")
     monkeypatch.setenv("OPENREADING_API_KEY_SCOPES", "scoped-key-0013=pymupdf")

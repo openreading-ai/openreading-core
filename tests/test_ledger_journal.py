@@ -472,6 +472,40 @@ def test_reap_expired_now_reaps_stamped_runs_past_their_ceiling(tmp_path, monkey
     assert (ledger_root / "blobs" / "fresh-run").exists()
 
 
+def test_reap_skips_a_malformed_stamp_without_crashing_the_whole_sweep(tmp_path):
+    """M7 review finding: a stamp is untrusted input, same thesis as the run_id containment checks
+    above — one that fails to parse must be skipped, not raised, or moving retention enforcement
+    into `server.app.create_app` at startup would mean one corrupted `retention/*.json` takes the
+    entire server down at boot instead of just failing a single run-arm request. Sorted glob order
+    ("corrupted.json" < "expired-run.json") puts the bad stamp first, so this also proves a bad
+    stamp doesn't stop the sweep from reaching the ones after it."""
+    root = tmp_path / "ledger"
+    keys = LocalFsKeyStore(root / "keys")
+    blobs = LocalFsBlobStore(root / "blobs", keys)
+    blobs.put("expired-run", "sha256:" + "0" * 64, b"data", "application/json")
+    stamp_run(root, "expired-run", expires_epoch_ms=1, zdr=False)
+    bad_stamp = root / "retention" / "corrupted.json"
+    bad_stamp.write_text("{not valid json", encoding="utf-8")
+
+    reaped = reap(root, keys, root / "blobs", now_epoch_ms=50_000)
+
+    assert reaped == ["expired-run"]  # the valid, expired stamp is still reaped
+    assert bad_stamp.read_text(encoding="utf-8") == "{not valid json"  # left for a human, untouched
+
+
+def test_reap_expired_now_is_a_noop_when_the_configured_root_is_a_file(tmp_path, monkeypatch):
+    """M7 review finding: a misconfigured `OPENREADING_LEDGER` pointing at a FILE rather than a
+    directory must not crash server startup either. `LocalFsKeyStore.__init__`'s own mkdir raises
+    `NotADirectoryError` when a path component is a file, so the guard must run before that
+    construction, not around it. A missing root is already a no-op (existing behavior); this
+    covers the file-instead-of-directory misconfiguration alongside it."""
+    not_a_dir = tmp_path / "ledger-is-a-file"
+    not_a_dir.write_text("oops", encoding="utf-8")
+    monkeypatch.setenv("OPENREADING_LEDGER", str(not_a_dir))
+
+    assert api.reap_expired_now() == []
+
+
 def test_header_path_refuses_traversal_run_id(tmp_path):
     """`openreading resume <RUN_ID>` (api.resume_run -> read_header) hands an operator-typed
     run_id straight to header_path; a traversal-shaped one must never reach the join."""

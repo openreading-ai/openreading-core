@@ -144,13 +144,23 @@ def tighten_retention(root: Path, run_id: str, descriptor: Any, *, now_epoch_ms:
 
 def reap(root: Path, keys: Any, blobs_root: Path, *, now_epoch_ms: int) -> list[str]:
     """Destroys the key (and removes the blob directory) for every stamped run past its ceiling.
-    The journal file itself is left in place — audit metadata survives erasure by design (§9.4)."""
+    The journal file itself is left in place — audit metadata survives erasure by design (§9.4).
+
+    M7 review finding: a stamp is untrusted persisted input, same thesis as the run_id containment
+    check below — an unreadable file or invalid JSON is skipped, not raised, so one corrupted
+    stamp can never abort the whole sweep. That mattered less when the only caller was
+    `_arm_ledger` (one failed run-arm request); `api.reap_expired_now` now calls this from
+    `server.app.create_app` at startup, where an unhandled exception here would otherwise take the
+    entire server down before it served a single request."""
     stamp_dir = root / "retention"
     if not stamp_dir.exists():
         return []
     reaped: list[str] = []
     for stamp_file in sorted(stamp_dir.glob("*.json")):
-        stamp = json.loads(stamp_file.read_text(encoding="utf-8"))
+        try:
+            stamp = json.loads(stamp_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue  # unreadable or malformed stamp: can't tell its expiry, leave it for a human
         if stamp["expires_epoch_ms"] > now_epoch_ms:
             continue
         run_id = stamp["run_id"]
