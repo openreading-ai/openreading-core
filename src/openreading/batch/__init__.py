@@ -12,7 +12,7 @@ platform should own: bounded concurrency, per-item failure isolation, honest ski
 cost roll-up, and a comparable artifact at the end. The batch layer composes the existing
 single-document pipeline without touching it. Three load-bearing choices:
 
-1. The single-document contract is untouched. `request.v0.1` / `response.v0.3` do not change; a
+1. The single-document contract is untouched. `request.v0.2` / `response.v0.3` do not change; a
    batch is a separate envelope whose items CONTAIN ordinary `response.v0.3` envelopes. Failure
    avoided: churning the one contract every consumer, test and adapter depends on. (A
    `documents[]` field on the request was rejected for exactly that reason -- it also forces
