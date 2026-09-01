@@ -160,6 +160,15 @@ class LocalFsBlobStore:
                 raise PayloadExpired(
                     ref.run_id, reason="ciphertext failed authentication (tampered or corrupted)"
                 ) from exc
+            except ValueError as exc:
+                # A blob truncated short enough that the nonce slice above comes out under 8
+                # bytes makes AESGCM.decrypt reject it before it ever reaches the tag check
+                # ("Nonce must be between 8 and 128 bytes") -- verified empirically that every
+                # other truncation length already raises InvalidTag on its own. Still "this store
+                # cannot produce a plaintext for this ref," just caught one step earlier.
+                raise PayloadExpired(
+                    ref.run_id, reason="ciphertext truncated or corrupted"
+                ) from exc
         # LEGACY (pre-M6): see module docstring and the _keystream/_xor definitions above.
         nonce, ciphertext = raw[:_LEGACY_NONCE_BYTES], raw[_LEGACY_NONCE_BYTES:]
         return _xor(ciphertext, _keystream(key, nonce, len(ciphertext)))

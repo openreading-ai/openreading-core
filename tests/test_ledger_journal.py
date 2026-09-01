@@ -460,6 +460,25 @@ def test_blobstore_get_raises_payload_expired_when_ciphertext_bytes_are_tampered
         store.get(ref)
 
 
+def test_blobstore_get_raises_payload_expired_not_valueerror_on_a_truncated_aead_blob(tmp_path):
+    """A 0x02-leading blob truncated short enough that even the nonce slice (`raw[1:13]`) comes
+    out under 8 bytes makes `AESGCM.decrypt` raise `ValueError` ("Nonce must be between 8 and 128
+    bytes") rather than `InvalidTag` -- verified empirically for every raw length from 1 to 8
+    bytes; 9+ bytes already raises `InvalidTag` on its own. Left uncaught, that `ValueError` would
+    contradict this module's own docstring, which says on-disk corruption is caught and re-raised
+    as `PayloadExpired` -- it still fails closed either way, but as the wrong, undocumented type.
+    """
+    keys = LocalFsKeyStore(tmp_path / "keys")
+    store = LocalFsBlobStore(tmp_path / "blobs", keys)
+    digest = "sha256:" + "d" * 64
+    ref = store.put("run1", digest, b"authenticated plaintext", "text/plain")
+
+    store._path("run1", digest).write_bytes(_FORMAT_AEAD + b"\x00\x00\x00")  # 4 bytes total
+
+    with pytest.raises(PayloadExpired):
+        store.get(ref)
+
+
 def test_blobstore_get_still_reads_a_legacy_xor_blob_written_before_the_aead_upgrade(tmp_path):
     """A blob written by T1's pre-AEAD stream cipher (`nonce + _xor(data, _keystream(...))`, never
     produced by today's `put` any more) must stay readable after the upgrade, so a run already
@@ -469,7 +488,11 @@ def test_blobstore_get_still_reads_a_legacy_xor_blob_written_before_the_aead_upg
     run_id, digest = "run1", "sha256:" + "c" * 64
     key = keys.get_or_create(run_id)
     data = b"pre-upgrade legacy plaintext"
-    nonce = secrets.token_bytes(16)
+    # First byte forced off 0x02 (`_FORMAT_AEAD`): a fully random 16-byte nonce collides with the
+    # AEAD marker ~1/256 of the time, which is exactly the documented "unreadable either way"
+    # case (see localfs.py's own comment on `_FORMAT_AEAD`) -- this test exercises the ordinary
+    # legacy-read path, not that intentionally-unreadable edge, so it must not be flaky on it.
+    nonce = b"\x00" + secrets.token_bytes(15)
     legacy_blob = nonce + _xor(data, _keystream(key, nonce, len(data)))
     store._path(run_id, digest).write_bytes(legacy_blob)
 
