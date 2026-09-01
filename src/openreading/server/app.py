@@ -113,9 +113,12 @@ the CLI / Python API, which read them through the same strategy loader and EnvCr
     `rate_limited` before its body is even parsed, let alone an adapter resolved or called.
     `DELETE /v1/jobs/{job_id}` (204, or 404 `unknown_job` — the same envelope GET's own 404 uses)
     frees a slot immediately on any job regardless of state, without waiting on the TTL.
-  OPENREADING_MAX_BODY_BYTES — bytes ceiling for `_BodyLimitMiddleware` (M2), read once at
-    `create_app` time. Unset ⇒ 150 MiB (157286400): the 100 MB document cap, base64-inflated by
-    ~4/3, plus headroom for the surrounding JSON envelope. A declared Content-Length over the cap
+  OPENREADING_MAX_BODY_BYTES — bytes ceiling for `_BodyLimitMiddleware` (M2), read once at module
+    import into the module-level `_MAX_BODY_BYTES` (same pattern as OPENREADING_JOB_TTL_S /
+    OPENREADING_MAX_ASYNC_JOBS above) — setting the env var after this module is already imported
+    has no effect, which is why tests monkeypatch `_MAX_BODY_BYTES` itself rather than the env
+    var. Unset ⇒ 150 MiB (157286400): the 100 MB document cap, base64-inflated by ~4/3, plus
+    headroom for the surrounding JSON envelope. A declared Content-Length over the cap
     ⇒ 413 before the app reads any of the body; a chunked/undeclared-length body is only cut off
     mid-stream once the running total passes the cap, which degrades to whatever the app does with
     a disconnected receive rather than a clean 413 (best-effort — see `_BodyLimitMiddleware`).

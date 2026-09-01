@@ -140,12 +140,13 @@ HTTP 200
 {"job_id":"omjob_86129928b4744727b9f5a2001ddb265c","state":"succeeded","response_state":"succeeded","error":null}
 ```
 
-**You should see** three results. The first is a compare report built only from saved envelopes.
-The second is HTTP 200 with `state: partial`, because one failed item never fails the batch, and
-items are named by index. The third is a job that already `succeeded`, because a local backend
-finishes before the first poll. Each GET advances a poll-mode job by one slice, so keep polling
-until `state` is not `running`. An empty `documents: []` returns 200 with an `empty_batch` warning.
-`jobs` above 32 or more than 200 documents returns 400 with no override.
+**You should see** three results. The first is a compare report built only from saved envelopes;
+more than 50 `responses` in one call returns 400 with no override, the same shape as the batch
+caps below. The second is HTTP 200 with `state: partial`, because one failed item never fails
+the batch, and items are named by index. The third is a job that already `succeeded`, because a
+local backend finishes before the first poll. Each GET advances a poll-mode job by one slice, so
+keep polling until `state` is not `running`. An empty `documents: []` returns 200 with an
+`empty_batch` warning. `jobs` above 32 or more than 200 documents returns 400 with no override.
 
 ### 4. Read the error ladder
 
@@ -178,7 +179,7 @@ right, so fix the table.
 | `401` | `unauthorized`, `bad_signature` | auth on and no valid bearer, on every endpoint but the two named below; webhook signature invalid or its secret unset | `POST /v1/webhooks/reducto` with any body and no `REDUCTO_WEBHOOK_SECRET` |
 | `403` | `compliance_refused`, `scope_denied` | the policy leaves nothing to run; the token is not scoped to the backend it named, or scope empties that request's router chain or strategy walk | `"backend": {"id": "reducto"}, "compliance": {"require_baa": true}` |
 | `404` | `unknown_backend`, `unknown_job` | the id names nothing | `"backend": {"id": "nope"}`; `GET /v1/jobs/j_nope` |
-| `413` | `terminal` (`doc_too_large`) | document over the backend's size limit | needs a hosted key; shape shown, not run |
+| `413` | `terminal` (`doc_too_large`) | document over the backend's size limit, OR the request body itself over the transport cap `OPENREADING_MAX_BODY_BYTES` (`_BodyLimitMiddleware`) | doc-size case needs a hosted key, shape shown not run; the transport cap needs no key but a 150 MB default body is impractical to demo here |
 | `422` | `unsupported_feature` | the named backend cannot produce what you asked for | `"backend": {"id": "pymupdf"}, "extraction_schema": {"instructions": "totals"}` |
 | `424` | `terminal` (`missing_credentials`, `auth_rejected`) | named backend has no key (`missing_env[]`), or the provider rejected it | `"backend": {"id": "reducto"}` with no `REDUCTO_API_KEY` |
 | `502` | `plan_exhausted`, `terminal` | every backend in the plan failed (`trail` lists them). Two request-shape refusals also land here rather than at 400: `credentials_ref_alias_not_allowed` (the body's `credentials_ref` named an alias the operator has not allow-listed) and `endpoint_not_request_configurable` (the body set `runtime.endpoint`). Both are permanent, so read `backend_code` before retrying a 502 | `"credentials_ref": "env:OPENREADING_REDUCTO"`; `"runtime": {"endpoint": "https://example.com"}` |

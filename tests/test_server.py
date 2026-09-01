@@ -2779,6 +2779,34 @@ def test_caller_auth_cors_preflight_is_answered_before_auth_when_both_configured
     assert r.headers.get("access-control-allow-origin") == "https://app.example.com"
 
 
+def test_body_limit_outranks_auth_and_still_gets_cors_headers_when_all_three_configured(
+    monkeypatch,
+):
+    # M2's must-hold invariant, committed rather than left to a throwaway script: with caller auth
+    # AND CORS both configured, an oversized body from an UNAUTHENTICATED cross-origin caller must
+    # still 413 (the size gate runs before the token check ever reads a header) — never 401, which
+    # would mean the auth gate ran first and paid the cost of parsing an oversized request just to
+    # reject it for the wrong reason. And because CORSMiddleware is registered OUTERMOST of all
+    # three (create_app's own comment), that 413 must still carry CORS headers — the same "a
+    # browser can actually read the error" property test_caller_auth_cors_preflight_is_answered_
+    # before_auth_when_both_configured proves for a 401, extended one layer further out.
+    import openreading.server.app as app_module
+
+    monkeypatch.setattr(app_module, "_MAX_BODY_BYTES", 100)
+    monkeypatch.setenv("OPENREADING_API_KEYS", "realtoken-0099")
+    client = TestClient(app_module.create_app(cors_origins=["https://app.example.com"]))
+    oversized = json.dumps({"document": {"bytes_base64": "A" * 1000}}).encode()
+
+    r = client.post(
+        "/v1/parse",
+        content=oversized,
+        headers={"content-type": "application/json", "Origin": "https://app.example.com"},
+    )
+
+    assert r.status_code == 413  # NOT 401 — the size gate must run before the auth gate
+    assert r.headers.get("access-control-allow-origin") == "https://app.example.com"
+
+
 # --- liveness (internal/design/liveness.md §6) -----------------------------------------------
 
 
