@@ -4,7 +4,7 @@ ports (internal/design/ledger.md §9.4). Blobs are encrypted with AES-256-GCM (`
 closed on tampering or on-disk corruption instead of silently handing back altered plaintext,
 closing M6 (T1's original stdlib SHA-256-counter-mode XOR stream had no authentication at all —
 integrity depended on a digest the journal recorded separately, and `BlobStore.get` never actually
-checked ciphertext against it).
+checked ciphertext against it; `get` now does check it, on the legacy branch alone — see there).
 
 Every blob `put` writes today is `_FORMAT_AEAD (1 byte) + nonce (12 bytes) + ciphertext‖tag`, under
 the run's own 32-byte key, with `run_id` itself as AAD — a blob decrypted against any run id but
@@ -12,7 +12,10 @@ its own fails authentication even with the right key file, which is the point (�
 addressing enforced cryptographically, not merely by filesystem layout). `_keystream`/`_xor` are
 KEPT, LEGACY-read-only (`put` never calls them): they decode T1's original format, still readable
 so a blob written by the pre-upgrade binary — a run already in flight when a deploy swaps it —
-survives the upgrade instead of stranding that run.
+survives the upgrade instead of stranding that run. That branch verifies the ref's plaintext
+digest before returning, which is the closest a format with no authentication tag can come to
+failing closed: a tampered or truncated legacy blob raises `PayloadExpired` rather than decoding
+to silently wrong bytes.
 
 Erasure is real deletion, not a flag: `KeyStore.destroy` unlinks the one file holding the run's
 key, so `BlobStore.get` after a shred cannot construct a keystream at all — it never reaches the
@@ -171,4 +174,19 @@ class LocalFsBlobStore:
                 ) from exc
         # LEGACY (pre-M6): see module docstring and the _keystream/_xor definitions above.
         nonce, ciphertext = raw[:_LEGACY_NONCE_BYTES], raw[_LEGACY_NONCE_BYTES:]
-        return _xor(ciphertext, _keystream(key, nonce, len(ciphertext)))
+        plaintext = _xor(ciphertext, _keystream(key, nonce, len(ciphertext)))
+        # The digest is the ONLY integrity signal this format carries, so it is checked here and
+        # nowhere else: the XOR stream has no way to fail — any bytes XOR a same-length keystream
+        # "succeed" — so tampering or on-disk corruption would otherwise leave `get` handing back
+        # silently altered plaintext, exactly the failure the AEAD upgrade closed for every blob
+        # written since. Truncation lands here too: a short read decodes to a short plaintext just
+        # as cleanly, and only the digest tells the two apart. The AEAD branch above deliberately
+        # does NOT repeat this check — its tag already authenticates the ciphertext against both
+        # the run key and the run id, and re-hashing every plaintext on read would cost a full
+        # SHA-256 pass over payloads up to the document size cap to prove something already proven.
+        expected = ref.digest.split(":", 1)[-1].lower()
+        if hashlib.sha256(plaintext).hexdigest() != expected:
+            raise PayloadExpired(
+                ref.run_id, reason="legacy blob failed its plaintext digest (tampered or corrupted)"
+            )
+        return plaintext

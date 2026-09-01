@@ -344,7 +344,8 @@ are in `uv run python -m pydoc openreading.ledger`. The ones you meet are these.
   32-byte key per run and a fresh nonce per blob, so tampering or on-disk corruption fails the
   AEAD tag check instead of decrypting to altered plaintext. A blob written by T1's original
   unauthenticated XOR stream, before this upgrade, still reads back correctly -- an in-flight run
-  survives the swap.
+  survives the swap -- but only if its plaintext still matches the digest the ref carries, the one
+  integrity signal that older format has.
 - The key protects backups, not the ledger root. `keys/` is mode 0700 and each key file is 0600,
   while the blobs beside them are 0644, all under the one directory `OPENREADING_LEDGER` names.
   Anyone who can read that whole directory can read the payloads, so give it the filesystem and

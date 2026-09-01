@@ -458,7 +458,8 @@ decrypts under `ref.run_id`'s own key, so isolation comes from the addressing, a
 cross-run rejection is unbuilt. `LocalFsBlobStore` encrypts every blob with AES-256-GCM (M6):
 tampering or on-disk corruption fails the AEAD tag check instead of decrypting to altered
 plaintext (a blob written by T1's original unauthenticated XOR stream, pre-upgrade, still reads
-back correctly -- see `localfs`'s own module docstring). A shredded run is permanently
+back correctly, and is checked against the digest its ref carries because that format has no tag
+of its own -- see `localfs`'s own module docstring). A shredded run is permanently
 non-replayable; the journal still answers WHAT happened, just not WITH WHAT content.
 
 `Sanitizer` is the backstop, not the primary defense: one instance per run, armed with the
