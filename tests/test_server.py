@@ -2492,6 +2492,43 @@ def test_create_app_survives_a_malformed_retention_stamp_at_startup(tmp_path, mo
     assert not (ledger_root / "blobs" / "expired-run").exists()
 
 
+def test_create_app_survives_stamps_missing_keys_or_of_the_wrong_top_level_type(
+    tmp_path, monkeypatch
+):
+    """Round-2 M7 finding: a stamp that parses as JSON but is missing `expires_epoch_ms`/`run_id`
+    (e.g. `{}`) or is the wrong top-level type (e.g. a JSON array) raised KeyError/TypeError past
+    round 1's narrower `except (OSError, ValueError)` — validating `run_id`'s shape but trusting
+    the other fields to simply be present was an inconsistent cut of the same "stamps are
+    untrusted input" thesis. `create_app()` must still succeed, leave both bad stamps untouched,
+    and still reap a valid expired stamp alongside them. Named so the two bad stamps sort BEFORE
+    the good one (`missing-keys` / `wrong-type` < `zzz-expired-run`), proving a bad stamp earlier
+    in iteration order doesn't stop a good one later from being reaped."""
+    from openreading.ledger.localfs import LocalFsBlobStore, LocalFsKeyStore
+    from openreading.ledger.retention import stamp_run
+
+    ledger_root = tmp_path / "ledger"
+    monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
+
+    keys = LocalFsKeyStore(ledger_root / "keys")
+    blobs = LocalFsBlobStore(ledger_root / "blobs", keys)
+    blobs.put("zzz-expired-run", "sha256:" + "b" * 64, b"data", "application/json")
+    stamp_run(ledger_root, "zzz-expired-run", expires_epoch_ms=1, zdr=False)  # already expired
+    retention_dir = ledger_root / "retention"
+    missing_keys_stamp = retention_dir / "missing-keys.json"
+    missing_keys_stamp.write_text("{}", encoding="utf-8")
+    wrong_type_stamp = retention_dir / "wrong-type.json"
+    wrong_type_stamp.write_text("[]", encoding="utf-8")
+
+    create_app()  # must not raise
+
+    assert missing_keys_stamp.read_text(encoding="utf-8") == "{}"  # left for a human, untouched
+    assert wrong_type_stamp.read_text(encoding="utf-8") == "[]"
+    assert not (
+        ledger_root / "keys" / "zzz-expired-run.key"
+    ).exists()  # the valid stamp still reaps
+    assert not (ledger_root / "blobs" / "zzz-expired-run").exists()
+
+
 def test_create_app_survives_ledger_root_configured_as_a_file(tmp_path, monkeypatch):
     """Second M7-review crash path: `OPENREADING_LEDGER` pointing at a FILE, not a directory (a
     plausible copy-paste/typo misconfiguration), must not crash server startup either —
