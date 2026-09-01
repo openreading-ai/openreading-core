@@ -54,7 +54,11 @@ POST /v1/compare
     400 naming count and limit, checked before the comparison engine runs — its pairwise
     `SequenceMatcher` diff is O(n²) in the response count, the same unauthenticated-caller
     CPU-amplification shape `/v1/batch`'s MAX_BATCH_DOCUMENTS already guards against. Constant,
-    not an env knob: nobody legitimately compares more responses than there are backends.
+    not an env knob: nobody legitimately compares more responses than there are backends. The
+    count is only half the bound, because the cost is quadratic in each response's TEXT as well as
+    in how many there are: a body over `OPENREADING_MAX_COMPARE_BYTES` (default 8 MB) is refused
+    with 400 before it is even parsed. Refused, never truncated — whatever is accepted is compared
+    in full.
 POST /v1/batch
     Body: {"documents": [<request.document>, ...], "backend"?, "jobs"?} plus the shared fields
     `outputs`, `extraction_schema`, `features`, `pages`, `compliance`, applied to every item.

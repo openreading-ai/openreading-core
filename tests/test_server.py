@@ -291,6 +291,37 @@ def test_gate_keeps_the_documents_type_when_it_replaces_the_path_with_bytes(monk
     assert gated.document.mime_type == "image/png"
 
 
+def test_compare_refuses_a_body_bigger_than_the_text_it_would_diff(client, monkeypatch):
+    """`_MAX_COMPARE_RESPONSES` bounds how MANY responses are compared, never how large each one
+    is. Compare is a pairwise SequenceMatcher matrix — quadratic per pair, and 50 responses is
+    1225 pairs, each diffed twice (once over tokens, once over characters) — so a handful of
+    multi-megabyte responses is CPU amplification for one unauthenticated POST, comfortably
+    inside the global body cap. The bound that actually matters is on the text."""
+    import openreading.server.app as app_module
+
+    monkeypatch.setattr(app_module, "_MAX_COMPARE_BODY_BYTES", 512)
+
+    r = client.post("/v1/compare", json={"responses": [{"text": "b" * 4096}]})
+
+    assert r.status_code == 400
+    assert "exceeds" in r.json()["error"]["message"]
+
+
+def test_compare_under_the_body_cap_is_never_rejected_for_size(client, monkeypatch):
+    """The cap refuses; it never truncates. A body under it reaches the comparison engine and is
+    diffed in full — these placeholder dicts are not valid response envelopes, so this still ends
+    up 400, but on their shape rather than on their size, which is what proves the size gate let
+    them through."""
+    import openreading.server.app as app_module
+
+    monkeypatch.setattr(app_module, "_MAX_COMPARE_BODY_BYTES", 10_000)
+
+    r = client.post("/v1/compare", json={"responses": [{"id": 1}, {"id": 2}]})
+
+    assert r.status_code == 400
+    assert "exceeds" not in r.json()["error"]["message"]
+
+
 def test_route_rejects_document_path_by_default(client, monkeypatch):
     # _parse_request (shared by /v1/route and /v1/jobs) raises ValueError(refusal) so this
     # endpoint's existing except->400 handles it exactly like any other bad body.

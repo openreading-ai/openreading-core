@@ -59,7 +59,8 @@ is offloaded with run_in_threadpool, and why fastapi is imported at module level
 Environment variables this module reads. Server-only (the CLI and Python API ignore them):
 OPENREADING_API_KEYS, OPENREADING_API_KEY_SCOPES, OPENREADING_SERVER_PATH_ROOT,
 OPENREADING_JOB_TTL_S, OPENREADING_MAX_ASYNC_JOBS, OPENREADING_MAX_JOBS_PER_PRINCIPAL,
-OPENREADING_MAX_BODY_BYTES, OPENREADING_ALLOW_UNSIGNED_WEBHOOKS and the three
+OPENREADING_MAX_BODY_BYTES, OPENREADING_MAX_COMPARE_BYTES,
+OPENREADING_ALLOW_UNSIGNED_WEBHOOKS and the three
 compliance attestation knobs. OPENREADING_CONFIG and the backend credential vars are shared with
 the CLI / Python API, which read them through the same strategy loader and EnvCredentialBroker.
   OPENREADING_API_KEYS — comma-separated bearer tokens (_load_api_key_config, once at startup).
@@ -84,6 +85,11 @@ the CLI / Python API, which read them through the same strategy loader and EnvCr
     implied type ride along as `mime_type`. The CLI and Python API never read this var —
     `document.path` there names a file the SAME process already trusts, which is why the gate is
     HTTP-only.
+  OPENREADING_MAX_COMPARE_BYTES — bytes ceiling on a POST /v1/compare body (default 8 MB), read
+    once at import. Separate from OPENREADING_MAX_BODY_BYTES because compare is the one endpoint
+    whose work is not linear in its input: it runs a pairwise SequenceMatcher matrix, so an
+    oversized body is CPU amplification rather than merely a large parse. Over the ceiling is 400,
+    never a truncated comparison — whatever is accepted is compared in full.
   OPENREADING_ALLOW_UNSIGNED_WEBHOOKS — `1`/`true`/`yes` accepts an inbound event from a backend
     that cannot sign (chunkr, open-ocr) WITHOUT the per-job callback token the server appended to
     the URL it registered — i.e. on the vendor's task id alone, which is what anyone who saw that
@@ -230,6 +236,16 @@ MAX_BATCH_DOCUMENTS = DEFAULT_MAX_ITEMS
 # legitimately compares more responses than there are backends to produce them, so there is no
 # deployment for which this ceiling should ever need raising.
 _MAX_COMPARE_RESPONSES = 50
+
+# M2 residual: the count above bounds how MANY responses are compared, never how LARGE each one
+# is, and size is the multiplier that matters. `text_section` runs a pairwise SequenceMatcher
+# matrix — quadratic in the length of each text, twice per pair (once over tokens, once over raw
+# characters) — so 50 responses is 1225 diffs whose cost is set entirely by a number nothing
+# checked. `_MAX_BODY_BYTES` is far too loose to serve as that bound: it exists to stop a huge
+# base64 DOCUMENT reaching /v1/parse, where the work is linear. This is the ceiling for the one
+# endpoint whose work is not. Read once at import, like its siblings; a test monkeypatches the
+# constant.
+_MAX_COMPARE_BODY_BYTES = int(os.environ.get("OPENREADING_MAX_COMPARE_BYTES", str(8 * 1024 * 1024)))
 
 
 @dataclass
@@ -1182,8 +1198,17 @@ def create_app(*, cors_origins: list[str] | None = None):
     @app.post("/v1/compare")
     async def compare_endpoint(request: Request):
         # Pure (DESIGN L1): compares already-computed response envelopes; never executes a backend.
+        raw = await request.body()
+        # Measured on the raw bytes and BEFORE json.loads, because parsing a body this size is
+        # itself part of the cost being refused. Refusal, never truncation: whatever is accepted
+        # is compared in full.
+        if len(raw) > _MAX_COMPARE_BODY_BYTES:
+            return _bad_request(
+                f"compare body exceeds {_MAX_COMPARE_BODY_BYTES} bytes; comparison cost is "
+                "quadratic in the text it is given"
+            )
         try:
-            body = await request.json()
+            body = json.loads(raw)
         except Exception as e:  # noqa: BLE001 — any JSON failure is a 400
             return _bad_request(f"invalid JSON body: {e}")
         if not isinstance(body, dict) or not isinstance(body.get("responses"), list):
