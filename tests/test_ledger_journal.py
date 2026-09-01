@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import secrets
 from pathlib import Path
 
 import pydantic
@@ -21,7 +22,13 @@ import pytest
 from openreading import api, schemas
 from openreading.ledger.inline import InlineExecutor, NullJournal
 from openreading.ledger.jsonl import JsonlJournal
-from openreading.ledger.localfs import LocalFsBlobStore, LocalFsKeyStore
+from openreading.ledger.localfs import (
+    _FORMAT_AEAD,
+    LocalFsBlobStore,
+    LocalFsKeyStore,
+    _keystream,
+    _xor,
+)
 from openreading.ledger.ports import PayloadExpired
 from openreading.ledger.retention import compute_retention_ceiling_hours, reap, stamp_run
 from openreading.ledger.sanitizer import Sanitizer
@@ -419,6 +426,57 @@ def test_blobstore_path_refuses_malformed_digest(tmp_path):
     store = LocalFsBlobStore(tmp_path / "blobs", keys)
     with pytest.raises(ValueError):
         store.put("fine-run-id", "sha256:../../evil", b"x", "application/octet-stream")
+
+
+# ---- Task 14 / M6: AES-256-GCM authenticated encryption for ledger blobs -----------------------
+
+
+def test_blobstore_put_writes_aead_format_and_get_roundtrips_the_plaintext(tmp_path):
+    keys = LocalFsKeyStore(tmp_path / "keys")
+    store = LocalFsBlobStore(tmp_path / "blobs", keys)
+    digest = "sha256:" + "a" * 64
+
+    ref = store.put("run1", digest, b"authenticated plaintext", "text/plain")
+
+    on_disk = store._path("run1", digest).read_bytes()
+    assert on_disk[:1] == _FORMAT_AEAD  # new blobs are tagged with the AEAD format byte
+    assert store.get(ref) == b"authenticated plaintext"
+
+
+def test_blobstore_get_raises_payload_expired_when_ciphertext_bytes_are_tampered(tmp_path):
+    """Corruption/tampering on disk must be detected, not silently decrypted into garbage — the
+    entire point of moving off the old unauthenticated XOR stream (M6)."""
+    keys = LocalFsKeyStore(tmp_path / "keys")
+    store = LocalFsBlobStore(tmp_path / "blobs", keys)
+    digest = "sha256:" + "b" * 64
+    ref = store.put("run1", digest, b"authenticated plaintext", "text/plain")
+
+    path = store._path("run1", digest)
+    tampered = bytearray(path.read_bytes())
+    tampered[-1] ^= 0xFF  # flip one on-disk byte, inside the GCM tag appended to the ciphertext
+    path.write_bytes(bytes(tampered))
+
+    with pytest.raises(PayloadExpired):
+        store.get(ref)
+
+
+def test_blobstore_get_still_reads_a_legacy_xor_blob_written_before_the_aead_upgrade(tmp_path):
+    """A blob written by T1's pre-AEAD stream cipher (`nonce + _xor(data, _keystream(...))`, never
+    produced by today's `put` any more) must stay readable after the upgrade, so a run already
+    in flight when a deploy swaps the binary is not left holding blobs it can no longer open."""
+    keys = LocalFsKeyStore(tmp_path / "keys")
+    store = LocalFsBlobStore(tmp_path / "blobs", keys)
+    run_id, digest = "run1", "sha256:" + "c" * 64
+    key = keys.get_or_create(run_id)
+    data = b"pre-upgrade legacy plaintext"
+    nonce = secrets.token_bytes(16)
+    legacy_blob = nonce + _xor(data, _keystream(key, nonce, len(data)))
+    store._path(run_id, digest).write_bytes(legacy_blob)
+
+    ref = BlobRef(
+        run_id=run_id, digest=digest, size_bytes=len(data), media_type="text/plain", store="localfs"
+    )
+    assert store.get(ref) == data
 
 
 def test_reap_refuses_run_id_whose_blobs_entry_resolves_outside_blobs_root(tmp_path):

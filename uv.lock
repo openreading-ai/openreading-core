@@ -997,6 +997,7 @@ name = "openreading"
 version = "0.3.0"
 source = { editable = "." }
 dependencies = [
+    { name = "cryptography" },
     { name = "jsonschema" },
     { name = "pydantic" },
     { name = "pypdf" },
@@ -1087,6 +1088,7 @@ requires-dist = [
     { name = "anthropic", marker = "extra == 'anthropic-claude'", specifier = ">=0.39" },
     { name = "boto3", marker = "extra == 'all'", specifier = ">=1.34" },
     { name = "boto3", marker = "extra == 'textract'", specifier = ">=1.34" },
+    { name = "cryptography", specifier = ">=50.0" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.110" },
     { name = "google-cloud-documentai", marker = "extra == 'all'", specifier = ">=2.29" },
     { name = "google-cloud-documentai", marker = "extra == 'google-document-ai'", specifier = ">=2.29" },

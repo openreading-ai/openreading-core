@@ -1,11 +1,18 @@
 """`LocalFsBlobStore` + `LocalFsKeyStore` — the core implementations of the `BlobStore`/`KeyStore`
-ports (internal/design/ledger.md §9.4). One AES-grade dependency (`cryptography`) is not in this run's
-"no new dependencies" allowance (RUN.md §0) and the ledger package itself is scoped "zero new
-required deps" (§5.2) — so T1 ships a stdlib-only SHA-256-counter-mode stream cipher instead of an
-AEAD. This is a real cipher (a fresh 32-byte key from `secrets.token_bytes` per run, a fresh nonce
-per blob), not a placeholder flag, but it is unauthenticated: integrity of the plaintext is the
-journal's job (the recorded digest), not this cipher's. Flagged to FOUNDER-INBOX.md as a two-line
-swap to `cryptography`'s `Fernet` once a new dependency is approved.
+ports (internal/design/ledger.md §9.4). Blobs are encrypted with AES-256-GCM (`cryptography`'s
+`AESGCM`, a base dependency now that the ledger is core, not an extra): an AEAD fails decryption
+closed on tampering or on-disk corruption instead of silently handing back altered plaintext,
+closing M6 (T1's original stdlib SHA-256-counter-mode XOR stream had no authentication at all —
+integrity depended on a digest the journal recorded separately, and `BlobStore.get` never actually
+checked ciphertext against it).
+
+Every blob `put` writes today is `_FORMAT_AEAD (1 byte) + nonce (12 bytes) + ciphertext‖tag`, under
+the run's own 32-byte key, with `run_id` itself as AAD — a blob decrypted against any run id but
+its own fails authentication even with the right key file, which is the point (§5.4's per-run
+addressing enforced cryptographically, not merely by filesystem layout). `_keystream`/`_xor` are
+KEPT, LEGACY-read-only (`put` never calls them): they decode T1's original format, still readable
+so a blob written by the pre-upgrade binary — a run already in flight when a deploy swaps it —
+survives the upgrade instead of stranding that run.
 
 Erasure is real deletion, not a flag: `KeyStore.destroy` unlinks the one file holding the run's
 key, so `BlobStore.get` after a shred cannot construct a keystream at all — it never reaches the
@@ -20,12 +27,30 @@ import re
 import secrets
 from pathlib import Path
 
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
 from openreading.ledger.ports import PayloadExpired
 from openreading.ledger.retention import VALID_RUN_ID
 from openreading.ledger.step import BlobRef
 
-_KEY_BYTES = 32
-_NONCE_BYTES = 16
+_KEY_BYTES = 32  # AES-256 key size — unchanged across the T1 XOR cipher and the AES-256-GCM upgrade
+_AEAD_NONCE_BYTES = 12  # GCM's standard nonce size; a fresh one per blob, never reused under a key
+
+_FORMAT_AEAD = b"\x02"
+# Leading byte of every blob `put` writes today. A LEGACY blob (below) begins with a random 16-byte
+# nonce, so roughly 1 legacy blob in 256 happens to start with this same byte by chance. `get`
+# resolves the ambiguity by trying AEAD first whenever the leading byte matches, and never falls
+# back to the legacy decode on InvalidTag: the legacy XOR cipher has no way to fail (any bytes XOR
+# a same-length keystream "succeed"), so a fallback would silently return garbage plaintext for a
+# genuinely tampered AEAD blob instead of raising — exactly the failure mode this upgrade exists to
+# close. A real 0x02-leading legacy blob is simply unreadable after the upgrade; retention ages it
+# out rather than this code trying to recover it.
+
+# LEGACY (pre-M6): T1's original format, `nonce (16 bytes) + XOR-ciphertext`, unauthenticated.
+# `_keystream`/`_xor` are read-only from here on: kept solely so `get` can still decode a blob a
+# pre-upgrade binary already wrote.
+_LEGACY_NONCE_BYTES = 16
 
 
 def _keystream(key: bytes, nonce: bytes, length: int) -> bytes:
@@ -105,9 +130,11 @@ class LocalFsBlobStore:
 
     def put(self, run_id: str, digest: str, data: bytes, media_type: str) -> BlobRef:
         key = self._keys.get_or_create(run_id)
-        nonce = secrets.token_bytes(_NONCE_BYTES)
-        ciphertext = _xor(data, _keystream(key, nonce, len(data)))
-        self._path(run_id, digest).write_bytes(nonce + ciphertext)
+        nonce = secrets.token_bytes(_AEAD_NONCE_BYTES)
+        # run_id as AAD: authenticated but not encrypted, so decrypting this ciphertext under any
+        # run_id other than the one it was written for fails the tag check (see module docstring).
+        ciphertext = AESGCM(key).encrypt(nonce, data, run_id.encode())
+        self._path(run_id, digest).write_bytes(_FORMAT_AEAD + nonce + ciphertext)
         return BlobRef(
             run_id=run_id,
             digest=digest,
@@ -122,5 +149,17 @@ class LocalFsBlobStore:
         except KeyError as exc:
             raise PayloadExpired(ref.run_id) from exc
         raw = self._path(ref.run_id, ref.digest).read_bytes()
-        nonce, ciphertext = raw[:_NONCE_BYTES], raw[_NONCE_BYTES:]
+        if raw[:1] == _FORMAT_AEAD:
+            nonce = raw[1 : 1 + _AEAD_NONCE_BYTES]
+            ciphertext = raw[1 + _AEAD_NONCE_BYTES :]
+            try:
+                return AESGCM(key).decrypt(nonce, ciphertext, ref.run_id.encode())
+            except InvalidTag as exc:
+                # Deliberately not a fallback to the legacy path below — see _FORMAT_AEAD's own
+                # comment for why that would defeat the whole point of moving to an AEAD.
+                raise PayloadExpired(
+                    ref.run_id, reason="ciphertext failed authentication (tampered or corrupted)"
+                ) from exc
+        # LEGACY (pre-M6): see module docstring and the _keystream/_xor definitions above.
+        nonce, ciphertext = raw[:_LEGACY_NONCE_BYTES], raw[_LEGACY_NONCE_BYTES:]
         return _xor(ciphertext, _keystream(key, nonce, len(ciphertext)))

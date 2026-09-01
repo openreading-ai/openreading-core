@@ -455,11 +455,11 @@ affects exactly that run; duplicate plaintext across runs is the accepted price 
 The port rule on the read side: `BlobStore.get` must reject a `BlobRef` whose `run_id` differs
 from the requesting run. `LocalFsBlobStore.get(ref)` takes no requesting-run argument today; it
 decrypts under `ref.run_id`'s own key, so isolation comes from the addressing, and the explicit
-cross-run rejection is unbuilt. `LocalFsBlobStore` uses a stdlib SHA-256 counter-mode stream
-cipher (fresh 32-byte key per run, fresh nonce per blob) because `cryptography` is not an
-allowed dependency; it is unauthenticated -- integrity is the journal's recorded digest, not the
-cipher's. A shredded run is permanently non-replayable; the journal still answers WHAT happened,
-just not WITH WHAT content.
+cross-run rejection is unbuilt. `LocalFsBlobStore` encrypts every blob with AES-256-GCM (M6):
+tampering or on-disk corruption fails the AEAD tag check instead of decrypting to altered
+plaintext (a blob written by T1's original unauthenticated XOR stream, pre-upgrade, still reads
+back correctly -- see `localfs`'s own module docstring). A shredded run is permanently
+non-replayable; the journal still answers WHAT happened, just not WITH WHAT content.
 
 `Sanitizer` is the backstop, not the primary defense: one instance per run, armed with the
 resolved secret VALUES of every eligible descriptor (a value-less `Sanitizer()` has nothing to
