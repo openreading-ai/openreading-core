@@ -893,7 +893,11 @@ def test_concurrent_get_job_does_not_double_drive_the_same_job():
         {"document": {"path": "/x"}, "backend": {"id": "pollslow"}}
     )
     job = adapter.submit(req, RunContext())
-    app.state.jobs[job.id] = JobRecord(job.id, "pollslow", adapter, job, req, 0)
+    # A real created_ms, not the usual placeholder 0: this test's own final GET below runs AFTER
+    # the job reaches terminal, and 0 would put it outside the TTL sweep's window (M4), deleting
+    # it out from under that assertion instead of exercising the double-drive guard it tests.
+    created_ms = int(_time.time() * 1000)
+    app.state.jobs[job.id] = JobRecord(job.id, "pollslow", adapter, job, req, created_ms)
 
     ready = threading.Barrier(2, timeout=30)
     responses: list = []
@@ -919,6 +923,104 @@ def test_concurrent_get_job_does_not_double_drive_the_same_job():
     assert any(r.json()["state"] == "succeeded" for r in responses)
     # ...and the completion is durable, not a fluke of response ordering.
     assert client.get(f"/v1/jobs/{job.id}").json()["state"] == "succeeded"
+
+
+# --- bounded job store: TTL sweep, capacity cap, DELETE (M4) ---------------------------
+# The store used to grow forever and every record retained the FULL request (base64 document
+# bytes, document.password) until process exit, with no way to remove one early.
+
+
+def _seed_job(app, job_id, *, state, created_ms):
+    # Minimal JobRecord for the sweep/cap tests below: adapter=None is safe because none of them
+    # ever GET this job's OWN id (which would try to drive/poll it) -- they either assert on
+    # app.state.jobs directly or hit an unrelated path to trigger the sweep as a side effect, the
+    # same lookup test_get_unknown_job_is_404 already exercises.
+    from openreading.server.app import JobRecord
+    from openreading.types.enums import WaitMode
+    from openreading.types.job import Job
+    from openreading.types.request import OpenReadingRequest
+
+    req = OpenReadingRequest.model_validate(
+        {"document": {"path": "/x"}, "backend": {"id": "boundsbk"}}
+    )
+    job = Job(id=job_id, backend_id="boundsbk", wait_mode=WaitMode.INLINE, state=state)
+    app.state.jobs[job_id] = JobRecord(job_id, "boundsbk", None, job, req, created_ms)
+
+
+def test_expired_terminal_job_is_swept_on_get_access():
+    from openreading.types.enums import JobState
+
+    app = create_app()
+    client = TestClient(app)
+    _seed_job(app, "old-done", state=JobState.SUCCEEDED, created_ms=0)  # epoch: always past TTL
+
+    # ANY jobs-store access sweeps it, not only a GET of this specific id -- ask about an
+    # unrelated, nonexistent job (test_get_unknown_job_is_404's own request) to prove the sweep
+    # runs as a side effect of the handler, independent of what was actually requested.
+    assert client.get("/v1/jobs/does-not-exist").status_code == 404
+    assert "old-done" not in app.state.jobs
+
+
+def test_expired_terminal_job_is_swept_on_submit_access():
+    from openreading.types.enums import JobState
+
+    app = create_app()
+    client = TestClient(app)
+    _seed_job(app, "old-done", state=JobState.SUCCEEDED, created_ms=0)
+
+    r = client.post("/v1/jobs", json=_pdf_body("pymupdf"))
+    assert r.status_code == 200
+    assert "old-done" not in app.state.jobs
+
+
+def test_sweep_never_removes_a_non_terminal_job_regardless_of_age():
+    # A still-running job must never be reaped out from under a caller mid-poll -- only TERMINAL
+    # records are ever swept, no matter how old created_ms is.
+    from openreading.types.enums import JobState
+
+    app = create_app()
+    client = TestClient(app)
+    _seed_job(app, "old-running", state=JobState.RUNNING, created_ms=0)
+
+    assert client.get("/v1/jobs/does-not-exist").status_code == 404
+    assert "old-running" in app.state.jobs
+
+
+def test_submit_job_rejected_with_429_when_store_is_at_capacity(monkeypatch):
+    import openreading.server.app as app_module
+    from openreading.types.enums import JobState
+
+    monkeypatch.setattr(app_module, "_MAX_ASYNC_JOBS", 1)
+    app = create_app()
+    client = TestClient(app)
+    # RUNNING (not terminal): occupies a slot without being swept away by this same request's own
+    # top-of-handler sweep before the cap check runs.
+    _seed_job(app, "occupant", state=JobState.RUNNING, created_ms=0)
+
+    r = client.post("/v1/jobs", json=_pdf_body("pymupdf"))
+
+    assert r.status_code == 429
+    assert r.json()["error"]["category"] == "rate_limited"
+    assert set(app.state.jobs) == {"occupant"}  # rejected BEFORE insertion -- store untouched
+
+
+def test_delete_job_then_get_is_404(client):
+    submit = client.post("/v1/jobs", json=_pdf_body("pymupdf"))
+    job_id = submit.json()["job_id"]
+
+    d = client.delete(f"/v1/jobs/{job_id}")
+    assert d.status_code == 204
+    assert d.content == b""
+
+    g = client.get(f"/v1/jobs/{job_id}")
+    assert g.status_code == 404
+    assert g.json()["error"]["category"] == "unknown_job"
+
+
+def test_delete_unknown_job_is_404(client):
+    r = client.delete("/v1/jobs/does-not-exist")
+    assert r.status_code == 404
+    assert r.json()["error"]["category"] == "unknown_job"
 
 
 # --- webhook ingress (8.2) -------------------------------------------------------------
@@ -1228,6 +1330,7 @@ def test_webhook_metered_redacts_a_secret_in_a_plain_normalize_crash(monkeypatch
 
 
 def _seed_chunkr_webhook_job(app):
+    import time
     from pathlib import Path
 
     from openreading.adapters.chunkr import ChunkrAdapter
@@ -1243,12 +1346,16 @@ def _seed_chunkr_webhook_job(app):
     req = OpenReadingRequest.model_validate(
         {"document": {"url": "https://x/d.pdf"}, "backend": {"id": "chunkr"}}
     )
-    app.state.jobs[job.id] = JobRecord(job.id, "chunkr", adapter, job, req, 0)
+    # A real created_ms, not the usual placeholder 0: the caller's own GET after the webhook
+    # resolves this job to terminal would otherwise fall outside the TTL sweep's window (M4).
+    created_ms = int(time.time() * 1000)
+    app.state.jobs[job.id] = JobRecord(job.id, "chunkr", adapter, job, req, created_ms)
     fixture = json.loads((Path(__file__).parent / "fixtures" / "chunkr" / "parse.json").read_text())
     return job.id, fixture
 
 
 def _seed_open_ocr_webhook_job(app):
+    import time
     from pathlib import Path
 
     from openreading.adapters.open_ocr import OpenOCRAdapter
@@ -1264,7 +1371,10 @@ def _seed_open_ocr_webhook_job(app):
     req = OpenReadingRequest.model_validate(
         {"document": {"url": "https://x/d.png"}, "backend": {"id": "open-ocr"}}
     )
-    app.state.jobs[job.id] = JobRecord(job.id, "open-ocr", adapter, job, req, 0)
+    # A real created_ms, not the usual placeholder 0: the caller's own GET after the webhook
+    # resolves this job to terminal would otherwise fall outside the TTL sweep's window (M4).
+    created_ms = int(time.time() * 1000)
+    app.state.jobs[job.id] = JobRecord(job.id, "open-ocr", adapter, job, req, created_ms)
     fixture = json.loads((Path(__file__).parent / "fixtures" / "open-ocr" / "ocr.json").read_text())
     return job.id, fixture
 

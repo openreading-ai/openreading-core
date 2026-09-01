@@ -81,10 +81,10 @@ POST /v1/batch
     caller-facing override here — the body IS the untrusted boundary — unlike the CLI's
     `--max-jobs` / `--max-items` and Python `max_jobs=` / `max_items=`, whose local caller can
     already spend local resources any other way.
-POST /v1/jobs  /  GET /v1/jobs/{job_id}
-    Async submit / poll for a NAMED backend ("auto" and "strategy:none" → 400; a real
+POST /v1/jobs  /  GET /v1/jobs/{job_id}  /  DELETE /v1/jobs/{job_id}
+    Async submit / poll / discard for a NAMED backend ("auto" and "strategy:none" → 400; a real
     `strategy:<name>` id is wrapped as one synthetic job that runs the whole walk inline).
-    Body: vendored request. Both return the job handle:
+    Body: vendored request. Submit and GET both return the job handle:
     {"job_id", "state": running|succeeded|failed, "backend", "created_ms", "response"?, "error"?}.
     A failed job's `error` is the SAME envelope /v1/parse returns for the identical failure,
     whichever leg failed (submit, a later poll, webhook resolution); only the HTTP status differs:
@@ -93,6 +93,16 @@ POST /v1/jobs  /  GET /v1/jobs/{job_id}
     deployment needs a shared store, there is no server-side resume, and `OPENREADING_LEDGER`
     (which arms CLI/Python `parse` / `resume`) does not extend to it (internal/design/ledger.md
     §10). Without a `webhook_url` a job runs in POLL mode, driven one slice per GET.
+    Bounded retention (M4): every record — TERMINAL or not — holds the FULL submitted request
+    (base64 document bytes, `document.password` included) and, once terminal, its response, so
+    the store cannot grow without a limit. A TERMINAL record older than `OPENREADING_JOB_TTL_S`
+    seconds (default 3600), measured from its own submit time, is deleted the next time ANY
+    submit or GET touches the store — lazily, since this process has no scheduler thread; a
+    still-running record is never swept, regardless of age. A submit at or over
+    `OPENREADING_MAX_ASYNC_JOBS` (default 1000) total records is refused with 429 before its body
+    is even parsed. `DELETE /v1/jobs/{job_id}` removes one record immediately and unconditionally
+    — 204, whatever its state — freeing a slot without waiting on the TTL; an unknown id is 404
+    `unknown_job`, the identical envelope GET's own unknown-id case returns.
 POST /v1/webhooks/{backend_id}
     Inbound provider webhook; resolves the job it names and, once terminal, meters it like
     /v1/parse. Response: the job handle. Verification is per-backend, gated on whether the
@@ -141,6 +151,7 @@ GET /healthz
 HTTP status codes
 -----------------
 200  success — including GET /v1/jobs/{id} for a FAILED job (`state` / `error` carry the failure)
+204  DELETE /v1/jobs/{id} removed the record — empty body, whatever the job's state was
 400  body not valid JSON, fails the request schema, or names a `strategy:<name>` that is neither
      a preset nor defined by the loaded config (`unknown_strategy`; presets run configless)
 401  webhook signature invalid, or the backend declares `webhook_secret` and none is configured
@@ -151,12 +162,14 @@ HTTP status codes
      "auto"/"strategy:none" request's fallback chain or a `strategy:<name>` walk could still
      reach (`scope_denied`) — an out-of-scope top pick is rerouted to an in-scope fallback, not
      refused, so this fires only when no in-scope backend is left
-404  unknown backend id / unknown job id
+404  unknown backend id / unknown job id (GET or DELETE)
 413  document exceeds the size limit (`doc_too_large`)
 422  requested feature the backend cannot produce (`unsupported_feature`)
 424  a directly-named backend is missing credentials (`missing_credentials`; `missing_env[]`
      names them) or its key was found and REJECTED by the provider (`auth_rejected`; the
      message names the var to check, never the key)
+429  POST /v1/jobs at or over `OPENREADING_MAX_ASYNC_JOBS` (`rate_limited`) — the job store's own
+     capacity bound, refused before the body is parsed; not a per-caller request-rate throttle
 502  plan exhausted — every backend failed (`plan_exhausted`, `trail`) — or other terminal error,
      which INCLUDES two permanent request-shape refusals a client must not retry:
      `credentials_ref_alias_not_allowed` and `endpoint_not_request_configurable`. Read

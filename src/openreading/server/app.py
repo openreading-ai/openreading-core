@@ -50,9 +50,10 @@ OPTIONS still gets a CORS answer instead of a 401). RouterConfig comes from the 
 is offloaded with run_in_threadpool, and why fastapi is imported at module level).
 
 Environment variables this module reads. Server-only (the CLI and Python API ignore them):
-OPENREADING_API_KEYS, OPENREADING_API_KEY_SCOPES, OPENREADING_SERVER_PATH_ROOT and the three
-compliance attestation knobs. OPENREADING_CONFIG and the backend credential vars are shared with
-the CLI / Python API, which read them through the same strategy loader and EnvCredentialBroker.
+OPENREADING_API_KEYS, OPENREADING_API_KEY_SCOPES, OPENREADING_SERVER_PATH_ROOT,
+OPENREADING_JOB_TTL_S, OPENREADING_MAX_ASYNC_JOBS and the three compliance attestation knobs.
+OPENREADING_CONFIG and the backend credential vars are shared with the CLI / Python API, which
+read them through the same strategy loader and EnvCredentialBroker.
   OPENREADING_API_KEYS — comma-separated bearer tokens (_load_api_key_config, once at startup).
     Unset/empty ⇒ caller auth OFF, every endpoint open. An empty ENTRY (stray/trailing comma)
     raises ServerConfigError at startup rather than being dropped: a key is security-bearing and
@@ -96,6 +97,15 @@ the CLI / Python API, which read them through the same strategy loader and EnvCr
   OPENREADING_LEDGER — NOT read here: arming the ledger covers CLI/Python `parse`/`resume` and a
     /v1/parse strategy run via api.run_request, but the /v1/jobs store stays in-memory,
     per-process, with no server-side resume (internal/design/ledger.md §10).
+  OPENREADING_JOB_TTL_S / OPENREADING_MAX_ASYNC_JOBS — bound the /v1/jobs store (M4): a TERMINAL
+    record (`Job.is_terminal()`) older than OPENREADING_JOB_TTL_S seconds, measured from its own
+    `created_ms`, is deleted the next time ANY submit or GET touches the store (`_sweep_jobs`) —
+    lazily, since this server has no scheduler thread; a non-terminal record is never swept
+    regardless of age, so a still-running job can never be reaped out from under a caller
+    mid-poll. Unset ⇒ 3600s / 1000 jobs. A submit at or over the cap is refused with 429
+    `rate_limited` before its body is even parsed, let alone an adapter resolved or called.
+    `DELETE /v1/jobs/{job_id}` (204, or 404 `unknown_job` — the same envelope GET's own 404 uses)
+    frees a slot immediately on any job regardless of state, without waiting on the TTL.
 """
 
 from __future__ import annotations
@@ -115,7 +125,7 @@ from typing import Any
 # module-level import is fine (and REQUIRED — under `from __future__ import annotations`, FastAPI
 # must resolve the `Request` annotation against these module globals).
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from openreading import __version__, api, schemas
@@ -228,6 +238,35 @@ def _job_dict(rec: JobRecord) -> dict[str, Any]:
     if rec.error is not None:
         out["error"] = rec.error
     return out
+
+
+# M4: a terminal job retains the FULL request (base64 document bytes, document.password) and its
+# response until removed -- bounded retention is the point, not tidiness. This server has no
+# scheduler thread, so sweeping is lazy: _sweep_jobs runs at the top of every submit/GET call
+# rather than on a timer. Plain module globals, read once when this module is imported (the same
+# effective timing as process startup for `openreading serve`) rather than per-request like
+# _server_router_config/_document_path_refusal below: a malformed value should fail at boot, not
+# crash unpredictably on the first job request that happens to touch it (the same reasoning
+# _load_api_key_config gives for parsing OPENREADING_API_KEYS once in create_app, AC-7) — and
+# unlike those two, _sweep_jobs is a plain top-level function with no `app` closure to cache a
+# parsed value on, so a module global is the only place for it to live. A test that needs a
+# different value monkeypatches the constant directly (as several already do for
+# DEFAULT_DEADLINE_MS) rather than the environment.
+_JOB_TTL_MS = int(os.environ.get("OPENREADING_JOB_TTL_S", "3600")) * 1000
+_MAX_ASYNC_JOBS = int(os.environ.get("OPENREADING_MAX_ASYNC_JOBS", "1000"))
+
+
+def _sweep_jobs(jobs: dict[str, JobRecord], now_ms: int) -> None:
+    """Delete every TERMINAL record older than `_JOB_TTL_MS`, measured from `created_ms`. Never
+    touches a non-terminal record: a still-running job must not be reaped out from under a caller
+    mid-poll, no matter its age."""
+    expired = [
+        jid
+        for jid, rec in jobs.items()
+        if rec.job.is_terminal() and now_ms - rec.created_ms > _JOB_TTL_MS
+    ]
+    for jid in expired:
+        del jobs[jid]
 
 
 def _webhook_secret(backend_id: str) -> str | None:
@@ -700,6 +739,20 @@ def create_app(*, cors_origins: list[str] | None = None):
             status_code=404, content={"error": {"category": category, "message": message}}
         )
 
+    def _job_store_full():
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": {
+                    "category": "rate_limited",
+                    "message": (
+                        f"async job store is full ({_MAX_ASYNC_JOBS}); retry after jobs expire "
+                        "or DELETE finished jobs"
+                    ),
+                }
+            },
+        )
+
     def _bad_signature():
         return JSONResponse(
             status_code=401,
@@ -1077,6 +1130,12 @@ def create_app(*, cors_origins: list[str] | None = None):
 
     @app.post("/v1/jobs")
     async def submit_job(request: Request):
+        _sweep_jobs(jobs, int(time.time() * 1000))
+        # Checked BEFORE anything else -- parsing the body, resolving an adapter, spending a
+        # vendor call -- so a full store fails fast rather than doing real work for a job it is
+        # about to refuse to keep.
+        if len(jobs) >= _MAX_ASYNC_JOBS:
+            return _job_store_full()
         try:
             req = await _parse_request(request)
         except Exception as e:  # noqa: BLE001
@@ -1176,6 +1235,7 @@ def create_app(*, cors_origins: list[str] | None = None):
 
     @app.get("/v1/jobs/{job_id}")
     async def get_job(job_id: str):
+        _sweep_jobs(jobs, int(time.time() * 1000))
         rec = jobs.get(job_id)
         if rec is None:
             return _not_found("unknown_job", job_id)
@@ -1250,6 +1310,16 @@ def create_app(*, cors_origins: list[str] | None = None):
             finally:
                 rec.drive_lock.release()
         return _job_dict(rec)
+
+    @app.delete("/v1/jobs/{job_id}")
+    async def delete_job(job_id: str):
+        # No TTL sweep here (unlike submit/GET): a caller naming a specific id is acting on that
+        # id directly, not merely touching the store, so this frees the slot immediately and
+        # unconditionally -- regardless of job state or age -- rather than waiting on the lazy
+        # staleness check submit/GET use to bound unattended growth.
+        if jobs.pop(job_id, None) is None:
+            return _not_found("unknown_job", job_id)
+        return Response(status_code=204)
 
     @app.post("/v1/webhooks/{backend_id}")
     async def webhook(backend_id: str, request: Request):
