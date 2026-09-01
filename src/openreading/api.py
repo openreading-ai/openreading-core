@@ -766,10 +766,15 @@ def reap_expired_now() -> list[str]:
     at `<root>/blobs`, the wall clock for the epoch `reap` compares stamps against — so the two
     sweeps can never disagree about where a run's content lives. No-op (`[]`) when
     `OPENREADING_LEDGER` is unset, the same "arming is env-only, no flag" contract documented on
-    `_arm_ledger_unguarded` — and equally a no-op when it is SET but names something other than a
-    directory (M7 review finding): `LocalFsKeyStore.__init__`'s own `mkdir` raises
-    `NotADirectoryError` given a file for a parent, and a misconfigured startup call must not take
-    the whole server down over a knob a single run-arm request would otherwise just fail on its own.
+    `_arm_ledger_unguarded` — equally a no-op when it is SET but names something other than a
+    directory, and equally a no-op on ANY other `OSError` while constructing the key store or
+    reaping (M7 review finding): `keys` or `blobs` existing as a plain file one level down still
+    makes `LocalFsKeyStore.__init__`'s `mkdir(exist_ok=True)` raise `FileExistsError` (`exist_ok`
+    only suppresses the case where the target is already a directory), and a permissions error is
+    always possible under a root this process doesn't fully control. Fail open: this is a
+    best-effort startup cleanup, not a request a caller is waiting on, so it must never be the
+    reason `create_app` fails to boot — the one attacker-reachable vector, a malformed
+    `retention/*.json` stamp, is already handled inside `reap()` itself and never raises here.
 
     Deliberately outside this module's documented Python API surface (no `__all__` entry, no row
     in the "Exports and return shapes" section above): it is a server operational concern, not a
@@ -781,10 +786,16 @@ def reap_expired_now() -> list[str]:
     ledger_root = Path(root)
     if ledger_root.exists() and not ledger_root.is_dir():
         return []
-    keys = LocalFsKeyStore(ledger_root / "keys")
-    return reap(
-        ledger_root, keys, ledger_root / "blobs", now_epoch_ms=int(RealClock().now_wall_ms())
-    )
+    try:
+        keys = LocalFsKeyStore(ledger_root / "keys")
+        return reap(
+            ledger_root, keys, ledger_root / "blobs", now_epoch_ms=int(RealClock().now_wall_ms())
+        )
+    except OSError:
+        # Fail open (see docstring): keys/blobs existing as a file (FileExistsError from mkdir),
+        # a permissions error under the ledger root, or any other filesystem surprise here must
+        # not take the whole server down over a best-effort startup cleanup.
+        return []
 
 
 def _run_strategy_request(

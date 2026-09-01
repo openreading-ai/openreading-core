@@ -2582,6 +2582,22 @@ def test_create_app_survives_ledger_root_configured_as_a_file(tmp_path, monkeypa
     create_app()  # must not raise
 
 
+def test_create_app_survives_the_keys_subdirectory_existing_as_a_file(tmp_path, monkeypatch):
+    """Fourth M7-review crash path: `OPENREADING_LEDGER` itself is a valid directory (the `is_dir()`
+    fast path in `reap_expired_now` does not catch this), but its `keys` sub-path exists as a plain
+    file rather than a directory. `LocalFsKeyStore.__init__`'s `mkdir(exist_ok=True)` still raises
+    `FileExistsError` in that case — `exist_ok` only suppresses the error when the existing target
+    IS a directory — which used to propagate out of `reap_expired_now`, out of `create_app`, and
+    fail the whole server's startup. Not attacker-reachable, but the same "a broken ledger must
+    never block boot" property every other shape in this finding chain has already been given."""
+    ledger_root = tmp_path / "ledger"
+    ledger_root.mkdir()
+    (ledger_root / "keys").write_bytes(b"x")  # a file where a directory belongs
+    monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
+
+    create_app()  # must not raise
+
+
 def test_caller_auth_multiple_keys_some_scoped_some_not(monkeypatch):
     monkeypatch.setenv("OPENREADING_API_KEYS", "scoped-key-0013,unscoped-key-0013")
     monkeypatch.setenv("OPENREADING_API_KEY_SCOPES", "scoped-key-0013=pymupdf")
