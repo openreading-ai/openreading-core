@@ -58,7 +58,8 @@ is offloaded with run_in_threadpool, and why fastapi is imported at module level
 
 Environment variables this module reads. Server-only (the CLI and Python API ignore them):
 OPENREADING_API_KEYS, OPENREADING_API_KEY_SCOPES, OPENREADING_SERVER_PATH_ROOT,
-OPENREADING_JOB_TTL_S, OPENREADING_MAX_ASYNC_JOBS, OPENREADING_MAX_BODY_BYTES and the three
+OPENREADING_JOB_TTL_S, OPENREADING_MAX_ASYNC_JOBS, OPENREADING_MAX_JOBS_PER_PRINCIPAL,
+OPENREADING_MAX_BODY_BYTES and the three
 compliance attestation knobs. OPENREADING_CONFIG and the backend credential vars are shared with
 the CLI / Python API, which read them through the same strategy loader and EnvCredentialBroker.
   OPENREADING_API_KEYS — comma-separated bearer tokens (_load_api_key_config, once at startup).
@@ -117,6 +118,12 @@ the CLI / Python API, which read them through the same strategy loader and EnvCr
     `rate_limited` before its body is even parsed, let alone an adapter resolved or called.
     `DELETE /v1/jobs/{job_id}` (204, or 404 `unknown_job` — the same envelope GET's own 404 uses)
     frees a slot immediately on any job regardless of state, without waiting on the TTL.
+  OPENREADING_MAX_JOBS_PER_PRINCIPAL — how many of those records ONE configured API key may hold
+    (default 100). `OPENREADING_MAX_ASYNC_JOBS` alone is a single shared counter, so the caller who
+    fills it 429s everyone else; this bounds each key within it. Only in force when
+    OPENREADING_API_KEYS is set — with auth off every request is the same anonymous principal, and
+    metering that would only restate the global cap. The identity metered is a digest of the key
+    (`_principal_id`), never the key.
   OPENREADING_MAX_BODY_BYTES — bytes ceiling for `_BodyLimitMiddleware` (M2), read once at module
     import into the module-level `_MAX_BODY_BYTES` (same pattern as OPENREADING_JOB_TTL_S /
     OPENREADING_MAX_ASYNC_JOBS above) — setting the env var after this module is already imported
@@ -132,6 +139,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import hashlib
 import hmac
 import json
 import mimetypes
@@ -233,8 +241,18 @@ class JobRecord:
     backend: str
     adapter: Any
     job: Job
+    # M4: the SLIM request — `document.bytes_base64`/`password`/`url` and `async.webhook_url`
+    # already nulled (`ledger.header.slim_request`). Never the caller's own object. A record used
+    # to pin the full payload for its whole life, unbounded for a still-running job, and no reader
+    # here ever wanted it: `build_run_context` reads runtime and credential config, and `normalize`
+    # is handed `slim_request(req)` by `_metered` regardless. Same exclusion list the ledger uses,
+    # deliberately — one definition of "what a stored copy of a request may contain".
     req: OpenReadingRequest
     created_ms: int
+    # Which caller's allowance this record spends — an opaque digest, never the token (see
+    # `_principal_id`). None when caller auth is off, which is also when there is no principal to
+    # meter and only the global `_MAX_ASYNC_JOBS` applies.
+    principal: str | None = None
     response: dict[str, Any] | None = None
     error: dict[str, Any] | None = None
     # BL-77/BL-88 history, corrected by BL-92: this WAS the absolute (RealClock-monotonic)
@@ -284,6 +302,21 @@ def _job_dict(rec: JobRecord) -> dict[str, Any]:
 # DEFAULT_DEADLINE_MS) rather than the environment.
 _JOB_TTL_MS = int(os.environ.get("OPENREADING_JOB_TTL_S", "3600")) * 1000
 _MAX_ASYNC_JOBS = int(os.environ.get("OPENREADING_MAX_ASYNC_JOBS", "1000"))
+# M4: `_MAX_ASYNC_JOBS` alone is one counter shared by everyone, so whoever fills it first 429s
+# every other caller — cross-tenant denial of service on any deployment where more than one
+# principal has a key. This is each key's own allowance within that total. Only meaningful when
+# caller auth is on: with no keys configured every request is the same anonymous principal, and
+# metering that would just be `_MAX_ASYNC_JOBS` under another name.
+_MAX_JOBS_PER_PRINCIPAL = int(os.environ.get("OPENREADING_MAX_JOBS_PER_PRINCIPAL", "100"))
+
+
+def _principal_id(key: str) -> str:
+    """A stable, opaque id for a configured API key. A digest, never the key: the job store is
+    long-lived process memory that ends up in a heap dump, a debugger, or a `repr` in a log, and
+    a working credential must not be recoverable from any of them. Truncated because this only
+    ever has to separate a handful of configured keys from each other, never resist preimage
+    search over an unbounded space."""
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 
 def _sweep_jobs(jobs: dict[str, JobRecord], now_ms: int) -> None:
@@ -881,6 +914,9 @@ def create_app(*, cors_origins: list[str] | None = None):
         # everything compliance/routing already allow), matching a disabled-auth request's own
         # `getattr(request.state, "api_key_scope", None)` default exactly.
         request.state.api_key_scope = api_key_config.scopes.get(matched_key)
+        # M4: the per-principal job allowance needs an identity to meter, and this is the only
+        # place a verified one exists. A digest, never `matched_key` itself — see `_principal_id`.
+        request.state.principal = _principal_id(matched_key)
         return await call_next(request)
 
     # M2: registered next (still BEFORE the optional CORS block), same prepend rule as above — CORS
@@ -923,6 +959,20 @@ def create_app(*, cors_origins: list[str] | None = None):
                     "message": (
                         f"async job store is full ({_MAX_ASYNC_JOBS}); retry after jobs expire "
                         "or DELETE finished jobs"
+                    ),
+                }
+            },
+        )
+
+    def _principal_jobs_full():
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": {
+                    "category": "rate_limited",
+                    "message": (
+                        f"this key already has {_MAX_JOBS_PER_PRINCIPAL} async jobs; retry after "
+                        "they expire or DELETE finished ones"
                     ),
                 }
             },
@@ -1322,6 +1372,13 @@ def create_app(*, cors_origins: list[str] | None = None):
         # about to refuse to keep.
         if len(jobs) >= _MAX_ASYNC_JOBS:
             return _job_store_full()
+        # Checked in the same breath as the global cap and for the same reason — before the body
+        # is parsed or a vendor call is spent on a job this store is about to refuse to keep.
+        principal = getattr(request.state, "principal", None)
+        if principal is not None:
+            held = sum(1 for r in jobs.values() if r.principal == principal)
+            if held >= _MAX_JOBS_PER_PRINCIPAL:
+                return _principal_jobs_full()
         try:
             req = await _parse_request(request)
         except Exception as e:  # noqa: BLE001
@@ -1359,7 +1416,14 @@ def create_app(*, cors_origins: list[str] | None = None):
                 state=JobState.SUCCEEDED,
             )
             rec = JobRecord(
-                sjob.id, backend, None, sjob, req, int(time.time() * 1000), response=result
+                sjob.id,
+                backend,
+                None,
+                sjob,
+                slim_request(req),
+                int(time.time() * 1000),
+                principal=principal,
+                response=result,
             )
             jobs[sjob.id] = rec
             return _job_dict(rec)
@@ -1398,8 +1462,11 @@ def create_app(*, cors_origins: list[str] | None = None):
             backend,
             adapter,
             job,
-            req,
+            # Slimmed AFTER submit, never before: `adapter.submit` is the one caller that needs
+            # the real bytes and the real password, and it has already had them by this line.
+            slim_request(req),
             int(time.time() * 1000),
+            principal=principal,
             # BL-77: anchor the drive-deadline to submission, once — not to "now" on every GET.
             deadline_ms=RealClock().now_ms() + DEFAULT_DEADLINE_MS,
         )

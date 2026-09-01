@@ -98,14 +98,19 @@ POST /v1/jobs  /  GET /v1/jobs/{job_id}  /  DELETE /v1/jobs/{job_id}
     deployment needs a shared store, there is no server-side resume, and `OPENREADING_LEDGER`
     (which arms CLI/Python `parse` / `resume`) does not extend to it (internal/design/ledger.md
     §10). Without a `webhook_url` a job runs in POLL mode, driven one slice per GET.
-    Bounded retention (M4): every record — TERMINAL or not — holds the FULL submitted request
-    (base64 document bytes, `document.password` included) and, once terminal, its response, so
-    the store cannot grow without a limit. A TERMINAL record older than `OPENREADING_JOB_TTL_S`
+    Bounded retention (M4): a record holds the SLIM request — `document.bytes_base64`,
+    `document.password`, `document.url` and `async.webhook_url` stripped, the same exclusion the
+    ledger applies before persisting anything — so an in-flight job does not pin its document, or
+    its password, in process memory for as long as it runs. What remains still grows with the
+    number of jobs, so the store is bounded twice over: a TERMINAL record older than
+    `OPENREADING_JOB_TTL_S`
     seconds (default 3600), measured from its own submit time, is deleted the next time ANY
     submit or GET touches the store — lazily, since this process has no scheduler thread; a
     still-running record is never swept, regardless of age. A submit at or over
     `OPENREADING_MAX_ASYNC_JOBS` (default 1000) total records is refused with 429 before its body
-    is even parsed. `DELETE /v1/jobs/{job_id}` removes one record immediately and unconditionally
+    is even parsed, as is one from a key already holding `OPENREADING_MAX_JOBS_PER_PRINCIPAL`
+    (default 100) of them — the global cap alone is one shared counter, so without the per-key
+    allowance the caller who fills it denies the endpoint to every other caller. `DELETE /v1/jobs/{job_id}` removes one record immediately and unconditionally
     — 204, whatever its state — freeing a slot without waiting on the TTL; an unknown id is 404
     `unknown_job`, the identical envelope GET's own unknown-id case returns.
 POST /v1/webhooks/{backend_id}

@@ -338,6 +338,66 @@ def test_route_tier_gated_baa_needs_the_deploy_env_confirmation(client, monkeypa
 # --- async jobs (8.2) ------------------------------------------------------------------
 
 
+def test_a_stored_job_never_retains_the_document_payload(client):
+    """A JobRecord held the FULL submitted request -- base64 document bytes and
+    `document.password` -- for as long as the record existed. A terminal one at least aged out on
+    the TTL; a RUNNING one had no bound at all beyond the global job cap, so a hosted deployment
+    kept every in-flight document, and its password, resident. The record now keeps the request
+    stripped of exactly the fields the ledger already refuses to persist, which is all its
+    remaining readers ever wanted from it."""
+    body = _pdf_body("pymupdf")
+    body["document"]["password"] = "hunter2"
+
+    r = client.post("/v1/jobs", json=body)
+
+    assert r.status_code == 200
+    rec = client.app.state.jobs[r.json()["job_id"]]
+    assert rec.req.document.bytes_base64 is None
+    assert rec.req.document.password is None
+
+
+def test_the_job_cap_is_per_principal_not_only_global(monkeypatch):
+    """`_MAX_ASYNC_JOBS` is one global counter, so a single caller filling the store 429s every
+    other caller — a cross-tenant denial of service the moment more than one principal shares a
+    deployment. Each configured key now carries its own allowance as well."""
+    import openreading.server.app as app_module
+
+    monkeypatch.setenv("OPENREADING_API_KEYS", "key-a,key-b")
+    monkeypatch.setattr(app_module, "_MAX_JOBS_PER_PRINCIPAL", 1)
+    client = TestClient(create_app())
+    a = {"Authorization": "Bearer key-a"}
+    b = {"Authorization": "Bearer key-b"}
+
+    assert client.post("/v1/jobs", json=_pdf_body("pymupdf"), headers=a).status_code == 200
+    spent = client.post("/v1/jobs", json=_pdf_body("pymupdf"), headers=a)
+    other = client.post("/v1/jobs", json=_pdf_body("pymupdf"), headers=b)
+
+    assert spent.status_code == 429
+    assert other.status_code == 200  # one principal's usage must not spend another's allowance
+
+
+def test_a_stored_job_never_records_the_api_key_that_submitted_it(monkeypatch):
+    """The per-principal counter needs an identity, and the obvious one — the bearer token — is a
+    credential. What lands on the record is a digest of it, so a memory dump or a repr of the job
+    store cannot hand back a working key."""
+    import openreading.server.app as app_module
+
+    monkeypatch.setenv("OPENREADING_API_KEYS", "super-secret-key")
+    client = TestClient(create_app())
+
+    r = client.post(
+        "/v1/jobs",
+        json=_pdf_body("pymupdf"),
+        headers={"Authorization": "Bearer super-secret-key"},
+    )
+
+    assert r.status_code == 200
+    rec = client.app.state.jobs[r.json()["job_id"]]
+    assert rec.principal is not None
+    assert "super-secret-key" not in repr(rec.principal)
+    assert rec.principal == app_module._principal_id("super-secret-key")
+
+
 def test_jobs_local_backend_completes_immediately(client):
     r = client.post("/v1/jobs", json=_pdf_body("pymupdf"))
     assert r.status_code == 200
