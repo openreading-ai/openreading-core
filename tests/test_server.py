@@ -322,6 +322,125 @@ def test_compare_under_the_body_cap_is_never_rejected_for_size(client, monkeypat
     assert "exceeds" not in r.json()["error"]["message"]
 
 
+# --- periodic retention sweep (M7) ------------------------------------------------------
+
+
+def test_the_server_starts_a_retention_sweeper_while_it_serves(monkeypatch):
+    """Retention swept at startup and whenever a run armed, and nowhere else — so a server that
+    went quiet held expired ledger content past its own retention ceiling until something
+    happened to wake it. On an idle deployment that is indefinitely, which is a retention policy
+    the operator would have to explain rather than one this code keeps."""
+    import asyncio
+
+    import openreading.server.app as app_module
+
+    started: list[float] = []
+
+    async def _fake(interval):
+        started.append(interval)
+        await asyncio.Event().wait()  # runs until the lifespan cancels it
+
+    monkeypatch.setattr(app_module, "_sweep_retention_forever", _fake)
+    monkeypatch.setenv("OPENREADING_RETENTION_SWEEP_S", "42")
+
+    with TestClient(create_app()):
+        pass
+
+    assert started == [42.0]
+
+
+def test_the_retention_sweeper_is_off_at_a_zero_interval(monkeypatch):
+    """The timer is a deployment knob like every other one, and zero turns it off — for an
+    operator whose retention is enforced by something outside this process."""
+    import asyncio
+
+    import openreading.server.app as app_module
+
+    started: list[float] = []
+
+    async def _fake(interval):
+        started.append(interval)
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(app_module, "_sweep_retention_forever", _fake)
+    monkeypatch.setenv("OPENREADING_RETENTION_SWEEP_S", "0")
+
+    with TestClient(create_app()):
+        pass
+
+    assert started == []
+
+
+def test_a_malformed_sweep_interval_fails_at_startup(monkeypatch):
+    """Same fail-fast contract every other OPENREADING_* deployment value honours: a broken
+    setting refuses to bind a socket rather than surfacing on some later request."""
+    import openreading.server.app as app_module
+
+    monkeypatch.setenv("OPENREADING_RETENTION_SWEEP_S", "every-hour-ish")
+
+    with pytest.raises(app_module.ServerConfigError):
+        create_app()
+
+
+def test_the_retention_sweep_repeats_rather_than_running_once(monkeypatch):
+    """The loop is the whole point — one more sweep at startup would have changed nothing about
+    an idle server."""
+    import asyncio
+
+    import openreading.server.app as app_module
+
+    calls: list[int] = []
+    done = asyncio.Event()
+
+    def _reap():
+        calls.append(1)
+        if len(calls) >= 3:
+            done.set()
+
+    monkeypatch.setattr(app_module.api, "reap_expired_now", _reap)
+
+    async def _run():
+        task = asyncio.create_task(app_module._sweep_retention_forever(0.0))
+        try:
+            await asyncio.wait_for(done.wait(), timeout=10)
+        finally:
+            task.cancel()
+
+    asyncio.run(_run())
+
+    assert len(calls) >= 3
+
+
+def test_a_failing_sweep_does_not_kill_the_loop(monkeypatch):
+    """A sweep that raises must not silently end retention enforcement for the life of the
+    process — the next tick has to come regardless."""
+    import asyncio
+
+    import openreading.server.app as app_module
+
+    calls: list[int] = []
+    done = asyncio.Event()
+
+    def _reap():
+        calls.append(1)
+        if len(calls) >= 3:
+            done.set()
+        raise RuntimeError("ledger root vanished")
+
+    monkeypatch.setattr(app_module.api, "reap_expired_now", _reap)
+
+    async def _run():
+        task = asyncio.create_task(app_module._sweep_retention_forever(0.0))
+        try:
+            await asyncio.wait_for(done.wait(), timeout=10)
+        finally:
+            task.cancel()
+
+    asyncio.run(_run())
+
+    assert len(calls) >= 3
+
+
 def test_route_rejects_document_path_by_default(client, monkeypatch):
     # _parse_request (shared by /v1/route and /v1/jobs) raises ValueError(refusal) so this
     # endpoint's existing except->400 handles it exactly like any other bad body.

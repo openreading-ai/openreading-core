@@ -60,7 +60,7 @@ Environment variables this module reads. Server-only (the CLI and Python API ign
 OPENREADING_API_KEYS, OPENREADING_API_KEY_SCOPES, OPENREADING_SERVER_PATH_ROOT,
 OPENREADING_JOB_TTL_S, OPENREADING_MAX_ASYNC_JOBS, OPENREADING_MAX_JOBS_PER_PRINCIPAL,
 OPENREADING_MAX_BODY_BYTES, OPENREADING_MAX_COMPARE_BYTES,
-OPENREADING_ALLOW_UNSIGNED_WEBHOOKS and the three
+OPENREADING_ALLOW_UNSIGNED_WEBHOOKS, OPENREADING_RETENTION_SWEEP_S and the three
 compliance attestation knobs. OPENREADING_CONFIG and the backend credential vars are shared with
 the CLI / Python API, which read them through the same strategy loader and EnvCredentialBroker.
   OPENREADING_API_KEYS — comma-separated bearer tokens (_load_api_key_config, once at startup).
@@ -85,6 +85,12 @@ the CLI / Python API, which read them through the same strategy loader and EnvCr
     implied type ride along as `mime_type`. The CLI and Python API never read this var —
     `document.path` there names a file the SAME process already trusts, which is why the gate is
     HTTP-only.
+  OPENREADING_RETENTION_SWEEP_S — seconds between ledger retention sweeps while serving
+    (default 3600; `0` disables the timer). The reaper otherwise fires only when a run arms and
+    once at startup, so a server that goes idle holds expired content past its retention ceiling
+    for as long as it stays idle. Parsed at `create_app` — a malformed value is a startup failure,
+    not a silent fall back to the default, because a retention timer nobody noticed had reverted
+    is a policy failure rather than an inconvenience (`_retention_sweep_seconds`).
   OPENREADING_MAX_COMPARE_BYTES — bytes ceiling on a POST /v1/compare body (default 8 MB), read
     once at import. Separate from OPENREADING_MAX_BODY_BYTES because compare is the one endpoint
     whose work is not linear in its input: it runs a pairwise SequenceMatcher matrix, so an
@@ -149,6 +155,7 @@ the CLI / Python API, which read them through the same strategy loader and EnvCr
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import contextlib
 import hashlib
@@ -923,8 +930,67 @@ class _BodyLimitMiddleware:
         await send({"type": "http.response.body", "body": body})
 
 
+_RETENTION_SWEEP_DEFAULT_S = 3600.0
+
+
+def _retention_sweep_seconds() -> float:
+    """Seconds between retention sweeps while the server is serving (default 1 hour; `0` off).
+
+    Read per `create_app`, not once at import, so a test or an embedder can set it before building
+    an app. A malformed value raises `ServerConfigError` from `create_app` — the same fail-at-boot
+    contract `_load_api_key_config` gives the key settings, for the same reason: a retention timer
+    that silently fell back to a default would be a policy failure nobody noticed."""
+    raw = os.environ.get("OPENREADING_RETENTION_SWEEP_S", "").strip()
+    if not raw:
+        return _RETENTION_SWEEP_DEFAULT_S
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        raise ServerConfigError(
+            "OPENREADING_RETENTION_SWEEP_S must be a number of seconds (0 disables the sweep)"
+        ) from None
+
+
+async def _sweep_retention_forever(interval: float) -> None:
+    """Call `api.reap_expired_now()` every `interval` seconds until cancelled.
+
+    M7's remaining half. The reaper fired when a run armed and (since the first pass) once at
+    startup, so a server that went idle held content past its retention ceiling until something
+    happened to wake it — indefinitely, on a deployment that simply gets no traffic for a while.
+    Retention is a promise about elapsed time, so something has to watch the clock.
+
+    Every exception is swallowed and the loop continues: a sweep that failed once — an
+    unreachable ledger root, a transient filesystem error — must not silently end retention
+    enforcement for the life of the process, which is exactly what letting the task die would do.
+    `reap_expired_now` already fails open internally on OSError; this is the backstop for
+    everything else. The sweep itself is filesystem work, so it runs off the event loop.
+    """
+    while True:
+        await asyncio.sleep(interval)
+        with contextlib.suppress(Exception):
+            await run_in_threadpool(api.reap_expired_now)
+
+
+@contextlib.asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Owns the retention sweeper for as long as the process is serving, and cancels it on
+    shutdown so a test client (or a reloading dev server) does not leave one running per app."""
+    interval = app.state.retention_sweep_s
+    task = asyncio.create_task(_sweep_retention_forever(interval)) if interval > 0 else None
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
 def create_app(*, cors_origins: list[str] | None = None):
-    app = FastAPI(title="OpenReading", version=__version__)
+    app = FastAPI(title="OpenReading", version=__version__, lifespan=_lifespan)
+    # Parsed here so a malformed value fails at app construction (AC-7's contract), even though
+    # the sweeper it configures only starts once something actually serves the app.
+    app.state.retention_sweep_s = _retention_sweep_seconds()
     jobs: dict[str, JobRecord] = {}
     app.state.jobs = jobs  # exposed for tests to seed async/webhook jobs offline
     # Idempotency cache for the /v1/parse `auto` chain: one per app, so it lives as long as the
@@ -933,7 +999,9 @@ def create_app(*, cors_origins: list[str] | None = None):
 
     # M7: the ledger's own reap only fires when a NEW run arms (`_arm_ledger`), so a server that
     # goes idle after its last request would otherwise hold expired content past its retention
-    # ceiling until something else happened to run. A no-op when OPENREADING_LEDGER is unset.
+    # ceiling until something else happened to run. This is the sweep at boot; `_lifespan` keeps
+    # one running on a timer thereafter, which is what covers a server that never goes busy again.
+    # A no-op when OPENREADING_LEDGER is unset.
     api.reap_expired_now()
 
     # Strategy config is loaded ONLY from OPENREADING_CONFIG — the server never sniffs its cwd

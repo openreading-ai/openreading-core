@@ -798,8 +798,10 @@ def reap_expired_now() -> list[str]:
     idle since its last request would otherwise hold that run's expired content (encrypted
     document blobs, and the key that unlocks them) past its retention ceiling indefinitely —
     nothing else in this module ever revisits the ledger root unprompted. `server.app.create_app`
-    calls this once at startup so an idle process still enforces expiry on its own, without waiting
-    on the next run to arm; a fully idle CLI-only install still only enforces on its next run.
+    calls this once at startup, and `server.app._sweep_retention_forever` keeps calling it on a
+    timer for as long as the server serves, so a process that never goes busy again still enforces
+    expiry on schedule rather than only when something happens to wake it; a fully idle CLI-only
+    install still only enforces on its next run.
 
     Mirrors `_arm_ledger_unguarded`'s own path construction exactly — keys at `<root>/keys`, blobs
     at `<root>/blobs`, the wall clock for the epoch `reap` compares stamps against — so the two
