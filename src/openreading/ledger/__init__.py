@@ -331,8 +331,14 @@ JSON resolved through the blob store on a replayed one), `status` in `ok | skipp
 only, `journal_seq`, `replayed`. A `failed` outcome -- live or replayed -- always RAISES, the
 recorded `StepError` reconstructed into its taxonomy class (`ComplianceRefused` with
 `constraint=`, else `TerminalError`/`RetryableError`/`UnsupportedFeatureError` by name, unknown
-=> `TerminalError`), so every call site's existing `except (...)` handling works unmodified on
-both paths. Replay is checked before either gate: an outcome once decided replays uniformly even
+=> `TerminalError`), with the ORIGINAL exception's message as the reconstructed exception's own
+message (`StepError.detail`, falling back to `code` -- the taxonomy class name -- when a record
+predates M9's fix or a gate refusal never had a longer message to carry), so every call site's
+existing `except (...)` handling works unmodified on both paths. Known gap: replayed errors carry
+taxonomy + message, not `backend_code`/`retry_after` -- `StepError.code` holds the exception's
+CLASS NAME, not its real `backend_code` value, and `StepError` has no `retry_after` field at all;
+full fidelity needs a `step` schema field addition (the schema-evolution procedure), not done.
+Replay is checked before either gate: an outcome once decided replays uniformly even
 if a live re-check would now differ (credentials that appeared since the original run still
 replay the original skip). `asyncio.CancelledError` out of `run()` (a losing `parallel:` branch)
 gets its own `cancelled` terminal record and is re-raised: without it the step is

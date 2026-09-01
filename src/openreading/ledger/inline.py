@@ -385,7 +385,19 @@ class InlineExecutor:
                         attempt=req.attempt,
                         idempotency_key=req.idempotency_key,
                         content_key=req.content_key,
-                        error=StepError(code=type(exc).__name__, taxonomy=_classify_taxonomy(exc)),
+                        error=StepError(
+                            code=type(exc).__name__,
+                            taxonomy=_classify_taxonomy(exc),
+                            # M9 (security review): the ORIGINAL message, not just the taxonomy
+                            # class name — `_reconstruct_error`'s own `err.detail or err.code`
+                            # fallback otherwise has nothing but the type name to rebuild a
+                            # replayed exception's message from, silently changing client-visible
+                            # retry/behavior decisions. `_sanitizer_scrub` (below `exec`, wrapping
+                            # this whole record) already walks `error.detail` for secret values —
+                            # this text passes through that same chokepoint before it ever reaches
+                            # the journal.
+                            detail=str(exc),
+                        ),
                         ended_epoch_ms=int(self._clock.now_wall_ms()),
                     )
                 )

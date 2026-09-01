@@ -715,6 +715,82 @@ def test_exception_taxonomy_is_classified_not_hardcoded():
     assert journal2.results[-1].error.taxonomy == "TerminalError"
 
 
+def test_exception_message_is_recorded_as_the_step_errors_detail():
+    # M9 (security review): `StepError.detail` was left unpopulated at this record site — replay
+    # had only `code=type(exc).__name__` (a taxonomy CLASS NAME, e.g. "TerminalError") to
+    # reconstruct a message from, silently discarding the original text. This is the record-side
+    # half; test_ledger_replay.py's own "...reconstructs the original exception message..." proves
+    # the round trip through replay.
+    class SpyJournal:
+        def __init__(self):
+            self.results = []
+
+        def append(self, result):
+            self.results.append(result)
+
+        def get(self, ref):
+            return []
+
+    journal = SpyJournal()
+    ex = InlineExecutor(journal=journal, blobs=None, registry=None, clock=RealClock())
+    req = StepRequest(
+        step_id="s1",
+        run_id="r1",
+        kind="submit",
+        step_path="root",
+        step_seq=0,
+        attempt=1,
+        backend_id="fake",
+    )
+
+    def boom():
+        raise TerminalError("quota exceeded for tenant-42", backend_code="quota")
+
+    with pytest.raises(TerminalError):
+        asyncio.run(ex.exec(req, run=boom))
+    assert journal.results[-1].error.detail == "quota exceeded for tenant-42"
+
+
+def test_a_secret_embedded_in_an_exceptions_message_is_scrubbed_from_the_recorded_detail(tmp_path):
+    """M9's own security-critical half: `detail=str(exc)` records the exception's raw text
+    verbatim — an adapter that echoes a live secret value back in its error text (a vendor 401
+    body quoting the key it rejected, for instance) must never get to plant that secret on disk.
+    `_sanitizer_scrub` already walks `StepResult.error.detail` (built for
+    `_missing_credentials_gate`'s own `detail=`, Ledger T3 §4.3b) — this proves the SAME
+    chokepoint covers the new `except Exception` call site too, with a real on-disk read, not just
+    a `Sanitizer`-class unit test."""
+    journal = JsonlJournal(tmp_path / "run1.jsonl")
+    secret = "sk-live-canary-9f3a"
+    ex = InlineExecutor(
+        journal=journal,
+        blobs=None,
+        registry=None,
+        clock=RealClock(),
+        sanitizer=Sanitizer(frozenset({secret})),
+    )
+    req = StepRequest(
+        step_id="s1",
+        run_id="run1",
+        kind="submit",
+        step_path="root",
+        step_seq=0,
+        attempt=1,
+        backend_id="fake",
+    )
+
+    def boom():
+        raise TerminalError(f"upstream rejected key {secret}", backend_code="auth_rejected")
+
+    with pytest.raises(TerminalError):
+        asyncio.run(ex.exec(req, run=boom))
+
+    on_disk = (tmp_path / "run1.jsonl").read_bytes()
+    assert secret.encode() not in on_disk, (
+        "a secret echoed in an exception message must never reach the journal"
+    )
+    assert b"upstream rejected key" in on_disk  # the safe portion of the message still lands
+
+
 def test_step_result_payload_rejects_a_set_rather_than_silently_coercing_to_a_list():
     # F7: JsonValue's list[Any] arm otherwise accepts any iterable, silently turning a set into a
     # list rather than raising, against the design's own "never Any... must raise" framing.
