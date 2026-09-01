@@ -6,6 +6,7 @@ from __future__ import annotations
 import pytest
 
 from openreading.router import FakeClock, await_result, backoff_ms
+from openreading.router.driver import MAX_CONSECUTIVE_FAULTS
 from openreading.types import Job, JobState, WaitMode
 from openreading.types.errors import RetryableError
 from openreading.types.request import OpenReadingRequest
@@ -102,6 +103,54 @@ async def test_healthy_long_running_job_is_not_terminated_by_the_fault_counter()
     out = await await_result(a, job, ctx=CTX, deadline_ms=1e9, clock=clock)
     assert out.state is JobState.SUCCEEDED
     assert out.attempts == 0  # never faulted, so the counter never engaged
+
+
+async def test_intermittent_faults_do_not_exhaust_a_long_running_healthy_job():
+    # M8: `max_consecutive_faults` must bound a CONSECUTIVE fault streak, as its name promises —
+    # not a lifetime total. Script 2 * MAX_CONSECUTIVE_FAULTS fault/healthy-poll pairs: cumulative
+    # faults (2x the budget) would exhaust a lifetime counter, but no run of CONSECUTIVE faults
+    # ever exceeds 1 because a healthy nonterminal poll always follows each fault. The job must
+    # still reach SUCCEEDED — today (pre-fix) the cumulative count exhausts the budget partway
+    # through and this raises instead.
+    clk = FakeClock()
+    total_cycles = 2 * MAX_CONSECUTIVE_FAULTS
+    calls = {"n": 0}
+
+    class AlternatingFaultAdapter:
+        def poll(self, job, ctx):
+            calls["n"] += 1
+            cycle = (calls["n"] + 1) // 2  # calls 1&2 -> cycle 1, calls 3&4 -> cycle 2, ...
+            if cycle > total_cycles:
+                job.state = JobState.SUCCEEDED
+                return job
+            if calls["n"] % 2 == 1:  # first call of the cycle: a transient fault
+                raise RetryableError("transient", retry_after=0.001)
+            job.next_poll_at = clk.now_ms() + 1.0  # second call: healthy, still running
+            return job
+
+    job = Job(
+        id="omjob_test",
+        backend_id="alternating-fake",
+        wait_mode=WaitMode.POLL,
+        state=JobState.RUNNING,
+        next_poll_at=0.0,
+    )
+    out = await await_result(AlternatingFaultAdapter(), job, ctx=CTX, deadline_ms=1e9, clock=clk)
+    assert out.state is JobState.SUCCEEDED
+    # every cycle made 2 calls (fault + healthy), plus the final call that returned success
+    assert calls["n"] == 2 * total_cycles + 1
+    # the streak was reset after every healthy poll, so it never carried past a single fault
+    assert out.attempts == 0
+
+
+async def test_max_consecutive_faults_plus_one_in_a_row_still_raises():
+    # Regression guard for the fix above: the reset must fire ONLY on a healthy nonterminal poll.
+    # MAX_CONSECUTIVE_FAULTS + 1 faults with NOTHING healthy between them is a genuine consecutive
+    # exhaustion and must still raise -- the budget is consecutive, not disabled.
+    a = PollFake(polls_needed=1, flaky=MAX_CONSECUTIVE_FAULTS + 1)
+    clock = FakeClock()
+    with pytest.raises(RetryableError):
+        await await_result(a, a.submit(REQ, CTX), ctx=CTX, deadline_ms=1e18, clock=clock)
 
 
 async def test_webhook_wait_mode_degrades_straight_to_polling():

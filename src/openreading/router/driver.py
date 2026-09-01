@@ -104,6 +104,13 @@ async def await_result(
             job.next_poll_at = clk.now_ms() + backoff_ms(job.attempts, e.retry_after)
             if job.attempts > max_consecutive_faults:
                 raise
+        else:
+            if not job.is_terminal():
+                # BL-169/M8: a healthy poll ends the fault streak -- the budget is CONSECUTIVE, as
+                # the parameter name promises; a cumulative count would let unrelated blips hours
+                # apart, on an otherwise-healthy long-running job, add up to an exhaustion none of
+                # them individually came close to.
+                job.attempts = 0
         # TerminalError / UnsupportedFeatureError propagate out unchanged.
 
         # Progress guard: a still-running job MUST schedule a future poll. A misbehaving
