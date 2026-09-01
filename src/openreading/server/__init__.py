@@ -50,6 +50,11 @@ POST /v1/compare
     a backend. `baseline` is a subject label or an extra response; `truth` an evals `expected`
     dict. Malformed body or fewer than two valid responses → 400. Two batch envelopes compare
     the same way (corpus report). See `openreading.comparison`.
+    Limit (M2): `responses` longer than `server.app._MAX_COMPARE_RESPONSES` (50) is REJECTED with
+    400 naming count and limit, checked before the comparison engine runs — its pairwise
+    `SequenceMatcher` diff is O(n²) in the response count, the same unauthenticated-caller
+    CPU-amplification shape `/v1/batch`'s MAX_BATCH_DOCUMENTS already guards against. Constant,
+    not an env knob: nobody legitimately compares more responses than there are backends.
 POST /v1/batch
     Body: {"documents": [<request.document>, ...], "backend"?, "jobs"?} plus the shared fields
     `outputs`, `extraction_schema`, `features`, `pages`, `compliance`, applied to every item.
@@ -163,7 +168,11 @@ HTTP status codes
      reach (`scope_denied`) — an out-of-scope top pick is rerouted to an in-scope fallback, not
      refused, so this fires only when no in-scope backend is left
 404  unknown backend id / unknown job id (GET or DELETE)
-413  document exceeds the size limit (`doc_too_large`)
+413  document exceeds the size limit (`doc_too_large`); OR (M2) the request BODY itself exceeds
+     `OPENREADING_MAX_BODY_BYTES` — `server.app._BodyLimitMiddleware` answers this one straight
+     off the transport, before routing or body parsing, so it carries the same envelope shape and
+     `doc_too_large` backend_code but never the request-specific detail the parsed-document case
+     can give
 422  requested feature the backend cannot produce (`unsupported_feature`)
 424  a directly-named backend is missing credentials (`missing_credentials`; `missing_env[]`
      names them) or its key was found and REJECTED by the provider (`auth_rejected`; the

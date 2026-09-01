@@ -1632,6 +1632,95 @@ def test_malformed_json_body_is_400(client, monkeypatch, path):
     assert r.json()["error"]["category"] == "bad_request"
 
 
+# --- M2: transport request-body cap + compare collection cap ---------------------------
+
+
+def test_request_body_over_declared_content_length_is_413(monkeypatch):
+    # Content-Length path: _BodyLimitMiddleware must 413 BEFORE the app ever reads the body.
+    # A monkeypatched-tiny cap plus a real oversized JSON payload proves the declared-length
+    # leg fires without needing an actual 150MB body in the test.
+    import openreading.server.app as app_module
+
+    monkeypatch.setattr(app_module, "_MAX_BODY_BYTES", 100)
+    app = create_app()
+    client = TestClient(app)
+    oversized = json.dumps({"document": {"bytes_base64": "A" * 1000}}).encode()
+    assert len(oversized) > 100  # the whole point: a real body over the (tiny) cap
+
+    r = client.post("/v1/parse", content=oversized, headers={"content-type": "application/json"})
+
+    assert r.status_code == 413
+    body = r.json()
+    assert body["error"]["backend_code"] == "doc_too_large"
+    assert "too large" in body["error"]["message"]
+
+
+def test_request_body_under_cap_is_unaffected(monkeypatch):
+    # A small body under a small cap must pass straight through the middleware — proves the
+    # 413 above is about SIZE, not a middleware that rejects every request.
+    import openreading.server.app as app_module
+
+    monkeypatch.setattr(app_module, "_MAX_BODY_BYTES", 1_000_000)
+    client = TestClient(create_app())
+
+    r = client.post("/v1/compare", json={"nope": 1})
+
+    assert r.status_code == 400  # the existing shape-check 400, not a 413
+    assert r.json()["error"]["category"] == "bad_request"
+
+
+def test_chunked_body_over_cap_is_cut_off(monkeypatch):
+    # The no-Content-Length (chunked) leg: best-effort by design (class docstring) — it disconnects
+    # mid-stream rather than answering a clean 413, and what the app does with a disconnected
+    # receive is whatever Starlette's own Request.stream() does with one (here: the truncated body
+    # fails JSON decoding, a 400). The one thing that MUST hold regardless of the exact status is
+    # the security property this middleware exists for: an oversized streamed body is never fully
+    # buffered and accepted. Proven against a body that would otherwise SUCCEED (a real, complete,
+    # valid pymupdf parse request, streamed a slice at a time so httpx/TestClient never precomputes
+    # a Content-Length and this leg — not the declared-length fast path above — is what runs): if
+    # the cutoff did nothing, this would be a 200, so a non-200 here is the cutoff actually firing,
+    # not just "the request happened to be malformed."
+    import openreading.server.app as app_module
+
+    raw = json.dumps(_pdf_body("pymupdf")).encode()
+    monkeypatch.setattr(app_module, "_MAX_BODY_BYTES", len(raw) // 2)
+    client = TestClient(app_module.create_app())
+
+    def chunks():
+        step = 2000
+        for i in range(0, len(raw), step):
+            yield raw[i : i + step]
+
+    r = client.post("/v1/parse", content=chunks(), headers={"content-type": "application/json"})
+
+    assert r.status_code != 200
+
+
+def test_compare_over_ceiling_is_400_naming_count_and_limit(client):
+    from openreading.server.app import _MAX_COMPARE_RESPONSES
+
+    responses = [{"id": i} for i in range(_MAX_COMPARE_RESPONSES + 1)]
+    r = client.post("/v1/compare", json={"responses": responses})
+    assert r.status_code == 400
+    body = r.json()
+    assert body["error"]["category"] == "bad_request"
+    assert str(_MAX_COMPARE_RESPONSES + 1) in body["error"]["message"]
+    assert str(_MAX_COMPARE_RESPONSES) in body["error"]["message"]
+
+
+def test_compare_at_ceiling_is_not_rejected_for_count_alone(client):
+    # Boundary check: exactly _MAX_COMPARE_RESPONSES must not be rejected by the count guard
+    # itself. These placeholder dicts are not valid response envelopes, so the request still
+    # ends up 400 — but on schema validation of input #1, not on the count message, which
+    # proves the request got PAST the count check.
+    from openreading.server.app import _MAX_COMPARE_RESPONSES
+
+    responses = [{"id": i} for i in range(_MAX_COMPARE_RESPONSES)]
+    r = client.post("/v1/compare", json={"responses": responses})
+    assert r.status_code == 400
+    assert "too many responses" not in r.json()["error"]["message"]
+
+
 # --- /v1/batch (Manifest v0.6) ----------------------------------------------------------
 
 

@@ -7,8 +7,15 @@ docstring; this one covers how the app enforces it and what it reads from the en
 HTTP status mapping (D-v2-8). Exceptions raised by the router/adapters are mapped in ONE place,
 _error_envelope (wrapped by _error_response):
   403 ComplianceRefused / no eligible backend · 424 missing credentials (named backend) or
-  `auth_rejected` · 413 doc too large · 422 unsupported feature · 400 unknown_strategy · 504
-  retryables exhausted / deadline · 502 PlanExhaustedError / other terminal · 500 anything else.
+  `auth_rejected` · 413 doc too large (TerminalError, `doc_too_large`) · 422 unsupported feature ·
+  400 unknown_strategy · 504 retryables exhausted / deadline · 502 PlanExhaustedError / other
+  terminal · 500 anything else.
+A second, earlier 413 predates all of this (M2): `_BodyLimitMiddleware`, a pure-ASGI middleware
+wrapping the whole app, answers it straight off the transport when a declared Content-Length
+exceeds `_MAX_BODY_BYTES` — before routing, before `_error_envelope`, before FastAPI even starts
+parsing the request. Same envelope shape and the same `doc_too_large` backend_code as the
+TerminalError case above (a caller reacts to either the same way: send less data), even though
+this one fires on raw bytes never decoded into a document at all.
 Request-shape and lookup failures never become exceptions, so they bypass _error_envelope and are
 built by small JSONResponse helpers inside create_app: 400 bad_request (body not JSON, fails the
 request schema, bad `jobs` / `timeout_s`) via _bad_request; 404 unknown_backend via
@@ -51,9 +58,9 @@ is offloaded with run_in_threadpool, and why fastapi is imported at module level
 
 Environment variables this module reads. Server-only (the CLI and Python API ignore them):
 OPENREADING_API_KEYS, OPENREADING_API_KEY_SCOPES, OPENREADING_SERVER_PATH_ROOT,
-OPENREADING_JOB_TTL_S, OPENREADING_MAX_ASYNC_JOBS and the three compliance attestation knobs.
-OPENREADING_CONFIG and the backend credential vars are shared with the CLI / Python API, which
-read them through the same strategy loader and EnvCredentialBroker.
+OPENREADING_JOB_TTL_S, OPENREADING_MAX_ASYNC_JOBS, OPENREADING_MAX_BODY_BYTES and the three
+compliance attestation knobs. OPENREADING_CONFIG and the backend credential vars are shared with
+the CLI / Python API, which read them through the same strategy loader and EnvCredentialBroker.
   OPENREADING_API_KEYS — comma-separated bearer tokens (_load_api_key_config, once at startup).
     Unset/empty ⇒ caller auth OFF, every endpoint open. An empty ENTRY (stray/trailing comma)
     raises ServerConfigError at startup rather than being dropped: a key is security-bearing and
@@ -106,6 +113,12 @@ read them through the same strategy loader and EnvCredentialBroker.
     `rate_limited` before its body is even parsed, let alone an adapter resolved or called.
     `DELETE /v1/jobs/{job_id}` (204, or 404 `unknown_job` — the same envelope GET's own 404 uses)
     frees a slot immediately on any job regardless of state, without waiting on the TTL.
+  OPENREADING_MAX_BODY_BYTES — bytes ceiling for `_BodyLimitMiddleware` (M2), read once at
+    `create_app` time. Unset ⇒ 150 MiB (157286400): the 100 MB document cap, base64-inflated by
+    ~4/3, plus headroom for the surrounding JSON envelope. A declared Content-Length over the cap
+    ⇒ 413 before the app reads any of the body; a chunked/undeclared-length body is only cut off
+    mid-stream once the running total passes the cap, which degrades to whatever the app does with
+    a disconnected receive rather than a clean 413 (best-effort — see `_BodyLimitMiddleware`).
 """
 
 from __future__ import annotations
@@ -185,6 +198,13 @@ _ADAPTER_ERRORS = (
 # (the CLI's own directory-expansion default, M4 — internal/design/batch-intake.md:98-100) rather
 # than a second, independently-hardcoded literal, so the two limits cannot drift apart.
 MAX_BATCH_DOCUMENTS = DEFAULT_MAX_ITEMS
+
+# M2: the ceiling on POST /v1/compare's `responses[]`. Compare is pure CPU (no adapter, no
+# credential, no network) — its whole cost is the pairwise `SequenceMatcher` diff the comparison
+# engine runs over every pair, O(n^2) in the response count. A constant, not an env knob: nobody
+# legitimately compares more responses than there are backends to produce them, so there is no
+# deployment for which this ceiling should ever need raising.
+_MAX_COMPARE_RESPONSES = 50
 
 
 @dataclass
@@ -670,6 +690,71 @@ def _error_response(exc: Exception):
     return JSONResponse(status_code=status, content={"error": env})
 
 
+# M2: every endpoint does `await request.json()` with no transport-level ceiling, so an
+# unauthenticated caller could hand the ASGI server an arbitrarily large body and have it fully
+# buffered into memory before any handler (let alone compliance/schema validation) ever runs.
+# 150 MB: the 100 MB document cap (`doc_too_large`, TerminalError) base64-inflates a binary
+# document by ~4/3, plus headroom for the surrounding JSON envelope.
+_MAX_BODY_BYTES = int(os.environ.get("OPENREADING_MAX_BODY_BYTES", str(150 * 1024 * 1024)))
+
+
+class _BodyLimitMiddleware:
+    """Pure ASGI (no BaseHTTPMiddleware): counts request-body bytes as they arrive and answers 413
+    before the app ever buffers an oversized body. Content-Length is honored when present — the
+    robust leg, since it rejects before a single body byte is read. A chunked/undeclared-length
+    body has no upfront count to check, so it is only cut off mid-stream once the running total
+    passes the cap (`http.disconnect` in place of the next chunk) — best-effort: whatever the app
+    does with a disconnected receive (typically its own JSON-decode failure) is acceptable, since
+    the goal here is bounding memory/CPU, not guaranteeing a clean 413 on every leg.
+    """
+
+    def __init__(self, app, max_bytes: int) -> None:
+        self.app, self.max = app, max_bytes
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        declared = dict(scope.get("headers") or []).get(b"content-length")
+        if declared and declared.isdigit() and int(declared) > self.max:
+            return await self._too_large(send)
+        seen = 0
+
+        async def counted_receive():
+            nonlocal seen
+            message = await receive()
+            if message["type"] == "http.request":
+                seen += len(message.get("body", b""))
+                if seen > self.max:
+                    return {"type": "http.disconnect"}
+            return message
+
+        await self.app(scope, counted_receive, send)
+        # If the app saw a disconnect mid-body it has already ended its own response; nothing to
+        # send here for that case — see the class docstring on why that leg is best-effort.
+
+    async def _too_large(self, send):
+        body = json.dumps(
+            {
+                "error": {
+                    "category": "terminal",
+                    "message": "request body too large",
+                    "backend_code": "doc_too_large",
+                }
+            }
+        ).encode()
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 413,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
+
+
 def create_app(*, cors_origins: list[str] | None = None):
     app = FastAPI(title="OpenReading", version=__version__)
     jobs: dict[str, JobRecord] = {}
@@ -713,6 +798,12 @@ def create_app(*, cors_origins: list[str] | None = None):
         # `getattr(request.state, "api_key_scope", None)` default exactly.
         request.state.api_key_scope = api_key_config.scopes.get(matched_key)
         return await call_next(request)
+
+    # M2: registered next (still BEFORE the optional CORS block), same prepend rule as above — CORS
+    # stays outermost of all three when configured, so even a 413 this middleware raises still
+    # picks up CORS headers for a legitimate cross-origin browser caller to read. Outer to
+    # _caller_auth so an oversized body is rejected before spending even a cheap token comparison.
+    app.add_middleware(_BodyLimitMiddleware, max_bytes=_MAX_BODY_BYTES)
 
     if cors_origins:
         from fastapi.middleware.cors import CORSMiddleware
@@ -921,6 +1012,15 @@ def create_app(*, cors_origins: list[str] | None = None):
             return _bad_request(f"invalid JSON body: {e}")
         if not isinstance(body, dict) or not isinstance(body.get("responses"), list):
             return _bad_request('body must be {"responses": [...], "baseline"?, "truth"?}')
+        # M2: reject BEFORE the comparison engine ever runs — its pairwise SequenceMatcher diff is
+        # O(n^2) in len(responses), so an uncapped list is a CPU-amplification primitive reachable
+        # by an unauthenticated caller, the same shape of risk /v1/batch's MAX_BATCH_DOCUMENTS
+        # guards against.
+        if len(body["responses"]) > _MAX_COMPARE_RESPONSES:
+            return _bad_request(
+                f"too many responses to compare "
+                f"({len(body['responses'])} > {_MAX_COMPARE_RESPONSES})"
+            )
         from openreading.comparison import CompareInputError
         from openreading.comparison import compare as _compare
 
