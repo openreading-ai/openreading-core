@@ -146,15 +146,18 @@ def reap(root: Path, keys: Any, blobs_root: Path, *, now_epoch_ms: int) -> list[
     """Destroys the key (and removes the blob directory) for every stamped run past its ceiling.
     The journal file itself is left in place — audit metadata survives erasure by design (§9.4).
 
-    M7 review finding: a stamp is untrusted persisted input, same thesis as the run_id containment
-    check below — an unreadable file, invalid JSON, a stamp missing a required key, or one of the
-    wrong top-level type (e.g. a JSON array, from a hand-edited file or a future schema change) is
-    skipped, not raised, so one corrupted stamp can never abort the whole sweep. Checking `run_id`'s
-    shape while trusting `expires_epoch_ms` to simply be present would be the same gap in a
-    different field. That mattered less when the only caller was `_arm_ledger` (one failed
-    run-arm request); `api.reap_expired_now` now calls this from `server.app.create_app` at
-    startup, where an unhandled exception here would otherwise take the entire server down before
-    it served a single request."""
+    M7 review finding: a stamp is untrusted persisted input. EVERY step that decides whether a
+    stamp names something to reap — parsing it, reading its two required fields, comparing its
+    expiry, validating its run_id's shape — can fail on data this process didn't write itself
+    (hand-edited, truncated, from a future schema, or simply wrong), so all of those steps share
+    ONE try/except rather than each getting its own ad hoc guard: any stamp this function can't
+    fully make sense of is skipped, never raised, and one corrupted stamp can never abort the whole
+    sweep. That mattered less when the only caller was `_arm_ledger` (one failed run-arm request);
+    `api.reap_expired_now` now calls this from `server.app.create_app` at startup, where an
+    unhandled exception here would otherwise take the entire server down before it served a single
+    request. The actual reap actions below (`keys.destroy`, `shutil.rmtree`, the stamp file's own
+    unlink) stay OUTSIDE the try — a real deletion failure there must surface, not vanish into the
+    same catch-and-skip an untrusted stamp gets."""
     stamp_dir = root / "retention"
     if not stamp_dir.exists():
         return []
@@ -164,17 +167,17 @@ def reap(root: Path, keys: Any, blobs_root: Path, *, now_epoch_ms: int) -> list[
             stamp = json.loads(stamp_file.read_text(encoding="utf-8"))
             expires_epoch_ms = stamp["expires_epoch_ms"]
             run_id = stamp["run_id"]
+            if expires_epoch_ms > now_epoch_ms:
+                continue  # not yet expired — not an error, just nothing to do for this stamp
+            if not isinstance(run_id, str) or not VALID_RUN_ID.fullmatch(run_id):
+                continue  # malformed/tampered run_id — not an error either, same "skip it" outcome
         except (OSError, ValueError, KeyError, TypeError):
-            # Unreadable, malformed, or incomplete stamp — missing a key, or `stamp` itself isn't
-            # a mapping (TypeError on the subscript, e.g. a JSON array) — can't tell its expiry,
-            # so leave it for a human rather than guessing (no `.get()` default: `None` still
-            # TypeErrors against `now_epoch_ms`, and defaulting to 0 would auto-reap an ambiguous
-            # stamp instead of refusing to touch it).
+            # Unreadable, malformed, incomplete, or wrong-typed stamp — including a non-numeric
+            # expires_epoch_ms, which fails the comparison above rather than the key read — can't
+            # be trusted, so leave it for a human rather than guessing (no `.get()` default:
+            # `None` still TypeErrors against `now_epoch_ms`, and defaulting to 0 would auto-reap
+            # an ambiguous stamp instead of refusing to touch it).
             continue
-        if expires_epoch_ms > now_epoch_ms:
-            continue
-        if not isinstance(run_id, str) or not VALID_RUN_ID.fullmatch(run_id):
-            continue  # malformed/tampered stamp: leave it for a human, delete nothing
         target = (blobs_root / run_id).resolve()
         if not (target.is_relative_to(blobs_root.resolve()) and target != blobs_root.resolve()):
             continue
