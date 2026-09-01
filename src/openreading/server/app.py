@@ -72,13 +72,17 @@ the CLI / Python API, which read them through the same strategy loader and EnvCr
     OPENREADING_API_KEYS is empty) ⇒ ServerConfigError at startup, naming the setting and the
     entry position, never the value.
   OPENREADING_SERVER_PATH_ROOT — a directory `document.path` may resolve beneath, checked per
-    request by `_document_path_refusal`. Unset (the default) refuses every `document.path` at
+    request by `_gate_document_path`. Unset (the default) refuses every `document.path` at
     every caller-body ingress (/v1/parse, /v1/route, /v1/jobs, /v1/batch): HTTP turns a local
     field naming a file into a remote file-read primitive, so it stays off until an operator
     opts in. When set, a path must resolve (symlinks followed first) to a regular file under this
-    directory; a link that escapes it is refused the same as a literal `..`. The CLI and Python
-    API never read this var — `document.path` there names a file the SAME process already
-    trusts, which is why the gate is HTTP-only.
+    directory; a link that escapes it is refused the same as a literal `..`. An accepted file is
+    then READ AT THE GATE and the request carries its bytes onward — no backend ever re-opens the
+    path, so the file cannot be swapped between the check and the read — which bounds it by the
+    same size ceiling a URL document obeys (`api._MAX_DOWNLOAD_BYTES`) and makes the filename's
+    implied type ride along as `mime_type`. The CLI and Python API never read this var —
+    `document.path` there names a file the SAME process already trusts, which is why the gate is
+    HTTP-only.
   OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE — `1`/`true`/`yes` lets UNVERIFIED compliance fields
     survive the router's compliance stage. Unset (or anything else) ⇒ fail closed: unverified
     is eliminated. The one switch that widens the eligible set; leave it off without a reason.
@@ -126,10 +130,13 @@ the CLI / Python API, which read them through the same strategy loader and EnvCr
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import hmac
 import json
+import mimetypes
 import os
+import stat
 import threading
 import time
 import uuid
@@ -268,7 +275,7 @@ def _job_dict(rec: JobRecord) -> dict[str, Any]:
 # scheduler thread, so sweeping is lazy: _sweep_jobs runs at the top of every submit/GET call
 # rather than on a timer. Plain module globals, read once when this module is imported (the same
 # effective timing as process startup for `openreading serve`) rather than per-request like
-# _server_router_config/_document_path_refusal below: a malformed value should fail at boot, not
+# _server_router_config/_gate_document_path below: a malformed value should fail at boot, not
 # crash unpredictably on the first job request that happens to touch it (the same reasoning
 # _load_api_key_config gives for parsing OPENREADING_API_KEYS once in create_app, AC-7) — and
 # unlike those two, _sweep_jobs is a plain top-level function with no `app` closure to cache a
@@ -375,28 +382,97 @@ def _server_router_config() -> RouterConfig:
     )
 
 
-def _document_path_refusal(req: OpenReadingRequest) -> str | None:
+class _GatedFileRefused(Exception):
+    """`_read_gated_file` will not hand back this file. Its message is caller-facing (it becomes a
+    400 body), so it names the failure and never the server-side detail behind it."""
+
+
+def _read_gated_file(target: Path) -> bytes:
+    """Open `target` and read it, or raise `_GatedFileRefused`.
+
+    `O_NOFOLLOW` is the point of doing this by hand rather than with `Path.read_bytes()`.
+    `resolve(strict=True)` never returns a path whose final component is a symlink, so if one is
+    a symlink HERE it was swapped in after containment was proved — the exact TOCTOU this whole
+    function exists to shut. Refusing it is right; following it would defeat the containment
+    check entirely. (`O_NOFOLLOW` covers the final component only. An intermediate directory in
+    an already-resolved path would have to be replaced by a directory symlink in the same
+    instant, which needs write access inside the operator's own document root and a far narrower
+    race than the one being closed here.)
+
+    The size ceiling is `api._MAX_DOWNLOAD_BYTES` — read through the module so a test can
+    monkeypatch it — because this is the same act a URL document already performs: materialize an
+    external reference into bytes this process holds. Read to the cap PLUS ONE rather than
+    trusting `st_size`, which a writer can grow between the stat and the read.
+    """
+    try:
+        fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        raise _GatedFileRefused(
+            "document.path could not be opened as a regular file under OPENREADING_SERVER_PATH_ROOT"
+        ) from None
+    with os.fdopen(fd, "rb") as fh:
+        # On the fd, not the path: this is the object actually opened, so nothing can be
+        # substituted between the check and the read. A FIFO would otherwise block here forever.
+        if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+            raise _GatedFileRefused("document.path must resolve to a regular file")
+        cap = api._MAX_DOWNLOAD_BYTES
+        data = fh.read(cap + 1)
+    if len(data) > cap:
+        raise _GatedFileRefused(f"document.path exceeds {cap} bytes")
+    return data
+
+
+def _gate_document_path(req: OpenReadingRequest) -> tuple[str | None, OpenReadingRequest]:
     """`document.path` names a file on the SERVER — on the HTTP surface that is a remote
     file-read primitive, so it is off unless the operator names a directory to serve from.
     Containment is proved on the resolved path (symlinks followed first), so a link that
-    escapes the root is refused the same as a literal `..`."""
+    escapes the root is refused the same as a literal `..`.
+
+    Returns `(refusal_or_None, request)`. On success the returned request no longer carries a
+    `document.path` at all: the file is READ HERE and the request comes back holding its bytes,
+    the same shape a URL document takes once `api.materialize_document` has fetched it. That is
+    what closes the check-then-open TOCTOU — the gate used to prove containment and then leave
+    the adapter to open the path a long way downstream (past routing, credential resolution and
+    a threadpool hop), and anything able to write inside the document root could swap the checked
+    file for a symlink in that window and be handed a file outside it. The bytes the backend
+    parses are now the bytes containment was proved for, and a swap afterwards changes nothing.
+
+    Reading here costs the file's size in memory (plus its base64 inflation) for the life of the
+    request, bounded by the same ceiling a URL document obeys — see `_read_gated_file`. The
+    filename's implied type is carried over into `mime_type` when the caller sent none, because
+    the filename is the only format signal a path carries and reading discards it.
+    """
     p = req.document.path
     if p is None:
-        return None
+        return None, req
     root = os.environ.get("OPENREADING_SERVER_PATH_ROOT")
     if not root:
         return (
             "document.path is not accepted over HTTP; send bytes_base64 or url, or set "
             "OPENREADING_SERVER_PATH_ROOT to serve files beneath a directory of your choosing"
-        )
+        ), req
     root_resolved = Path(root).resolve()
     try:
         target = Path(p).resolve(strict=True)
     except OSError:
-        return f"document.path {p!r} does not resolve to a readable file"
+        return f"document.path {p!r} does not resolve to a readable file", req
     if not (target.is_relative_to(root_resolved) and target.is_file()):
-        return "document.path must resolve to a regular file under OPENREADING_SERVER_PATH_ROOT"
-    return None
+        return (
+            "document.path must resolve to a regular file under OPENREADING_SERVER_PATH_ROOT",
+            req,
+        )
+    try:
+        data = _read_gated_file(target)
+    except _GatedFileRefused as e:
+        return str(e), req
+    doc = req.document.model_copy(
+        update={
+            "path": None,
+            "bytes_base64": base64.b64encode(data).decode(),
+            "mime_type": req.document.mime_type or mimetypes.guess_type(target.name)[0],
+        }
+    )
+    return None, req.model_copy(update={"document": doc})
 
 
 class ServerConfigError(Exception):
@@ -865,8 +941,10 @@ def create_app(*, cors_origins: list[str] | None = None):
         schemas.validate_request(body)  # vendored request schema (raises → 400)
         req = OpenReadingRequest.model_validate(body)
         # Shared by /v1/route and /v1/jobs — a ValueError here lands in each caller's own
-        # existing except→400, so this one gate covers both ingress points.
-        refusal = _document_path_refusal(req)
+        # existing except→400, so this one gate covers both ingress points. The request it
+        # RETURNS is the gated one: a rooted document.path has already been read into bytes by
+        # this point, so nothing downstream ever holds a path to re-open (see _gate_document_path).
+        refusal, req = _gate_document_path(req)
         if refusal is not None:
             raise ValueError(refusal)
         return req
@@ -953,7 +1031,7 @@ def create_app(*, cors_origins: list[str] | None = None):
             req = OpenReadingRequest.model_validate(body)
         except Exception as e:  # noqa: BLE001 — any validation failure is a 400
             return _bad_request(str(e))
-        refusal = _document_path_refusal(req)
+        refusal, req = _gate_document_path(req)
         if refusal is not None:
             return _bad_request(refusal)
         # BL-159 AC-3: scope-gate BEFORE run_request ever constructs an adapter or resolves a
@@ -1182,7 +1260,7 @@ def create_app(*, cors_origins: list[str] | None = None):
                     item_req = OpenReadingRequest.model_validate(
                         {"document": doc, "backend": {"id": backend}, **shared}
                     )
-                    refusal = _document_path_refusal(item_req)
+                    refusal, item_req = _gate_document_path(item_req)
                     if refusal is not None:
                         raise ValueError(refusal)
                 except Exception:  # noqa: BLE001 — an unbuildable item is run_batch's own M6
@@ -1210,7 +1288,7 @@ def create_app(*, cors_origins: list[str] | None = None):
             # M6: raising here (rather than checking earlier) lets _run_item's own per-item
             # isolation turn a refused document.path into a `failed` item, never aborting the
             # rest of the batch — the same containment as any other bad item.
-            refusal = _document_path_refusal(req)
+            refusal, req = _gate_document_path(req)
             if refusal is not None:
                 raise ValueError(refusal)
             return api.run_request(

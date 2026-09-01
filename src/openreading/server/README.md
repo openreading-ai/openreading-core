@@ -317,7 +317,8 @@ sample through `/v1/parse` and `/v1/batch`, asserts schema-valid responses, and 
   avoids a caller turning a JSON field naming a file into a way to read anything the server
   process can open. `OPENREADING_SERVER_PATH_ROOT` is the explicit opt-in, and containment is
   proved on the resolved path, so a symlink pointing outside that directory cannot escape it
-  either. `openreading.server.app._document_path_refusal` enforces it.
+  either, and the file is read at the gate so no backend re-opens a path that could have been
+  swapped meanwhile. `openreading.server.app._gate_document_path` enforces it.
 - Tokens, keys and compliance attestations come from the environment only, never a body or a
   flag. A compliance attestation is the operator's declaration that a backend meets a requirement,
   such as a signed business associate agreement (BAA). Nothing lands in `ps` or shell history, and
