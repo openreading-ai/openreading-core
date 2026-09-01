@@ -110,8 +110,8 @@ def run_leaderboard(
     # was called with — so every backend's run_dataset call loads the identical case sequence.
     first = reports[backend_ids[0]]
     case_names = [r.name for r in first.results]
-    for bid, report in reports.items():
-        names = [r.name for r in report.results]
+    for bid, backend_report in reports.items():
+        names = [r.name for r in backend_report.results]
         if names != case_names:
             raise ValueError(
                 f"backend {bid!r} scored a different case sequence than {backend_ids[0]!r} "

@@ -480,7 +480,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, cast
 
 from openreading.credentials import DEFAULT_DEADLINE_MS, EnvCredentialBroker, build_run_context
 from openreading.ledger.header import slim_request
@@ -2159,8 +2159,17 @@ async def _eval_paged_cascade(node: dict[str, Any], path: str, ctx: _WalkCtx) ->
             budget_ms = max(1, int(deadline_ms - ctx.clock.now_ms()))
             result = await _get_executor(ctx).exec(
                 _step_request(ctx, spath, backend, adapter.descriptor, req_i),
-                run=lambda adapter=adapter, req_i=req_i, budget_ms=budget_ms: _execute_leaf_sync(
-                    adapter, req_i, ctx.broker, ctx.clock, budget_ms
+                # cast: the default-arg trick captures this iteration's adapter/req_i/budget_ms by
+                # value (else every rung's closure would read the LAST loop iteration's values —
+                # the classic late-binding bug), but the extra defaulted params make mypy unable to
+                # match this lambda against exec's `Callable[[], Any]` on its own (a known mypy
+                # limitation, not a real type mismatch: called with zero args, as exec does, it
+                # satisfies that signature exactly).
+                run=cast(
+                    Callable[[], Any],
+                    lambda adapter=adapter, req_i=req_i, budget_ms=budget_ms: _execute_leaf_sync(
+                        adapter, req_i, ctx.broker, ctx.clock, budget_ms
+                    ),
                 ),
             )
         except (TerminalError, RetryableError, UnsupportedFeatureError, ComplianceRefused) as e:
@@ -2719,7 +2728,7 @@ def _resolve_backend(slug: str, ctx: _WalkCtx) -> str | None:
     type added later that resolves a backend without going through the prune — silently reopens
     the hole. Failing closed here means it cannot.
     """
-    resolved = slug
+    resolved: str | None = slug
     if slug == "auto":
         resolved = next((c for c in ctx.eligible if c not in ctx.attempted), None)
         if resolved is None:

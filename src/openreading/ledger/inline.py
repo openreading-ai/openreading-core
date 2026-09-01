@@ -189,6 +189,7 @@ class InlineExecutor:
         if not self._pinned_eligible or req.backend_id is None:
             return None
         pinned_digest = self._pinned_eligible.get(req.backend_id)
+        code: str | None
         if pinned_digest is None:
             code = "not_in_pinned_set"
         else:
