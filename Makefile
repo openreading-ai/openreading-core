@@ -1,4 +1,4 @@
-.PHONY: verify lint typecheck typecheck-mypy test schema-validate extras-parity smoke strategy-smoke compare-smoke leaderboard-smoke serve-smoke verify-live sync clean
+.PHONY: verify lint typecheck typecheck-mypy test schema-validate extras-parity smoke strategy-smoke compare-smoke leaderboard-smoke serve-smoke audit verify-live sync clean
 
 # `make verify` is the gate: nothing red gets committed.
 verify: lint typecheck test schema-validate extras-parity smoke strategy-smoke compare-smoke leaderboard-smoke
@@ -86,6 +86,22 @@ leaderboard-smoke:
 # assert schema-valid, shut down. Not in `verify` (uses a localhost socket); run explicitly.
 serve-smoke:
 	uv run python scripts/serve_smoke.py
+
+# Dependency vulnerability audit (finding M1): queries the OSV/PyPI advisory DB against the
+# resolved lock's third-party dependencies. Not in `verify` — it needs network, so it is a build
+# gate, not part of the offline suite. Blocking on purpose: a vulnerable lock with no CI signal is
+# exactly how PYSEC-2026-3655/3656 (pypdf) and PYSEC-2026-3552 (cryptography) sat unnoticed —
+# Dependabot alone left the lock in place. Audits `uv export`'s output rather than the live
+# environment on purpose: pip-audit's `--strict` treats ANY skipped dependency as fatal — including
+# this project's own editable-installed package (uv installs the checkout that way, and an
+# unpublished local package can't be looked up on PyPI) — so auditing the live environment makes
+# `--strict` fail on every run regardless of real vulnerabilities. `--no-emit-project` keeps that
+# self-reference out of the exported list entirely, so `--strict` only ever fires on a genuine
+# third-party finding. The escape hatch for an advisory with no released fix is an explicit
+# `--ignore-vuln <ID>` argument added in a commit whose body says why, never a silent skip.
+audit:
+	uv export --format requirements.txt --all-extras --no-emit-project > "$${TMPDIR:-/tmp}/audit-requirements.txt"
+	uv run --with pip-audit pip-audit --strict -r "$${TMPDIR:-/tmp}/audit-requirements.txt"
 
 # Live lane: run ONLY the @pytest.mark.live tests. Each skips cleanly unless its backend's env
 # keys are present (`-rs` surfaces the skip reasons). Never part of the offline `verify` gate.

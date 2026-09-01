@@ -20,7 +20,7 @@ dependencies = [
     "pydantic>=2.7",
     "jsonschema>=4.21",
     "pyyaml>=6.0",     # MIT — safe_load only, lazy-imported for the optional openreading.yaml (D-v3-1)
-    "pypdf>=4.0",      # BSD — PDF-layer signal probe (scan/text-source); pymupdf (AGPL) never in core (D-v3-4)
+    "pypdf>=6.15.0",   # BSD — PDF-layer signal probe (scan/text-source); pymupdf (AGPL) never in core (D-v3-4)
 ]
 
 [project.optional-dependencies]
