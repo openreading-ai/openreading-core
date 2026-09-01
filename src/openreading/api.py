@@ -367,7 +367,7 @@ def validate_policy(policy: Any) -> dict[str, Any] | None:
             f"unknown policy key{plural}: {', '.join(named)}; valid keys: {', '.join(POLICY_KEYS)}"
         )
     try:
-        # strict=: the HTTP surface type-checks the same values against request.v0.1.json BEFORE
+        # strict=: the HTTP surface type-checks the same values against request.v0.2.json BEFORE
         # pydantic sees them, and JSON Schema does not coerce. Without strict=, `require_baa:
         # "yes"` would be accepted here and rejected over HTTP — the same divergence in a new place.
         Compliance.model_validate(

@@ -43,13 +43,21 @@ Validate anything programmatically with ``validate_request`` / ``validate_respon
 on the way in and responses on the way out; the CLI validates before printing. Inspect any
 backend's descriptor with ``make_adapter(id).descriptor.to_schema_dict()``.
 
-Request (``request.v0.1.json``)
+Request (``request.v0.2.json``)
 -------------------------------
-Required: ``document`` and ``backend``; ``additionalProperties: false`` (unknown keys are
-rejected — D7: deployment knobs such as ``allow_unverified_compliance`` therefore live on
-``RouterConfig``, never on the wire). Optional blocks: ``schema_version`` (const ``"0.1"``),
-``outputs``, ``features``, ``pages``, ``extraction_schema``, ``routing``, ``compliance``,
-``async``, ``idempotency_key``.
+Required: ``document`` and ``backend``; ``additionalProperties: false`` at the top level AND at
+every nested object node — ``document``, ``backend``, ``backend.runtime``, ``outputs``,
+``outputs.chunking``, ``extraction_schema``, ``features``, ``pages``, ``pages.ranges[]``,
+``routing``, ``compliance``, ``async`` (unknown keys are rejected — D7: deployment knobs such as
+``allow_unverified_compliance`` therefore live on ``RouterConfig``, never on the wire). The one
+deliberate exception is ``extraction_schema.json_schema``'s VALUE, an arbitrary caller-supplied
+JSON Schema the wire contract does not shape. Nested strictness is v0.2 (M12): v0.1 closed the
+top level only, so a misspelled nested field such as ``document.mim_type`` passed schema
+validation and failed only later, at the pydantic layer (``openreading.types.request``, already
+``extra="forbid"`` throughout) — the vendored schema stopped being the source of truth exactly
+where nesting began. Optional blocks: ``schema_version`` (const ``"0.2"``), ``outputs``,
+``features``, ``pages``, ``extraction_schema``, ``routing``, ``compliance``, ``async``,
+``idempotency_key``.
 
 - ``document``: exactly ONE of ``bytes_base64`` (the router may spool/upload where a backend needs
   storage, e.g. Textract's S3 flow), ``url`` (passed through to backends declaring
@@ -311,8 +319,9 @@ Versioning rules
   response, comparison-report, batch-result, corpus-report, leaderboard-report and
   liveness-report REQUIRE a ``schema_version`` const — the in-band const is the only version
   signal a consumer gets (no HTTP header carries it); request's ``schema_version`` is optional
-  (const ``"0.1"``) with the newest as the documented default (making it required would be
-  optional-to-required = MAJOR, deferred); adapter-descriptor, step and journal have none;
+  (each file's own const; ``"0.2"`` in the newest) with the newest as the documented default
+  (making it required would be optional-to-required = MAJOR, deferred); adapter-descriptor,
+  step and journal have none;
   strategy-config keeps its own integer ``version`` const (1 in both v0.1 and v0.2). Two
   ``$id`` shapes coexist and both are permanent (released files are immutable): the slash form
   ``https://openreading.ai/schemas/<family>/vX.Y.json`` on request, response, strategy-config
@@ -402,6 +411,7 @@ The labels below are milestone names, not released package versions: ``pyproject
 - 0.6.0 "Manifest": batch-result v0.1, corpus-report v0.1, adapter-descriptor v0.4.
 - 0.7.0 "Pulse" / "Plain": liveness-report v0.1, adapter-descriptor v0.5, strategy-config v0.2.
 - Ledger: adapter-descriptor v0.6 and v0.7, step v0.1, journal v0.1, leaderboard-report v0.1.
+- Security review (M12): request v0.2.
 
 Schema version history (oldest first)
 -------------------------------------
@@ -454,6 +464,17 @@ Schema version history (oldest first)
   implements) and journal v0.1 (the per-line shape of a run's JSONL journal): two new families.
 - Ledger T4a — adapter-descriptor v0.7 (additive over v0.6): optional ``protocol_version``
   integer; the pydantic model requires it so the registry can refuse pre-T4a adapters.
+- Security review (M12) — request v0.2 (Changed, a named strengthening, not merely additive):
+  ``additionalProperties: false`` now closes every nested object node, not only the top level
+  (document, backend, backend.runtime, outputs, outputs.chunking, extraction_schema, features,
+  pages, pages.ranges[], routing, compliance, async), matching the pydantic mirrors'
+  ``extra="forbid"``. Before this, a misspelled nested field such as ``document.mim_type`` passed
+  schema validation and only failed later, at the pydantic layer, contradicting "schemas are the
+  source of truth" (AGENTS.md). ``extraction_schema.json_schema``'s VALUE is deliberately excluded
+  — it is an arbitrary caller-supplied JSON Schema, not a field of this contract. Under 0.x this
+  rides the MINOR slot per the channel-semantics rule (named here, not shipped silently); a
+  caller who was relying on an unknown nested key being silently ignored is the only one affected,
+  and no such caller could pass pydantic construction anyway. request.v0.1.json is unchanged.
 """
 
 from __future__ import annotations
@@ -465,7 +486,10 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
-REQUEST_SCHEMA_FILE = "request.v0.1.json"
+# v0.2 (Security review, M12): additionalProperties:false now closes every nested object node,
+# not only the top level, matching the pydantic mirrors' extra="forbid" — additive+Changed over
+# v0.1 (§6/§8; see "Schema version history" above for the full rationale).
+REQUEST_SCHEMA_FILE = "request.v0.2.json"
 # v0.3 (Canon): named channel invariants (C1-C11 in $defs descriptions), confidence bounds [0,1]
 # on TableCell/Page/doc_type/Citation, + document.confidence / channel_provenance / schema_url,
 # and the const-fix for the v0.1/0.2 version-identity drift. Additive+Changed over v0.2 (§6/§8).

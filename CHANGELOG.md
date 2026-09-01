@@ -16,6 +16,22 @@ All notable changes to OpenReading are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed — the request schema now forbids unknown fields at every nesting level (M12)
+
+`request.v0.1.json` set `additionalProperties: false` at the top level only, while the pydantic
+request models (`openreading.types.request`) were already `extra="forbid"` at every level. A
+misspelled NESTED field — `document.mim_type` for `mime_type`, say — passed schema validation and
+was rejected only later, at the pydantic layer, which is exactly the drift "schemas are the source
+of truth" (`AGENTS.md`) exists to rule out.
+
+`request.v0.2.json` adds `additionalProperties: false` to the 12 nested object nodes the schema was
+missing it on: `document`, `backend`, `backend.runtime`, `outputs`, `outputs.chunking`,
+`extraction_schema`, `features`, `pages`, `pages.ranges[]`, `routing`, `compliance`, `async`.
+`extraction_schema.json_schema`'s own value is deliberately left open — it holds an arbitrary
+caller-supplied JSON Schema, not a field this contract shapes. `request.v0.1.json` is unchanged and
+stays byte-frozen; `REQUEST_SCHEMA_FILE` and the `OpenReadingRequest.schema_version` default now
+point at v0.2.
+
 ### Fixed — a compliance policy is now validated, on every surface
 
 A `--policy` file or a `policy=` argument was an unvalidated dict. `_apply_policy` split it into

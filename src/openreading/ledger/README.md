@@ -113,7 +113,7 @@ jq -c '{strategy_name, config_hash, plan_hash, journal_version, slim_request}' .
 ```json
 {"step_id":"bcfe2aac…","status":"attempted","attempt":1,"run_id":"769d5f06-…","step_path":"root.steps[0]","step_seq":0,"backend_id":"pymupdf","idempotency_key":"om_868044b9…","content_key":"om_868044b9…","started_epoch_ms":1788036714842,"journal_seq":0}
 {"step_id":"bcfe2aac…","status":"ok","attempt":1,"run_id":"769d5f06-…","step_path":"root.steps[0]","step_seq":0,"backend_id":"pymupdf","idempotency_key":"om_868044b9…","content_key":"om_868044b9…","payload":{"run_id":"769d5f06-…","digest":"sha256:49e166b7…","size_bytes":17091,"media_type":"application/json","store":"localfs"},"ended_epoch_ms":1788036714899,"journal_seq":1}
-{"strategy_name":"offline_first","config_hash":"sha256:4b081150…","plan_hash":"sha256:3e0803c8…","journal_version":1,"slim_request":{"backend":{"id":"strategy:offline_first"},"document":{"filename":"sample.pdf","mime_type":"application/pdf"},"schema_version":"0.1"}}
+{"strategy_name":"offline_first","config_hash":"sha256:4b081150…","plan_hash":"sha256:3e0803c8…","journal_version":1,"slim_request":{"backend":{"id":"strategy:offline_first"},"document":{"filename":"sample.pdf","mime_type":"application/pdf"},"schema_version":"0.2"}}
 ```
 
 **You should see** two journal lines that share one `step_id`. The `attempted` line is written

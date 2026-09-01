@@ -1,4 +1,4 @@
-"""NormalizedRequest — the pydantic mirror of request.v0.1.json.
+"""NormalizedRequest — the pydantic mirror of request.v0.2.json.
 
 `async` is a Python keyword, so the field is `async_` with alias `"async"`; build requests
 with `OpenReadingRequest(..., **{"async": {...}})` or set `.async_`. `to_schema_dict()`
@@ -167,7 +167,10 @@ class AsyncSpec(BaseModel):
 class OpenReadingRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    schema_version: str = "0.1"
+    # "0.2": the newest request schema file's const (schemas.REQUEST_SCHEMA_FILE); C12 pins this
+    # default to match it. Every nested model here was already extra="forbid" — v0.2 only taught
+    # the wire schema the same rule, so this default bump carries no behavior change of its own.
+    schema_version: str = "0.2"
     document: DocumentInput
     backend: BackendSpec
     outputs: Outputs | None = None

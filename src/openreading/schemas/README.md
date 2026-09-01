@@ -35,7 +35,7 @@ uv run python -m openreading.schemas validate
 **You should see:**
 
 ```
-schemas: request.v0.1.json OK, response.v0.3.json OK, adapter-descriptor.v0.7.json OK, … journal.v0.1.json OK
+schemas: request.v0.2.json OK, response.v0.3.json OK, adapter-descriptor.v0.7.json OK, … journal.v0.1.json OK
 fixtures: 0 checked, 0 invalid
 ```
 
@@ -60,7 +60,7 @@ which a backend declares its formats, its environment variables and its complian
 
 | family | current file | constant | validator | in-band version |
 |---|---|---|---|---|
-| request | `request.v0.1.json` | `REQUEST_SCHEMA_FILE` | `validate_request` | optional `schema_version` const `"0.1"` |
+| request | `request.v0.2.json` | `REQUEST_SCHEMA_FILE` | `validate_request` | optional `schema_version` const `"0.2"` |
 | response | `response.v0.3.json` | `RESPONSE_SCHEMA_FILE` | `validate_response` | required `schema_version` const `"0.3"` |
 | adapter-descriptor | `adapter-descriptor.v0.7.json` | `DESCRIPTOR_SCHEMA_FILE` | `validate_descriptor` | none, filename and `$id` only |
 | strategy-config | `strategy-config.v0.2.json` | `STRATEGY_CONFIG_SCHEMA_FILE` | `validate_strategy_config` | required integer `version` const `1` |
@@ -292,7 +292,7 @@ run.
 ## Versions
 
 A request and a response carry different version numbers, so never copy one into the other. A
-request carries `schema_version: "0.1"` and a response carries `"0.3"`. They are different
+request carries `schema_version: "0.2"` and a response carries `"0.3"`. They are different
 families with different numbers. Sending `"0.3"` in a request to `openreading serve` returns
 HTTP 400.
 
