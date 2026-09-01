@@ -291,6 +291,156 @@ def test_gate_keeps_the_documents_type_when_it_replaces_the_path_with_bytes(monk
     assert gated.document.mime_type == "image/png"
 
 
+def test_compare_refuses_a_body_bigger_than_the_text_it_would_diff(client, monkeypatch):
+    """`_MAX_COMPARE_RESPONSES` bounds how MANY responses are compared, never how large each one
+    is. Compare is a pairwise SequenceMatcher matrix — quadratic per pair, and 50 responses is
+    1225 pairs, each diffed twice (once over tokens, once over characters) — so a handful of
+    multi-megabyte responses is CPU amplification for one unauthenticated POST, comfortably
+    inside the global body cap. The bound that actually matters is on the text."""
+    import openreading.server.app as app_module
+
+    monkeypatch.setattr(app_module, "_MAX_COMPARE_BODY_BYTES", 512)
+
+    r = client.post("/v1/compare", json={"responses": [{"text": "b" * 4096}]})
+
+    assert r.status_code == 400
+    assert "exceeds" in r.json()["error"]["message"]
+
+
+def test_compare_under_the_body_cap_is_never_rejected_for_size(client, monkeypatch):
+    """The cap refuses; it never truncates. A body under it reaches the comparison engine and is
+    diffed in full — these placeholder dicts are not valid response envelopes, so this still ends
+    up 400, but on their shape rather than on their size, which is what proves the size gate let
+    them through."""
+    import openreading.server.app as app_module
+
+    monkeypatch.setattr(app_module, "_MAX_COMPARE_BODY_BYTES", 10_000)
+
+    r = client.post("/v1/compare", json={"responses": [{"id": 1}, {"id": 2}]})
+
+    assert r.status_code == 400
+    assert "exceeds" not in r.json()["error"]["message"]
+
+
+# --- periodic retention sweep (M7) ------------------------------------------------------
+
+
+def test_the_server_starts_a_retention_sweeper_while_it_serves(monkeypatch):
+    """Retention swept at startup and whenever a run armed, and nowhere else — so a server that
+    went quiet held expired ledger content past its own retention ceiling until something
+    happened to wake it. On an idle deployment that is indefinitely, which is a retention policy
+    the operator would have to explain rather than one this code keeps."""
+    import asyncio
+
+    import openreading.server.app as app_module
+
+    started: list[float] = []
+
+    async def _fake(interval):
+        started.append(interval)
+        await asyncio.Event().wait()  # runs until the lifespan cancels it
+
+    monkeypatch.setattr(app_module, "_sweep_retention_forever", _fake)
+    monkeypatch.setenv("OPENREADING_RETENTION_SWEEP_S", "42")
+
+    with TestClient(create_app()):
+        pass
+
+    assert started == [42.0]
+
+
+def test_the_retention_sweeper_is_off_at_a_zero_interval(monkeypatch):
+    """The timer is a deployment knob like every other one, and zero turns it off — for an
+    operator whose retention is enforced by something outside this process."""
+    import asyncio
+
+    import openreading.server.app as app_module
+
+    started: list[float] = []
+
+    async def _fake(interval):
+        started.append(interval)
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(app_module, "_sweep_retention_forever", _fake)
+    monkeypatch.setenv("OPENREADING_RETENTION_SWEEP_S", "0")
+
+    with TestClient(create_app()):
+        pass
+
+    assert started == []
+
+
+def test_a_malformed_sweep_interval_fails_at_startup(monkeypatch):
+    """Same fail-fast contract every other OPENREADING_* deployment value honours: a broken
+    setting refuses to bind a socket rather than surfacing on some later request."""
+    import openreading.server.app as app_module
+
+    monkeypatch.setenv("OPENREADING_RETENTION_SWEEP_S", "every-hour-ish")
+
+    with pytest.raises(app_module.ServerConfigError):
+        create_app()
+
+
+def test_the_retention_sweep_repeats_rather_than_running_once(monkeypatch):
+    """The loop is the whole point — one more sweep at startup would have changed nothing about
+    an idle server."""
+    import asyncio
+
+    import openreading.server.app as app_module
+
+    calls: list[int] = []
+    done = asyncio.Event()
+
+    def _reap():
+        calls.append(1)
+        if len(calls) >= 3:
+            done.set()
+
+    monkeypatch.setattr(app_module.api, "reap_expired_now", _reap)
+
+    async def _run():
+        task = asyncio.create_task(app_module._sweep_retention_forever(0.0))
+        try:
+            await asyncio.wait_for(done.wait(), timeout=10)
+        finally:
+            task.cancel()
+
+    asyncio.run(_run())
+
+    assert len(calls) >= 3
+
+
+def test_a_failing_sweep_does_not_kill_the_loop(monkeypatch):
+    """A sweep that raises must not silently end retention enforcement for the life of the
+    process — the next tick has to come regardless."""
+    import asyncio
+
+    import openreading.server.app as app_module
+
+    calls: list[int] = []
+    done = asyncio.Event()
+
+    def _reap():
+        calls.append(1)
+        if len(calls) >= 3:
+            done.set()
+        raise RuntimeError("ledger root vanished")
+
+    monkeypatch.setattr(app_module.api, "reap_expired_now", _reap)
+
+    async def _run():
+        task = asyncio.create_task(app_module._sweep_retention_forever(0.0))
+        try:
+            await asyncio.wait_for(done.wait(), timeout=10)
+        finally:
+            task.cancel()
+
+    asyncio.run(_run())
+
+    assert len(calls) >= 3
+
+
 def test_route_rejects_document_path_by_default(client, monkeypatch):
     # _parse_request (shared by /v1/route and /v1/jobs) raises ValueError(refusal) so this
     # endpoint's existing except->400 handles it exactly like any other bad body.
@@ -336,6 +486,66 @@ def test_route_tier_gated_baa_needs_the_deploy_env_confirmation(client, monkeypa
 
 
 # --- async jobs (8.2) ------------------------------------------------------------------
+
+
+def test_a_stored_job_never_retains_the_document_payload(client):
+    """A JobRecord held the FULL submitted request -- base64 document bytes and
+    `document.password` -- for as long as the record existed. A terminal one at least aged out on
+    the TTL; a RUNNING one had no bound at all beyond the global job cap, so a hosted deployment
+    kept every in-flight document, and its password, resident. The record now keeps the request
+    stripped of exactly the fields the ledger already refuses to persist, which is all its
+    remaining readers ever wanted from it."""
+    body = _pdf_body("pymupdf")
+    body["document"]["password"] = "hunter2"
+
+    r = client.post("/v1/jobs", json=body)
+
+    assert r.status_code == 200
+    rec = client.app.state.jobs[r.json()["job_id"]]
+    assert rec.req.document.bytes_base64 is None
+    assert rec.req.document.password is None
+
+
+def test_the_job_cap_is_per_principal_not_only_global(monkeypatch):
+    """`_MAX_ASYNC_JOBS` is one global counter, so a single caller filling the store 429s every
+    other caller — a cross-tenant denial of service the moment more than one principal shares a
+    deployment. Each configured key now carries its own allowance as well."""
+    import openreading.server.app as app_module
+
+    monkeypatch.setenv("OPENREADING_API_KEYS", "key-a,key-b")
+    monkeypatch.setattr(app_module, "_MAX_JOBS_PER_PRINCIPAL", 1)
+    client = TestClient(create_app())
+    a = {"Authorization": "Bearer key-a"}
+    b = {"Authorization": "Bearer key-b"}
+
+    assert client.post("/v1/jobs", json=_pdf_body("pymupdf"), headers=a).status_code == 200
+    spent = client.post("/v1/jobs", json=_pdf_body("pymupdf"), headers=a)
+    other = client.post("/v1/jobs", json=_pdf_body("pymupdf"), headers=b)
+
+    assert spent.status_code == 429
+    assert other.status_code == 200  # one principal's usage must not spend another's allowance
+
+
+def test_a_stored_job_never_records_the_api_key_that_submitted_it(monkeypatch):
+    """The per-principal counter needs an identity, and the obvious one — the bearer token — is a
+    credential. What lands on the record is a digest of it, so a memory dump or a repr of the job
+    store cannot hand back a working key."""
+    import openreading.server.app as app_module
+
+    monkeypatch.setenv("OPENREADING_API_KEYS", "super-secret-key")
+    client = TestClient(create_app())
+
+    r = client.post(
+        "/v1/jobs",
+        json=_pdf_body("pymupdf"),
+        headers={"Authorization": "Bearer super-secret-key"},
+    )
+
+    assert r.status_code == 200
+    rec = client.app.state.jobs[r.json()["job_id"]]
+    assert rec.principal is not None
+    assert "super-secret-key" not in repr(rec.principal)
+    assert rec.principal == app_module._principal_id("super-secret-key")
 
 
 def test_jobs_local_backend_completes_immediately(client):
@@ -1417,7 +1627,12 @@ def test_webhook_metered_redacts_a_secret_in_a_plain_normalize_crash(monkeypatch
 # --- webhook cross-backend / event-key scoping (BL-66) ---------------------------------
 
 
-def _seed_chunkr_webhook_job(app):
+# M5: every seeded webhook job carries the callback token a real submit would have issued, so
+# these tests exercise the authenticated path a genuine vendor callback takes.
+_TEST_CALLBACK_TOKEN = "tok-correct-0123456789"
+
+
+def _seed_chunkr_webhook_job(app, callback_token=_TEST_CALLBACK_TOKEN):
     import time
     from pathlib import Path
 
@@ -1437,12 +1652,14 @@ def _seed_chunkr_webhook_job(app):
     # A real created_ms, not the usual placeholder 0: the caller's own GET after the webhook
     # resolves this job to terminal would otherwise fall outside the TTL sweep's window (M4).
     created_ms = int(time.time() * 1000)
-    app.state.jobs[job.id] = JobRecord(job.id, "chunkr", adapter, job, req, created_ms)
+    app.state.jobs[job.id] = JobRecord(
+        job.id, "chunkr", adapter, job, req, created_ms, callback_token=callback_token
+    )
     fixture = json.loads((Path(__file__).parent / "fixtures" / "chunkr" / "parse.json").read_text())
     return job.id, fixture
 
 
-def _seed_open_ocr_webhook_job(app):
+def _seed_open_ocr_webhook_job(app, callback_token=_TEST_CALLBACK_TOKEN):
     import time
     from pathlib import Path
 
@@ -1462,9 +1679,133 @@ def _seed_open_ocr_webhook_job(app):
     # A real created_ms, not the usual placeholder 0: the caller's own GET after the webhook
     # resolves this job to terminal would otherwise fall outside the TTL sweep's window (M4).
     created_ms = int(time.time() * 1000)
-    app.state.jobs[job.id] = JobRecord(job.id, "open-ocr", adapter, job, req, created_ms)
+    app.state.jobs[job.id] = JobRecord(
+        job.id, "open-ocr", adapter, job, req, created_ms, callback_token=callback_token
+    )
     fixture = json.loads((Path(__file__).parent / "fixtures" / "open-ocr" / "ocr.json").read_text())
     return job.id, fixture
+
+
+# --- webhook authentication for backends with no signature (M5) -------------------------
+
+
+def test_unsigned_webhook_without_a_callback_token_is_refused():
+    """chunkr and open-ocr declare no `webhook_secret` and have no signature mechanism, so every
+    event they send used to be trusted on a `task_id` alone — an identifier the vendor puts in
+    URLs and logs, not a secret. Anyone who learned or guessed one could forge a completion, and
+    on a shared deployment forge it into someone else's job. Without the per-job callback token
+    the server issued, the event is unauthenticated and refused."""
+    app = create_app()
+    client = TestClient(app)
+    job_id, fixture = _seed_chunkr_webhook_job(app)
+
+    r = client.post("/v1/webhooks/chunkr", content=json.dumps({"task_id": "task_wh_1"}))
+
+    assert r.status_code == 401
+    assert client.get(f"/v1/jobs/{job_id}").json()["state"] == "running"
+
+
+def test_unsigned_webhook_with_the_wrong_callback_token_is_refused():
+    """The token is compared, not merely required."""
+    app = create_app()
+    client = TestClient(app)
+    job_id, _ = _seed_chunkr_webhook_job(app)
+
+    r = client.post(
+        "/v1/webhooks/chunkr?ort=tok-guessed-9876543210",
+        content=json.dumps({"task_id": "task_wh_1"}),
+    )
+
+    assert r.status_code == 401
+    assert client.get(f"/v1/jobs/{job_id}").json()["state"] == "running"
+
+
+def test_unsigned_webhook_with_the_right_callback_token_completes_the_job():
+    """The token proves the event came back down a URL only this server and the vendor ever saw,
+    which is the whole authentication story for a backend that cannot sign."""
+    app = create_app()
+    client = TestClient(app)
+    job_id, fixture = _seed_chunkr_webhook_job(app)
+
+    r = client.post(
+        f"/v1/webhooks/chunkr?ort={_TEST_CALLBACK_TOKEN}",
+        content=json.dumps({"task_id": "task_wh_1", "data": fixture}),
+    )
+
+    assert r.status_code == 200
+    assert r.json()["state"] == "succeeded"
+
+
+def test_unsigned_webhooks_can_be_opted_back_in(monkeypatch):
+    """Failing closed breaks any deployment whose vendor strips query parameters from the
+    callback URL it was given. The escape hatch is explicit and named, like every other
+    OPENREADING_* widening — and it restores exactly the old, forgeable behaviour."""
+    monkeypatch.setenv("OPENREADING_ALLOW_UNSIGNED_WEBHOOKS", "1")
+    app = create_app()
+    client = TestClient(app)
+    _job_id, fixture = _seed_chunkr_webhook_job(app)
+
+    r = client.post(
+        "/v1/webhooks/chunkr", content=json.dumps({"task_id": "task_wh_1", "data": fixture})
+    )
+
+    assert r.status_code == 200
+
+
+def test_submit_registers_a_callback_url_carrying_a_per_job_token(monkeypatch):
+    """The token has to reach the vendor to come back, and the only channel is the callback URL
+    the caller asked us to register. The server appends it there, after prepare_named_backend and
+    before submit — the caller never picks the value, so one caller cannot choose a token another
+    caller could guess."""
+    import openreading.api as api_module
+    import openreading.server.app as app_module
+    from tests.fakes import ScriptedBackend
+
+    seen: dict[str, str | None] = {}
+
+    class _CaptureBackend(ScriptedBackend):
+        def submit(self, req, ctx):
+            seen["url"] = req.async_.webhook_url if req.async_ else None
+            return super().submit(req, ctx)
+
+    backend = _CaptureBackend("capture-webhook")
+    real = api_module.make_adapter
+    monkeypatch.setattr(
+        api_module,
+        "make_adapter",
+        lambda bid: backend if bid == "capture-webhook" else real(bid),
+    )
+    client = TestClient(app_module.create_app())
+    body = _pdf_body("capture-webhook")
+    body["async"] = {"mode": "async", "webhook_url": "https://host/v1/webhooks/chunkr"}
+
+    r = client.post("/v1/jobs", json=body)
+
+    assert r.status_code == 200
+    assert seen["url"].startswith("https://host/v1/webhooks/chunkr?ort=")
+    rec = client.app.state.jobs[r.json()["job_id"]]
+    assert rec.callback_token and rec.callback_token in seen["url"]
+
+
+def test_the_callback_token_is_appended_without_disturbing_the_callers_own_query(monkeypatch):
+    """A caller's callback URL may already carry its own routing parameters, and the stored
+    request must not be the vehicle either — `slim_request` nulls `webhook_url`, so the token
+    lives on the record, not in anything a later reader of the request could recover."""
+    import openreading.server.app as app_module
+    from openreading.types.request import OpenReadingRequest
+
+    req = OpenReadingRequest.model_validate(
+        {
+            "document": {"url": "https://x/d.pdf"},
+            "backend": {"id": "chunkr"},
+            "async": {"mode": "async", "webhook_url": "https://host/cb?tenant=42"},
+        }
+    )
+
+    out = app_module._with_callback_token(req, "tok-abc")
+
+    assert out.async_.webhook_url == "https://host/cb?tenant=42&ort=tok-abc"
+    assert req.async_.webhook_url == "https://host/cb?tenant=42"  # caller's object untouched
 
 
 def test_webhook_cross_backend_hijack_is_404(monkeypatch):
@@ -1529,7 +1870,7 @@ def test_webhook_chunkr_genuine_event_resolves():
     client = TestClient(app)
     job_id, fixture = _seed_chunkr_webhook_job(app)
     payload = json.dumps({"task_id": "task_wh_1", "data": fixture})
-    r = client.post("/v1/webhooks/chunkr", content=payload)
+    r = client.post(f"/v1/webhooks/chunkr?ort={_TEST_CALLBACK_TOKEN}", content=payload)
     assert r.status_code == 200
     body = r.json()
     assert body["state"] == "succeeded"
@@ -1543,7 +1884,7 @@ def test_webhook_open_ocr_genuine_event_resolves():
     client = TestClient(app)
     job_id, fixture = _seed_open_ocr_webhook_job(app)
     payload = json.dumps({"request_id": "req_wh_1", "data": fixture})
-    r = client.post("/v1/webhooks/open-ocr", content=payload)
+    r = client.post(f"/v1/webhooks/open-ocr?ort={_TEST_CALLBACK_TOKEN}", content=payload)
     assert r.status_code == 200
     body = r.json()
     assert body["state"] == "succeeded"

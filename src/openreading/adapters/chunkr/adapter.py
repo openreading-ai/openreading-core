@@ -428,9 +428,12 @@ class ChunkrAdapter(BackendAdapter):
 
     def resolve_webhook(self, event: dict, job: Job, ctx: RunContext) -> Job:
         # BL-50: chunkr declares no webhook_secret and has no signature mechanism at all — every
-        # event this method sees is unauthenticated by construction (see the openreading.server docstring's webhook
-        # section for the operator-facing disclaimer). Real verification is separate follow-up
-        # scope; this method only does id-matching + refetch-on-empty-body, never signature checks.
+        # event this method sees carries no signature of its own. Authentication happens one level
+        # up, at the dispatcher: the server appends a per-job callback token to the URL it
+        # registers with the vendor and refuses an event that cannot present it (M5, see the
+        # openreading.server docstring's webhook section). This method only does id-matching +
+        # refetch-on-empty-body, and must stay safe on its own terms for a caller that reaches it
+        # another way — hence the id guard below.
         if job.is_terminal():
             return job
         eid = event.get("task_id")

@@ -54,7 +54,11 @@ POST /v1/compare
     400 naming count and limit, checked before the comparison engine runs — its pairwise
     `SequenceMatcher` diff is O(n²) in the response count, the same unauthenticated-caller
     CPU-amplification shape `/v1/batch`'s MAX_BATCH_DOCUMENTS already guards against. Constant,
-    not an env knob: nobody legitimately compares more responses than there are backends.
+    not an env knob: nobody legitimately compares more responses than there are backends. The
+    count is only half the bound, because the cost is quadratic in each response's TEXT as well as
+    in how many there are: a body over `OPENREADING_MAX_COMPARE_BYTES` (default 8 MB) is refused
+    with 400 before it is even parsed. Refused, never truncated — whatever is accepted is compared
+    in full.
 POST /v1/batch
     Body: {"documents": [<request.document>, ...], "backend"?, "jobs"?} plus the shared fields
     `outputs`, `extraction_schema`, `features`, `pages`, `compliance`, applied to every item.
@@ -98,14 +102,19 @@ POST /v1/jobs  /  GET /v1/jobs/{job_id}  /  DELETE /v1/jobs/{job_id}
     deployment needs a shared store, there is no server-side resume, and `OPENREADING_LEDGER`
     (which arms CLI/Python `parse` / `resume`) does not extend to it (internal/design/ledger.md
     §10). Without a `webhook_url` a job runs in POLL mode, driven one slice per GET.
-    Bounded retention (M4): every record — TERMINAL or not — holds the FULL submitted request
-    (base64 document bytes, `document.password` included) and, once terminal, its response, so
-    the store cannot grow without a limit. A TERMINAL record older than `OPENREADING_JOB_TTL_S`
+    Bounded retention (M4): a record holds the SLIM request — `document.bytes_base64`,
+    `document.password`, `document.url` and `async.webhook_url` stripped, the same exclusion the
+    ledger applies before persisting anything — so an in-flight job does not pin its document, or
+    its password, in process memory for as long as it runs. What remains still grows with the
+    number of jobs, so the store is bounded twice over: a TERMINAL record older than
+    `OPENREADING_JOB_TTL_S`
     seconds (default 3600), measured from its own submit time, is deleted the next time ANY
     submit or GET touches the store — lazily, since this process has no scheduler thread; a
     still-running record is never swept, regardless of age. A submit at or over
     `OPENREADING_MAX_ASYNC_JOBS` (default 1000) total records is refused with 429 before its body
-    is even parsed. `DELETE /v1/jobs/{job_id}` removes one record immediately and unconditionally
+    is even parsed, as is one from a key already holding `OPENREADING_MAX_JOBS_PER_PRINCIPAL`
+    (default 100) of them — the global cap alone is one shared counter, so without the per-key
+    allowance the caller who fills it denies the endpoint to every other caller. `DELETE /v1/jobs/{job_id}` removes one record immediately and unconditionally
     — 204, whatever its state — freeing a slot without waiting on the TTL; an unknown id is 404
     `unknown_job`, the identical envelope GET's own unknown-id case returns.
 POST /v1/webhooks/{backend_id}
@@ -113,17 +122,24 @@ POST /v1/webhooks/{backend_id}
     /v1/parse. Response: the job handle. Verification is per-backend, gated on whether the
     backend declares a `webhook_secret` credential at all — today reducto alone (Svix, secret
     from `REDUCTO_WEBHOOK_SECRET`): invalid signature → 401, and so is a MISSING secret — fail
-    closed rather than trust a possibly forged vendor result. chunkr and open-ocr declare a
-    WEBHOOK wait mode but verify nothing (neither has a signature mechanism), so treat webhook
-    mode on either as unauthenticated until real verification ships. That gap is contained: the
-    event-to-job lookup only considers records for the URL's `{backend_id}` that are themselves
-    waiting in WEBHOOK mode, so a forged chunkr/open-ocr event can only settle a chunkr/open-ocr
-    webhook-mode job whose id it names — never another backend's job nor any POLL-mode job. The
-    id is read from the field each vendor actually uses (`job_id` reducto, `task_id` chunkr,
-    `request_id` open-ocr). The callback is always caller-supplied on the submit request —
+    closed rather than trust a possibly forged vendor result. chunkr and open-ocr offer no
+    signature mechanism at all, so their callbacks are authenticated by a PER-JOB CALLBACK TOKEN
+    instead (M5): on submit the server generates one, appends it to the `webhook_url` it registers
+    with the vendor as `?ort=…`, and keeps it on the job record alone — `slim_request` nulls
+    `webhook_url`, so the URL that carried it is retained nowhere. An event for one of those
+    backends that cannot present the matching token is 401. Without this the vendor's own task id
+    was the only thing standing between a stranger and a forged completion, and that id travels in
+    URLs and logs. The token is the server's to choose, never the caller's: a caller-picked value
+    is one another caller could guess. `OPENREADING_ALLOW_UNSIGNED_WEBHOOKS=1` restores the old
+    behaviour for a vendor that strips query parameters from the URL it was handed, and accepts
+    forgeable completions in doing so. The lookup is scoped either way: only records for the
+    URL's `{backend_id}` that are themselves waiting in WEBHOOK mode are considered, so an event
+    can never settle another backend's job nor any POLL-mode job. The id is read from the field
+    each vendor actually uses (`job_id` reducto, `task_id` chunkr, `request_id` open-ocr). The
+    callback is always caller-supplied on the submit request —
     `"async": {"mode": "async", "webhook_url": "https://host/v1/webhooks/reducto"}` — the server
-    never invents one; the CLI/Python API only ever use POLL, so nothing there depends on inbound
-    reachability.
+    never invents one, only appends its token to it; the CLI/Python API only ever use POLL, so
+    nothing there depends on inbound reachability.
 POST /v1/backends/{backend_id}/liveness
     Is this backend actually ANSWERING? Optional body {"timeout_s": <float>}, clamped to
     [0.1, 30]. Response: liveness report {"schema_version", "backend", "status", "measured",

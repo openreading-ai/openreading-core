@@ -172,9 +172,10 @@ Environment variables read by this module
   address (cloud metadata endpoints included) — `unsupported_input` / `url_not_public`
   respectively. Set (any non-empty value): skips that whole check, scheme included, for a
   deployment whose document store is deliberately intranet-only; the operator is trusted to have
-  already constrained which URLs can reach `run()`/`route()` in that case. Pre-resolution only — a
-  DNS answer that changes between this check and the actual connect (rebinding) is out of scope;
-  an operator needing that guarantee puts egress policy in front.
+  already constrained which URLs can reach `run()`/`route()` in that case. The connection is then
+  PINNED to the address that check vetted (original host carried in `Host` and SNI), so a DNS
+  answer that changes between the check and the connect — rebinding — cannot redirect it, and a
+  redirect is refused rather than followed for the same reason.
 - `env_file=` -> `credentials.load_dotenv`: loads `KEY=VALUE` lines WITHOUT overriding an
   already-set process variable (an exported shell var always beats the file); a missing file is
   a no-op. Loaded ONLY when the argument is given (`if env_file:` in `run()` / `run_batch()`):
@@ -488,13 +489,17 @@ def build_request(
     return OpenReadingRequest.model_validate(body)
 
 
-def _assert_public_http_url(url: str) -> None:
+def _assert_public_http_url(url: str) -> str:
     """Refuse URL schemes and destinations a hosted parse must never fetch on a caller's behalf:
     non-http(s), and hosts resolving to loopback/private/link-local/reserved addresses (cloud
-    metadata endpoints included). Pre-resolution check only — a DNS answer that changes between
-    this check and the connect (rebinding) is out of scope here; a deployment needing that
-    guarantee enforces egress policy at the network layer, outside this process.
-    OPENREADING_ALLOW_PRIVATE_URLS=1 disables the address check for intranet document stores."""
+    metadata endpoints included). Returns the ONE vetted address the caller must then connect to —
+    see `_download`, which pins the connection to it.
+
+    Returning the address rather than just approving the name is what closes DNS rebinding. Every
+    answer is checked, and the first is handed back; resolving again at connect time would re-ask
+    a resolver whose answer the attacker controls and can change between the two calls, which is
+    the whole trick. `OPENREADING_ALLOW_PRIVATE_URLS=1` disables the address check (and, with it,
+    the pinning) for intranet document stores."""
     import ipaddress
     import socket
     from urllib.parse import urlparse
@@ -512,6 +517,7 @@ def _assert_public_http_url(url: str) -> None:
         infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
     except OSError as exc:
         raise TerminalError(f"cannot resolve {host!r}", backend_code="url_not_public") from exc
+    vetted = ""
     for info in infos:
         addr = ipaddress.ip_address(info[4][0])
         if not addr.is_global or addr.is_multicast:
@@ -519,17 +525,50 @@ def _assert_public_http_url(url: str) -> None:
                 f"URL host {host!r} resolves to a non-public address",
                 backend_code="url_not_public",
             )
+        # EVERY answer is checked before any is used, so a resolver that mixes one public address
+        # in with a private one cannot get the private one approved by ordering.
+        vetted = vetted or str(addr)
+    if not vetted:
+        raise TerminalError(f"cannot resolve {host!r}", backend_code="url_not_public")
+    return vetted
+
+
+def _pin_to_address(url: str, address: str) -> tuple[str, dict[str, str], dict[str, str]]:
+    """`(url, headers, extensions)` for fetching `url` from exactly `address`.
+
+    The URL's host is swapped for the literal address so no name is resolved a second time; the
+    original host rides in `Host` (virtual hosting still routes) and in `sni_hostname` (TLS still
+    presents and verifies the right certificate). An IPv6 literal is bracketed, as a URL authority
+    requires."""
+    from urllib.parse import urlparse, urlunparse
+
+    parsed = urlparse(url)
+    literal = f"[{address}]" if ":" in address else address
+    netloc = f"{literal}:{parsed.port}" if parsed.port else literal
+    pinned = urlunparse(parsed._replace(netloc=netloc))
+    assert parsed.hostname is not None  # _assert_public_http_url refuses a host-less URL
+    return pinned, {"Host": parsed.netloc}, {"sni_hostname": parsed.hostname}
 
 
 def _download(url: str, *, transport=None) -> bytes:
     import httpx  # lazy — only when a URL is actually materialized
 
+    target, headers, extensions = url, {}, {}
     if not os.environ.get("OPENREADING_ALLOW_PRIVATE_URLS"):
-        _assert_public_http_url(url)
+        target, headers, extensions = _pin_to_address(url, _assert_public_http_url(url))
     client = (
         httpx.Client(transport=transport, timeout=60.0) if transport else httpx.Client(timeout=60.0)
     )
-    with client, client.stream("GET", url) as r:
+    with client, client.stream("GET", target, headers=headers, extensions=extensions) as r:
+        # Redirects are off (httpx's default), so a 3xx never reaches `>= 400` and used to be read
+        # as a successful zero-byte document. It is refused rather than followed: a redirect is the
+        # ordinary way to walk a vetted address to an unvetted one, and following it would need the
+        # whole guard above re-run per hop.
+        if 300 <= r.status_code < 400:
+            raise TerminalError(
+                f"{url} redirected to {r.headers.get('location', '?')!r}; redirects are not followed",
+                backend_code="url_not_public",
+            )
         if r.status_code >= 400:
             raise error_for_status(r.status_code, r.headers, message=f"fetch {url}")
         declared = r.headers.get("content-length", "")
@@ -759,8 +798,10 @@ def reap_expired_now() -> list[str]:
     idle since its last request would otherwise hold that run's expired content (encrypted
     document blobs, and the key that unlocks them) past its retention ceiling indefinitely —
     nothing else in this module ever revisits the ledger root unprompted. `server.app.create_app`
-    calls this once at startup so an idle process still enforces expiry on its own, without waiting
-    on the next run to arm; a fully idle CLI-only install still only enforces on its next run.
+    calls this once at startup, and `server.app._sweep_retention_forever` keeps calling it on a
+    timer for as long as the server serves, so a process that never goes busy again still enforces
+    expiry on schedule rather than only when something happens to wake it; a fully idle CLI-only
+    install still only enforces on its next run.
 
     Mirrors `_arm_ledger_unguarded`'s own path construction exactly — keys at `<root>/keys`, blobs
     at `<root>/blobs`, the wall clock for the epoch `reap` compares stamps against — so the two

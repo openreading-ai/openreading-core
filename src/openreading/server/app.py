@@ -58,7 +58,9 @@ is offloaded with run_in_threadpool, and why fastapi is imported at module level
 
 Environment variables this module reads. Server-only (the CLI and Python API ignore them):
 OPENREADING_API_KEYS, OPENREADING_API_KEY_SCOPES, OPENREADING_SERVER_PATH_ROOT,
-OPENREADING_JOB_TTL_S, OPENREADING_MAX_ASYNC_JOBS, OPENREADING_MAX_BODY_BYTES and the three
+OPENREADING_JOB_TTL_S, OPENREADING_MAX_ASYNC_JOBS, OPENREADING_MAX_JOBS_PER_PRINCIPAL,
+OPENREADING_MAX_BODY_BYTES, OPENREADING_MAX_COMPARE_BYTES,
+OPENREADING_ALLOW_UNSIGNED_WEBHOOKS, OPENREADING_RETENTION_SWEEP_S and the three
 compliance attestation knobs. OPENREADING_CONFIG and the backend credential vars are shared with
 the CLI / Python API, which read them through the same strategy loader and EnvCredentialBroker.
   OPENREADING_API_KEYS — comma-separated bearer tokens (_load_api_key_config, once at startup).
@@ -83,6 +85,23 @@ the CLI / Python API, which read them through the same strategy loader and EnvCr
     implied type ride along as `mime_type`. The CLI and Python API never read this var —
     `document.path` there names a file the SAME process already trusts, which is why the gate is
     HTTP-only.
+  OPENREADING_RETENTION_SWEEP_S — seconds between ledger retention sweeps while serving
+    (default 3600; `0` disables the timer). The reaper otherwise fires only when a run arms and
+    once at startup, so a server that goes idle holds expired content past its retention ceiling
+    for as long as it stays idle. Parsed at `create_app` — a malformed value is a startup failure,
+    not a silent fall back to the default, because a retention timer nobody noticed had reverted
+    is a policy failure rather than an inconvenience (`_retention_sweep_seconds`).
+  OPENREADING_MAX_COMPARE_BYTES — bytes ceiling on a POST /v1/compare body (default 8 MB), read
+    once at import. Separate from OPENREADING_MAX_BODY_BYTES because compare is the one endpoint
+    whose work is not linear in its input: it runs a pairwise SequenceMatcher matrix, so an
+    oversized body is CPU amplification rather than merely a large parse. Over the ceiling is 400,
+    never a truncated comparison — whatever is accepted is compared in full.
+  OPENREADING_ALLOW_UNSIGNED_WEBHOOKS — `1`/`true`/`yes` accepts an inbound event from a backend
+    that cannot sign (chunkr, open-ocr) WITHOUT the per-job callback token the server appended to
+    the URL it registered — i.e. on the vendor's task id alone, which is what anyone who saw that
+    id can forge. Unset (the default) refuses it with 401. The hatch exists for a vendor that
+    strips query parameters from the callback URL it is given; it buys working webhooks at the
+    price of forgeable completions (`_allow_unsigned_webhooks`).
   OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE — `1`/`true`/`yes` lets UNVERIFIED compliance fields
     survive the router's compliance stage. Unset (or anything else) ⇒ fail closed: unverified
     is eliminated. The one switch that widens the eligible set; leave it off without a reason.
@@ -117,6 +136,12 @@ the CLI / Python API, which read them through the same strategy loader and EnvCr
     `rate_limited` before its body is even parsed, let alone an adapter resolved or called.
     `DELETE /v1/jobs/{job_id}` (204, or 404 `unknown_job` — the same envelope GET's own 404 uses)
     frees a slot immediately on any job regardless of state, without waiting on the TTL.
+  OPENREADING_MAX_JOBS_PER_PRINCIPAL — how many of those records ONE configured API key may hold
+    (default 100). `OPENREADING_MAX_ASYNC_JOBS` alone is a single shared counter, so the caller who
+    fills it 429s everyone else; this bounds each key within it. Only in force when
+    OPENREADING_API_KEYS is set — with auth off every request is the same anonymous principal, and
+    metering that would only restate the global cap. The identity metered is a digest of the key
+    (`_principal_id`), never the key.
   OPENREADING_MAX_BODY_BYTES — bytes ceiling for `_BodyLimitMiddleware` (M2), read once at module
     import into the module-level `_MAX_BODY_BYTES` (same pattern as OPENREADING_JOB_TTL_S /
     OPENREADING_MAX_ASYNC_JOBS above) — setting the env var after this module is already imported
@@ -130,12 +155,15 @@ the CLI / Python API, which read them through the same strategy loader and EnvCr
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import contextlib
+import hashlib
 import hmac
 import json
 import mimetypes
 import os
+import secrets
 import stat
 import threading
 import time
@@ -216,6 +244,16 @@ MAX_BATCH_DOCUMENTS = DEFAULT_MAX_ITEMS
 # deployment for which this ceiling should ever need raising.
 _MAX_COMPARE_RESPONSES = 50
 
+# M2 residual: the count above bounds how MANY responses are compared, never how LARGE each one
+# is, and size is the multiplier that matters. `text_section` runs a pairwise SequenceMatcher
+# matrix — quadratic in the length of each text, twice per pair (once over tokens, once over raw
+# characters) — so 50 responses is 1225 diffs whose cost is set entirely by a number nothing
+# checked. `_MAX_BODY_BYTES` is far too loose to serve as that bound: it exists to stop a huge
+# base64 DOCUMENT reaching /v1/parse, where the work is linear. This is the ceiling for the one
+# endpoint whose work is not. Read once at import, like its siblings; a test monkeypatches the
+# constant.
+_MAX_COMPARE_BODY_BYTES = int(os.environ.get("OPENREADING_MAX_COMPARE_BYTES", str(8 * 1024 * 1024)))
+
 
 @dataclass
 class JobRecord:
@@ -233,8 +271,23 @@ class JobRecord:
     backend: str
     adapter: Any
     job: Job
+    # M4: the SLIM request — `document.bytes_base64`/`password`/`url` and `async.webhook_url`
+    # already nulled (`ledger.header.slim_request`). Never the caller's own object. A record used
+    # to pin the full payload for its whole life, unbounded for a still-running job, and no reader
+    # here ever wanted it: `build_run_context` reads runtime and credential config, and `normalize`
+    # is handed `slim_request(req)` by `_metered` regardless. Same exclusion list the ledger uses,
+    # deliberately — one definition of "what a stored copy of a request may contain".
     req: OpenReadingRequest
     created_ms: int
+    # Which caller's allowance this record spends — an opaque digest, never the token (see
+    # `_principal_id`). None when caller auth is off, which is also when there is no principal to
+    # meter and only the global `_MAX_ASYNC_JOBS` applies.
+    principal: str | None = None
+    # M5: the secret this job's callback URL carries, for a backend that cannot sign its webhooks.
+    # It lives HERE and not on the stored request precisely because `slim_request` nulls
+    # `async.webhook_url` — the URL that carried it is not retained anywhere a later reader could
+    # recover it from. None for a POLL job, and for one submitted before a token was issued.
+    callback_token: str | None = None
     response: dict[str, Any] | None = None
     error: dict[str, Any] | None = None
     # BL-77/BL-88 history, corrected by BL-92: this WAS the absolute (RealClock-monotonic)
@@ -284,6 +337,21 @@ def _job_dict(rec: JobRecord) -> dict[str, Any]:
 # DEFAULT_DEADLINE_MS) rather than the environment.
 _JOB_TTL_MS = int(os.environ.get("OPENREADING_JOB_TTL_S", "3600")) * 1000
 _MAX_ASYNC_JOBS = int(os.environ.get("OPENREADING_MAX_ASYNC_JOBS", "1000"))
+# M4: `_MAX_ASYNC_JOBS` alone is one counter shared by everyone, so whoever fills it first 429s
+# every other caller — cross-tenant denial of service on any deployment where more than one
+# principal has a key. This is each key's own allowance within that total. Only meaningful when
+# caller auth is on: with no keys configured every request is the same anonymous principal, and
+# metering that would just be `_MAX_ASYNC_JOBS` under another name.
+_MAX_JOBS_PER_PRINCIPAL = int(os.environ.get("OPENREADING_MAX_JOBS_PER_PRINCIPAL", "100"))
+
+
+def _principal_id(key: str) -> str:
+    """A stable, opaque id for a configured API key. A digest, never the key: the job store is
+    long-lived process memory that ends up in a heap dump, a debugger, or a `repr` in a log, and
+    a working credential must not be recoverable from any of them. Truncated because this only
+    ever has to separate a handful of configured keys from each other, never resist preimage
+    search over an unbounded space."""
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 
 def _sweep_jobs(jobs: dict[str, JobRecord], now_ms: int) -> None:
@@ -311,11 +379,10 @@ def _webhook_secret(backend_id: str) -> str | None:
 
 def _webhook_secret_required(backend_id: str) -> bool:
     """True when the backend's own credentials_spec declares a `webhook_secret` field at all — i.e.
-    it offers signature verification (today: reducto alone). BL-50: the fail-closed gate only
-    applies here. A backend that never declares the field (chunkr, open-ocr) has no configured/
-    unconfigured distinction to fail on — their webhook events are unverified by construction
-    (documented in the openreading.server docstring); real verification for them is separate
-    follow-up scope, not a regression of this check."""
+    it offers signature verification (today: reducto alone). BL-50: the fail-closed-on-a-MISSING-
+    secret gate only applies here. A backend that never declares the field (chunkr, open-ocr) has
+    no configured/unconfigured distinction to fail on; it is authenticated by the per-job callback
+    token instead (M5, see the webhook handler), not left unverified."""
     desc = make_adapter(backend_id).descriptor
     return any(f.key == "webhook_secret" for f in desc.credentials_spec)
 
@@ -341,6 +408,35 @@ def _webhook_event_id(backend_id: str, event: dict) -> Any:
     regardless of which key is read; the fallback exists so this never raises."""
     field = _WEBHOOK_EVENT_ID_FIELDS.get(backend_id, "job_id")
     return event.get(field)
+
+
+# M5: the query parameter carrying a job's callback token back from the vendor. Short and
+# opaque — it ends up in vendor dashboards and access logs, where a descriptive name would
+# advertise what it is worth stealing.
+_CALLBACK_TOKEN_PARAM = "ort"
+
+
+def _allow_unsigned_webhooks() -> bool:
+    """OPENREADING_ALLOW_UNSIGNED_WEBHOOKS=1/true/yes restores the pre-M5 behaviour: an event from
+    a backend that cannot sign is trusted on its vendor id alone. Read per request, not at import,
+    so it behaves like the other deployment knobs. The escape hatch exists because a vendor that
+    strips query parameters from the callback URL it was handed would otherwise have its webhooks
+    fail closed with no way back; setting it accepts forgeable completions in exchange."""
+    return os.environ.get("OPENREADING_ALLOW_UNSIGNED_WEBHOOKS", "").lower() in ("1", "true", "yes")
+
+
+def _with_callback_token(req: OpenReadingRequest, token: str) -> OpenReadingRequest:
+    """`req` with `_CALLBACK_TOKEN_PARAM=<token>` appended to `async.webhook_url`'s query, leaving
+    the caller's own object and its own parameters untouched. This is the ONLY channel by which
+    the token reaches the vendor and comes back, which is why the server appends it rather than
+    letting a caller supply one: a caller-chosen token is a token another caller can guess."""
+    from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
+    assert req.async_ is not None and req.async_.webhook_url  # caller checks before calling
+    parsed = urlparse(req.async_.webhook_url)
+    query = [*parse_qsl(parsed.query, keep_blank_values=True), (_CALLBACK_TOKEN_PARAM, token)]
+    url = urlunparse(parsed._replace(query=urlencode(query)))
+    return req.model_copy(update={"async_": req.async_.model_copy(update={"webhook_url": url})})
 
 
 def _verify_svix(secret: str, raw: bytes, headers: dict[str, str]) -> None:
@@ -834,8 +930,67 @@ class _BodyLimitMiddleware:
         await send({"type": "http.response.body", "body": body})
 
 
+_RETENTION_SWEEP_DEFAULT_S = 3600.0
+
+
+def _retention_sweep_seconds() -> float:
+    """Seconds between retention sweeps while the server is serving (default 1 hour; `0` off).
+
+    Read per `create_app`, not once at import, so a test or an embedder can set it before building
+    an app. A malformed value raises `ServerConfigError` from `create_app` — the same fail-at-boot
+    contract `_load_api_key_config` gives the key settings, for the same reason: a retention timer
+    that silently fell back to a default would be a policy failure nobody noticed."""
+    raw = os.environ.get("OPENREADING_RETENTION_SWEEP_S", "").strip()
+    if not raw:
+        return _RETENTION_SWEEP_DEFAULT_S
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        raise ServerConfigError(
+            "OPENREADING_RETENTION_SWEEP_S must be a number of seconds (0 disables the sweep)"
+        ) from None
+
+
+async def _sweep_retention_forever(interval: float) -> None:
+    """Call `api.reap_expired_now()` every `interval` seconds until cancelled.
+
+    M7's remaining half. The reaper fired when a run armed and (since the first pass) once at
+    startup, so a server that went idle held content past its retention ceiling until something
+    happened to wake it — indefinitely, on a deployment that simply gets no traffic for a while.
+    Retention is a promise about elapsed time, so something has to watch the clock.
+
+    Every exception is swallowed and the loop continues: a sweep that failed once — an
+    unreachable ledger root, a transient filesystem error — must not silently end retention
+    enforcement for the life of the process, which is exactly what letting the task die would do.
+    `reap_expired_now` already fails open internally on OSError; this is the backstop for
+    everything else. The sweep itself is filesystem work, so it runs off the event loop.
+    """
+    while True:
+        await asyncio.sleep(interval)
+        with contextlib.suppress(Exception):
+            await run_in_threadpool(api.reap_expired_now)
+
+
+@contextlib.asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Owns the retention sweeper for as long as the process is serving, and cancels it on
+    shutdown so a test client (or a reloading dev server) does not leave one running per app."""
+    interval = app.state.retention_sweep_s
+    task = asyncio.create_task(_sweep_retention_forever(interval)) if interval > 0 else None
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
 def create_app(*, cors_origins: list[str] | None = None):
-    app = FastAPI(title="OpenReading", version=__version__)
+    app = FastAPI(title="OpenReading", version=__version__, lifespan=_lifespan)
+    # Parsed here so a malformed value fails at app construction (AC-7's contract), even though
+    # the sweeper it configures only starts once something actually serves the app.
+    app.state.retention_sweep_s = _retention_sweep_seconds()
     jobs: dict[str, JobRecord] = {}
     app.state.jobs = jobs  # exposed for tests to seed async/webhook jobs offline
     # Idempotency cache for the /v1/parse `auto` chain: one per app, so it lives as long as the
@@ -844,7 +999,9 @@ def create_app(*, cors_origins: list[str] | None = None):
 
     # M7: the ledger's own reap only fires when a NEW run arms (`_arm_ledger`), so a server that
     # goes idle after its last request would otherwise hold expired content past its retention
-    # ceiling until something else happened to run. A no-op when OPENREADING_LEDGER is unset.
+    # ceiling until something else happened to run. This is the sweep at boot; `_lifespan` keeps
+    # one running on a timer thereafter, which is what covers a server that never goes busy again.
+    # A no-op when OPENREADING_LEDGER is unset.
     api.reap_expired_now()
 
     # Strategy config is loaded ONLY from OPENREADING_CONFIG — the server never sniffs its cwd
@@ -881,6 +1038,9 @@ def create_app(*, cors_origins: list[str] | None = None):
         # everything compliance/routing already allow), matching a disabled-auth request's own
         # `getattr(request.state, "api_key_scope", None)` default exactly.
         request.state.api_key_scope = api_key_config.scopes.get(matched_key)
+        # M4: the per-principal job allowance needs an identity to meter, and this is the only
+        # place a verified one exists. A digest, never `matched_key` itself — see `_principal_id`.
+        request.state.principal = _principal_id(matched_key)
         return await call_next(request)
 
     # M2: registered next (still BEFORE the optional CORS block), same prepend rule as above — CORS
@@ -923,6 +1083,20 @@ def create_app(*, cors_origins: list[str] | None = None):
                     "message": (
                         f"async job store is full ({_MAX_ASYNC_JOBS}); retry after jobs expire "
                         "or DELETE finished jobs"
+                    ),
+                }
+            },
+        )
+
+    def _principal_jobs_full():
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": {
+                    "category": "rate_limited",
+                    "message": (
+                        f"this key already has {_MAX_JOBS_PER_PRINCIPAL} async jobs; retry after "
+                        "they expire or DELETE finished ones"
                     ),
                 }
             },
@@ -1092,8 +1266,17 @@ def create_app(*, cors_origins: list[str] | None = None):
     @app.post("/v1/compare")
     async def compare_endpoint(request: Request):
         # Pure (DESIGN L1): compares already-computed response envelopes; never executes a backend.
+        raw = await request.body()
+        # Measured on the raw bytes and BEFORE json.loads, because parsing a body this size is
+        # itself part of the cost being refused. Refusal, never truncation: whatever is accepted
+        # is compared in full.
+        if len(raw) > _MAX_COMPARE_BODY_BYTES:
+            return _bad_request(
+                f"compare body exceeds {_MAX_COMPARE_BODY_BYTES} bytes; comparison cost is "
+                "quadratic in the text it is given"
+            )
         try:
-            body = await request.json()
+            body = json.loads(raw)
         except Exception as e:  # noqa: BLE001 — any JSON failure is a 400
             return _bad_request(f"invalid JSON body: {e}")
         if not isinstance(body, dict) or not isinstance(body.get("responses"), list):
@@ -1322,6 +1505,13 @@ def create_app(*, cors_origins: list[str] | None = None):
         # about to refuse to keep.
         if len(jobs) >= _MAX_ASYNC_JOBS:
             return _job_store_full()
+        # Checked in the same breath as the global cap and for the same reason — before the body
+        # is parsed or a vendor call is spent on a job this store is about to refuse to keep.
+        principal = getattr(request.state, "principal", None)
+        if principal is not None:
+            held = sum(1 for r in jobs.values() if r.principal == principal)
+            if held >= _MAX_JOBS_PER_PRINCIPAL:
+                return _principal_jobs_full()
         try:
             req = await _parse_request(request)
         except Exception as e:  # noqa: BLE001
@@ -1359,7 +1549,14 @@ def create_app(*, cors_origins: list[str] | None = None):
                 state=JobState.SUCCEEDED,
             )
             rec = JobRecord(
-                sjob.id, backend, None, sjob, req, int(time.time() * 1000), response=result
+                sjob.id,
+                backend,
+                None,
+                sjob,
+                slim_request(req),
+                int(time.time() * 1000),
+                principal=principal,
+                response=result,
             )
             jobs[sjob.id] = rec
             return _job_dict(rec)
@@ -1388,6 +1585,12 @@ def create_app(*, cors_origins: list[str] | None = None):
             return _unknown_backend(e)
         except _ADAPTER_ERRORS as e:
             return _error_response(e)
+        # M5: issued here — after prepare_named_backend, before submit — because submit is the
+        # call that hands the callback URL to the vendor, and the token has to already be in it.
+        callback_token: str | None = None
+        if req.async_ is not None and req.async_.webhook_url:
+            callback_token = secrets.token_urlsafe(32)
+            req = _with_callback_token(req, callback_token)
         try:
             with auth_hinted(adapter.descriptor, ctx.credentials):
                 job = await run_in_threadpool(adapter.submit, req, ctx)
@@ -1398,8 +1601,12 @@ def create_app(*, cors_origins: list[str] | None = None):
             backend,
             adapter,
             job,
-            req,
+            # Slimmed AFTER submit, never before: `adapter.submit` is the one caller that needs
+            # the real bytes and the real password, and it has already had them by this line.
+            slim_request(req),
             int(time.time() * 1000),
+            principal=principal,
+            callback_token=callback_token,
             # BL-77: anchor the drive-deadline to submission, once — not to "now" on every GET.
             deadline_ms=RealClock().now_ms() + DEFAULT_DEADLINE_MS,
         )
@@ -1561,6 +1768,20 @@ def create_app(*, cors_origins: list[str] | None = None):
         )
         if rec is None:
             return _not_found("unknown_job", str(jid))
+        # M5: for a backend that declares no webhook_secret there is no signature to check, so the
+        # per-job callback token this server appended to the URL it registered is the ONLY thing
+        # separating a genuine completion from one anybody who learned the vendor's task id could
+        # forge — and on a shared deployment, forge INTO ANOTHER TENANT'S JOB. Checked after the
+        # lookup, not before, so an event naming no job at all is still the 404 it always was
+        # rather than leaking a different answer for ids that do and do not exist.
+        if not secret and not _allow_unsigned_webhooks():
+            presented = request.query_params.get(_CALLBACK_TOKEN_PARAM)
+            if (
+                rec.callback_token is None
+                or presented is None
+                or not hmac.compare_digest(rec.callback_token, presented)
+            ):
+                return _bad_signature()
         # fresh adapter (client=None) — the server already verified the signature, so resolve_webhook
         # maps the event without re-verifying.
         adapter = make_adapter(backend_id)

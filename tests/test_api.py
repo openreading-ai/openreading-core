@@ -191,6 +191,49 @@ def test_download_streams_and_stops_at_limit_with_no_declared_length(monkeypatch
     assert e.value.backend_code == "doc_too_large"
 
 
+def test_download_connects_to_the_vetted_address_not_a_second_resolution(monkeypatch):
+    """DNS rebinding: the guard resolved the host and then httpx resolved it AGAIN at connect, so
+    a name whose answer changed between the two reached an address the guard never approved —
+    a cloud metadata endpoint among them. The connect is now pinned to the exact address the guard
+    vetted, with the original host carried in the Host header and in SNI so virtual hosting and
+    certificate verification still work."""
+    monkeypatch.delenv("OPENREADING_ALLOW_PRIVATE_URLS", raising=False)
+    monkeypatch.setattr(
+        "socket.getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 443))]
+    )
+    seen: dict[str, object] = {}
+
+    def handler(request):
+        seen["url"] = str(request.url)
+        seen["host"] = request.headers.get("host")
+        seen["sni"] = request.extensions.get("sni_hostname")
+        return httpx.Response(200, content=b"ok")
+
+    out = api._download("https://example.test/doc.pdf", transport=httpx.MockTransport(handler))
+
+    assert out == b"ok"
+    assert "93.184.216.34" in str(seen["url"])
+    assert "example.test" not in str(seen["url"])
+    assert seen["host"] == "example.test"
+    assert seen["sni"] == "example.test"
+
+
+def test_download_refuses_a_redirect_rather_than_returning_an_empty_document(monkeypatch):
+    """Redirects are off (httpx's default), so a 3xx used to fall through the `>= 400` check and
+    be read as a successful zero-byte document. A redirect is also the classic way to walk a
+    vetted address to an unvetted one, so it is refused outright rather than followed."""
+    monkeypatch.delenv("OPENREADING_ALLOW_PRIVATE_URLS", raising=False)
+    monkeypatch.setattr(
+        "socket.getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 80))]
+    )
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(302, headers={"location": "http://169.254.169.254/"})
+    )
+    with pytest.raises(TerminalError) as e:
+        api._download("http://example.test/doc.pdf", transport=transport)
+    assert e.value.backend_code == "url_not_public"
+
+
 def test_download_allows_private_when_opted_in(monkeypatch):
     monkeypatch.setenv("OPENREADING_ALLOW_PRIVATE_URLS", "1")
     transport = httpx.MockTransport(lambda request: httpx.Response(200, content=b"ok"))

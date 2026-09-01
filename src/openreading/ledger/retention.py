@@ -14,8 +14,11 @@ surface): it scans every stamped run under the ledger root and, for one whose ce
 calls `KeyStore.destroy` — the exact mechanism a manual shred uses — so a reaped run and a
 manually-shredded one leave the journal in the identical `payload_expired` state. Finding M7:
 an at-arm-only sweep left an idle server holding expired content indefinitely, since nothing new
-was ever arming to trigger it — so expiry is now enforced both when a new run arms AND once at
-server startup (`api.reap_expired_now`, called from `server.app.create_app`); a fully idle
+was ever arming to trigger it — so expiry is now enforced when a new run arms, once at server
+startup (`api.reap_expired_now`, called from `server.app.create_app`), AND on a timer for as long
+as the server serves (`server.app._sweep_retention_forever`, every
+`OPENREADING_RETENTION_SWEEP_S` seconds, default an hour). Retention is a promise about elapsed
+time, so on a server something has to watch the clock rather than wait to be woken. A fully idle
 CLI-only install (no server, no new runs) still only enforces on its next run, so the operator
 owns that schedule.
 
