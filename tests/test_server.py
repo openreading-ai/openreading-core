@@ -13,6 +13,7 @@ pytest.importorskip("fastapi", reason="server extra not installed")
 pytest.importorskip("fitz", reason="pymupdf not installed")
 
 from datetime import UTC
+from pathlib import Path
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -157,6 +158,61 @@ def test_parse_corrupt_document_is_502_terminal_not_a_bare_500(client):
     err = r.json()["error"]
     assert err["category"] == "terminal"
     assert err["backend_code"] == "FileDataError"
+
+
+# --- document.path gating over HTTP (H1) -----------------------------------------------
+
+
+def test_parse_rejects_document_path_by_default(client, monkeypatch):
+    monkeypatch.delenv("OPENREADING_SERVER_PATH_ROOT", raising=False)
+    r = client.post(
+        "/v1/parse",
+        json={"document": {"path": "/etc/hosts"}, "backend": {"id": "pymupdf"}},
+    )
+    assert r.status_code == 400
+    assert "document.path" in r.json()["error"]["message"]
+
+
+def test_parse_allows_path_under_configured_root(client, monkeypatch, tmp_path):
+    src = Path("examples")  # repo ships two synthetic PDFs
+    pdf = next(src.glob("*.pdf"))
+    doc = tmp_path / pdf.name
+    doc.write_bytes(pdf.read_bytes())
+    monkeypatch.setenv("OPENREADING_SERVER_PATH_ROOT", str(tmp_path))
+    r = client.post(
+        "/v1/parse",
+        json={"document": {"path": str(doc)}, "backend": {"id": "pymupdf"}},
+    )
+    assert r.status_code == 200
+
+
+def test_parse_rejects_symlink_escaping_root(client, monkeypatch, tmp_path):
+    outside = tmp_path / "outside.pdf"
+    outside.write_bytes(b"%PDF-1.4")
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "link.pdf").symlink_to(outside)
+    monkeypatch.setenv("OPENREADING_SERVER_PATH_ROOT", str(root))
+    r = client.post(
+        "/v1/parse",
+        json={
+            "document": {"path": str(root / "link.pdf")},
+            "backend": {"id": "pymupdf"},
+        },
+    )
+    assert r.status_code == 400
+
+
+def test_route_rejects_document_path_by_default(client, monkeypatch):
+    # _parse_request (shared by /v1/route and /v1/jobs) raises ValueError(refusal) so this
+    # endpoint's existing except->400 handles it exactly like any other bad body.
+    monkeypatch.delenv("OPENREADING_SERVER_PATH_ROOT", raising=False)
+    r = client.post(
+        "/v1/route",
+        json={"document": {"path": "/etc/hosts"}, "backend": {"id": "pymupdf"}},
+    )
+    assert r.status_code == 400
+    assert "document.path" in r.json()["error"]["message"]
 
 
 def test_route_returns_plan_shape(client):
@@ -339,6 +395,16 @@ def test_submit_job_cost_report_warning_redacts_a_secret(monkeypatch):
 def test_jobs_auto_backend_rejected(client):
     r = client.post("/v1/jobs", json=_pdf_body("auto"))
     assert r.status_code == 400
+
+
+def test_jobs_rejects_document_path_by_default(client, monkeypatch):
+    monkeypatch.delenv("OPENREADING_SERVER_PATH_ROOT", raising=False)
+    r = client.post(
+        "/v1/jobs",
+        json={"document": {"path": "/etc/hosts"}, "backend": {"id": "pymupdf"}},
+    )
+    assert r.status_code == 400
+    assert "document.path" in r.json()["error"]["message"]
 
 
 def test_jobs_strategy_id_wraps_the_walk_as_a_synthetic_job(tmp_path, monkeypatch):
@@ -555,15 +621,22 @@ def test_get_job_metered_redacts_a_secret_in_a_plain_normalize_crash(monkeypatch
 
 
 def test_get_job_deadline_exceeded_keeps_running_then_reaches_succeeded(monkeypatch):
-    # BL-77: `_drive_job` used to compute its deadline fresh from "now" on every call (never
-    # anchored to the job's own submission), and `get_job` latched ANY RetryableError reaching it —
-    # including its own per-call deadline check — as a permanent `rec.error`, with nothing anywhere
-    # ever clearing it. A still-healthy POLL job whose GET has to span more than one internal
-    # backoff cycle would get stuck "failed" forever even though the backend never claimed anything
-    # worse than "still processing". Anchoring `deadline_ms` on the JobRecord (refreshed only when
-    # THIS specific per-call slice — not a real backend failure, not MAX_CONSECUTIVE_FAULTS exhaustion —
-    # elapses) fixes both halves: repeated GETs must keep reporting "running", never "failed", and
-    # the same job must still be able to finish once its backend actually does.
+    # BL-77: `get_job` used to latch ANY RetryableError reaching it — including the driver's OWN
+    # per-call deadline check — as a permanent `rec.error`, with nothing anywhere ever clearing it.
+    # A still-healthy POLL job whose GETs span more than one internal backoff cycle would get stuck
+    # "failed" forever even though the backend never claimed anything worse than "still processing".
+    # The fix tells the driver's own slice-expiry (`_DriveSliceExpired`) apart by TYPE and leaves
+    # the job "running" instead of latching it failed, and each GET drives a fresh slice — so the
+    # two halves this test guards still hold: repeated GETs whose slice expires mid-backoff must
+    # keep reporting "running", never "failed", and the SAME job must still finish once its backend
+    # actually does.
+    #
+    # No-overshoot (H4) cadence: the corrected driver caps every sleep at the deadline and never
+    # polls past it, so a GET makes contact only when the next poll is genuinely due within its
+    # slice. DEFAULT_DEADLINE_MS is set below the driver's 500ms base backoff, so the first GET's
+    # slice expires right after a single transient poll (mid-backoff); each subsequent tiny slice
+    # advances the virtual clock one DEFAULT_DEADLINE_MS until it reaches that pending next-poll
+    # time, at which the final GET polls again and the job succeeds.
     from openreading.router.clock import FakeClock
     from openreading.server import app as app_module
     from openreading.server.app import JobRecord
@@ -573,10 +646,13 @@ def test_get_job_deadline_exceeded_keeps_running_then_reaches_succeeded(monkeypa
 
     clock = FakeClock()
     monkeypatch.setattr(app_module, "RealClock", lambda: clock)
-    monkeypatch.setattr(app_module, "DEFAULT_DEADLINE_MS", 100.0)  # tiny -> one slice elapses fast
+    monkeypatch.setattr(app_module, "DEFAULT_DEADLINE_MS", 150.0)  # below the 500ms base backoff
 
-    # 4 RetryableError("transient", ...) — never a claim of death — then succeeds on the 5th poll.
-    adapter = PollFake(polls_needed=1, flaky=4)
+    # One RetryableError("transient", ...) — never a claim of death — then succeeds on the 2nd poll.
+    # Just one transient fault: under the no-overshoot driver the 500ms backoff it schedules already
+    # outruns the tiny slice, so a second transient would only be reached many empty slices later —
+    # the exponential backoff, not the fault count, is what paces this test now.
+    adapter = PollFake(polls_needed=1, flaky=1)
     req = OpenReadingRequest.model_validate(
         {"document": {"path": "/x"}, "backend": {"id": "poll-fake"}}
     )
@@ -589,35 +665,51 @@ def test_get_job_deadline_exceeded_keeps_running_then_reaches_succeeded(monkeypa
         job.id, "poll-fake", adapter, job, req, 0, deadline_ms=deadline_ms
     )
 
-    # Each of these GETs drives the job far enough that its own internal slice elapses mid-backoff
-    # (the vendor is still only ever reporting "transient") — none of them may latch "failed".
-    for _ in range(3):
+    # First GET: makes genuine backend contact (one transient poll), then its tiny slice expires
+    # while the job is still mid-backoff. Genuine contact followed by a slice-expiry must report
+    # "running" with no error — never latch "failed" (the BL-77 property).
+    r = client.get(f"/v1/jobs/{job.id}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["state"] == "running"
+    assert body.get("error") is None
+    assert adapter.poll_calls > 0  # the slice that expired had actually reached the vendor
+
+    # Further GETs keep expiring mid-backoff — the backend's next poll isn't due within the tiny
+    # slice yet, so these correctly make no contact under the no-overshoot driver — and every one
+    # must still report "running", never latch "failed".
+    for _ in range(2):
         r = client.get(f"/v1/jobs/{job.id}")
         assert r.status_code == 200
         body = r.json()
         assert body["state"] == "running"
         assert body.get("error") is None
 
-    # ...and once the backend actually finishes, the SAME job still reaches "succeeded" — the
-    # per-call deadline elapsing never permanently disabled future driving of this job.
+    # ...and once the clock has reached the backend's next-poll time, the SAME job polls again and
+    # reaches "succeeded" — the earlier slice-expiries never permanently disabled driving it.
     r = client.get(f"/v1/jobs/{job.id}")
     assert r.status_code == 200
     assert r.json()["state"] == "succeeded"
 
 
 def test_get_job_deadline_survives_a_caller_gap_between_polls(monkeypatch):
-    # BL-92: extends the test above with the ONE dimension none of the four existing BL-77/BL-88
-    # tests exercise — a caller-side gap BETWEEN two `client.get()` calls, modeling an ordinary,
-    # considerate "don't hammer the endpoint" polling cadence rather than back-to-back calls (grep
-    # -n "_now +=" this file, pre-fix, returns nothing). Pre-fix, `get_job` handed `_drive_job` the
-    # JobRecord's own anchored `deadline_ms` — renewed only when a slice actually expires, to
-    # `now + DEFAULT_DEADLINE_MS` as of the END of the call that renewed it. If the caller's own
-    # gap since that renewal already exceeds DEFAULT_DEADLINE_MS by the time the NEXT GET arrives,
-    # the anchor is already stale before the call starts: driver.py's deadline check is the first
-    # thing the loop body does, so it raises before `adapter.poll()` is ever invoked. `get_job`
-    # then rolls the anchor forward again and reports "running" — zero actual contact with the
-    # backend. The fix (server/app.py:618-620, `None` instead of `rec.deadline_ms`) measures every
-    # call's own slice from THAT call's own start instead, regardless of any prior gap.
+    # BL-92: extends the test above with the ONE dimension the other BL-77/BL-88 tests don't — a
+    # caller-side gap BETWEEN two `client.get()` calls, modeling a considerate "don't hammer the
+    # endpoint" polling cadence rather than back-to-back calls. `get_job` used to hand `_drive_job`
+    # the JobRecord's own anchored `deadline_ms` (renewed to `now + DEFAULT_DEADLINE_MS` at the END
+    # of the call that last renewed it); once the caller's gap since that renewal outran the anchor,
+    # the NEXT GET began already past its deadline — driver.py's deadline check is the first thing
+    # the loop body does, so it raised before `adapter.poll()` ran, `get_job` rolled the anchor
+    # forward, and the GET reported "running" having made ZERO contact with the backend. The fix:
+    # `get_job` passes `None` to `_drive_job`, never `rec.deadline_ms`, so every call measures its
+    # own slice from THAT call's own start, regardless of any prior gap.
+    #
+    # No-overshoot (H4) cadence: the corrected driver never polls past the deadline, so the honest
+    # way to exercise "contact resumes after a gap" is to make the backend genuinely DUE at the
+    # second GET — advance the caller-side clock PAST the pending next_poll_at (the driver's base
+    # backoff after the first transient poll), not merely past DEFAULT_DEADLINE_MS. The strict-
+    # increase `poll_calls` assertion is the guard: it tells a real poll apart from a "running"
+    # result that never reached the vendor at all.
     from openreading.router.clock import FakeClock
     from openreading.server import app as app_module
     from openreading.server.app import JobRecord
@@ -627,12 +719,13 @@ def test_get_job_deadline_survives_a_caller_gap_between_polls(monkeypatch):
 
     clock = FakeClock()
     monkeypatch.setattr(app_module, "RealClock", lambda: clock)
-    monkeypatch.setattr(app_module, "DEFAULT_DEADLINE_MS", 100.0)  # tiny -> easy to outrun
+    monkeypatch.setattr(app_module, "DEFAULT_DEADLINE_MS", 100.0)  # tiny; backoff outruns it
 
-    # 2 RetryableError("transient", ...) then succeeds on the 3rd poll — enough that the first GET
-    # below reliably hits _DriveSliceExpired (and renews the anchor) after two genuine polls,
-    # without resolving the job outright, leaving exactly one more genuine poll to reach terminal.
-    adapter = PollFake(polls_needed=1, flaky=2)
+    # One RetryableError("transient", ...) then succeeds on the 2nd poll. Under the no-overshoot
+    # driver the first GET makes exactly ONE genuine poll (the transient fault) before the 500ms
+    # backoff it schedules outruns the tiny slice and it expires _DriveSliceExpired, without
+    # resolving — leaving exactly one more genuine poll, made by the post-gap second GET, to finish.
+    adapter = PollFake(polls_needed=1, flaky=1)
     req = OpenReadingRequest.model_validate(
         {"document": {"path": "/x"}, "backend": {"id": "poll-fake"}}
     )
@@ -645,26 +738,28 @@ def test_get_job_deadline_survives_a_caller_gap_between_polls(monkeypatch):
         job.id, "poll-fake", adapter, job, req, 0, deadline_ms=deadline_ms
     )
 
-    # First GET: drives the job until its own internal backoff outruns the tiny slice — makes
-    # genuine contact (poll_calls > 0) but does not resolve; the anchor gets renewed to
-    # `now + DEFAULT_DEADLINE_MS` as of THIS call's end.
+    # First GET: makes genuine contact (one transient poll, poll_calls > 0) then its slice expires
+    # once the 500ms backoff outruns the tiny deadline — the job does not resolve and stays running.
     r1 = client.get(f"/v1/jobs/{job.id}")
     assert r1.status_code == 200
     assert r1.json()["state"] == "running"
     polls_after_first_call = adapter.poll_calls
     assert polls_after_first_call > 0
 
-    # An ordinary caller gap — bigger than DEFAULT_DEADLINE_MS — elapses before the NEXT GET, just
-    # like a considerate "poll every couple minutes" client against a job the openreading.server docstring itself
-    # frames as potentially slow. This is real elapsed time on the caller's side, not something
-    # `_drive_job`'s own `clock.sleep()` calls would ever produce.
-    clock._now += app_module.DEFAULT_DEADLINE_MS * 2
+    # An ordinary caller gap elapses before the NEXT GET — real elapsed time on the caller's side,
+    # not something `_drive_job`'s own `clock.sleep()` calls would ever produce. It must reach PAST
+    # the backend's pending next_poll_at (the driver's base backoff after GET1's transient poll) so
+    # the backend is genuinely DUE at the second GET; a gap merely bigger than DEFAULT_DEADLINE_MS
+    # would leave it not-yet-due, which the corrected driver correctly reports as a contact-free
+    # slice expiry. Read the pending time off the record so this stays correct if the backoff moves.
+    pending_next_poll = app.state.jobs[job.id].job.next_poll_at
+    clock._now = pending_next_poll + app_module.DEFAULT_DEADLINE_MS
 
     # Second GET: pre-fix, the renewed-but-now-stale anchor makes this raise _DriveSliceExpired on
     # its very first loop check, before adapter.poll() ever runs again — poll_calls does not move,
     # and the job reports "running" having made zero contact with the backend this call. Post-fix,
     # this call measures a fresh slice from ITS OWN start regardless of the gap, so it reaches the
-    # backend — and since only one more genuine poll was ever needed, resolves.
+    # now-due backend — and since only one more genuine poll was ever needed, resolves.
     r2 = client.get(f"/v1/jobs/{job.id}")
     assert r2.status_code == 200
     assert adapter.poll_calls > polls_after_first_call  # genuine contact was made this call
@@ -798,7 +893,11 @@ def test_concurrent_get_job_does_not_double_drive_the_same_job():
         {"document": {"path": "/x"}, "backend": {"id": "pollslow"}}
     )
     job = adapter.submit(req, RunContext())
-    app.state.jobs[job.id] = JobRecord(job.id, "pollslow", adapter, job, req, 0)
+    # A real created_ms, not the usual placeholder 0: this test's own final GET below runs AFTER
+    # the job reaches terminal, and 0 would put it outside the TTL sweep's window (M4), deleting
+    # it out from under that assertion instead of exercising the double-drive guard it tests.
+    created_ms = int(_time.time() * 1000)
+    app.state.jobs[job.id] = JobRecord(job.id, "pollslow", adapter, job, req, created_ms)
 
     ready = threading.Barrier(2, timeout=30)
     responses: list = []
@@ -824,6 +923,104 @@ def test_concurrent_get_job_does_not_double_drive_the_same_job():
     assert any(r.json()["state"] == "succeeded" for r in responses)
     # ...and the completion is durable, not a fluke of response ordering.
     assert client.get(f"/v1/jobs/{job.id}").json()["state"] == "succeeded"
+
+
+# --- bounded job store: TTL sweep, capacity cap, DELETE (M4) ---------------------------
+# The store used to grow forever and every record retained the FULL request (base64 document
+# bytes, document.password) until process exit, with no way to remove one early.
+
+
+def _seed_job(app, job_id, *, state, created_ms):
+    # Minimal JobRecord for the sweep/cap tests below: adapter=None is safe because none of them
+    # ever GET this job's OWN id (which would try to drive/poll it) -- they either assert on
+    # app.state.jobs directly or hit an unrelated path to trigger the sweep as a side effect, the
+    # same lookup test_get_unknown_job_is_404 already exercises.
+    from openreading.server.app import JobRecord
+    from openreading.types.enums import WaitMode
+    from openreading.types.job import Job
+    from openreading.types.request import OpenReadingRequest
+
+    req = OpenReadingRequest.model_validate(
+        {"document": {"path": "/x"}, "backend": {"id": "boundsbk"}}
+    )
+    job = Job(id=job_id, backend_id="boundsbk", wait_mode=WaitMode.INLINE, state=state)
+    app.state.jobs[job_id] = JobRecord(job_id, "boundsbk", None, job, req, created_ms)
+
+
+def test_expired_terminal_job_is_swept_on_get_access():
+    from openreading.types.enums import JobState
+
+    app = create_app()
+    client = TestClient(app)
+    _seed_job(app, "old-done", state=JobState.SUCCEEDED, created_ms=0)  # epoch: always past TTL
+
+    # ANY jobs-store access sweeps it, not only a GET of this specific id -- ask about an
+    # unrelated, nonexistent job (test_get_unknown_job_is_404's own request) to prove the sweep
+    # runs as a side effect of the handler, independent of what was actually requested.
+    assert client.get("/v1/jobs/does-not-exist").status_code == 404
+    assert "old-done" not in app.state.jobs
+
+
+def test_expired_terminal_job_is_swept_on_submit_access():
+    from openreading.types.enums import JobState
+
+    app = create_app()
+    client = TestClient(app)
+    _seed_job(app, "old-done", state=JobState.SUCCEEDED, created_ms=0)
+
+    r = client.post("/v1/jobs", json=_pdf_body("pymupdf"))
+    assert r.status_code == 200
+    assert "old-done" not in app.state.jobs
+
+
+def test_sweep_never_removes_a_non_terminal_job_regardless_of_age():
+    # A still-running job must never be reaped out from under a caller mid-poll -- only TERMINAL
+    # records are ever swept, no matter how old created_ms is.
+    from openreading.types.enums import JobState
+
+    app = create_app()
+    client = TestClient(app)
+    _seed_job(app, "old-running", state=JobState.RUNNING, created_ms=0)
+
+    assert client.get("/v1/jobs/does-not-exist").status_code == 404
+    assert "old-running" in app.state.jobs
+
+
+def test_submit_job_rejected_with_429_when_store_is_at_capacity(monkeypatch):
+    import openreading.server.app as app_module
+    from openreading.types.enums import JobState
+
+    monkeypatch.setattr(app_module, "_MAX_ASYNC_JOBS", 1)
+    app = create_app()
+    client = TestClient(app)
+    # RUNNING (not terminal): occupies a slot without being swept away by this same request's own
+    # top-of-handler sweep before the cap check runs.
+    _seed_job(app, "occupant", state=JobState.RUNNING, created_ms=0)
+
+    r = client.post("/v1/jobs", json=_pdf_body("pymupdf"))
+
+    assert r.status_code == 429
+    assert r.json()["error"]["category"] == "rate_limited"
+    assert set(app.state.jobs) == {"occupant"}  # rejected BEFORE insertion -- store untouched
+
+
+def test_delete_job_then_get_is_404(client):
+    submit = client.post("/v1/jobs", json=_pdf_body("pymupdf"))
+    job_id = submit.json()["job_id"]
+
+    d = client.delete(f"/v1/jobs/{job_id}")
+    assert d.status_code == 204
+    assert d.content == b""
+
+    g = client.get(f"/v1/jobs/{job_id}")
+    assert g.status_code == 404
+    assert g.json()["error"]["category"] == "unknown_job"
+
+
+def test_delete_unknown_job_is_404(client):
+    r = client.delete("/v1/jobs/does-not-exist")
+    assert r.status_code == 404
+    assert r.json()["error"]["category"] == "unknown_job"
 
 
 # --- webhook ingress (8.2) -------------------------------------------------------------
@@ -1133,6 +1330,7 @@ def test_webhook_metered_redacts_a_secret_in_a_plain_normalize_crash(monkeypatch
 
 
 def _seed_chunkr_webhook_job(app):
+    import time
     from pathlib import Path
 
     from openreading.adapters.chunkr import ChunkrAdapter
@@ -1148,12 +1346,16 @@ def _seed_chunkr_webhook_job(app):
     req = OpenReadingRequest.model_validate(
         {"document": {"url": "https://x/d.pdf"}, "backend": {"id": "chunkr"}}
     )
-    app.state.jobs[job.id] = JobRecord(job.id, "chunkr", adapter, job, req, 0)
+    # A real created_ms, not the usual placeholder 0: the caller's own GET after the webhook
+    # resolves this job to terminal would otherwise fall outside the TTL sweep's window (M4).
+    created_ms = int(time.time() * 1000)
+    app.state.jobs[job.id] = JobRecord(job.id, "chunkr", adapter, job, req, created_ms)
     fixture = json.loads((Path(__file__).parent / "fixtures" / "chunkr" / "parse.json").read_text())
     return job.id, fixture
 
 
 def _seed_open_ocr_webhook_job(app):
+    import time
     from pathlib import Path
 
     from openreading.adapters.open_ocr import OpenOCRAdapter
@@ -1169,7 +1371,10 @@ def _seed_open_ocr_webhook_job(app):
     req = OpenReadingRequest.model_validate(
         {"document": {"url": "https://x/d.png"}, "backend": {"id": "open-ocr"}}
     )
-    app.state.jobs[job.id] = JobRecord(job.id, "open-ocr", adapter, job, req, 0)
+    # A real created_ms, not the usual placeholder 0: the caller's own GET after the webhook
+    # resolves this job to terminal would otherwise fall outside the TTL sweep's window (M4).
+    created_ms = int(time.time() * 1000)
+    app.state.jobs[job.id] = JobRecord(job.id, "open-ocr", adapter, job, req, created_ms)
     fixture = json.loads((Path(__file__).parent / "fixtures" / "open-ocr" / "ocr.json").read_text())
     return job.id, fixture
 
@@ -1427,6 +1632,95 @@ def test_malformed_json_body_is_400(client, monkeypatch, path):
     assert r.json()["error"]["category"] == "bad_request"
 
 
+# --- M2: transport request-body cap + compare collection cap ---------------------------
+
+
+def test_request_body_over_declared_content_length_is_413(monkeypatch):
+    # Content-Length path: _BodyLimitMiddleware must 413 BEFORE the app ever reads the body.
+    # A monkeypatched-tiny cap plus a real oversized JSON payload proves the declared-length
+    # leg fires without needing an actual 150MB body in the test.
+    import openreading.server.app as app_module
+
+    monkeypatch.setattr(app_module, "_MAX_BODY_BYTES", 100)
+    app = create_app()
+    client = TestClient(app)
+    oversized = json.dumps({"document": {"bytes_base64": "A" * 1000}}).encode()
+    assert len(oversized) > 100  # the whole point: a real body over the (tiny) cap
+
+    r = client.post("/v1/parse", content=oversized, headers={"content-type": "application/json"})
+
+    assert r.status_code == 413
+    body = r.json()
+    assert body["error"]["backend_code"] == "doc_too_large"
+    assert "too large" in body["error"]["message"]
+
+
+def test_request_body_under_cap_is_unaffected(monkeypatch):
+    # A small body under a small cap must pass straight through the middleware — proves the
+    # 413 above is about SIZE, not a middleware that rejects every request.
+    import openreading.server.app as app_module
+
+    monkeypatch.setattr(app_module, "_MAX_BODY_BYTES", 1_000_000)
+    client = TestClient(create_app())
+
+    r = client.post("/v1/compare", json={"nope": 1})
+
+    assert r.status_code == 400  # the existing shape-check 400, not a 413
+    assert r.json()["error"]["category"] == "bad_request"
+
+
+def test_chunked_body_over_cap_is_cut_off(monkeypatch):
+    # The no-Content-Length (chunked) leg: best-effort by design (class docstring) — it disconnects
+    # mid-stream rather than answering a clean 413, and what the app does with a disconnected
+    # receive is whatever Starlette's own Request.stream() does with one (here: the truncated body
+    # fails JSON decoding, a 400). The one thing that MUST hold regardless of the exact status is
+    # the security property this middleware exists for: an oversized streamed body is never fully
+    # buffered and accepted. Proven against a body that would otherwise SUCCEED (a real, complete,
+    # valid pymupdf parse request, streamed a slice at a time so httpx/TestClient never precomputes
+    # a Content-Length and this leg — not the declared-length fast path above — is what runs): if
+    # the cutoff did nothing, this would be a 200, so a non-200 here is the cutoff actually firing,
+    # not just "the request happened to be malformed."
+    import openreading.server.app as app_module
+
+    raw = json.dumps(_pdf_body("pymupdf")).encode()
+    monkeypatch.setattr(app_module, "_MAX_BODY_BYTES", len(raw) // 2)
+    client = TestClient(app_module.create_app())
+
+    def chunks():
+        step = 2000
+        for i in range(0, len(raw), step):
+            yield raw[i : i + step]
+
+    r = client.post("/v1/parse", content=chunks(), headers={"content-type": "application/json"})
+
+    assert r.status_code != 200
+
+
+def test_compare_over_ceiling_is_400_naming_count_and_limit(client):
+    from openreading.server.app import _MAX_COMPARE_RESPONSES
+
+    responses = [{"id": i} for i in range(_MAX_COMPARE_RESPONSES + 1)]
+    r = client.post("/v1/compare", json={"responses": responses})
+    assert r.status_code == 400
+    body = r.json()
+    assert body["error"]["category"] == "bad_request"
+    assert str(_MAX_COMPARE_RESPONSES + 1) in body["error"]["message"]
+    assert str(_MAX_COMPARE_RESPONSES) in body["error"]["message"]
+
+
+def test_compare_at_ceiling_is_not_rejected_for_count_alone(client):
+    # Boundary check: exactly _MAX_COMPARE_RESPONSES must not be rejected by the count guard
+    # itself. These placeholder dicts are not valid response envelopes, so the request still
+    # ends up 400 — but on schema validation of input #1, not on the count message, which
+    # proves the request got PAST the count check.
+    from openreading.server.app import _MAX_COMPARE_RESPONSES
+
+    responses = [{"id": i} for i in range(_MAX_COMPARE_RESPONSES)]
+    r = client.post("/v1/compare", json={"responses": responses})
+    assert r.status_code == 400
+    assert "too many responses" not in r.json()["error"]["message"]
+
+
 # --- /v1/batch (Manifest v0.6) ----------------------------------------------------------
 
 
@@ -1556,6 +1850,20 @@ def test_batch_endpoint_per_item_isolation(client):
     env = r.json()
     assert env["status"]["state"] == "partial"
     assert (env["summary"]["succeeded"], env["summary"]["failed"]) == (1, 1)
+
+
+def test_batch_endpoint_rejects_document_path_by_default(client, monkeypatch):
+    # M6 per-item isolation (see test_batch_endpoint_per_item_isolation): a refused document.path
+    # fails that ONE item rather than the whole batch, the same as any other bad item.
+    monkeypatch.delenv("OPENREADING_SERVER_PATH_ROOT", raising=False)
+    r = client.post(
+        "/v1/batch",
+        json={"documents": [{"path": "/etc/hosts"}], "backend": "pymupdf"},
+    )
+    assert r.status_code == 200
+    env = r.json()
+    assert env["summary"]["failed"] == 1
+    assert "document.path" in env["items"][0]["error"]["message"]
 
 
 def test_batch_endpoint_duration_ms_is_not_the_fabricated_zero(client, monkeypatch):
@@ -2129,6 +2437,167 @@ def test_an_unscoped_run_of_the_same_strategy_pins_the_whole_eligible_set(tmp_pa
     assert len(header["pinned_eligible"]) > 1
 
 
+def test_create_app_reaps_expired_ledger_content_at_startup(tmp_path, monkeypatch):
+    """M7: the reaper used to run only when a NEW run arms (`_arm_ledger`'s own sweep), so a
+    server that took its last request long ago held that run's expired content (encrypted document
+    blobs, the key that unlocks them) past its retention ceiling indefinitely — nothing else ever
+    swept the ledger root. `create_app()` now calls `api.reap_expired_now()` once at startup so a
+    process that never receives another request still enforces expiry on its own. The journal file
+    itself is untouched either way — audit metadata survives erasure by design (retention.py §9.4)."""
+    from openreading.ledger.localfs import LocalFsBlobStore, LocalFsKeyStore
+    from openreading.ledger.retention import stamp_run
+
+    ledger_root = tmp_path / "ledger"
+    monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
+
+    run_id = "expired-before-startup"
+    keys = LocalFsKeyStore(ledger_root / "keys")
+    blobs = LocalFsBlobStore(ledger_root / "blobs", keys)
+    blobs.put(run_id, "sha256:" + "a" * 64, b"encrypted document bytes", "application/pdf")
+    stamp_run(ledger_root, run_id, expires_epoch_ms=1, zdr=False)  # epoch 1ms: already expired
+    journal = ledger_root / f"{run_id}.jsonl"
+    journal.write_text('{"seq": 0}\n', encoding="utf-8")
+
+    create_app()
+
+    assert not (ledger_root / "blobs" / run_id).exists()
+    assert not (ledger_root / "keys" / f"{run_id}.key").exists()
+    assert journal.exists()
+
+
+def test_create_app_survives_a_malformed_retention_stamp_at_startup(tmp_path, monkeypatch):
+    """Important finding on the M7 review: moving the reap into `create_app` means a single
+    corrupted `retention/*.json` — untrusted, persisted input, same as a run_id — could otherwise
+    take the ENTIRE server down at boot (nothing reachable, not even /healthz) instead of just
+    failing one run-arm request the way an unarmed `_arm_ledger` call used to. `create_app()` must
+    still succeed, leave the malformed stamp in place for a human, and still reap anything else
+    that legitimately expired."""
+    from openreading.ledger.localfs import LocalFsBlobStore, LocalFsKeyStore
+    from openreading.ledger.retention import stamp_run
+
+    ledger_root = tmp_path / "ledger"
+    monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
+
+    keys = LocalFsKeyStore(ledger_root / "keys")
+    blobs = LocalFsBlobStore(ledger_root / "blobs", keys)
+    blobs.put("expired-run", "sha256:" + "a" * 64, b"data", "application/json")
+    stamp_run(ledger_root, "expired-run", expires_epoch_ms=1, zdr=False)  # already expired
+    bad_stamp = ledger_root / "retention" / "corrupted.json"
+    bad_stamp.write_text("{not valid json", encoding="utf-8")
+
+    create_app()  # must not raise
+
+    assert bad_stamp.read_text(encoding="utf-8") == "{not valid json"  # left for a human, untouched
+    assert not (ledger_root / "keys" / "expired-run.key").exists()  # the valid stamp still reaps
+    assert not (ledger_root / "blobs" / "expired-run").exists()
+
+
+def test_create_app_survives_stamps_missing_keys_or_of_the_wrong_top_level_type(
+    tmp_path, monkeypatch
+):
+    """Round-2 M7 finding: a stamp that parses as JSON but is missing `expires_epoch_ms`/`run_id`
+    (e.g. `{}`) or is the wrong top-level type (e.g. a JSON array) raised KeyError/TypeError past
+    round 1's narrower `except (OSError, ValueError)` — validating `run_id`'s shape but trusting
+    the other fields to simply be present was an inconsistent cut of the same "stamps are
+    untrusted input" thesis. `create_app()` must still succeed, leave both bad stamps untouched,
+    and still reap a valid expired stamp alongside them. Named so the two bad stamps sort BEFORE
+    the good one (`missing-keys` / `wrong-type` < `zzz-expired-run`), proving a bad stamp earlier
+    in iteration order doesn't stop a good one later from being reaped."""
+    from openreading.ledger.localfs import LocalFsBlobStore, LocalFsKeyStore
+    from openreading.ledger.retention import stamp_run
+
+    ledger_root = tmp_path / "ledger"
+    monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
+
+    keys = LocalFsKeyStore(ledger_root / "keys")
+    blobs = LocalFsBlobStore(ledger_root / "blobs", keys)
+    blobs.put("zzz-expired-run", "sha256:" + "b" * 64, b"data", "application/json")
+    stamp_run(ledger_root, "zzz-expired-run", expires_epoch_ms=1, zdr=False)  # already expired
+    retention_dir = ledger_root / "retention"
+    missing_keys_stamp = retention_dir / "missing-keys.json"
+    missing_keys_stamp.write_text("{}", encoding="utf-8")
+    wrong_type_stamp = retention_dir / "wrong-type.json"
+    wrong_type_stamp.write_text("[]", encoding="utf-8")
+
+    create_app()  # must not raise
+
+    assert missing_keys_stamp.read_text(encoding="utf-8") == "{}"  # left for a human, untouched
+    assert wrong_type_stamp.read_text(encoding="utf-8") == "[]"
+    assert not (
+        ledger_root / "keys" / "zzz-expired-run.key"
+    ).exists()  # the valid stamp still reaps
+    assert not (ledger_root / "blobs" / "zzz-expired-run").exists()
+
+
+def test_create_app_survives_every_known_malformed_stamp_shape_at_once(tmp_path, monkeypatch):
+    """Round-3 M7 finding: the expiry comparison and the run_id validation still sat OUTSIDE the
+    try after rounds 1 and 2, so a stamp with both required keys present but a non-numeric
+    `expires_epoch_ms` (e.g. `"soon"`) raised TypeError at `expires_epoch_ms > now_epoch_ms`,
+    uncaught, crashing `create_app()` the same way malformed JSON and missing keys once did.
+    `reap()` now wraps the parse, both key reads, the expiry comparison, AND the run_id validation
+    in one try/except, so any of the four bad stamp shapes below is skipped rather than crashing
+    the sweep — a comprehensive guard instead of one exception type per newly-discovered shape.
+    Named so all four bad stamps sort BEFORE the good one (`corrupted` / `missing-keys` /
+    `non-numeric-expiry` / `wrong-type` < `zzz-expired-run`), so this also proves none of them
+    stops the sweep from reaching the one that's actually due."""
+    from openreading.ledger.localfs import LocalFsBlobStore, LocalFsKeyStore
+    from openreading.ledger.retention import stamp_run
+
+    ledger_root = tmp_path / "ledger"
+    monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
+
+    keys = LocalFsKeyStore(ledger_root / "keys")
+    blobs = LocalFsBlobStore(ledger_root / "blobs", keys)
+    blobs.put("zzz-expired-run", "sha256:" + "c" * 64, b"data", "application/json")
+    stamp_run(ledger_root, "zzz-expired-run", expires_epoch_ms=1, zdr=False)  # already expired
+    retention_dir = ledger_root / "retention"
+    bad_stamps = {
+        "corrupted.json": "{not valid json",
+        "missing-keys.json": "{}",
+        "wrong-type.json": "[]",
+        "non-numeric-expiry.json": json.dumps({"expires_epoch_ms": "soon", "run_id": "x"}),
+    }
+    for name, content in bad_stamps.items():
+        (retention_dir / name).write_text(content, encoding="utf-8")
+
+    create_app()  # must not raise
+
+    for name, content in bad_stamps.items():
+        assert (retention_dir / name).read_text(encoding="utf-8") == content  # untouched
+    assert not (
+        ledger_root / "keys" / "zzz-expired-run.key"
+    ).exists()  # the valid stamp still reaps
+    assert not (ledger_root / "blobs" / "zzz-expired-run").exists()
+
+
+def test_create_app_survives_ledger_root_configured_as_a_file(tmp_path, monkeypatch):
+    """Second M7-review crash path: `OPENREADING_LEDGER` pointing at a FILE, not a directory (a
+    plausible copy-paste/typo misconfiguration), must not crash server startup either —
+    `LocalFsKeyStore.__init__`'s own mkdir would otherwise raise `NotADirectoryError` before a
+    single request is ever served."""
+    not_a_dir = tmp_path / "ledger-is-a-file"
+    not_a_dir.write_text("oops", encoding="utf-8")
+    monkeypatch.setenv("OPENREADING_LEDGER", str(not_a_dir))
+
+    create_app()  # must not raise
+
+
+def test_create_app_survives_the_keys_subdirectory_existing_as_a_file(tmp_path, monkeypatch):
+    """Fourth M7-review crash path: `OPENREADING_LEDGER` itself is a valid directory (the `is_dir()`
+    fast path in `reap_expired_now` does not catch this), but its `keys` sub-path exists as a plain
+    file rather than a directory. `LocalFsKeyStore.__init__`'s `mkdir(exist_ok=True)` still raises
+    `FileExistsError` in that case — `exist_ok` only suppresses the error when the existing target
+    IS a directory — which used to propagate out of `reap_expired_now`, out of `create_app`, and
+    fail the whole server's startup. Not attacker-reachable, but the same "a broken ledger must
+    never block boot" property every other shape in this finding chain has already been given."""
+    ledger_root = tmp_path / "ledger"
+    ledger_root.mkdir()
+    (ledger_root / "keys").write_bytes(b"x")  # a file where a directory belongs
+    monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
+
+    create_app()  # must not raise
+
+
 def test_caller_auth_multiple_keys_some_scoped_some_not(monkeypatch):
     monkeypatch.setenv("OPENREADING_API_KEYS", "scoped-key-0013,unscoped-key-0013")
     monkeypatch.setenv("OPENREADING_API_KEY_SCOPES", "scoped-key-0013=pymupdf")
@@ -2468,6 +2937,34 @@ def test_caller_auth_cors_preflight_is_answered_before_auth_when_both_configured
         },
     )
     assert r.status_code == 200
+    assert r.headers.get("access-control-allow-origin") == "https://app.example.com"
+
+
+def test_body_limit_outranks_auth_and_still_gets_cors_headers_when_all_three_configured(
+    monkeypatch,
+):
+    # M2's must-hold invariant, committed rather than left to a throwaway script: with caller auth
+    # AND CORS both configured, an oversized body from an UNAUTHENTICATED cross-origin caller must
+    # still 413 (the size gate runs before the token check ever reads a header) — never 401, which
+    # would mean the auth gate ran first and paid the cost of parsing an oversized request just to
+    # reject it for the wrong reason. And because CORSMiddleware is registered OUTERMOST of all
+    # three (create_app's own comment), that 413 must still carry CORS headers — the same "a
+    # browser can actually read the error" property test_caller_auth_cors_preflight_is_answered_
+    # before_auth_when_both_configured proves for a 401, extended one layer further out.
+    import openreading.server.app as app_module
+
+    monkeypatch.setattr(app_module, "_MAX_BODY_BYTES", 100)
+    monkeypatch.setenv("OPENREADING_API_KEYS", "realtoken-0099")
+    client = TestClient(app_module.create_app(cors_origins=["https://app.example.com"]))
+    oversized = json.dumps({"document": {"bytes_base64": "A" * 1000}}).encode()
+
+    r = client.post(
+        "/v1/parse",
+        content=oversized,
+        headers={"content-type": "application/json", "Origin": "https://app.example.com"},
+    )
+
+    assert r.status_code == 413  # NOT 401 — the size gate must run before the auth gate
     assert r.headers.get("access-control-allow-origin") == "https://app.example.com"
 
 

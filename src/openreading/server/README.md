@@ -65,8 +65,11 @@ sequenceDiagram
 
 ## Walkthrough
 
-Start a server in a second terminal with `uv run openreading serve`. Every command below ran
-against that server. Generate the root README's sample first:
+Start a server in a second terminal with
+`OPENREADING_SERVER_PATH_ROOT="$PWD" uv run openreading serve`. This walkthrough sends
+`document.path`, which the server refuses over HTTP unless rooted (`openreading.server` docstring,
+"Security"); rooting it at `$PWD` covers every path below. Every command below ran against that
+server. Generate the root README's sample first:
 
 ```bash
 uv run python -c 'from openreading.testing.sample_pdf import build_sample_pdf; open("sample.pdf","wb").write(build_sample_pdf())'
@@ -137,12 +140,13 @@ HTTP 200
 {"job_id":"omjob_86129928b4744727b9f5a2001ddb265c","state":"succeeded","response_state":"succeeded","error":null}
 ```
 
-**You should see** three results. The first is a compare report built only from saved envelopes.
-The second is HTTP 200 with `state: partial`, because one failed item never fails the batch, and
-items are named by index. The third is a job that already `succeeded`, because a local backend
-finishes before the first poll. Each GET advances a poll-mode job by one slice, so keep polling
-until `state` is not `running`. An empty `documents: []` returns 200 with an `empty_batch` warning.
-`jobs` above 32 or more than 200 documents returns 400 with no override.
+**You should see** three results. The first is a compare report built only from saved envelopes;
+more than 50 `responses` in one call returns 400 with no override, the same shape as the batch
+caps below. The second is HTTP 200 with `state: partial`, because one failed item never fails
+the batch, and items are named by index. The third is a job that already `succeeded`, because a
+local backend finishes before the first poll. Each GET advances a poll-mode job by one slice, so
+keep polling until `state` is not `running`. An empty `documents: []` returns 200 with an
+`empty_batch` warning. `jobs` above 32 or more than 200 documents returns 400 with no override.
 
 ### 4. Read the error ladder
 
@@ -175,7 +179,7 @@ right, so fix the table.
 | `401` | `unauthorized`, `bad_signature` | auth on and no valid bearer, on every endpoint but the two named below; webhook signature invalid or its secret unset | `POST /v1/webhooks/reducto` with any body and no `REDUCTO_WEBHOOK_SECRET` |
 | `403` | `compliance_refused`, `scope_denied` | the policy leaves nothing to run; the token is not scoped to the backend it named, or scope empties that request's router chain or strategy walk | `"backend": {"id": "reducto"}, "compliance": {"require_baa": true}` |
 | `404` | `unknown_backend`, `unknown_job` | the id names nothing | `"backend": {"id": "nope"}`; `GET /v1/jobs/j_nope` |
-| `413` | `terminal` (`doc_too_large`) | document over the backend's size limit | needs a hosted key; shape shown, not run |
+| `413` | `terminal` (`doc_too_large`) | document over the backend's size limit, OR the request body itself over the transport cap `OPENREADING_MAX_BODY_BYTES` (`_BodyLimitMiddleware`) | doc-size case needs a hosted key, shape shown not run; the transport cap needs no key but a 150 MB default body is impractical to demo here |
 | `422` | `unsupported_feature` | the named backend cannot produce what you asked for | `"backend": {"id": "pymupdf"}, "extraction_schema": {"instructions": "totals"}` |
 | `424` | `terminal` (`missing_credentials`, `auth_rejected`) | named backend has no key (`missing_env[]`), or the provider rejected it | `"backend": {"id": "reducto"}` with no `REDUCTO_API_KEY` |
 | `502` | `plan_exhausted`, `terminal` | every backend in the plan failed (`trail` lists them). Two request-shape refusals also land here rather than at 400: `credentials_ref_alias_not_allowed` (the body's `credentials_ref` named an alias the operator has not allow-listed) and `endpoint_not_request_configurable` (the body set `runtime.endpoint`). Both are permanent, so read `backend_code` before retrying a 502 | `"credentials_ref": "env:OPENREADING_REDUCTO"`; `"runtime": {"endpoint": "https://example.com"}` |
@@ -222,7 +226,8 @@ backends that token may reach. A token is never a flag, so it never lands in she
 
 ```bash
 export TOK=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
-OPENREADING_API_KEYS="$TOK" OPENREADING_API_KEY_SCOPES="$TOK=pymupdf" uv run openreading serve
+OPENREADING_API_KEYS="$TOK" OPENREADING_API_KEY_SCOPES="$TOK=pymupdf" \
+  OPENREADING_SERVER_PATH_ROOT="$PWD" uv run openreading serve
 ```
 
 ```bash
@@ -308,6 +313,11 @@ sample through `/v1/parse` and `/v1/batch`, asserts schema-valid responses, and 
 
 - Auth is off by default and the server binds to loopback only. This avoids a default token nobody
   rotates and an open port that spends your credits. `openreading.server.app` enforces it.
+- `document.path` is refused by default, whether or not caller auth is configured at all. This
+  avoids a caller turning a JSON field naming a file into a way to read anything the server
+  process can open. `OPENREADING_SERVER_PATH_ROOT` is the explicit opt-in, and containment is
+  proved on the resolved path, so a symlink pointing outside that directory cannot escape it
+  either. `openreading.server.app._document_path_refusal` enforces it.
 - Tokens, keys and compliance attestations come from the environment only, never a body or a
   flag. A compliance attestation is the operator's declaration that a backend meets a requirement,
   such as a signed business associate agreement (BAA). Nothing lands in `ps` or shell history, and
@@ -353,7 +363,7 @@ The server writes to both streams and splits them by kind, which a log-shipping 
 account for. Start it with the streams apart and drive one request through:
 
 ```bash
-uv run openreading serve --port 8901 > access.log 2> lifecycle.log &
+OPENREADING_SERVER_PATH_ROOT="$PWD" uv run openreading serve --port 8901 > access.log 2> lifecycle.log &
 sleep 3
 curl -s -o /dev/null -X POST localhost:8901/v1/parse -H 'content-type: application/json' \
   -d '{"document": {"path": "'"$PWD"'/sample.pdf"}, "backend": {"id": "pymupdf"}}'

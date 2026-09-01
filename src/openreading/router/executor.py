@@ -26,6 +26,7 @@ Invariants:
 
 from __future__ import annotations
 
+import threading
 from collections import OrderedDict
 from dataclasses import dataclass
 
@@ -80,29 +81,41 @@ class Attempt:
 
 class BoundedResultCache:
     """Process-local idempotency cache: bounded (LRU) with a TTL. `now_ms` is passed by the caller
-    so expiry is deterministic under the injected clock (no wall-clock reads)."""
+    so expiry is deterministic under the injected clock (no wall-clock reads).
+
+    `execute_plan` runs under `run_in_threadpool` (BL-146's server path dispatches concurrent
+    requests to worker threads sharing one cache instance), and every method here is a
+    read-modify-write over the same `OrderedDict` (`get`'s expiry path does a lookup then a
+    `del`; `put` does an insert then a size-bounded eviction loop). Two threads racing those
+    compound steps — e.g. both `get`s seeing the same expired key, both taking the `del` branch —
+    turn a `dict.__delitem__` into a `KeyError` that propagates out of the cache as a 500, so the
+    whole body of `get` and `put` is one atomic section under `self._lock`.
+    """
 
     def __init__(self, max_entries: int = _CACHE_MAX_ENTRIES, ttl_ms: int = _CACHE_TTL_MS) -> None:
         self._d: OrderedDict[str, tuple[float, NormalizedResponse]] = OrderedDict()
         self._max = max_entries
         self._ttl = ttl_ms
+        self._lock = threading.Lock()
 
     def get(self, key: str, now_ms: float) -> NormalizedResponse | None:
-        item = self._d.get(key)
-        if item is None:
-            return None
-        expires, value = item
-        if now_ms >= expires:
-            del self._d[key]
-            return None
-        self._d.move_to_end(key)
-        return value
+        with self._lock:
+            item = self._d.get(key)
+            if item is None:
+                return None
+            expires, value = item
+            if now_ms >= expires:
+                del self._d[key]
+                return None
+            self._d.move_to_end(key)
+            return value
 
     def put(self, key: str, value: NormalizedResponse, now_ms: float) -> None:
-        self._d[key] = (now_ms + self._ttl, value)
-        self._d.move_to_end(key)
-        while len(self._d) > self._max:
-            self._d.popitem(last=False)
+        with self._lock:
+            self._d[key] = (now_ms + self._ttl, value)
+            self._d.move_to_end(key)
+            while len(self._d) > self._max:
+                self._d.popitem(last=False)
 
 
 def _cache_key(req: OpenReadingRequest, adapter) -> str | None:
@@ -224,7 +237,10 @@ def execute_plan(
             continue
 
         if cache is not None and key is not None:
-            cache.put(key, resp, clock.now_ms())
+            # A deep copy, because the two _record_* calls below mutate `resp` with THIS
+            # request's confirmations/trail — the cached entry must stay the adapter's
+            # canonical answer, or every later hit replays this caller's transient history.
+            cache.put(key, resp.model_copy(deep=True), clock.now_ms())
         _record_confirmations(resp, plan, desc.id)
         _record_trail(resp, trail, desc.id)
         return resp

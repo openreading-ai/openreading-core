@@ -40,7 +40,7 @@ from openreading.router.router import RouterConfig
 from openreading.strategies import StrategyConfig, compile_strategy, run_strategy
 from openreading.strategies.engine import _step_id, _step_request
 from openreading.testing.sample_pdf import build_sample_pdf
-from openreading.types.errors import ComplianceRefused, PlanExhaustedError
+from openreading.types.errors import ComplianceRefused, PlanExhaustedError, TerminalError
 from openreading.types.request import OpenReadingRequest
 from tests.fakes import ScriptedBackend, scripted_registry
 
@@ -212,6 +212,47 @@ def test_resume_replays_a_cancelled_step_with_zero_network_calls(tmp_path):
     assert result.status == "cancelled"
     assert result.replayed is True
     assert result.journal_seq == recs[-1].journal_seq
+
+
+# ---- M9: a replayed failure carries the ORIGINAL message, not a generic taxonomy name ----------
+
+
+def test_resume_reconstructs_the_original_exception_message_not_a_generic_taxonomy_name(tmp_path):
+    """M9 (security review): the failure record site (`InlineExecutor.exec`'s own `except
+    Exception` clause) used to build `StepError(code=type(exc).__name__, taxonomy=...)` with no
+    `detail` — `_reconstruct_error`'s own `err.detail or err.code` fallback then had nothing but
+    the TAXONOMY CLASS NAME to reconstruct a message from, so a resumed run's re-raised exception
+    read `TerminalError("TerminalError", ...)`: the original "quota exceeded" text a caller's own
+    retry/backoff logic (or a human reading the trail) needs was silently gone. Zero-network proof,
+    matching every other AC-3 test in this file: the resumed executor's `run` callable would raise
+    if ever actually called."""
+    ledger_root = tmp_path / "ledger"
+    journal = JsonlJournal(ledger_root / "run1.jsonl")
+    ex = InlineExecutor(journal=journal, blobs=None, registry=None, clock=RealClock())
+    req = StepRequest(
+        step_id="s1",
+        run_id="run1",
+        kind="submit",
+        step_path="root",
+        step_seq=0,
+        attempt=1,
+        backend_id="fake",
+    )
+
+    def boom():
+        raise TerminalError("quota exceeded for tenant-42", backend_code="quota")
+
+    with pytest.raises(TerminalError):
+        asyncio.run(ex.exec(req, run=boom))
+
+    # resume: a fresh reader Journal + a run() that would raise if ever called.
+    reader = JsonlJournal(ledger_root / "run1.jsonl")
+    ex2 = InlineExecutor(journal=reader, blobs=None, registry=None, clock=RealClock())
+    with pytest.raises(TerminalError) as exc_info:
+        asyncio.run(
+            ex2.exec(req, run=lambda: (_ for _ in ()).throw(AssertionError("must not dispatch")))
+        )
+    assert "quota exceeded" in str(exc_info.value)
 
 
 # ---- journal_seq ordering (§7.4) ----------------------------------------------------------------

@@ -166,6 +166,15 @@ Environment variables read by this module
   run: after the key is reaped, replay reports `payload_expired` and nothing brings the content
   back. A fresh run also sweeps the whole ledger root at arm time, so stale runs are collected by
   ordinary use.
+- `OPENREADING_ALLOW_PRIVATE_URLS` — read by `_download` (`materialize_document`'s own URL
+  fetch). Unset (default): before any request leaves this process, `_assert_public_http_url`
+  refuses a non-http(s) scheme and a host that resolves to a loopback/private/link-local/reserved
+  address (cloud metadata endpoints included) — `unsupported_input` / `url_not_public`
+  respectively. Set (any non-empty value): skips that whole check, scheme included, for a
+  deployment whose document store is deliberately intranet-only; the operator is trusted to have
+  already constrained which URLs can reach `run()`/`route()` in that case. Pre-resolution only — a
+  DNS answer that changes between this check and the actual connect (rebinding) is out of scope;
+  an operator needing that guarantee puts egress policy in front.
 - `env_file=` -> `credentials.load_dotenv`: loads `KEY=VALUE` lines WITHOUT overriding an
   already-set process variable (an exported shell var always beats the file); a missing file is
   a no-op. Loaded ONLY when the argument is given (`if env_file:` in `run()` / `run_batch()`):
@@ -358,7 +367,7 @@ def validate_policy(policy: Any) -> dict[str, Any] | None:
             f"unknown policy key{plural}: {', '.join(named)}; valid keys: {', '.join(POLICY_KEYS)}"
         )
     try:
-        # strict=: the HTTP surface type-checks the same values against request.v0.1.json BEFORE
+        # strict=: the HTTP surface type-checks the same values against request.v0.2.json BEFORE
         # pydantic sees them, and JSON Schema does not coerce. Without strict=, `require_baa:
         # "yes"` would be accepted here and rejected over HTTP — the same divergence in a new place.
         Compliance.model_validate(
@@ -388,7 +397,10 @@ def _document_dict(source: str | bytes, mime_type: str | None) -> dict[str, Any]
         }
     s = str(source)
     if s.startswith(("http://", "https://")):
-        return {"url": s}
+        # Preserve the caller's explicit mime_type (None is valid on DocumentInput) instead of
+        # dropping it here -- materialize_document's own `d.mime_type or "application/pdf"`
+        # fallback is what supplies the PDF default when the caller gave none (L1).
+        return {"url": s, "mime_type": mime_type}
     p = Path(s)
     if not p.exists():
         # BL-133: every direct Python-API caller (route()/build_request()/run()/run_batch()) gets
@@ -476,22 +488,69 @@ def build_request(
     return OpenReadingRequest.model_validate(body)
 
 
+def _assert_public_http_url(url: str) -> None:
+    """Refuse URL schemes and destinations a hosted parse must never fetch on a caller's behalf:
+    non-http(s), and hosts resolving to loopback/private/link-local/reserved addresses (cloud
+    metadata endpoints included). Pre-resolution check only — a DNS answer that changes between
+    this check and the connect (rebinding) is out of scope here; a deployment needing that
+    guarantee enforces egress policy at the network layer, outside this process.
+    OPENREADING_ALLOW_PRIVATE_URLS=1 disables the address check for intranet document stores."""
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise TerminalError(
+            f"unsupported URL scheme {parsed.scheme!r}", backend_code="unsupported_input"
+        )
+    host = parsed.hostname
+    if not host:
+        raise TerminalError("URL has no host", backend_code="unsupported_input")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except OSError as exc:
+        raise TerminalError(f"cannot resolve {host!r}", backend_code="url_not_public") from exc
+    for info in infos:
+        addr = ipaddress.ip_address(info[4][0])
+        if not addr.is_global or addr.is_multicast:
+            raise TerminalError(
+                f"URL host {host!r} resolves to a non-public address",
+                backend_code="url_not_public",
+            )
+
+
 def _download(url: str, *, transport=None) -> bytes:
     import httpx  # lazy — only when a URL is actually materialized
 
+    if not os.environ.get("OPENREADING_ALLOW_PRIVATE_URLS"):
+        _assert_public_http_url(url)
     client = (
         httpx.Client(transport=transport, timeout=60.0) if transport else httpx.Client(timeout=60.0)
     )
-    with client:
-        r = client.get(url)
+    with client, client.stream("GET", url) as r:
         if r.status_code >= 400:
             raise error_for_status(r.status_code, r.headers, message=f"fetch {url}")
-        data = r.content
-    if len(data) > _MAX_DOWNLOAD_BYTES:
-        raise TerminalError(
-            f"document at {url} exceeds {_MAX_DOWNLOAD_BYTES} bytes", backend_code="doc_too_large"
-        )
-    return data
+        declared = r.headers.get("content-length", "")
+        if declared.isdigit() and int(declared) > _MAX_DOWNLOAD_BYTES:
+            raise TerminalError(
+                f"document at {url} exceeds {_MAX_DOWNLOAD_BYTES} bytes",
+                backend_code="doc_too_large",
+            )
+        chunks: list[bytes] = []
+        total = 0
+        # Stream with a running count: buffering the whole body first (r.content) would let an
+        # oversized or endless response exhaust memory before the limit was ever consulted.
+        for chunk in r.iter_bytes():
+            total += len(chunk)
+            if total > _MAX_DOWNLOAD_BYTES:
+                raise TerminalError(
+                    f"document at {url} exceeds {_MAX_DOWNLOAD_BYTES} bytes",
+                    backend_code="doc_too_large",
+                )
+            chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def materialize_document(req: OpenReadingRequest, descriptor=None, *, transport=None):
@@ -691,6 +750,52 @@ def _arm_ledger_unguarded(
         sanitizer=sanitizer,
         ledger_root=ledger_root,
     )
+
+
+def reap_expired_now() -> list[str]:
+    """Reap every expired stamped run immediately, independent of any run arming (finding M7).
+
+    `_arm_ledger_unguarded`'s own sweep only runs when a NEW run arms, so a server that has gone
+    idle since its last request would otherwise hold that run's expired content (encrypted
+    document blobs, and the key that unlocks them) past its retention ceiling indefinitely —
+    nothing else in this module ever revisits the ledger root unprompted. `server.app.create_app`
+    calls this once at startup so an idle process still enforces expiry on its own, without waiting
+    on the next run to arm; a fully idle CLI-only install still only enforces on its next run.
+
+    Mirrors `_arm_ledger_unguarded`'s own path construction exactly — keys at `<root>/keys`, blobs
+    at `<root>/blobs`, the wall clock for the epoch `reap` compares stamps against — so the two
+    sweeps can never disagree about where a run's content lives. No-op (`[]`) when
+    `OPENREADING_LEDGER` is unset, the same "arming is env-only, no flag" contract documented on
+    `_arm_ledger_unguarded` — equally a no-op when it is SET but names something other than a
+    directory, and equally a no-op on ANY other `OSError` while constructing the key store or
+    reaping (M7 review finding): `keys` or `blobs` existing as a plain file one level down still
+    makes `LocalFsKeyStore.__init__`'s `mkdir(exist_ok=True)` raise `FileExistsError` (`exist_ok`
+    only suppresses the case where the target is already a directory), and a permissions error is
+    always possible under a root this process doesn't fully control. Fail open: this is a
+    best-effort startup cleanup, not a request a caller is waiting on, so it must never be the
+    reason `create_app` fails to boot — the one attacker-reachable vector, a malformed
+    `retention/*.json` stamp, is already handled inside `reap()` itself and never raises here.
+
+    Deliberately outside this module's documented Python API surface (no `__all__` entry, no row
+    in the "Exports and return shapes" section above): it is a server operational concern, not a
+    document-processing recipe, and its only caller is `create_app`.
+    """
+    root = os.environ.get("OPENREADING_LEDGER")
+    if not root:
+        return []
+    ledger_root = Path(root)
+    if ledger_root.exists() and not ledger_root.is_dir():
+        return []
+    try:
+        keys = LocalFsKeyStore(ledger_root / "keys")
+        return reap(
+            ledger_root, keys, ledger_root / "blobs", now_epoch_ms=int(RealClock().now_wall_ms())
+        )
+    except OSError:
+        # Fail open (see docstring): keys/blobs existing as a file (FileExistsError from mkdir),
+        # a permissions error under the ledger root, or any other filesystem surprise here must
+        # not take the whole server down over a best-effort startup cleanup.
+        return []
 
 
 def _run_strategy_request(

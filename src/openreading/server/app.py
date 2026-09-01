@@ -7,8 +7,15 @@ docstring; this one covers how the app enforces it and what it reads from the en
 HTTP status mapping (D-v2-8). Exceptions raised by the router/adapters are mapped in ONE place,
 _error_envelope (wrapped by _error_response):
   403 ComplianceRefused / no eligible backend · 424 missing credentials (named backend) or
-  `auth_rejected` · 413 doc too large · 422 unsupported feature · 400 unknown_strategy · 504
-  retryables exhausted / deadline · 502 PlanExhaustedError / other terminal · 500 anything else.
+  `auth_rejected` · 413 doc too large (TerminalError, `doc_too_large`) · 422 unsupported feature ·
+  400 unknown_strategy · 504 retryables exhausted / deadline · 502 PlanExhaustedError / other
+  terminal · 500 anything else.
+A second, earlier 413 predates all of this (M2): `_BodyLimitMiddleware`, a pure-ASGI middleware
+wrapping the whole app, answers it straight off the transport when a declared Content-Length
+exceeds `_MAX_BODY_BYTES` — before routing, before `_error_envelope`, before FastAPI even starts
+parsing the request. Same envelope shape and the same `doc_too_large` backend_code as the
+TerminalError case above (a caller reacts to either the same way: send less data), even though
+this one fires on raw bytes never decoded into a document at all.
 Request-shape and lookup failures never become exceptions, so they bypass _error_envelope and are
 built by small JSONResponse helpers inside create_app: 400 bad_request (body not JSON, fails the
 request schema, bad `jobs` / `timeout_s`) via _bad_request; 404 unknown_backend via
@@ -50,9 +57,10 @@ OPTIONS still gets a CORS answer instead of a 401). RouterConfig comes from the 
 is offloaded with run_in_threadpool, and why fastapi is imported at module level).
 
 Environment variables this module reads. Server-only (the CLI and Python API ignore them):
-OPENREADING_API_KEYS, OPENREADING_API_KEY_SCOPES and the three compliance attestation knobs.
-OPENREADING_CONFIG and the backend credential vars are shared with the CLI / Python API, which
-read them through the same strategy loader and EnvCredentialBroker.
+OPENREADING_API_KEYS, OPENREADING_API_KEY_SCOPES, OPENREADING_SERVER_PATH_ROOT,
+OPENREADING_JOB_TTL_S, OPENREADING_MAX_ASYNC_JOBS, OPENREADING_MAX_BODY_BYTES and the three
+compliance attestation knobs. OPENREADING_CONFIG and the backend credential vars are shared with
+the CLI / Python API, which read them through the same strategy loader and EnvCredentialBroker.
   OPENREADING_API_KEYS — comma-separated bearer tokens (_load_api_key_config, once at startup).
     Unset/empty ⇒ caller auth OFF, every endpoint open. An empty ENTRY (stray/trailing comma)
     raises ServerConfigError at startup rather than being dropped: a key is security-bearing and
@@ -63,6 +71,14 @@ read them through the same strategy loader and EnvCredentialBroker.
     a token OPENREADING_API_KEYS never listed, two scopes for one token, or set while
     OPENREADING_API_KEYS is empty) ⇒ ServerConfigError at startup, naming the setting and the
     entry position, never the value.
+  OPENREADING_SERVER_PATH_ROOT — a directory `document.path` may resolve beneath, checked per
+    request by `_document_path_refusal`. Unset (the default) refuses every `document.path` at
+    every caller-body ingress (/v1/parse, /v1/route, /v1/jobs, /v1/batch): HTTP turns a local
+    field naming a file into a remote file-read primitive, so it stays off until an operator
+    opts in. When set, a path must resolve (symlinks followed first) to a regular file under this
+    directory; a link that escapes it is refused the same as a literal `..`. The CLI and Python
+    API never read this var — `document.path` there names a file the SAME process already
+    trusts, which is why the gate is HTTP-only.
   OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE — `1`/`true`/`yes` lets UNVERIFIED compliance fields
     survive the router's compliance stage. Unset (or anything else) ⇒ fail closed: unverified
     is eliminated. The one switch that widens the eligible set; leave it off without a reason.
@@ -88,6 +104,24 @@ read them through the same strategy loader and EnvCredentialBroker.
   OPENREADING_LEDGER — NOT read here: arming the ledger covers CLI/Python `parse`/`resume` and a
     /v1/parse strategy run via api.run_request, but the /v1/jobs store stays in-memory,
     per-process, with no server-side resume (internal/design/ledger.md §10).
+  OPENREADING_JOB_TTL_S / OPENREADING_MAX_ASYNC_JOBS — bound the /v1/jobs store (M4): a TERMINAL
+    record (`Job.is_terminal()`) older than OPENREADING_JOB_TTL_S seconds, measured from its own
+    `created_ms`, is deleted the next time ANY submit or GET touches the store (`_sweep_jobs`) —
+    lazily, since this server has no scheduler thread; a non-terminal record is never swept
+    regardless of age, so a still-running job can never be reaped out from under a caller
+    mid-poll. Unset ⇒ 3600s / 1000 jobs. A submit at or over the cap is refused with 429
+    `rate_limited` before its body is even parsed, let alone an adapter resolved or called.
+    `DELETE /v1/jobs/{job_id}` (204, or 404 `unknown_job` — the same envelope GET's own 404 uses)
+    frees a slot immediately on any job regardless of state, without waiting on the TTL.
+  OPENREADING_MAX_BODY_BYTES — bytes ceiling for `_BodyLimitMiddleware` (M2), read once at module
+    import into the module-level `_MAX_BODY_BYTES` (same pattern as OPENREADING_JOB_TTL_S /
+    OPENREADING_MAX_ASYNC_JOBS above) — setting the env var after this module is already imported
+    has no effect, which is why tests monkeypatch `_MAX_BODY_BYTES` itself rather than the env
+    var. Unset ⇒ 150 MiB (157286400): the 100 MB document cap, base64-inflated by ~4/3, plus
+    headroom for the surrounding JSON envelope. A declared Content-Length over the cap
+    ⇒ 413 before the app reads any of the body; a chunked/undeclared-length body is only cut off
+    mid-stream once the running total passes the cap, which degrades to whatever the app does with
+    a disconnected receive rather than a clean 413 (best-effort — see `_BodyLimitMiddleware`).
 """
 
 from __future__ import annotations
@@ -100,13 +134,14 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 # fastapi lives in the [server] extra; this module is only imported when serving/testing, so a
 # module-level import is fine (and REQUIRED — under `from __future__ import annotations`, FastAPI
 # must resolve the `Request` annotation against these module globals).
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from openreading import __version__, api, schemas
@@ -167,6 +202,13 @@ _ADAPTER_ERRORS = (
 # than a second, independently-hardcoded literal, so the two limits cannot drift apart.
 MAX_BATCH_DOCUMENTS = DEFAULT_MAX_ITEMS
 
+# M2: the ceiling on POST /v1/compare's `responses[]`. Compare is pure CPU (no adapter, no
+# credential, no network) — its whole cost is the pairwise `SequenceMatcher` diff the comparison
+# engine runs over every pair, O(n^2) in the response count. A constant, not an env knob: nobody
+# legitimately compares more responses than there are backends to produce them, so there is no
+# deployment for which this ceiling should ever need raising.
+_MAX_COMPARE_RESPONSES = 50
+
 
 @dataclass
 class JobRecord:
@@ -219,6 +261,35 @@ def _job_dict(rec: JobRecord) -> dict[str, Any]:
     if rec.error is not None:
         out["error"] = rec.error
     return out
+
+
+# M4: a terminal job retains the FULL request (base64 document bytes, document.password) and its
+# response until removed -- bounded retention is the point, not tidiness. This server has no
+# scheduler thread, so sweeping is lazy: _sweep_jobs runs at the top of every submit/GET call
+# rather than on a timer. Plain module globals, read once when this module is imported (the same
+# effective timing as process startup for `openreading serve`) rather than per-request like
+# _server_router_config/_document_path_refusal below: a malformed value should fail at boot, not
+# crash unpredictably on the first job request that happens to touch it (the same reasoning
+# _load_api_key_config gives for parsing OPENREADING_API_KEYS once in create_app, AC-7) — and
+# unlike those two, _sweep_jobs is a plain top-level function with no `app` closure to cache a
+# parsed value on, so a module global is the only place for it to live. A test that needs a
+# different value monkeypatches the constant directly (as several already do for
+# DEFAULT_DEADLINE_MS) rather than the environment.
+_JOB_TTL_MS = int(os.environ.get("OPENREADING_JOB_TTL_S", "3600")) * 1000
+_MAX_ASYNC_JOBS = int(os.environ.get("OPENREADING_MAX_ASYNC_JOBS", "1000"))
+
+
+def _sweep_jobs(jobs: dict[str, JobRecord], now_ms: int) -> None:
+    """Delete every TERMINAL record older than `_JOB_TTL_MS`, measured from `created_ms`. Never
+    touches a non-terminal record: a still-running job must not be reaped out from under a caller
+    mid-poll, no matter its age."""
+    expired = [
+        jid
+        for jid, rec in jobs.items()
+        if rec.job.is_terminal() and now_ms - rec.created_ms > _JOB_TTL_MS
+    ]
+    for jid in expired:
+        del jobs[jid]
 
 
 def _webhook_secret(backend_id: str) -> str | None:
@@ -302,6 +373,30 @@ def _server_router_config() -> RouterConfig:
         train_optout_confirmed=optout,
         baa_tier_confirmed=baa_tier,
     )
+
+
+def _document_path_refusal(req: OpenReadingRequest) -> str | None:
+    """`document.path` names a file on the SERVER — on the HTTP surface that is a remote
+    file-read primitive, so it is off unless the operator names a directory to serve from.
+    Containment is proved on the resolved path (symlinks followed first), so a link that
+    escapes the root is refused the same as a literal `..`."""
+    p = req.document.path
+    if p is None:
+        return None
+    root = os.environ.get("OPENREADING_SERVER_PATH_ROOT")
+    if not root:
+        return (
+            "document.path is not accepted over HTTP; send bytes_base64 or url, or set "
+            "OPENREADING_SERVER_PATH_ROOT to serve files beneath a directory of your choosing"
+        )
+    root_resolved = Path(root).resolve()
+    try:
+        target = Path(p).resolve(strict=True)
+    except OSError:
+        return f"document.path {p!r} does not resolve to a readable file"
+    if not (target.is_relative_to(root_resolved) and target.is_file()):
+        return "document.path must resolve to a regular file under OPENREADING_SERVER_PATH_ROOT"
+    return None
 
 
 class ServerConfigError(Exception):
@@ -598,6 +693,71 @@ def _error_response(exc: Exception):
     return JSONResponse(status_code=status, content={"error": env})
 
 
+# M2: every endpoint does `await request.json()` with no transport-level ceiling, so an
+# unauthenticated caller could hand the ASGI server an arbitrarily large body and have it fully
+# buffered into memory before any handler (let alone compliance/schema validation) ever runs.
+# 150 MB: the 100 MB document cap (`doc_too_large`, TerminalError) base64-inflates a binary
+# document by ~4/3, plus headroom for the surrounding JSON envelope.
+_MAX_BODY_BYTES = int(os.environ.get("OPENREADING_MAX_BODY_BYTES", str(150 * 1024 * 1024)))
+
+
+class _BodyLimitMiddleware:
+    """Pure ASGI (no BaseHTTPMiddleware): counts request-body bytes as they arrive and answers 413
+    before the app ever buffers an oversized body. Content-Length is honored when present — the
+    robust leg, since it rejects before a single body byte is read. A chunked/undeclared-length
+    body has no upfront count to check, so it is only cut off mid-stream once the running total
+    passes the cap (`http.disconnect` in place of the next chunk) — best-effort: whatever the app
+    does with a disconnected receive (typically its own JSON-decode failure) is acceptable, since
+    the goal here is bounding memory/CPU, not guaranteeing a clean 413 on every leg.
+    """
+
+    def __init__(self, app, max_bytes: int) -> None:
+        self.app, self.max = app, max_bytes
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        declared = dict(scope.get("headers") or []).get(b"content-length")
+        if declared and declared.isdigit() and int(declared) > self.max:
+            return await self._too_large(send)
+        seen = 0
+
+        async def counted_receive():
+            nonlocal seen
+            message = await receive()
+            if message["type"] == "http.request":
+                seen += len(message.get("body", b""))
+                if seen > self.max:
+                    return {"type": "http.disconnect"}
+            return message
+
+        await self.app(scope, counted_receive, send)
+        # If the app saw a disconnect mid-body it has already ended its own response; nothing to
+        # send here for that case — see the class docstring on why that leg is best-effort.
+
+    async def _too_large(self, send):
+        body = json.dumps(
+            {
+                "error": {
+                    "category": "terminal",
+                    "message": "request body too large",
+                    "backend_code": "doc_too_large",
+                }
+            }
+        ).encode()
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 413,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
+
+
 def create_app(*, cors_origins: list[str] | None = None):
     app = FastAPI(title="OpenReading", version=__version__)
     jobs: dict[str, JobRecord] = {}
@@ -605,6 +765,11 @@ def create_app(*, cors_origins: list[str] | None = None):
     # Idempotency cache for the /v1/parse `auto` chain: one per app, so it lives as long as the
     # server process and never crosses into another app instance (D-v3-3).
     app.state.result_cache = BoundedResultCache()
+
+    # M7: the ledger's own reap only fires when a NEW run arms (`_arm_ledger`), so a server that
+    # goes idle after its last request would otherwise hold expired content past its retention
+    # ceiling until something else happened to run. A no-op when OPENREADING_LEDGER is unset.
+    api.reap_expired_now()
 
     # Strategy config is loaded ONLY from OPENREADING_CONFIG — the server never sniffs its cwd
     # (spec §1.2). A broken config fails fast at startup.
@@ -642,6 +807,12 @@ def create_app(*, cors_origins: list[str] | None = None):
         request.state.api_key_scope = api_key_config.scopes.get(matched_key)
         return await call_next(request)
 
+    # M2: registered next (still BEFORE the optional CORS block), same prepend rule as above — CORS
+    # stays outermost of all three when configured, so even a 413 this middleware raises still
+    # picks up CORS headers for a legitimate cross-origin browser caller to read. Outer to
+    # _caller_auth so an oversized body is rejected before spending even a cheap token comparison.
+    app.add_middleware(_BodyLimitMiddleware, max_bytes=_MAX_BODY_BYTES)
+
     if cors_origins:
         from fastapi.middleware.cors import CORSMiddleware
 
@@ -667,6 +838,20 @@ def create_app(*, cors_origins: list[str] | None = None):
             status_code=404, content={"error": {"category": category, "message": message}}
         )
 
+    def _job_store_full():
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": {
+                    "category": "rate_limited",
+                    "message": (
+                        f"async job store is full ({_MAX_ASYNC_JOBS}); retry after jobs expire "
+                        "or DELETE finished jobs"
+                    ),
+                }
+            },
+        )
+
     def _bad_signature():
         return JSONResponse(
             status_code=401,
@@ -678,7 +863,13 @@ def create_app(*, cors_origins: list[str] | None = None):
     async def _parse_request(request: Request) -> OpenReadingRequest:
         body = await request.json()  # raises on invalid JSON → caught by caller
         schemas.validate_request(body)  # vendored request schema (raises → 400)
-        return OpenReadingRequest.model_validate(body)
+        req = OpenReadingRequest.model_validate(body)
+        # Shared by /v1/route and /v1/jobs — a ValueError here lands in each caller's own
+        # existing except→400, so this one gate covers both ingress points.
+        refusal = _document_path_refusal(req)
+        if refusal is not None:
+            raise ValueError(refusal)
+        return req
 
     @app.get("/healthz")
     def healthz() -> dict[str, Any]:
@@ -762,6 +953,9 @@ def create_app(*, cors_origins: list[str] | None = None):
             req = OpenReadingRequest.model_validate(body)
         except Exception as e:  # noqa: BLE001 — any validation failure is a 400
             return _bad_request(str(e))
+        refusal = _document_path_refusal(req)
+        if refusal is not None:
+            return _bad_request(refusal)
         # BL-159 AC-3: scope-gate BEFORE run_request ever constructs an adapter or resolves a
         # vendor credential — for both a directly-named backend outside the key's allow-list and
         # an "auto" request the router would otherwise have picked one for.
@@ -826,6 +1020,15 @@ def create_app(*, cors_origins: list[str] | None = None):
             return _bad_request(f"invalid JSON body: {e}")
         if not isinstance(body, dict) or not isinstance(body.get("responses"), list):
             return _bad_request('body must be {"responses": [...], "baseline"?, "truth"?}')
+        # M2: reject BEFORE the comparison engine ever runs — its pairwise SequenceMatcher diff is
+        # O(n^2) in len(responses), so an uncapped list is a CPU-amplification primitive reachable
+        # by an unauthenticated caller, the same shape of risk /v1/batch's MAX_BATCH_DOCUMENTS
+        # guards against.
+        if len(body["responses"]) > _MAX_COMPARE_RESPONSES:
+            return _bad_request(
+                f"too many responses to compare "
+                f"({len(body['responses'])} > {_MAX_COMPARE_RESPONSES})"
+            )
         from openreading.comparison import CompareInputError
         from openreading.comparison import compare as _compare
 
@@ -979,6 +1182,9 @@ def create_app(*, cors_origins: list[str] | None = None):
                     item_req = OpenReadingRequest.model_validate(
                         {"document": doc, "backend": {"id": backend}, **shared}
                     )
+                    refusal = _document_path_refusal(item_req)
+                    if refusal is not None:
+                        raise ValueError(refusal)
                 except Exception:  # noqa: BLE001 — an unbuildable item is run_batch's own M6
                     # per-item-isolation concern (surfaces there as a `failed` item); it is not a
                     # scope decision, so this pre-check simply defers to that existing path.
@@ -1001,6 +1207,12 @@ def create_app(*, cors_origins: list[str] | None = None):
                     **shared,
                 }
             )
+            # M6: raising here (rather than checking earlier) lets _run_item's own per-item
+            # isolation turn a refused document.path into a `failed` item, never aborting the
+            # rest of the batch — the same containment as any other bad item.
+            refusal = _document_path_refusal(req)
+            if refusal is not None:
+                raise ValueError(refusal)
             return api.run_request(
                 req,
                 config=_server_router_config(),
@@ -1026,6 +1238,12 @@ def create_app(*, cors_origins: list[str] | None = None):
 
     @app.post("/v1/jobs")
     async def submit_job(request: Request):
+        _sweep_jobs(jobs, int(time.time() * 1000))
+        # Checked BEFORE anything else -- parsing the body, resolving an adapter, spending a
+        # vendor call -- so a full store fails fast rather than doing real work for a job it is
+        # about to refuse to keep.
+        if len(jobs) >= _MAX_ASYNC_JOBS:
+            return _job_store_full()
         try:
             req = await _parse_request(request)
         except Exception as e:  # noqa: BLE001
@@ -1125,6 +1343,7 @@ def create_app(*, cors_origins: list[str] | None = None):
 
     @app.get("/v1/jobs/{job_id}")
     async def get_job(job_id: str):
+        _sweep_jobs(jobs, int(time.time() * 1000))
         rec = jobs.get(job_id)
         if rec is None:
             return _not_found("unknown_job", job_id)
@@ -1199,6 +1418,16 @@ def create_app(*, cors_origins: list[str] | None = None):
             finally:
                 rec.drive_lock.release()
         return _job_dict(rec)
+
+    @app.delete("/v1/jobs/{job_id}")
+    async def delete_job(job_id: str):
+        # No TTL sweep here (unlike submit/GET): a caller naming a specific id is acting on that
+        # id directly, not merely touching the store, so this frees the slot immediately and
+        # unconditionally -- regardless of job state or age -- rather than waiting on the lazy
+        # staleness check submit/GET use to bound unattended growth.
+        if jobs.pop(job_id, None) is None:
+            return _not_found("unknown_job", job_id)
+        return Response(status_code=204)
 
     @app.post("/v1/webhooks/{backend_id}")
     async def webhook(backend_id: str, request: Request):

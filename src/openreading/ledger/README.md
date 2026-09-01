@@ -113,7 +113,7 @@ jq -c '{strategy_name, config_hash, plan_hash, journal_version, slim_request}' .
 ```json
 {"step_id":"bcfe2aac…","status":"attempted","attempt":1,"run_id":"769d5f06-…","step_path":"root.steps[0]","step_seq":0,"backend_id":"pymupdf","idempotency_key":"om_868044b9…","content_key":"om_868044b9…","started_epoch_ms":1788036714842,"journal_seq":0}
 {"step_id":"bcfe2aac…","status":"ok","attempt":1,"run_id":"769d5f06-…","step_path":"root.steps[0]","step_seq":0,"backend_id":"pymupdf","idempotency_key":"om_868044b9…","content_key":"om_868044b9…","payload":{"run_id":"769d5f06-…","digest":"sha256:49e166b7…","size_bytes":17091,"media_type":"application/json","store":"localfs"},"ended_epoch_ms":1788036714899,"journal_seq":1}
-{"strategy_name":"offline_first","config_hash":"sha256:4b081150…","plan_hash":"sha256:3e0803c8…","journal_version":1,"slim_request":{"backend":{"id":"strategy:offline_first"},"document":{"filename":"sample.pdf","mime_type":"application/pdf"},"schema_version":"0.1"}}
+{"strategy_name":"offline_first","config_hash":"sha256:4b081150…","plan_hash":"sha256:3e0803c8…","journal_version":1,"slim_request":{"backend":{"id":"strategy:offline_first"},"document":{"filename":"sample.pdf","mime_type":"application/pdf"},"schema_version":"0.2"}}
 ```
 
 **You should see** two journal lines that share one `step_id`. The `attempted` line is written
@@ -288,15 +288,18 @@ happened, but not with what content. Retention defaults to 24 hours and is read 
 hosted backend's own retention limit can only tighten it per step. Raise it before the run, never
 after.
 
-Read the comment on the `sleep 1` line as a precondition rather than a decoration. The reaper runs
-only when another run arms the ledger, so `OPENREADING_LEDGER_RETENTION_HOURS` sets the earliest
-moment a payload may be destroyed and never the moment it is. Nothing sweeps on a timer, and there
-is no purge verb to call. A run whose window expired on Friday keeps its key and its document bytes
-all weekend if nothing else runs, which is exactly the quiet period a retention promise is written
-for. When you owe someone a deletion deadline, schedule a sweep of your own that does not depend on
-how often the pipeline runs: a cron entry that arms the ledger against the sample every hour is
-enough to fire the reaper, and deleting the file under `keys/` yourself has the same effect as the
-last line above.
+Read the comment on the `sleep 1` line as a precondition rather than a decoration, for a CLI-only
+install: the reaper there runs only when another run arms the ledger, so
+`OPENREADING_LEDGER_RETENTION_HOURS` sets the earliest moment a payload may be destroyed and never
+the moment it is. `openreading serve` additionally reaps once at its own startup (finding M7) —
+restarting the server collects anything already past its ceiling — but nothing sweeps on a timer
+either way, and there is no purge verb to call. A run whose window expired on Friday keeps its key
+and its document bytes all weekend if nothing else arms a run or restarts the server, which is
+exactly the quiet period a retention promise is written for. When you owe someone a deletion
+deadline, schedule a sweep of your own that does not depend on how often the pipeline runs or the
+server restarts: a cron entry that arms the ledger against the sample every hour is enough to fire
+the reaper, and deleting the file under `keys/` yourself has the same effect as the last line
+above.
 
 Destroying the key deletes one file, the key itself. Every other file stays where it was, and the
 blobs stay on disk as ciphertext nothing can now read. The header keeps `document.digest`, which is
@@ -337,9 +340,11 @@ are in `uv run python -m pydoc openreading.ledger`. The ones you meet are these.
   not yet refuse a foreign `run_id`, which is the cross-run rejection listed under [Not built
   yet](#not-built-yet).
 - Erasure is crypto-shredding rather than deletion, because a delete would have to reach every
-  replica and backup one file at a time. Each blob is encrypted with a stdlib SHA-256 counter-mode
-  stream cipher under a fresh 32-byte key per run. That cipher is unauthenticated, and integrity
-  comes from the digest the journal recorded rather than from the cipher.
+  replica and backup one file at a time. Each blob is encrypted with AES-256-GCM under a fresh
+  32-byte key per run and a fresh nonce per blob, so tampering or on-disk corruption fails the
+  AEAD tag check instead of decrypting to altered plaintext. A blob written by T1's original
+  unauthenticated XOR stream, before this upgrade, still reads back correctly -- an in-flight run
+  survives the swap.
 - The key protects backups, not the ledger root. `keys/` is mode 0700 and each key file is 0600,
   while the blobs beside them are 0644, all under the one directory `OPENREADING_LEDGER` names.
   Anyone who can read that whole directory can read the payloads, so give it the filesystem and
@@ -378,8 +383,10 @@ Each line names the `openreading.ledger` docstring section that records it.
   ("Retention, ZDR, erasure").
 - A verb that lists resumable runs. After a `SIGKILL` the only way back to a run id is reading
   `$OPENREADING_LEDGER/*.header.json` by hand ("Operational contract").
-- A retention sweep on a timer. The reaper runs at arm time only, as the recipe above shows
-  ("Retention, ZDR, erasure").
+- A retention sweep on a timer, independent of a run arming or a server restart. The reaper runs
+  at run-arm time and once at server startup (`openreading.api.reap_expired_now`); a fully idle
+  CLI-only install still only sweeps on its next run, as the recipe above shows ("Retention, ZDR,
+  erasure").
 
 ## See also
 

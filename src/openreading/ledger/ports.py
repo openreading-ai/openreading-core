@@ -26,11 +26,23 @@ from openreading.types.errors import TerminalError
 
 
 class PayloadExpired(Exception):
-    """Raised by `BlobStore.get` when the run's key has been destroyed (`KeyStore.destroy`) —
-    the journal record survives, the plaintext does not (§9.4's "third terminal state")."""
+    """Raised by `BlobStore.get` for a payload it cannot hand back, in either of two disjoint
+    cases: the run's key has been destroyed (`KeyStore.destroy`) — the journal record survives,
+    the plaintext does not (§9.4's "third terminal state") — or, since the AES-256-GCM upgrade
+    (M6), the stored ciphertext fails authentication or is truncated/malformed (tampering or
+    on-disk corruption; `get` catches `cryptography`'s `InvalidTag` and, for a blob truncated
+    short enough that even the nonce is malformed, `ValueError`, re-raising either as this same
+    type). Both are "this store
+    cannot produce a trustworthy plaintext for this ref," and every existing caller already
+    treats `PayloadExpired` as one undifferentiated terminal condition (see
+    `InlineExecutor._resolve_replay_payload`'s `except PayloadExpired`) — a new cause reuses the
+    type and supplies a distinguishing `reason` rather than forking the taxonomy.
+    """
 
-    def __init__(self, run_id: str) -> None:
-        super().__init__(f"run {run_id!r}: key destroyed, payload unrecoverable")
+    def __init__(
+        self, run_id: str, *, reason: str = "key destroyed, payload unrecoverable"
+    ) -> None:
+        super().__init__(f"run {run_id!r}: {reason}")
         self.run_id = run_id
 
 
@@ -93,7 +105,8 @@ class BlobStore(Protocol):
     def put(self, run_id: str, digest: str, data: bytes, media_type: str) -> BlobRef: ...
 
     def get(self, ref: BlobRef) -> bytes:
-        """Raises `PayloadExpired` once the run's key is destroyed."""
+        """Raises `PayloadExpired` once the run's key is destroyed, or if the stored ciphertext
+        fails authentication (tampering or on-disk corruption)."""
         ...
 
 

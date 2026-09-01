@@ -331,8 +331,14 @@ JSON resolved through the blob store on a replayed one), `status` in `ok | skipp
 only, `journal_seq`, `replayed`. A `failed` outcome -- live or replayed -- always RAISES, the
 recorded `StepError` reconstructed into its taxonomy class (`ComplianceRefused` with
 `constraint=`, else `TerminalError`/`RetryableError`/`UnsupportedFeatureError` by name, unknown
-=> `TerminalError`), so every call site's existing `except (...)` handling works unmodified on
-both paths. Replay is checked before either gate: an outcome once decided replays uniformly even
+=> `TerminalError`), with the ORIGINAL exception's message as the reconstructed exception's own
+message (`StepError.detail`, falling back to `code` -- the taxonomy class name -- when a record
+predates M9's fix or a gate refusal never had a longer message to carry), so every call site's
+existing `except (...)` handling works unmodified on both paths. Known gap: replayed errors carry
+taxonomy + message, not `backend_code`/`retry_after` -- `StepError.code` holds the exception's
+CLASS NAME, not its real `backend_code` value, and `StepError` has no `retry_after` field at all;
+full fidelity needs a `step` schema field addition (the schema-evolution procedure), not done.
+Replay is checked before either gate: an outcome once decided replays uniformly even
 if a live re-check would now differ (credentials that appeared since the original run still
 replay the original skip). `asyncio.CancelledError` out of `run()` (a losing `parallel:` branch)
 gets its own `cancelled` terminal record and is re-raised: without it the step is
@@ -449,11 +455,11 @@ affects exactly that run; duplicate plaintext across runs is the accepted price 
 The port rule on the read side: `BlobStore.get` must reject a `BlobRef` whose `run_id` differs
 from the requesting run. `LocalFsBlobStore.get(ref)` takes no requesting-run argument today; it
 decrypts under `ref.run_id`'s own key, so isolation comes from the addressing, and the explicit
-cross-run rejection is unbuilt. `LocalFsBlobStore` uses a stdlib SHA-256 counter-mode stream
-cipher (fresh 32-byte key per run, fresh nonce per blob) because `cryptography` is not an
-allowed dependency; it is unauthenticated -- integrity is the journal's recorded digest, not the
-cipher's. A shredded run is permanently non-replayable; the journal still answers WHAT happened,
-just not WITH WHAT content.
+cross-run rejection is unbuilt. `LocalFsBlobStore` encrypts every blob with AES-256-GCM (M6):
+tampering or on-disk corruption fails the AEAD tag check instead of decrypting to altered
+plaintext (a blob written by T1's original unauthenticated XOR stream, pre-upgrade, still reads
+back correctly -- see `localfs`'s own module docstring). A shredded run is permanently
+non-replayable; the journal still answers WHAT happened, just not WITH WHAT content.
 
 `Sanitizer` is the backstop, not the primary defense: one instance per run, armed with the
 resolved secret VALUES of every eligible descriptor (a value-less `Sanitizer()` has nothing to

@@ -102,8 +102,13 @@ def test_response_envelope_tolerates_unknown_future_fields():
 # AGENTS.md names as the source of truth. Validation behaviour is byte-for-byte unchanged (a
 # description is inert), so this is a documentation correction inside a schema rather than schema
 # evolution, and a new version would have made every consumer migrate for a sentence.
+# request.v0.2.json frozen at cut, 2026-08-31 (M12, security review): additionalProperties:false
+# now closes every nested object node, not only the top level, matching the pydantic mirrors'
+# extra="forbid" (openreading.types.request). request.v0.1.json is untouched and stays frozen
+# above — this is a new file, not an edit to the old one.
 _FROZEN_RELEASED = {
     "request.v0.1.json": "c3fdc3ee4e3fcf5eddc3a7d6be4ef3fb938479f1f982f47d0f72a6b2e4f42a26",
+    "request.v0.2.json": "31a32a3b1d1c59a76066477b2565bab39a5fdc197cbbdaf850fb3e7b5d181ad4",
     "response.v0.1.json": "41a1506091027f894508327b50d27f47205dd689f9d5dcfc48b3375ea19d0772",
     "response.v0.2.json": "aad609e0ad1e1d09891bd1a19649b352532ef12443dfc44cc08342cefa9f6d69",
     "adapter-descriptor.v0.1.json": "fb5f5f366ae06c8f8c536e1a2300b8a5b17387308050e4ac0c2e4b7ae03818f8",
@@ -176,6 +181,60 @@ def test_response_additivity_a_pre_v0_3_response_still_validates():
     for forbidden in ("confidence", "doc_type"):
         assert forbidden not in pre_v03["document"]
     assert "channel_provenance" not in pre_v03 and "schema_url" not in pre_v03
+
+
+# --------------------------------------------------------------- request nested-strictness parity (M12)
+def _walk_object_nodes(node: dict, path: str, skip_subtrees: frozenset[str]):
+    """Yield (path, node) for every JSON-Schema object node (``type: object`` + ``properties``)
+    reachable from `node`, depth-first, without following `$ref`/`$defs` (the request schema is
+    built entirely inline, unlike response). `path` is dotted for a property and suffixed `[]` for
+    array items. Recursion stops at any path listed in `skip_subtrees`: that value is a caller-
+    supplied blob the wire contract does not own, not a field of the request shape itself."""
+    if path in skip_subtrees:
+        return
+    if node.get("type") == "object" and "properties" in node:
+        yield path, node
+    for name, sub in (node.get("properties") or {}).items():
+        if isinstance(sub, dict):
+            yield from _walk_object_nodes(sub, f"{path}.{name}" if path else name, skip_subtrees)
+    items = node.get("items")
+    if isinstance(items, dict):
+        yield from _walk_object_nodes(items, f"{path}[]", skip_subtrees)
+
+
+def test_request_schema_nested_objects_forbid_additional_properties():
+    """M12: request.v0.1.json set `additionalProperties: false` at the top level only, while the
+    pydantic mirrors (openreading.types.request) are `extra="forbid"` at every level — a misspelled
+    NESTED field (e.g. `document.mim_type`) passed schema validation and failed only later, at the
+    pydantic layer, contradicting the "schemas are the source of truth" contract (AGENTS.md). This
+    structural walk pins the fix so no future nested object can silently regress to permissive:
+    every `type: object` node in the ACTIVE request schema must close the door on unknown keys,
+    except `extraction_schema.json_schema`'s own value, which IS an arbitrary caller-supplied JSON
+    Schema (draft 2020-12 subset) and must stay open."""
+    schema = schemas.request_schema()
+    nodes = list(
+        _walk_object_nodes(schema, "", skip_subtrees=frozenset({"extraction_schema.json_schema"}))
+    )
+    # sanity: the walk actually reached the root plus the 12 nested object nodes the review found
+    # (document, backend, backend.runtime, outputs, outputs.chunking, extraction_schema, features,
+    # pages, pages.ranges[], routing, compliance, async) — not silently walking zero nodes.
+    assert len(nodes) >= 13
+    for path, node in nodes:
+        assert node.get("additionalProperties") is False, (
+            f"{path or '<root>'}: object node allows unknown keys "
+            "(a misspelled field would pass schema validation and fail only at the pydantic layer)"
+        )
+
+
+def test_request_schema_extraction_schema_value_stays_open():
+    """Twin of the structural walk above: `extraction_schema.json_schema` is deliberately EXCLUDED
+    from the additionalProperties sweep because its value is an arbitrary caller-supplied JSON
+    Schema (routed to the backend's native extraction mechanism), not a field this contract
+    defines the shape of. Pin that the node exists and carries no `additionalProperties` /
+    `properties` of its own, so a future edit cannot accidentally close it back up."""
+    node = schemas.request_schema()["properties"]["extraction_schema"]["properties"]["json_schema"]
+    assert node.get("type") == "object"
+    assert "properties" not in node and "additionalProperties" not in node
 
 
 # --------------------------------------------------------------- x-stability registry agreement

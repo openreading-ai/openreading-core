@@ -20,7 +20,9 @@ dependencies = [
     "pydantic>=2.7",
     "jsonschema>=4.21",
     "pyyaml>=6.0",     # MIT — safe_load only, lazy-imported for the optional openreading.yaml (D-v3-1)
-    "pypdf>=4.0",      # BSD — PDF-layer signal probe (scan/text-source); pymupdf (AGPL) never in core (D-v3-4)
+    "pypdf>=6.15.0",   # BSD — PDF-layer signal probe (scan/text-source); pymupdf (AGPL) never in core (D-v3-4)
+    "cryptography>=50.0",  # Apache-2.0/BSD — AES-256-GCM for ledger blobs (localfs.py, M6); the
+                            # ledger is core, not an extra, so this is a base dep, not [server]/[http]
 ]
 
 [project.optional-dependencies]

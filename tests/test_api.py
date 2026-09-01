@@ -76,7 +76,19 @@ def _url_req(url="https://example.test/doc.pdf"):
     return api.build_request(url, "pymupdf")
 
 
-def test_url_materialized_to_bytes_for_non_url_backend():
+@pytest.fixture
+def resolves_public(monkeypatch):
+    """`_assert_public_http_url` (H2) resolves the URL host for real before any transport runs.
+    `example.test` is a reserved, deliberately non-resolving TLD (RFC 2606), so the offline
+    URL-materialization tests below — which prove behavior through an injected transport, never a
+    live network call — need a stand-in for "the host resolves to a public address" that never
+    touches a resolver."""
+    monkeypatch.setattr(
+        "socket.getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 80))]
+    )
+
+
+def test_url_materialized_to_bytes_for_non_url_backend(resolves_public):
     req = _url_req()
     assert req.document.url and req.document.bytes_base64 is None
     out = api.materialize_document(
@@ -95,20 +107,94 @@ def test_url_passed_through_for_url_accepting_backend():
     assert out.document.url == url and out.document.bytes_base64 is None  # untouched
 
 
-def test_materialize_download_error_maps_to_terminal():
+def test_materialize_download_error_maps_to_terminal(resolves_public):
     req = _url_req()
     transport = httpx.MockTransport(lambda request: httpx.Response(404, text="nope"))
     with pytest.raises(TerminalError):
         api.materialize_document(req, make_adapter("pymupdf").descriptor, transport=transport)
 
 
-def test_run_from_url_executes_local_backend(monkeypatch):
+def test_run_from_url_executes_local_backend(resolves_public):
     # end-to-end: URL → materialize (mock transport) → pymupdf runs for real
     url = "https://example.test/doc.pdf"
     transport = _mock_transport(build_sample_pdf())
     result = openreading.run(url, backend="pymupdf", transport=transport)
     assert result["backend"]["id"] == "pymupdf"
     assert "OpenReading Test Document" in result["document"]["text"]
+
+
+# --- SSRF guard + streaming size cap for URL documents (H2) -----------------------------
+
+
+def test_download_rejects_non_public_host(monkeypatch):
+    monkeypatch.delenv("OPENREADING_ALLOW_PRIVATE_URLS", raising=False)
+    monkeypatch.setattr(
+        "socket.getaddrinfo",
+        lambda *a, **k: [(2, 1, 6, "", ("169.254.169.254", 80))],
+    )
+    # A transport, even though the guard is expected to reject before ever using it: without one,
+    # a pre-fix/broken guard would fall through to a REAL connect against the address above, and
+    # this test's own failure mode would then depend on this machine's network reachability
+    # (fast local ConnectError, a long hang, or — on infra where that address is actually routed —
+    # a real metadata-endpoint request) instead of on `_download`'s own behavior.
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=b"unreachable"))
+    with pytest.raises(TerminalError) as e:
+        api._download("http://metadata.internal/doc.pdf", transport=transport)
+    assert e.value.backend_code == "url_not_public"
+
+
+def test_download_rejects_file_scheme():
+    with pytest.raises(TerminalError):
+        api._download("file:///etc/hosts")
+
+
+def test_download_streams_and_stops_at_limit(monkeypatch):
+    # `content=` makes httpx auto-set Content-Length, so this always resolves at _download's
+    # declared-length precheck and never reaches the per-chunk iter_bytes loop below it — see
+    # test_download_streams_and_stops_at_limit_with_no_declared_length for that path.
+    monkeypatch.setattr("openreading.api._MAX_DOWNLOAD_BYTES", 1024)
+    monkeypatch.setattr(
+        "socket.getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 80))]
+    )
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, content=b"x" * 4096))
+    with pytest.raises(TerminalError) as e:
+        api._download("http://example.com/big.pdf", transport=transport)
+    assert e.value.backend_code == "doc_too_large"
+
+
+class _UndeclaredLengthBody(httpx.SyncByteStream):
+    """A response body with no Content-Length at all — the only way to reach `_download`'s
+    per-chunk running-total loop instead of short-circuiting at its declared-length precheck.
+    Two chunks, each under the cap on its own, so only the RUNNING total (not any single
+    chunk's size) can be what trips the limit."""
+
+    def __iter__(self):
+        yield b"x" * 700
+        yield b"x" * 700
+
+
+def test_download_streams_and_stops_at_limit_with_no_declared_length(monkeypatch):
+    monkeypatch.setattr("openreading.api._MAX_DOWNLOAD_BYTES", 1024)
+    monkeypatch.setattr(
+        "socket.getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 80))]
+    )
+
+    def handler(request):
+        response = httpx.Response(200, stream=_UndeclaredLengthBody())
+        # Confirms the precheck this test exists to bypass truly has nothing to short-circuit on.
+        assert "content-length" not in response.headers
+        return response
+
+    transport = httpx.MockTransport(handler)
+    with pytest.raises(TerminalError) as e:
+        api._download("http://example.com/big.pdf", transport=transport)
+    assert e.value.backend_code == "doc_too_large"
+
+
+def test_download_allows_private_when_opted_in(monkeypatch):
+    monkeypatch.setenv("OPENREADING_ALLOW_PRIVATE_URLS", "1")
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=b"ok"))
+    assert api._download("http://127.0.0.1:9/x.pdf", transport=transport) == b"ok"
 
 
 def test_mime_inference_by_extension(tmp_path):
@@ -128,6 +214,14 @@ def test_mime_inference_by_extension(tmp_path):
     assert (
         api._document_dict(b"raw", "image/tiff")["mime_type"] == "image/tiff"
     )  # explicit override
+
+
+def test_build_request_url_keeps_mime_type():
+    # L1: _document_dict's URL branch used to return {"url": s}, dropping the caller's explicit
+    # mime_type entirely -- materialize_document's fallback then mis-typed every URL document as
+    # application/pdf regardless of what the caller passed.
+    req = api.build_request("https://example.com/scan.png", "auto", mime_type="image/png")
+    assert req.document.mime_type == "image/png"
 
 
 @pytest.mark.parametrize("ext", [".docx", ".xlsx", ".pptx"])

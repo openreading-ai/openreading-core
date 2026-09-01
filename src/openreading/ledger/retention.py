@@ -12,9 +12,12 @@ overrides it) and logs the placeholder to FOUNDER-INBOX.md rather than presentin
 The reaper is an at-run-start sweep (Open Questions §9 item 2, recommendation (a) — no new CLI
 surface): it scans every stamped run under the ledger root and, for one whose ceiling has passed,
 calls `KeyStore.destroy` — the exact mechanism a manual shred uses — so a reaped run and a
-manually-shredded one leave the journal in the identical `payload_expired` state. Nothing else
-sweeps: expiry deletes nothing until the next run arms the ledger, so the operator owns the
-schedule.
+manually-shredded one leave the journal in the identical `payload_expired` state. Finding M7:
+an at-arm-only sweep left an idle server holding expired content indefinitely, since nothing new
+was ever arming to trigger it — so expiry is now enforced both when a new run arms AND once at
+server startup (`api.reap_expired_now`, called from `server.app.create_app`); a fully idle
+CLI-only install (no server, no new runs) still only enforces on its next run, so the operator
+owns that schedule.
 
 **The clock: `expires_epoch_ms` is an absolute UTC epoch, from `Clock.now_wall_ms()`, never
 `now_ms()`.** The stamp is written by one process and read by another, possibly across a reboot,
@@ -43,11 +46,17 @@ live "ok" branch (the one place a real dispatch is known to have happened).
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 from typing import Any
 
 DEFAULT_RETENTION_HOURS = 24.0  # placeholder (plan §7) — founder-overridable, see FOUNDER-INBOX.md
+
+# Canonical run-id shape (matches what _arm generates). Persisted stamps are data, not
+# trusted input: retention deletes recursively, so anything joined onto blobs_root must be
+# provably a single, well-formed path segment before it is used.
+VALID_RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
 
 def compute_retention_ceiling_hours(
@@ -135,18 +144,45 @@ def tighten_retention(root: Path, run_id: str, descriptor: Any, *, now_epoch_ms:
 
 def reap(root: Path, keys: Any, blobs_root: Path, *, now_epoch_ms: int) -> list[str]:
     """Destroys the key (and removes the blob directory) for every stamped run past its ceiling.
-    The journal file itself is left in place — audit metadata survives erasure by design (§9.4)."""
+    The journal file itself is left in place — audit metadata survives erasure by design (§9.4).
+
+    M7 review finding: a stamp is untrusted persisted input. EVERY step that decides whether a
+    stamp names something to reap — parsing it, reading its two required fields, comparing its
+    expiry, validating its run_id's shape — can fail on data this process didn't write itself
+    (hand-edited, truncated, from a future schema, or simply wrong), so all of those steps share
+    ONE try/except rather than each getting its own ad hoc guard: any stamp this function can't
+    fully make sense of is skipped, never raised, and one corrupted stamp can never abort the whole
+    sweep. That mattered less when the only caller was `_arm_ledger` (one failed run-arm request);
+    `api.reap_expired_now` now calls this from `server.app.create_app` at startup, where an
+    unhandled exception here would otherwise take the entire server down before it served a single
+    request. The actual reap actions below (`keys.destroy`, `shutil.rmtree`, the stamp file's own
+    unlink) stay OUTSIDE the try — a real deletion failure there must surface, not vanish into the
+    same catch-and-skip an untrusted stamp gets."""
     stamp_dir = root / "retention"
     if not stamp_dir.exists():
         return []
     reaped: list[str] = []
     for stamp_file in sorted(stamp_dir.glob("*.json")):
-        stamp = json.loads(stamp_file.read_text(encoding="utf-8"))
-        if stamp["expires_epoch_ms"] > now_epoch_ms:
+        try:
+            stamp = json.loads(stamp_file.read_text(encoding="utf-8"))
+            expires_epoch_ms = stamp["expires_epoch_ms"]
+            run_id = stamp["run_id"]
+            if expires_epoch_ms > now_epoch_ms:
+                continue  # not yet expired — not an error, just nothing to do for this stamp
+            if not isinstance(run_id, str) or not VALID_RUN_ID.fullmatch(run_id):
+                continue  # malformed/tampered run_id — not an error either, same "skip it" outcome
+        except (OSError, ValueError, KeyError, TypeError):
+            # Unreadable, malformed, incomplete, or wrong-typed stamp — including a non-numeric
+            # expires_epoch_ms, which fails the comparison above rather than the key read — can't
+            # be trusted, so leave it for a human rather than guessing (no `.get()` default:
+            # `None` still TypeErrors against `now_epoch_ms`, and defaulting to 0 would auto-reap
+            # an ambiguous stamp instead of refusing to touch it).
             continue
-        run_id = stamp["run_id"]
+        target = (blobs_root / run_id).resolve()
+        if not (target.is_relative_to(blobs_root.resolve()) and target != blobs_root.resolve()):
+            continue
         keys.destroy(run_id)
-        shutil.rmtree(blobs_root / run_id, ignore_errors=True)
+        shutil.rmtree(target, ignore_errors=True)
         stamp_file.unlink(missing_ok=True)
         reaped.append(run_id)
     return reaped

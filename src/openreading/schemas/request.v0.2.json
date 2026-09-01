@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/request/v0.2.json",
+  "title": "OpenReadingRequest",
+  "type": "object",
+  "required": ["document", "backend"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "string", "const": "0.2" },
+
+    "document": {
+      "type": "object",
+      "description": "Exactly one of bytes_base64 | url | path | file_id must be set.",
+      "additionalProperties": false,
+      "oneOf": [
+        { "required": ["bytes_base64"] },
+        { "required": ["url"] },
+        { "required": ["path"] },
+        { "required": ["file_id"] }
+      ],
+      "properties": {
+        "bytes_base64": { "type": "string", "contentEncoding": "base64",
+          "description": "Inline document bytes. Router MAY spool to a temp file / upload to backend-required storage (e.g. Textract S3, LlamaParse /files)." },
+        "url": { "type": "string", "format": "uri",
+          "description": "Fetchable URL. Some backends accept URLs directly (Docling convert(url), reducto); others require the router to download first." },
+        "path": { "type": "string",
+          "description": "Local filesystem path. Only valid for in-process/subprocess/container backends (oss_library, framework_loader, self_hosted_model)." },
+        "file_id": { "type": "string",
+          "description": "Opaque id of a previously uploaded file (LlamaParse file_id, OpenAI file id, reused Chunkr parse task id)." },
+        "mime_type": { "type": "string",
+          "examples": ["application/pdf", "image/png", "image/tiff", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"] },
+        "filename": { "type": "string" },
+        "password": { "type": "string", "description": "For encrypted PDFs (pikepdf/pypdf can open; most OCR backends cannot)." }
+      }
+    },
+
+    "backend": {
+      "type": "object",
+      "required": ["id"],
+      "description": "Which backend to run, and how it is provisioned. Encodes the four BYO modes.",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string",
+          "description": "Slug from the backend registry, e.g. 'aws-textract', 'docling', 'pymupdf', 'langchain-pdf-loaders:PyMuPDFLoader'." },
+        "type": { "enum": ["hosted_api", "oss_library", "framework_loader", "self_hosted_model"] },
+        "operation": { "type": "string",
+          "description": "Sub-operation when a backend has several. Textract: DetectDocumentText|AnalyzeDocument|AnalyzeExpense|AnalyzeID|AnalyzeLending. Docling: default|vlm. LlamaParse tier: fast|cost_effective|agentic|agentic_plus." },
+        "version": { "type": "string", "description": "Pin the backend/model version (LlamaParse 'version', model weights tag, library version)." },
+        "credentials_ref": { "type": "string",
+          "description": "BYO-KEY (hosted_api): reference into the caller's secret store (AWS role ARN, 'llx-...' key handle). Never the raw secret in the request body." },
+        "runtime": {
+          "type": "object",
+          "description": "BYO-COMPUTE (oss_library / framework_loader / self_hosted_model).",
+          "additionalProperties": false,
+          "properties": {
+            "mode": { "enum": ["in_process", "subprocess", "container", "remote_endpoint"] },
+            "image": { "type": "string", "description": "Container image ref when mode=container." },
+            "endpoint": { "type": "string", "format": "uri",
+              "description": "For self_hosted_model served via an OpenAI-compatible or custom endpoint (vLLM, docling-serve, TGI)." },
+            "device": { "enum": ["cpu", "cuda", "mps", "auto"] },
+            "system_deps_ok": { "type": "boolean",
+              "description": "Caller asserts poppler/tesseract/ghostscript/CUDA are present (see routing memo). Router MAY still probe." }
+          }
+        }
+      }
+    },
+
+    "outputs": {
+      "type": "object",
+      "description": "Desired output channels. The adapter fills what the backend supports and reports the rest in response.warnings.",
+      "additionalProperties": false,
+      "properties": {
+        "markdown": { "type": "boolean", "default": true },
+        "text": { "type": "boolean", "default": true },
+        "blocks": { "type": "boolean", "default": true,
+          "description": "Reading-order typed blocks with optional bbox/confidence (the common spine). Impossible for pure typed-field APIs and un-prompted token-stream LLMs." },
+        "typed_fields": { "type": "boolean", "default": false },
+        "tables": { "enum": ["none", "cells", "markdown", "html"], "default": "markdown" },
+        "chunking": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "strategy": { "enum": ["none", "by_page", "by_title", "by_section", "by_similarity", "fixed"], "default": "none" },
+            "max_characters": { "type": "integer", "minimum": 1 },
+            "overlap": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "include_backend_raw": { "type": "boolean", "default": true,
+          "description": "Return the untouched native payload / serialized native object (see §5). Off by default for high-volume callers who only want normalized." }
+      }
+    },
+
+    "extraction_schema": {
+      "type": "object",
+      "description": "Custom typed extraction (P2/P6). A JSON Schema describing the fields to pull. Routed to /extract (Reducto, Chunkr), documents[].fields via queryFields (Azure), QUERIES (Textract, degraded), Structured Outputs (OpenAI/Gemini/Claude), document_annotation (Mistral). Backends that cannot do schema extraction return a warning.",
+      "additionalProperties": false,
+      "properties": {
+        "json_schema": { "type": "object", "description": "Draft 2020-12 subset the target supports. Deliberately left open (no `properties`/`additionalProperties` of its own): this value IS an arbitrary caller-supplied JSON Schema, not a field this contract shapes (M12)." },
+        "instructions": { "type": "string", "description": "System prompt / extraction guidance for LLM-based extractors." },
+        "citations": { "type": "boolean", "default": false,
+          "description": "Request per-field source grounding (page + bbox) where supported (Reducto, Chunkr, Claude page citations)." }
+      }
+    },
+
+    "features": {
+      "type": "object",
+      "description": "Capability flags. Adapter maps to native toggles; unsupported flags → response.warnings, never a hard error.",
+      "additionalProperties": false,
+      "properties": {
+        "ocr": { "enum": ["auto", "force", "off"], "default": "auto",
+          "description": "off = born-digital only (Docling do_ocr=False, pypdf/pymupdf). force = always rasterize+OCR." },
+        "ocr_languages": { "type": "array", "items": { "type": "string" }, "description": "ISO codes; e.g. ['en'] Tesseract, Textract 6 Latin only." },
+        "layout": { "type": "boolean", "default": true },
+        "reading_order": { "type": "boolean", "default": true },
+        "tables": { "type": "boolean", "default": true },
+        "forms_key_value": { "type": "boolean", "default": false },
+        "figures_images": { "type": "boolean", "default": false },
+        "signatures": { "type": "boolean", "default": false },
+        "classification": { "type": "boolean", "default": false },
+        "handwriting": { "type": "boolean", "default": false }
+      }
+    },
+
+    "pages": {
+      "type": "object",
+      "description": "Page selection. Normalizer applies 1-based inclusive ranges before/after backend call depending on whether the backend supports native page ranges.",
+      "additionalProperties": false,
+      "properties": {
+        "ranges": { "type": "array",
+          "items": { "type": "object",
+            "additionalProperties": false,
+            "properties": { "start": { "type": "integer", "minimum": 1 }, "end": { "type": "integer", "minimum": 1 } },
+            "required": ["start"] } },
+        "max_pages": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "routing": {
+      "type": "object",
+      "description": "Hints for the router when backend.id is a class rather than a concrete backend, or for fallback.",
+      "additionalProperties": false,
+      "properties": {
+        "doc_type_hint": { "enum": ["bank_statement", "paystub", "w2", "1003_loan_app", "1040_tax", "invoice", "id_document", "medical_form", "clinical_pdf", "generic"] },
+        "optimize_for": { "enum": ["accuracy", "cost", "latency", "offline"] },
+        "fallback": { "type": "array", "items": { "type": "string" },
+          "description": "Ordered backend ids to try if the primary fails or violates a compliance constraint." }
+      }
+    },
+
+    "compliance": {
+      "type": "object",
+      "description": "Hard constraints the router enforces at dispatch. A backend that cannot meet these is not eligible (and is skipped in fallback).",
+      "additionalProperties": false,
+      "properties": {
+        "require_baa": { "type": "boolean", "default": false,
+          "description": "HIPAA: only backends that advertise a BAA (or fully-local backends where PHI never leaves) are eligible. The gate reads what each vendor publishes about its own BAA, so passing it is necessary and not sufficient; the agreement your organisation actually signed is yours to confirm out of band." },
+        "no_train_on_data": { "type": "boolean", "default": false,
+          "description": "Excludes backends that train on inputs without opt-out (e.g. Textract trains by default; opt-out required)." },
+        "data_region": { "type": "string", "description": "e.g. 'us', 'eu'. Enforced against backend data-region options." },
+        "require_local": { "type": "boolean", "default": false,
+          "description": "Only oss_library / self_hosted_model / on-prem: data never leaves the caller's environment." },
+        "max_retention": { "type": "string", "description": "e.g. 'zero', '48h'." }
+      }
+    },
+
+    "async": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "enum": ["auto", "sync", "async"], "default": "auto",
+          "description": "auto: router picks sync/async per backend + doc size (Textract forces async for multi-page PDFs; LlamaParse is async-only)." },
+        "webhook_url": { "type": "string", "format": "uri" }
+      }
+    },
+
+    "idempotency_key": { "type": "string", "description": "Dedup; maps to Textract ClientRequestToken, etc." }
+  }
+}

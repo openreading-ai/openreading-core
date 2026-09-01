@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import secrets
 from pathlib import Path
 
 import pydantic
@@ -21,7 +22,13 @@ import pytest
 from openreading import api, schemas
 from openreading.ledger.inline import InlineExecutor, NullJournal
 from openreading.ledger.jsonl import JsonlJournal
-from openreading.ledger.localfs import LocalFsBlobStore, LocalFsKeyStore
+from openreading.ledger.localfs import (
+    _FORMAT_AEAD,
+    LocalFsBlobStore,
+    LocalFsKeyStore,
+    _keystream,
+    _xor,
+)
 from openreading.ledger.ports import PayloadExpired
 from openreading.ledger.retention import compute_retention_ceiling_hours, reap, stamp_run
 from openreading.ledger.sanitizer import Sanitizer
@@ -384,6 +391,211 @@ def test_reap_destroys_keys_and_blobs_for_stamped_runs_past_their_ceiling_only()
         assert (root / "blobs" / "fresh-run").exists()
 
 
+def test_reap_refuses_traversal_run_id(tmp_path):
+    """A stamp whose run_id escapes blobs_root must be skipped, never deleted."""
+    root = tmp_path / "ledger"
+    blobs = root / "blobs"
+    (root / "retention").mkdir(parents=True)
+    blobs.mkdir(parents=True)
+    keys = LocalFsKeyStore(root / "keys")
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "keep.txt").write_text("x")
+    for bad in ("../../victim", str(victim)):
+        (root / "retention" / "evil.json").write_text(
+            json.dumps({"run_id": bad, "expires_epoch_ms": 0})
+        )
+        reaped = reap(root, keys, blobs, now_epoch_ms=10)
+        assert bad not in reaped
+        assert (victim / "keep.txt").exists()
+
+
+def test_blobstore_path_refuses_traversal(tmp_path):
+    keys = LocalFsKeyStore(tmp_path / "keys")
+    store = LocalFsBlobStore(tmp_path / "blobs", keys)
+    with pytest.raises(ValueError):
+        store.put("../escape", "sha256:" + "a" * 64, b"data", "application/octet-stream")
+
+
+def test_blobstore_path_refuses_malformed_digest(tmp_path):
+    """A run_id alone passing validation is not enough: the above test's malformed run_id makes
+    `LocalFsKeyStore._path` (via `get_or_create`) raise before `LocalFsBlobStore._path`'s own
+    digest check is ever reached. Here run_id is well-formed so the digest regex is the thing
+    that must do the refusing."""
+    keys = LocalFsKeyStore(tmp_path / "keys")
+    store = LocalFsBlobStore(tmp_path / "blobs", keys)
+    with pytest.raises(ValueError):
+        store.put("fine-run-id", "sha256:../../evil", b"x", "application/octet-stream")
+
+
+# ---- Task 14 / M6: AES-256-GCM authenticated encryption for ledger blobs -----------------------
+
+
+def test_blobstore_put_writes_aead_format_and_get_roundtrips_the_plaintext(tmp_path):
+    keys = LocalFsKeyStore(tmp_path / "keys")
+    store = LocalFsBlobStore(tmp_path / "blobs", keys)
+    digest = "sha256:" + "a" * 64
+
+    ref = store.put("run1", digest, b"authenticated plaintext", "text/plain")
+
+    on_disk = store._path("run1", digest).read_bytes()
+    assert on_disk[:1] == _FORMAT_AEAD  # new blobs are tagged with the AEAD format byte
+    assert store.get(ref) == b"authenticated plaintext"
+
+
+def test_blobstore_get_raises_payload_expired_when_ciphertext_bytes_are_tampered(tmp_path):
+    """Corruption/tampering on disk must be detected, not silently decrypted into garbage — the
+    entire point of moving off the old unauthenticated XOR stream (M6)."""
+    keys = LocalFsKeyStore(tmp_path / "keys")
+    store = LocalFsBlobStore(tmp_path / "blobs", keys)
+    digest = "sha256:" + "b" * 64
+    ref = store.put("run1", digest, b"authenticated plaintext", "text/plain")
+
+    path = store._path("run1", digest)
+    tampered = bytearray(path.read_bytes())
+    tampered[-1] ^= 0xFF  # flip one on-disk byte, inside the GCM tag appended to the ciphertext
+    path.write_bytes(bytes(tampered))
+
+    with pytest.raises(PayloadExpired):
+        store.get(ref)
+
+
+def test_blobstore_get_raises_payload_expired_not_valueerror_on_a_truncated_aead_blob(tmp_path):
+    """A 0x02-leading blob truncated short enough that even the nonce slice (`raw[1:13]`) comes
+    out under 8 bytes makes `AESGCM.decrypt` raise `ValueError` ("Nonce must be between 8 and 128
+    bytes") rather than `InvalidTag` -- verified empirically for every raw length from 1 to 8
+    bytes; 9+ bytes already raises `InvalidTag` on its own. Left uncaught, that `ValueError` would
+    contradict this module's own docstring, which says on-disk corruption is caught and re-raised
+    as `PayloadExpired` -- it still fails closed either way, but as the wrong, undocumented type.
+    """
+    keys = LocalFsKeyStore(tmp_path / "keys")
+    store = LocalFsBlobStore(tmp_path / "blobs", keys)
+    digest = "sha256:" + "d" * 64
+    ref = store.put("run1", digest, b"authenticated plaintext", "text/plain")
+
+    store._path("run1", digest).write_bytes(_FORMAT_AEAD + b"\x00\x00\x00")  # 4 bytes total
+
+    with pytest.raises(PayloadExpired):
+        store.get(ref)
+
+
+def test_blobstore_get_still_reads_a_legacy_xor_blob_written_before_the_aead_upgrade(tmp_path):
+    """A blob written by T1's pre-AEAD stream cipher (`nonce + _xor(data, _keystream(...))`, never
+    produced by today's `put` any more) must stay readable after the upgrade, so a run already
+    in flight when a deploy swaps the binary is not left holding blobs it can no longer open."""
+    keys = LocalFsKeyStore(tmp_path / "keys")
+    store = LocalFsBlobStore(tmp_path / "blobs", keys)
+    run_id, digest = "run1", "sha256:" + "c" * 64
+    key = keys.get_or_create(run_id)
+    data = b"pre-upgrade legacy plaintext"
+    # First byte forced off 0x02 (`_FORMAT_AEAD`): a fully random 16-byte nonce collides with the
+    # AEAD marker ~1/256 of the time, which is exactly the documented "unreadable either way"
+    # case (see localfs.py's own comment on `_FORMAT_AEAD`) -- this test exercises the ordinary
+    # legacy-read path, not that intentionally-unreadable edge, so it must not be flaky on it.
+    nonce = b"\x00" + secrets.token_bytes(15)
+    legacy_blob = nonce + _xor(data, _keystream(key, nonce, len(data)))
+    store._path(run_id, digest).write_bytes(legacy_blob)
+
+    ref = BlobRef(
+        run_id=run_id, digest=digest, size_bytes=len(data), media_type="text/plain", store="localfs"
+    )
+    assert store.get(ref) == data
+
+
+def test_reap_refuses_run_id_whose_blobs_entry_resolves_outside_blobs_root(tmp_path):
+    """A run_id can be well-formed (passes VALID_RUN_ID, so the regex alone lets it through) and
+    still escape if the entry it names under blobs_root is a symlink to somewhere else — proves
+    the resolve()/is_relative_to containment check earns its keep independent of the regex."""
+    root = tmp_path / "ledger"
+    blobs = root / "blobs"
+    (root / "retention").mkdir(parents=True)
+    blobs.mkdir(parents=True)
+    keys = LocalFsKeyStore(root / "keys")
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "keep.txt").write_text("x")
+    (blobs / "goodname").symlink_to(victim)
+    (root / "retention" / "goodname.json").write_text(
+        json.dumps({"run_id": "goodname", "expires_epoch_ms": 0})
+    )
+    reaped = reap(root, keys, blobs, now_epoch_ms=10)
+    assert "goodname" not in reaped
+    assert (victim / "keep.txt").exists()
+
+
+def test_reap_expired_now_is_a_noop_without_a_configured_ledger_root(monkeypatch):
+    """`api.reap_expired_now` is the server-startup counterpart to `_arm_ledger`'s at-run-start
+    sweep (M7) — it must stay silent, not raise, on a deployment with no `OPENREADING_LEDGER`."""
+    monkeypatch.delenv("OPENREADING_LEDGER", raising=False)
+    assert api.reap_expired_now() == []
+
+
+def test_reap_expired_now_reaps_stamped_runs_past_their_ceiling(tmp_path, monkeypatch):
+    """Same destroy-key-and-blobs behavior as `reap()` itself (proven above), reached through the
+    path a server actually calls: an idle process that arms no new run still enforces expiry."""
+    ledger_root = tmp_path / "ledger"
+    monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
+    keys = LocalFsKeyStore(ledger_root / "keys")
+    blobs = LocalFsBlobStore(ledger_root / "blobs", keys)
+    blobs.put("expired-run", "sha256:" + "0" * 64, b"data", "application/json")
+    blobs.put("fresh-run", "sha256:" + "1" * 64, b"data", "application/json")
+    stamp_run(ledger_root, "expired-run", expires_epoch_ms=1, zdr=False)
+    # Unlike reap() above, this goes through the real wall clock (RealClock), not an injected fake
+    # `now_epoch_ms` — "fresh" has to outlast the actual time this test runs, not just outlast 10.
+    stamp_run(ledger_root, "fresh-run", expires_epoch_ms=4_102_444_800_000, zdr=False)  # 2100-01-01
+
+    reaped = api.reap_expired_now()
+
+    assert reaped == ["expired-run"]
+    assert not (ledger_root / "keys" / "expired-run.key").exists()
+    assert (ledger_root / "keys" / "fresh-run.key").exists()
+    assert not (ledger_root / "blobs" / "expired-run").exists()
+    assert (ledger_root / "blobs" / "fresh-run").exists()
+
+
+def test_reap_skips_a_malformed_stamp_without_crashing_the_whole_sweep(tmp_path):
+    """M7 review finding: a stamp is untrusted input, same thesis as the run_id containment checks
+    above — one that fails to parse must be skipped, not raised, or moving retention enforcement
+    into `server.app.create_app` at startup would mean one corrupted `retention/*.json` takes the
+    entire server down at boot instead of just failing a single run-arm request. Sorted glob order
+    ("corrupted.json" < "expired-run.json") puts the bad stamp first, so this also proves a bad
+    stamp doesn't stop the sweep from reaching the ones after it."""
+    root = tmp_path / "ledger"
+    keys = LocalFsKeyStore(root / "keys")
+    blobs = LocalFsBlobStore(root / "blobs", keys)
+    blobs.put("expired-run", "sha256:" + "0" * 64, b"data", "application/json")
+    stamp_run(root, "expired-run", expires_epoch_ms=1, zdr=False)
+    bad_stamp = root / "retention" / "corrupted.json"
+    bad_stamp.write_text("{not valid json", encoding="utf-8")
+
+    reaped = reap(root, keys, root / "blobs", now_epoch_ms=50_000)
+
+    assert reaped == ["expired-run"]  # the valid, expired stamp is still reaped
+    assert bad_stamp.read_text(encoding="utf-8") == "{not valid json"  # left for a human, untouched
+
+
+def test_reap_expired_now_is_a_noop_when_the_configured_root_is_a_file(tmp_path, monkeypatch):
+    """M7 review finding: a misconfigured `OPENREADING_LEDGER` pointing at a FILE rather than a
+    directory must not crash server startup either. `LocalFsKeyStore.__init__`'s own mkdir raises
+    `NotADirectoryError` when a path component is a file, so the guard must run before that
+    construction, not around it. A missing root is already a no-op (existing behavior); this
+    covers the file-instead-of-directory misconfiguration alongside it."""
+    not_a_dir = tmp_path / "ledger-is-a-file"
+    not_a_dir.write_text("oops", encoding="utf-8")
+    monkeypatch.setenv("OPENREADING_LEDGER", str(not_a_dir))
+
+    assert api.reap_expired_now() == []
+
+
+def test_header_path_refuses_traversal_run_id(tmp_path):
+    """`openreading resume <RUN_ID>` (api.resume_run -> read_header) hands an operator-typed
+    run_id straight to header_path; a traversal-shaped one must never reach the join."""
+    from openreading.ledger.header import header_path
+
+    with pytest.raises(ValueError):
+        header_path(tmp_path, "../../etc/evil")
+
+
 # ---- golden fixture (§12's convention) --------------------------------------------------------
 
 
@@ -616,6 +828,82 @@ def test_exception_taxonomy_is_classified_not_hardcoded():
     with pytest.raises(TerminalError):
         asyncio.run(ex2.exec(req, run=boom2))
     assert journal2.results[-1].error.taxonomy == "TerminalError"
+
+
+def test_exception_message_is_recorded_as_the_step_errors_detail():
+    # M9 (security review): `StepError.detail` was left unpopulated at this record site — replay
+    # had only `code=type(exc).__name__` (a taxonomy CLASS NAME, e.g. "TerminalError") to
+    # reconstruct a message from, silently discarding the original text. This is the record-side
+    # half; test_ledger_replay.py's own "...reconstructs the original exception message..." proves
+    # the round trip through replay.
+    class SpyJournal:
+        def __init__(self):
+            self.results = []
+
+        def append(self, result):
+            self.results.append(result)
+
+        def get(self, ref):
+            return []
+
+    journal = SpyJournal()
+    ex = InlineExecutor(journal=journal, blobs=None, registry=None, clock=RealClock())
+    req = StepRequest(
+        step_id="s1",
+        run_id="r1",
+        kind="submit",
+        step_path="root",
+        step_seq=0,
+        attempt=1,
+        backend_id="fake",
+    )
+
+    def boom():
+        raise TerminalError("quota exceeded for tenant-42", backend_code="quota")
+
+    with pytest.raises(TerminalError):
+        asyncio.run(ex.exec(req, run=boom))
+    assert journal.results[-1].error.detail == "quota exceeded for tenant-42"
+
+
+def test_a_secret_embedded_in_an_exceptions_message_is_scrubbed_from_the_recorded_detail(tmp_path):
+    """M9's own security-critical half: `detail=str(exc)` records the exception's raw text
+    verbatim — an adapter that echoes a live secret value back in its error text (a vendor 401
+    body quoting the key it rejected, for instance) must never get to plant that secret on disk.
+    `_sanitizer_scrub` already walks `StepResult.error.detail` (built for
+    `_missing_credentials_gate`'s own `detail=`, Ledger T3 §4.3b) — this proves the SAME
+    chokepoint covers the new `except Exception` call site too, with a real on-disk read, not just
+    a `Sanitizer`-class unit test."""
+    journal = JsonlJournal(tmp_path / "run1.jsonl")
+    secret = "sk-live-canary-9f3a"
+    ex = InlineExecutor(
+        journal=journal,
+        blobs=None,
+        registry=None,
+        clock=RealClock(),
+        sanitizer=Sanitizer(frozenset({secret})),
+    )
+    req = StepRequest(
+        step_id="s1",
+        run_id="run1",
+        kind="submit",
+        step_path="root",
+        step_seq=0,
+        attempt=1,
+        backend_id="fake",
+    )
+
+    def boom():
+        raise TerminalError(f"upstream rejected key {secret}", backend_code="auth_rejected")
+
+    with pytest.raises(TerminalError):
+        asyncio.run(ex.exec(req, run=boom))
+
+    on_disk = (tmp_path / "run1.jsonl").read_bytes()
+    assert secret.encode() not in on_disk, (
+        "a secret echoed in an exception message must never reach the journal"
+    )
+    assert b"upstream rejected key" in on_disk  # the safe portion of the message still lands
 
 
 def test_step_result_payload_rejects_a_set_rather_than_silently_coercing_to_a_list():

@@ -236,7 +236,7 @@ prefer `document.text`, else `document.markdown`, else join `pages[].blocks[].te
 `reading_order`. `warnings[].code` is an OPEN set. Switch on the codes you know, tolerate the
 rest.
 
-The request (`request.v0.1`)
+The request (`request.v0.2`)
 ============================
 Required: `document` + `backend`. `document` is EXACTLY ONE of `bytes_base64` | `url` | `path` |
 `file_id` (+ optional `mime_type`, `filename`). Other top-level fields: `outputs` (markdown /
