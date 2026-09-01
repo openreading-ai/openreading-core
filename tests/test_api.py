@@ -216,6 +216,14 @@ def test_mime_inference_by_extension(tmp_path):
     )  # explicit override
 
 
+def test_build_request_url_keeps_mime_type():
+    # L1: _document_dict's URL branch used to return {"url": s}, dropping the caller's explicit
+    # mime_type entirely -- materialize_document's fallback then mis-typed every URL document as
+    # application/pdf regardless of what the caller passed.
+    req = api.build_request("https://example.com/scan.png", "auto", mime_type="image/png")
+    assert req.document.mime_type == "image/png"
+
+
 @pytest.mark.parametrize("ext", [".docx", ".xlsx", ".pptx"])
 def test_route_office_document_reaches_a_backend(tmp_path, ext):
     # the reported break: through the convenience path an Office file's OOXML MIME derived the

@@ -397,7 +397,10 @@ def _document_dict(source: str | bytes, mime_type: str | None) -> dict[str, Any]
         }
     s = str(source)
     if s.startswith(("http://", "https://")):
-        return {"url": s}
+        # Preserve the caller's explicit mime_type (None is valid on DocumentInput) instead of
+        # dropping it here -- materialize_document's own `d.mime_type or "application/pdf"`
+        # fallback is what supplies the PDF default when the caller gave none (L1).
+        return {"url": s, "mime_type": mime_type}
     p = Path(s)
     if not p.exists():
         # BL-133: every direct Python-API caller (route()/build_request()/run()/run_batch()) gets
