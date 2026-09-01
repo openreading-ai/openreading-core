@@ -2437,6 +2437,34 @@ def test_an_unscoped_run_of_the_same_strategy_pins_the_whole_eligible_set(tmp_pa
     assert len(header["pinned_eligible"]) > 1
 
 
+def test_create_app_reaps_expired_ledger_content_at_startup(tmp_path, monkeypatch):
+    """M7: the reaper used to run only when a NEW run arms (`_arm_ledger`'s own sweep), so a
+    server that took its last request long ago held that run's expired content (encrypted document
+    blobs, the key that unlocks them) past its retention ceiling indefinitely — nothing else ever
+    swept the ledger root. `create_app()` now calls `api.reap_expired_now()` once at startup so a
+    process that never receives another request still enforces expiry on its own. The journal file
+    itself is untouched either way — audit metadata survives erasure by design (retention.py §9.4)."""
+    from openreading.ledger.localfs import LocalFsBlobStore, LocalFsKeyStore
+    from openreading.ledger.retention import stamp_run
+
+    ledger_root = tmp_path / "ledger"
+    monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
+
+    run_id = "expired-before-startup"
+    keys = LocalFsKeyStore(ledger_root / "keys")
+    blobs = LocalFsBlobStore(ledger_root / "blobs", keys)
+    blobs.put(run_id, "sha256:" + "a" * 64, b"encrypted document bytes", "application/pdf")
+    stamp_run(ledger_root, run_id, expires_epoch_ms=1, zdr=False)  # epoch 1ms: already expired
+    journal = ledger_root / f"{run_id}.jsonl"
+    journal.write_text('{"seq": 0}\n', encoding="utf-8")
+
+    create_app()
+
+    assert not (ledger_root / "blobs" / run_id).exists()
+    assert not (ledger_root / "keys" / f"{run_id}.key").exists()
+    assert journal.exists()
+
+
 def test_caller_auth_multiple_keys_some_scoped_some_not(monkeypatch):
     monkeypatch.setenv("OPENREADING_API_KEYS", "scoped-key-0013,unscoped-key-0013")
     monkeypatch.setenv("OPENREADING_API_KEY_SCOPES", "scoped-key-0013=pymupdf")

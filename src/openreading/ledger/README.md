@@ -288,15 +288,18 @@ happened, but not with what content. Retention defaults to 24 hours and is read 
 hosted backend's own retention limit can only tighten it per step. Raise it before the run, never
 after.
 
-Read the comment on the `sleep 1` line as a precondition rather than a decoration. The reaper runs
-only when another run arms the ledger, so `OPENREADING_LEDGER_RETENTION_HOURS` sets the earliest
-moment a payload may be destroyed and never the moment it is. Nothing sweeps on a timer, and there
-is no purge verb to call. A run whose window expired on Friday keeps its key and its document bytes
-all weekend if nothing else runs, which is exactly the quiet period a retention promise is written
-for. When you owe someone a deletion deadline, schedule a sweep of your own that does not depend on
-how often the pipeline runs: a cron entry that arms the ledger against the sample every hour is
-enough to fire the reaper, and deleting the file under `keys/` yourself has the same effect as the
-last line above.
+Read the comment on the `sleep 1` line as a precondition rather than a decoration, for a CLI-only
+install: the reaper there runs only when another run arms the ledger, so
+`OPENREADING_LEDGER_RETENTION_HOURS` sets the earliest moment a payload may be destroyed and never
+the moment it is. `openreading serve` additionally reaps once at its own startup (finding M7) —
+restarting the server collects anything already past its ceiling — but nothing sweeps on a timer
+either way, and there is no purge verb to call. A run whose window expired on Friday keeps its key
+and its document bytes all weekend if nothing else arms a run or restarts the server, which is
+exactly the quiet period a retention promise is written for. When you owe someone a deletion
+deadline, schedule a sweep of your own that does not depend on how often the pipeline runs or the
+server restarts: a cron entry that arms the ledger against the sample every hour is enough to fire
+the reaper, and deleting the file under `keys/` yourself has the same effect as the last line
+above.
 
 Destroying the key deletes one file, the key itself. Every other file stays where it was, and the
 blobs stay on disk as ciphertext nothing can now read. The header keeps `document.digest`, which is
@@ -378,8 +381,10 @@ Each line names the `openreading.ledger` docstring section that records it.
   ("Retention, ZDR, erasure").
 - A verb that lists resumable runs. After a `SIGKILL` the only way back to a run id is reading
   `$OPENREADING_LEDGER/*.header.json` by hand ("Operational contract").
-- A retention sweep on a timer. The reaper runs at arm time only, as the recipe above shows
-  ("Retention, ZDR, erasure").
+- A retention sweep on a timer, independent of a run arming or a server restart. The reaper runs
+  at run-arm time and once at server startup (`openreading.api.reap_expired_now`); a fully idle
+  CLI-only install still only sweeps on its next run, as the recipe above shows ("Retention, ZDR,
+  erasure").
 
 ## See also
 

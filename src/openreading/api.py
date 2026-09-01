@@ -752,6 +752,36 @@ def _arm_ledger_unguarded(
     )
 
 
+def reap_expired_now() -> list[str]:
+    """Reap every expired stamped run immediately, independent of any run arming (finding M7).
+
+    `_arm_ledger_unguarded`'s own sweep only runs when a NEW run arms, so a server that has gone
+    idle since its last request would otherwise hold that run's expired content (encrypted
+    document blobs, and the key that unlocks them) past its retention ceiling indefinitely —
+    nothing else in this module ever revisits the ledger root unprompted. `server.app.create_app`
+    calls this once at startup so an idle process still enforces expiry on its own, without waiting
+    on the next run to arm; a fully idle CLI-only install still only enforces on its next run.
+
+    Mirrors `_arm_ledger_unguarded`'s own path construction exactly — keys at `<root>/keys`, blobs
+    at `<root>/blobs`, the wall clock for the epoch `reap` compares stamps against — so the two
+    sweeps can never disagree about where a run's content lives. No-op (`[]`) when
+    `OPENREADING_LEDGER` is unset, the same "arming is env-only, no flag" contract documented on
+    `_arm_ledger_unguarded`.
+
+    Deliberately outside this module's documented Python API surface (no `__all__` entry, no row
+    in the "Exports and return shapes" section above): it is a server operational concern, not a
+    document-processing recipe, and its only caller is `create_app`.
+    """
+    root = os.environ.get("OPENREADING_LEDGER")
+    if not root:
+        return []
+    ledger_root = Path(root)
+    keys = LocalFsKeyStore(ledger_root / "keys")
+    return reap(
+        ledger_root, keys, ledger_root / "blobs", now_epoch_ms=int(RealClock().now_wall_ms())
+    )
+
+
 def _run_strategy_request(
     req: OpenReadingRequest,
     name: str,

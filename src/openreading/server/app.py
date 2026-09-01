@@ -766,6 +766,11 @@ def create_app(*, cors_origins: list[str] | None = None):
     # server process and never crosses into another app instance (D-v3-3).
     app.state.result_cache = BoundedResultCache()
 
+    # M7: the ledger's own reap only fires when a NEW run arms (`_arm_ledger`), so a server that
+    # goes idle after its last request would otherwise hold expired content past its retention
+    # ceiling until something else happened to run. A no-op when OPENREADING_LEDGER is unset.
+    api.reap_expired_now()
+
     # Strategy config is loaded ONLY from OPENREADING_CONFIG — the server never sniffs its cwd
     # (spec §1.2). A broken config fails fast at startup.
     from openreading.strategies.loader import load_config as _load_strategy_config

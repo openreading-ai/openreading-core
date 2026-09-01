@@ -12,9 +12,12 @@ overrides it) and logs the placeholder to FOUNDER-INBOX.md rather than presentin
 The reaper is an at-run-start sweep (Open Questions §9 item 2, recommendation (a) — no new CLI
 surface): it scans every stamped run under the ledger root and, for one whose ceiling has passed,
 calls `KeyStore.destroy` — the exact mechanism a manual shred uses — so a reaped run and a
-manually-shredded one leave the journal in the identical `payload_expired` state. Nothing else
-sweeps: expiry deletes nothing until the next run arms the ledger, so the operator owns the
-schedule.
+manually-shredded one leave the journal in the identical `payload_expired` state. Finding M7:
+an at-arm-only sweep left an idle server holding expired content indefinitely, since nothing new
+was ever arming to trigger it — so expiry is now enforced both when a new run arms AND once at
+server startup (`api.reap_expired_now`, called from `server.app.create_app`); a fully idle
+CLI-only install (no server, no new runs) still only enforces on its next run, so the operator
+owns that schedule.
 
 **The clock: `expires_epoch_ms` is an absolute UTC epoch, from `Clock.now_wall_ms()`, never
 `now_ms()`.** The stamp is written by one process and read by another, possibly across a reboot,

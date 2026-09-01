@@ -442,6 +442,36 @@ def test_reap_refuses_run_id_whose_blobs_entry_resolves_outside_blobs_root(tmp_p
     assert (victim / "keep.txt").exists()
 
 
+def test_reap_expired_now_is_a_noop_without_a_configured_ledger_root(monkeypatch):
+    """`api.reap_expired_now` is the server-startup counterpart to `_arm_ledger`'s at-run-start
+    sweep (M7) — it must stay silent, not raise, on a deployment with no `OPENREADING_LEDGER`."""
+    monkeypatch.delenv("OPENREADING_LEDGER", raising=False)
+    assert api.reap_expired_now() == []
+
+
+def test_reap_expired_now_reaps_stamped_runs_past_their_ceiling(tmp_path, monkeypatch):
+    """Same destroy-key-and-blobs behavior as `reap()` itself (proven above), reached through the
+    path a server actually calls: an idle process that arms no new run still enforces expiry."""
+    ledger_root = tmp_path / "ledger"
+    monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
+    keys = LocalFsKeyStore(ledger_root / "keys")
+    blobs = LocalFsBlobStore(ledger_root / "blobs", keys)
+    blobs.put("expired-run", "sha256:" + "0" * 64, b"data", "application/json")
+    blobs.put("fresh-run", "sha256:" + "1" * 64, b"data", "application/json")
+    stamp_run(ledger_root, "expired-run", expires_epoch_ms=1, zdr=False)
+    # Unlike reap() above, this goes through the real wall clock (RealClock), not an injected fake
+    # `now_epoch_ms` — "fresh" has to outlast the actual time this test runs, not just outlast 10.
+    stamp_run(ledger_root, "fresh-run", expires_epoch_ms=4_102_444_800_000, zdr=False)  # 2100-01-01
+
+    reaped = api.reap_expired_now()
+
+    assert reaped == ["expired-run"]
+    assert not (ledger_root / "keys" / "expired-run.key").exists()
+    assert (ledger_root / "keys" / "fresh-run.key").exists()
+    assert not (ledger_root / "blobs" / "expired-run").exists()
+    assert (ledger_root / "blobs" / "fresh-run").exists()
+
+
 def test_header_path_refuses_traversal_run_id(tmp_path):
     """`openreading resume <RUN_ID>` (api.resume_run -> read_header) hands an operator-typed
     run_id straight to header_path; a traversal-shaped one must never reach the join."""
