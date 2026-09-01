@@ -485,9 +485,12 @@ def test_blobstore_get_still_reads_a_legacy_xor_blob_written_before_the_aead_upg
     in flight when a deploy swaps the binary is not left holding blobs it can no longer open."""
     keys = LocalFsKeyStore(tmp_path / "keys")
     store = LocalFsBlobStore(tmp_path / "blobs", keys)
-    run_id, digest = "run1", "sha256:" + "c" * 64
+    run_id = "run1"
     key = keys.get_or_create(run_id)
     data = b"pre-upgrade legacy plaintext"
+    # The REAL plaintext digest, not a placeholder: `get` now verifies it on the legacy path
+    # (the only integrity signal a pre-AEAD blob has), so a stand-in value would be a mismatch.
+    digest = "sha256:" + hashlib.sha256(data).hexdigest()
     # First byte forced off 0x02 (`_FORMAT_AEAD`): a fully random 16-byte nonce collides with the
     # AEAD marker ~1/256 of the time, which is exactly the documented "unreadable either way"
     # case (see localfs.py's own comment on `_FORMAT_AEAD`) -- this test exercises the ordinary
@@ -500,6 +503,52 @@ def test_blobstore_get_still_reads_a_legacy_xor_blob_written_before_the_aead_upg
         run_id=run_id, digest=digest, size_bytes=len(data), media_type="text/plain", store="localfs"
     )
     assert store.get(ref) == data
+
+
+def test_blobstore_get_rejects_a_legacy_xor_blob_whose_plaintext_digest_does_not_match(tmp_path):
+    """The legacy XOR cipher cannot fail — any ciphertext XOR a same-length keystream "succeeds"
+    — so without this check a tampered pre-AEAD blob is handed back as silently altered
+    plaintext, which is the whole failure mode the AEAD upgrade exists to close. The BlobRef's
+    own digest is the only integrity signal that format carries; `get` must actually check it."""
+    keys = LocalFsKeyStore(tmp_path / "keys")
+    store = LocalFsBlobStore(tmp_path / "blobs", keys)
+    run_id = "run1"
+    key = keys.get_or_create(run_id)
+    data = b"pre-upgrade legacy plaintext"
+    digest = "sha256:" + hashlib.sha256(data).hexdigest()
+    nonce = b"\x00" + secrets.token_bytes(15)  # off 0x02 — see the legacy-read test above
+    blob = bytearray(nonce + _xor(data, _keystream(key, nonce, len(data))))
+    blob[-1] ^= 0xFF  # flip one ciphertext bit: decodes cleanly, to the WRONG plaintext
+
+    store._path(run_id, digest).write_bytes(bytes(blob))
+    ref = BlobRef(
+        run_id=run_id, digest=digest, size_bytes=len(data), media_type="text/plain", store="localfs"
+    )
+
+    with pytest.raises(PayloadExpired):
+        store.get(ref)
+
+
+def test_blobstore_get_rejects_a_truncated_legacy_xor_blob(tmp_path):
+    """Truncation is the other way a legacy blob goes bad on disk, and it too decodes without
+    error (to a short plaintext) — the digest check is what turns it into a refusal rather than
+    a silently shortened payload."""
+    keys = LocalFsKeyStore(tmp_path / "keys")
+    store = LocalFsBlobStore(tmp_path / "blobs", keys)
+    run_id = "run1"
+    key = keys.get_or_create(run_id)
+    data = b"pre-upgrade legacy plaintext"
+    digest = "sha256:" + hashlib.sha256(data).hexdigest()
+    nonce = b"\x00" + secrets.token_bytes(15)
+    blob = nonce + _xor(data, _keystream(key, nonce, len(data)))
+
+    store._path(run_id, digest).write_bytes(blob[:-4])
+    ref = BlobRef(
+        run_id=run_id, digest=digest, size_bytes=len(data), media_type="text/plain", store="localfs"
+    )
+
+    with pytest.raises(PayloadExpired):
+        store.get(ref)
 
 
 def test_reap_refuses_run_id_whose_blobs_entry_resolves_outside_blobs_root(tmp_path):

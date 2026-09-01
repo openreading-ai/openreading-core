@@ -203,6 +203,94 @@ def test_parse_rejects_symlink_escaping_root(client, monkeypatch, tmp_path):
     assert r.status_code == 400
 
 
+def test_rooted_path_is_read_at_the_gate_so_a_later_swap_cannot_redirect_it(monkeypatch, tmp_path):
+    """TOCTOU: the gate used to resolve and containment-check the path and leave the ADAPTER to
+    open it later — a window spanning routing, credential resolution and a threadpool hop, in
+    which the checked file could be swapped for a symlink to anything the server process can
+    read. The gate now opens and reads the file itself, so the bytes the backend parses are the
+    bytes containment was proved for and a swap afterwards is inert."""
+    import openreading.server.app as app_module
+    from openreading.types.request import OpenReadingRequest
+
+    root = tmp_path / "root"
+    root.mkdir()
+    doc = root / "doc.pdf"
+    doc.write_bytes(b"%PDF-1.4 the file the gate checked")
+    secret = tmp_path / "secret"
+    secret.write_bytes(b"NOT FOR THE CALLER")
+    monkeypatch.setenv("OPENREADING_SERVER_PATH_ROOT", str(root))
+
+    req = OpenReadingRequest.model_validate(
+        {"document": {"path": str(doc)}, "backend": {"id": "pymupdf"}}
+    )
+    refusal, gated = app_module._gate_document_path(req)
+    assert refusal is None
+
+    doc.unlink()
+    doc.symlink_to(secret)  # exactly the swap the old check-then-open window allowed
+
+    assert gated.document.path is None
+    assert base64.b64decode(gated.document.bytes_base64) == b"%PDF-1.4 the file the gate checked"
+
+
+def test_gate_refuses_a_path_that_is_a_symlink_at_open_time(tmp_path):
+    """O_NOFOLLOW guards the one instant that remains: `resolve(strict=True)` never returns a
+    path whose final component is a link, so a link reaching the opener can only mean the file
+    was replaced after containment was proved. Handed a link directly, the reader must refuse."""
+    import openreading.server.app as app_module
+
+    target = tmp_path / "outside"
+    target.write_bytes(b"secret")
+    link = tmp_path / "link.pdf"
+    link.symlink_to(target)
+
+    with pytest.raises(app_module._GatedFileRefused):
+        app_module._read_gated_file(link)
+
+
+def test_gate_refuses_a_rooted_file_over_the_document_size_cap(monkeypatch, tmp_path):
+    """Reading at the gate means the server buffers the file, so it obeys the same ceiling a URL
+    document already does — an operator's document root holding one enormous file must not be a
+    way to exhaust the process."""
+    import openreading.server.app as app_module
+    from openreading import api as api_module
+    from openreading.types.request import OpenReadingRequest
+
+    root = tmp_path / "root"
+    root.mkdir()
+    doc = root / "big.pdf"
+    doc.write_bytes(b"%PDF-1.4" + b"x" * 64)
+    monkeypatch.setenv("OPENREADING_SERVER_PATH_ROOT", str(root))
+    monkeypatch.setattr(api_module, "_MAX_DOWNLOAD_BYTES", 8)
+
+    req = OpenReadingRequest.model_validate(
+        {"document": {"path": str(doc)}, "backend": {"id": "pymupdf"}}
+    )
+    refusal, _ = app_module._gate_document_path(req)
+    assert refusal is not None and "exceeds" in refusal
+
+
+def test_gate_keeps_the_documents_type_when_it_replaces_the_path_with_bytes(monkeypatch, tmp_path):
+    """The filename is the only format signal a `document.path` carries, and reading at the gate
+    discards it — so the type it implies is carried over as `mime_type` (an explicit caller value
+    always wins), or the backend loses the one hint it had about what it was handed."""
+    import openreading.server.app as app_module
+    from openreading.types.request import OpenReadingRequest
+
+    root = tmp_path / "root"
+    root.mkdir()
+    doc = root / "scan.png"
+    doc.write_bytes(b"\x89PNG\r\n\x1a\n")
+    monkeypatch.setenv("OPENREADING_SERVER_PATH_ROOT", str(root))
+
+    req = OpenReadingRequest.model_validate(
+        {"document": {"path": str(doc)}, "backend": {"id": "tesseract"}}
+    )
+    refusal, gated = app_module._gate_document_path(req)
+    assert refusal is None
+    assert gated.document.mime_type == "image/png"
+
+
 def test_route_rejects_document_path_by_default(client, monkeypatch):
     # _parse_request (shared by /v1/route and /v1/jobs) raises ValueError(refusal) so this
     # endpoint's existing except->400 handles it exactly like any other bad body.

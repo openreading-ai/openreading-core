@@ -218,7 +218,10 @@ is refused by default on every caller-body ingress (`/v1/parse`, `/v1/route`, `/
 `/v1/batch`): send `bytes_base64` or `url` instead. An operator who needs it sets
 `OPENREADING_SERVER_PATH_ROOT=<dir>` to serve files beneath one directory; the check resolves
 symlinks before proving containment, so a link inside that directory pointing outside it is
-refused the same as a literal `..` (`server.app._document_path_refusal`). This gate is HTTP-only —
+refused the same as a literal `..`, and an accepted file is read there and then rather than
+handed onward as a path for a backend to open later — closing the window in which the checked
+file could be swapped for a link out of the root (`server.app._gate_document_path`). Reading it
+at the gate bounds it by the same ceiling a URL document obeys. This gate is HTTP-only —
 the CLI and `openreading.api` still accept `document.path` unchanged, because there the caller and
 the machine granting file access are the same trust domain.
 
