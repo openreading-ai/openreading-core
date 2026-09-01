@@ -59,7 +59,7 @@ is offloaded with run_in_threadpool, and why fastapi is imported at module level
 Environment variables this module reads. Server-only (the CLI and Python API ignore them):
 OPENREADING_API_KEYS, OPENREADING_API_KEY_SCOPES, OPENREADING_SERVER_PATH_ROOT,
 OPENREADING_JOB_TTL_S, OPENREADING_MAX_ASYNC_JOBS, OPENREADING_MAX_JOBS_PER_PRINCIPAL,
-OPENREADING_MAX_BODY_BYTES and the three
+OPENREADING_MAX_BODY_BYTES, OPENREADING_ALLOW_UNSIGNED_WEBHOOKS and the three
 compliance attestation knobs. OPENREADING_CONFIG and the backend credential vars are shared with
 the CLI / Python API, which read them through the same strategy loader and EnvCredentialBroker.
   OPENREADING_API_KEYS — comma-separated bearer tokens (_load_api_key_config, once at startup).
@@ -84,6 +84,12 @@ the CLI / Python API, which read them through the same strategy loader and EnvCr
     implied type ride along as `mime_type`. The CLI and Python API never read this var —
     `document.path` there names a file the SAME process already trusts, which is why the gate is
     HTTP-only.
+  OPENREADING_ALLOW_UNSIGNED_WEBHOOKS — `1`/`true`/`yes` accepts an inbound event from a backend
+    that cannot sign (chunkr, open-ocr) WITHOUT the per-job callback token the server appended to
+    the URL it registered — i.e. on the vendor's task id alone, which is what anyone who saw that
+    id can forge. Unset (the default) refuses it with 401. The hatch exists for a vendor that
+    strips query parameters from the callback URL it is given; it buys working webhooks at the
+    price of forgeable completions (`_allow_unsigned_webhooks`).
   OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE — `1`/`true`/`yes` lets UNVERIFIED compliance fields
     survive the router's compliance stage. Unset (or anything else) ⇒ fail closed: unverified
     is eliminated. The one switch that widens the eligible set; leave it off without a reason.
@@ -144,6 +150,7 @@ import hmac
 import json
 import mimetypes
 import os
+import secrets
 import stat
 import threading
 import time
@@ -253,6 +260,11 @@ class JobRecord:
     # `_principal_id`). None when caller auth is off, which is also when there is no principal to
     # meter and only the global `_MAX_ASYNC_JOBS` applies.
     principal: str | None = None
+    # M5: the secret this job's callback URL carries, for a backend that cannot sign its webhooks.
+    # It lives HERE and not on the stored request precisely because `slim_request` nulls
+    # `async.webhook_url` — the URL that carried it is not retained anywhere a later reader could
+    # recover it from. None for a POLL job, and for one submitted before a token was issued.
+    callback_token: str | None = None
     response: dict[str, Any] | None = None
     error: dict[str, Any] | None = None
     # BL-77/BL-88 history, corrected by BL-92: this WAS the absolute (RealClock-monotonic)
@@ -344,11 +356,10 @@ def _webhook_secret(backend_id: str) -> str | None:
 
 def _webhook_secret_required(backend_id: str) -> bool:
     """True when the backend's own credentials_spec declares a `webhook_secret` field at all — i.e.
-    it offers signature verification (today: reducto alone). BL-50: the fail-closed gate only
-    applies here. A backend that never declares the field (chunkr, open-ocr) has no configured/
-    unconfigured distinction to fail on — their webhook events are unverified by construction
-    (documented in the openreading.server docstring); real verification for them is separate
-    follow-up scope, not a regression of this check."""
+    it offers signature verification (today: reducto alone). BL-50: the fail-closed-on-a-MISSING-
+    secret gate only applies here. A backend that never declares the field (chunkr, open-ocr) has
+    no configured/unconfigured distinction to fail on; it is authenticated by the per-job callback
+    token instead (M5, see the webhook handler), not left unverified."""
     desc = make_adapter(backend_id).descriptor
     return any(f.key == "webhook_secret" for f in desc.credentials_spec)
 
@@ -374,6 +385,35 @@ def _webhook_event_id(backend_id: str, event: dict) -> Any:
     regardless of which key is read; the fallback exists so this never raises."""
     field = _WEBHOOK_EVENT_ID_FIELDS.get(backend_id, "job_id")
     return event.get(field)
+
+
+# M5: the query parameter carrying a job's callback token back from the vendor. Short and
+# opaque — it ends up in vendor dashboards and access logs, where a descriptive name would
+# advertise what it is worth stealing.
+_CALLBACK_TOKEN_PARAM = "ort"
+
+
+def _allow_unsigned_webhooks() -> bool:
+    """OPENREADING_ALLOW_UNSIGNED_WEBHOOKS=1/true/yes restores the pre-M5 behaviour: an event from
+    a backend that cannot sign is trusted on its vendor id alone. Read per request, not at import,
+    so it behaves like the other deployment knobs. The escape hatch exists because a vendor that
+    strips query parameters from the callback URL it was handed would otherwise have its webhooks
+    fail closed with no way back; setting it accepts forgeable completions in exchange."""
+    return os.environ.get("OPENREADING_ALLOW_UNSIGNED_WEBHOOKS", "").lower() in ("1", "true", "yes")
+
+
+def _with_callback_token(req: OpenReadingRequest, token: str) -> OpenReadingRequest:
+    """`req` with `_CALLBACK_TOKEN_PARAM=<token>` appended to `async.webhook_url`'s query, leaving
+    the caller's own object and its own parameters untouched. This is the ONLY channel by which
+    the token reaches the vendor and comes back, which is why the server appends it rather than
+    letting a caller supply one: a caller-chosen token is a token another caller can guess."""
+    from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
+    assert req.async_ is not None and req.async_.webhook_url  # caller checks before calling
+    parsed = urlparse(req.async_.webhook_url)
+    query = [*parse_qsl(parsed.query, keep_blank_values=True), (_CALLBACK_TOKEN_PARAM, token)]
+    url = urlunparse(parsed._replace(query=urlencode(query)))
+    return req.model_copy(update={"async_": req.async_.model_copy(update={"webhook_url": url})})
 
 
 def _verify_svix(secret: str, raw: bytes, headers: dict[str, str]) -> None:
@@ -1452,6 +1492,12 @@ def create_app(*, cors_origins: list[str] | None = None):
             return _unknown_backend(e)
         except _ADAPTER_ERRORS as e:
             return _error_response(e)
+        # M5: issued here — after prepare_named_backend, before submit — because submit is the
+        # call that hands the callback URL to the vendor, and the token has to already be in it.
+        callback_token: str | None = None
+        if req.async_ is not None and req.async_.webhook_url:
+            callback_token = secrets.token_urlsafe(32)
+            req = _with_callback_token(req, callback_token)
         try:
             with auth_hinted(adapter.descriptor, ctx.credentials):
                 job = await run_in_threadpool(adapter.submit, req, ctx)
@@ -1467,6 +1513,7 @@ def create_app(*, cors_origins: list[str] | None = None):
             slim_request(req),
             int(time.time() * 1000),
             principal=principal,
+            callback_token=callback_token,
             # BL-77: anchor the drive-deadline to submission, once — not to "now" on every GET.
             deadline_ms=RealClock().now_ms() + DEFAULT_DEADLINE_MS,
         )
@@ -1628,6 +1675,20 @@ def create_app(*, cors_origins: list[str] | None = None):
         )
         if rec is None:
             return _not_found("unknown_job", str(jid))
+        # M5: for a backend that declares no webhook_secret there is no signature to check, so the
+        # per-job callback token this server appended to the URL it registered is the ONLY thing
+        # separating a genuine completion from one anybody who learned the vendor's task id could
+        # forge — and on a shared deployment, forge INTO ANOTHER TENANT'S JOB. Checked after the
+        # lookup, not before, so an event naming no job at all is still the 404 it always was
+        # rather than leaking a different answer for ids that do and do not exist.
+        if not secret and not _allow_unsigned_webhooks():
+            presented = request.query_params.get(_CALLBACK_TOKEN_PARAM)
+            if (
+                rec.callback_token is None
+                or presented is None
+                or not hmac.compare_digest(rec.callback_token, presented)
+            ):
+                return _bad_signature()
         # fresh adapter (client=None) — the server already verified the signature, so resolve_webhook
         # maps the event without re-verifying.
         adapter = make_adapter(backend_id)

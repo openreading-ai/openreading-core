@@ -111,7 +111,7 @@ Each row is absent by design or not built yet, and each is also stated on the pa
 | Not provided | What to do instead |
 |---|---|
 | Rate limiting, spend accounting, TLS termination | Put your own reverse proxy in front. `pydoc openreading.server`, "Security": "What this does NOT add: rate limiting, spend accounting, transport encryption" |
-| Webhook signature verification for `chunkr` and `open-ocr` | Those two callback paths are unauthenticated and unverified. Keep them off any interface you do not control |
+| Webhook *signature* verification for `chunkr` and `open-ocr` | Neither vendor offers one. The server authenticates their callbacks with a per-job token it appends to the URL it registers, and refuses an event that cannot present it; `OPENREADING_ALLOW_UNSIGNED_WEBHOOKS=1` opts back out, and forgeable completions come with it |
 | Protection of the ledger root beyond file modes | Give that directory the filesystem permissions and disk encryption you give the documents themselves |
 | A released version to patch | Track `main`, as "Supported versions" below explains |
 

@@ -1477,7 +1477,12 @@ def test_webhook_metered_redacts_a_secret_in_a_plain_normalize_crash(monkeypatch
 # --- webhook cross-backend / event-key scoping (BL-66) ---------------------------------
 
 
-def _seed_chunkr_webhook_job(app):
+# M5: every seeded webhook job carries the callback token a real submit would have issued, so
+# these tests exercise the authenticated path a genuine vendor callback takes.
+_TEST_CALLBACK_TOKEN = "tok-correct-0123456789"
+
+
+def _seed_chunkr_webhook_job(app, callback_token=_TEST_CALLBACK_TOKEN):
     import time
     from pathlib import Path
 
@@ -1497,12 +1502,14 @@ def _seed_chunkr_webhook_job(app):
     # A real created_ms, not the usual placeholder 0: the caller's own GET after the webhook
     # resolves this job to terminal would otherwise fall outside the TTL sweep's window (M4).
     created_ms = int(time.time() * 1000)
-    app.state.jobs[job.id] = JobRecord(job.id, "chunkr", adapter, job, req, created_ms)
+    app.state.jobs[job.id] = JobRecord(
+        job.id, "chunkr", adapter, job, req, created_ms, callback_token=callback_token
+    )
     fixture = json.loads((Path(__file__).parent / "fixtures" / "chunkr" / "parse.json").read_text())
     return job.id, fixture
 
 
-def _seed_open_ocr_webhook_job(app):
+def _seed_open_ocr_webhook_job(app, callback_token=_TEST_CALLBACK_TOKEN):
     import time
     from pathlib import Path
 
@@ -1522,9 +1529,133 @@ def _seed_open_ocr_webhook_job(app):
     # A real created_ms, not the usual placeholder 0: the caller's own GET after the webhook
     # resolves this job to terminal would otherwise fall outside the TTL sweep's window (M4).
     created_ms = int(time.time() * 1000)
-    app.state.jobs[job.id] = JobRecord(job.id, "open-ocr", adapter, job, req, created_ms)
+    app.state.jobs[job.id] = JobRecord(
+        job.id, "open-ocr", adapter, job, req, created_ms, callback_token=callback_token
+    )
     fixture = json.loads((Path(__file__).parent / "fixtures" / "open-ocr" / "ocr.json").read_text())
     return job.id, fixture
+
+
+# --- webhook authentication for backends with no signature (M5) -------------------------
+
+
+def test_unsigned_webhook_without_a_callback_token_is_refused():
+    """chunkr and open-ocr declare no `webhook_secret` and have no signature mechanism, so every
+    event they send used to be trusted on a `task_id` alone — an identifier the vendor puts in
+    URLs and logs, not a secret. Anyone who learned or guessed one could forge a completion, and
+    on a shared deployment forge it into someone else's job. Without the per-job callback token
+    the server issued, the event is unauthenticated and refused."""
+    app = create_app()
+    client = TestClient(app)
+    job_id, fixture = _seed_chunkr_webhook_job(app)
+
+    r = client.post("/v1/webhooks/chunkr", content=json.dumps({"task_id": "task_wh_1"}))
+
+    assert r.status_code == 401
+    assert client.get(f"/v1/jobs/{job_id}").json()["state"] == "running"
+
+
+def test_unsigned_webhook_with_the_wrong_callback_token_is_refused():
+    """The token is compared, not merely required."""
+    app = create_app()
+    client = TestClient(app)
+    job_id, _ = _seed_chunkr_webhook_job(app)
+
+    r = client.post(
+        "/v1/webhooks/chunkr?ort=tok-guessed-9876543210",
+        content=json.dumps({"task_id": "task_wh_1"}),
+    )
+
+    assert r.status_code == 401
+    assert client.get(f"/v1/jobs/{job_id}").json()["state"] == "running"
+
+
+def test_unsigned_webhook_with_the_right_callback_token_completes_the_job():
+    """The token proves the event came back down a URL only this server and the vendor ever saw,
+    which is the whole authentication story for a backend that cannot sign."""
+    app = create_app()
+    client = TestClient(app)
+    job_id, fixture = _seed_chunkr_webhook_job(app)
+
+    r = client.post(
+        f"/v1/webhooks/chunkr?ort={_TEST_CALLBACK_TOKEN}",
+        content=json.dumps({"task_id": "task_wh_1", "data": fixture}),
+    )
+
+    assert r.status_code == 200
+    assert r.json()["state"] == "succeeded"
+
+
+def test_unsigned_webhooks_can_be_opted_back_in(monkeypatch):
+    """Failing closed breaks any deployment whose vendor strips query parameters from the
+    callback URL it was given. The escape hatch is explicit and named, like every other
+    OPENREADING_* widening — and it restores exactly the old, forgeable behaviour."""
+    monkeypatch.setenv("OPENREADING_ALLOW_UNSIGNED_WEBHOOKS", "1")
+    app = create_app()
+    client = TestClient(app)
+    _job_id, fixture = _seed_chunkr_webhook_job(app)
+
+    r = client.post(
+        "/v1/webhooks/chunkr", content=json.dumps({"task_id": "task_wh_1", "data": fixture})
+    )
+
+    assert r.status_code == 200
+
+
+def test_submit_registers_a_callback_url_carrying_a_per_job_token(monkeypatch):
+    """The token has to reach the vendor to come back, and the only channel is the callback URL
+    the caller asked us to register. The server appends it there, after prepare_named_backend and
+    before submit — the caller never picks the value, so one caller cannot choose a token another
+    caller could guess."""
+    import openreading.api as api_module
+    import openreading.server.app as app_module
+    from tests.fakes import ScriptedBackend
+
+    seen: dict[str, str | None] = {}
+
+    class _CaptureBackend(ScriptedBackend):
+        def submit(self, req, ctx):
+            seen["url"] = req.async_.webhook_url if req.async_ else None
+            return super().submit(req, ctx)
+
+    backend = _CaptureBackend("capture-webhook")
+    real = api_module.make_adapter
+    monkeypatch.setattr(
+        api_module,
+        "make_adapter",
+        lambda bid: backend if bid == "capture-webhook" else real(bid),
+    )
+    client = TestClient(app_module.create_app())
+    body = _pdf_body("capture-webhook")
+    body["async"] = {"mode": "async", "webhook_url": "https://host/v1/webhooks/chunkr"}
+
+    r = client.post("/v1/jobs", json=body)
+
+    assert r.status_code == 200
+    assert seen["url"].startswith("https://host/v1/webhooks/chunkr?ort=")
+    rec = client.app.state.jobs[r.json()["job_id"]]
+    assert rec.callback_token and rec.callback_token in seen["url"]
+
+
+def test_the_callback_token_is_appended_without_disturbing_the_callers_own_query(monkeypatch):
+    """A caller's callback URL may already carry its own routing parameters, and the stored
+    request must not be the vehicle either — `slim_request` nulls `webhook_url`, so the token
+    lives on the record, not in anything a later reader of the request could recover."""
+    import openreading.server.app as app_module
+    from openreading.types.request import OpenReadingRequest
+
+    req = OpenReadingRequest.model_validate(
+        {
+            "document": {"url": "https://x/d.pdf"},
+            "backend": {"id": "chunkr"},
+            "async": {"mode": "async", "webhook_url": "https://host/cb?tenant=42"},
+        }
+    )
+
+    out = app_module._with_callback_token(req, "tok-abc")
+
+    assert out.async_.webhook_url == "https://host/cb?tenant=42&ort=tok-abc"
+    assert req.async_.webhook_url == "https://host/cb?tenant=42"  # caller's object untouched
 
 
 def test_webhook_cross_backend_hijack_is_404(monkeypatch):
@@ -1589,7 +1720,7 @@ def test_webhook_chunkr_genuine_event_resolves():
     client = TestClient(app)
     job_id, fixture = _seed_chunkr_webhook_job(app)
     payload = json.dumps({"task_id": "task_wh_1", "data": fixture})
-    r = client.post("/v1/webhooks/chunkr", content=payload)
+    r = client.post(f"/v1/webhooks/chunkr?ort={_TEST_CALLBACK_TOKEN}", content=payload)
     assert r.status_code == 200
     body = r.json()
     assert body["state"] == "succeeded"
@@ -1603,7 +1734,7 @@ def test_webhook_open_ocr_genuine_event_resolves():
     client = TestClient(app)
     job_id, fixture = _seed_open_ocr_webhook_job(app)
     payload = json.dumps({"request_id": "req_wh_1", "data": fixture})
-    r = client.post("/v1/webhooks/open-ocr", content=payload)
+    r = client.post(f"/v1/webhooks/open-ocr?ort={_TEST_CALLBACK_TOKEN}", content=payload)
     assert r.status_code == 200
     body = r.json()
     assert body["state"] == "succeeded"

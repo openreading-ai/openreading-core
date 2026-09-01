@@ -118,17 +118,24 @@ POST /v1/webhooks/{backend_id}
     /v1/parse. Response: the job handle. Verification is per-backend, gated on whether the
     backend declares a `webhook_secret` credential at all — today reducto alone (Svix, secret
     from `REDUCTO_WEBHOOK_SECRET`): invalid signature → 401, and so is a MISSING secret — fail
-    closed rather than trust a possibly forged vendor result. chunkr and open-ocr declare a
-    WEBHOOK wait mode but verify nothing (neither has a signature mechanism), so treat webhook
-    mode on either as unauthenticated until real verification ships. That gap is contained: the
-    event-to-job lookup only considers records for the URL's `{backend_id}` that are themselves
-    waiting in WEBHOOK mode, so a forged chunkr/open-ocr event can only settle a chunkr/open-ocr
-    webhook-mode job whose id it names — never another backend's job nor any POLL-mode job. The
-    id is read from the field each vendor actually uses (`job_id` reducto, `task_id` chunkr,
-    `request_id` open-ocr). The callback is always caller-supplied on the submit request —
+    closed rather than trust a possibly forged vendor result. chunkr and open-ocr offer no
+    signature mechanism at all, so their callbacks are authenticated by a PER-JOB CALLBACK TOKEN
+    instead (M5): on submit the server generates one, appends it to the `webhook_url` it registers
+    with the vendor as `?ort=…`, and keeps it on the job record alone — `slim_request` nulls
+    `webhook_url`, so the URL that carried it is retained nowhere. An event for one of those
+    backends that cannot present the matching token is 401. Without this the vendor's own task id
+    was the only thing standing between a stranger and a forged completion, and that id travels in
+    URLs and logs. The token is the server's to choose, never the caller's: a caller-picked value
+    is one another caller could guess. `OPENREADING_ALLOW_UNSIGNED_WEBHOOKS=1` restores the old
+    behaviour for a vendor that strips query parameters from the URL it was handed, and accepts
+    forgeable completions in doing so. The lookup is scoped either way: only records for the
+    URL's `{backend_id}` that are themselves waiting in WEBHOOK mode are considered, so an event
+    can never settle another backend's job nor any POLL-mode job. The id is read from the field
+    each vendor actually uses (`job_id` reducto, `task_id` chunkr, `request_id` open-ocr). The
+    callback is always caller-supplied on the submit request —
     `"async": {"mode": "async", "webhook_url": "https://host/v1/webhooks/reducto"}` — the server
-    never invents one; the CLI/Python API only ever use POLL, so nothing there depends on inbound
-    reachability.
+    never invents one, only appends its token to it; the CLI/Python API only ever use POLL, so
+    nothing there depends on inbound reachability.
 POST /v1/backends/{backend_id}/liveness
     Is this backend actually ANSWERING? Optional body {"timeout_s": <float>}, clamped to
     [0.1, 30]. Response: liveness report {"schema_version", "backend", "status", "measured",
