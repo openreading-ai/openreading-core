@@ -165,8 +165,9 @@ Implemented (5):
     anthropic-claude  vendor    client.models.list()             documented non-billing endpoint
                                 (GET /v1/models)                 on the SDK already depended on
 
-Deliberately unsupported (8): aws-textract, azure-document-intelligence, google-document-ai,
-chunkr, pulse, nuextract, open-ocr, reducto. No free liveness call is verifiable from a primary
+Deliberately unsupported (10): aws-textract, azure-document-intelligence, google-document-ai,
+google-gemini, mistral-ocr, chunkr, pulse, nuextract, open-ocr, reducto. No free liveness call is
+verifiable from a primary
 source (a guessed URL would be a fabricated descriptor value — the failure the honesty ladders
 exist to prevent), and the build forbids the real vendor call that would verify one, so a probe
 that cannot be run cannot be honestly graded. Adding one later is contained and additive: a

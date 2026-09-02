@@ -1,7 +1,7 @@
 {
   "pages": [
     {
-      "index": 1,
+      "index": 0,
       "markdown": "# Invoice 1001\n\nBill to Jane Doe.\n\n<table><tr><th>Item</th><th>Amount</th></tr><tr><td>Consulting</td><td>$42.50</td></tr></table>",
       "dimensions": {
         "dpi": 200,
@@ -11,7 +11,8 @@
       "tables": [
         {
           "id": "table-1",
-          "html": "<table><tr><th>Item</th><th>Amount</th></tr><tr><td>Consulting</td><td>$42.50</td></tr></table>"
+          "content": "<table><tr><th>Item</th><th>Amount</th></tr><tr><td>Consulting</td><td>$42.50</td></tr></table>",
+          "format": "html"
         }
       ],
       "blocks": [
@@ -46,7 +47,7 @@
       ]
     },
     {
-      "index": 2,
+      "index": 1,
       "markdown": "## Terms\n\nDue in 30 days.",
       "dimensions": {
         "dpi": 200,

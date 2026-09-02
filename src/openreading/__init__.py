@@ -283,6 +283,10 @@ read the error, which does name the variable.
                                                        pdf png jpg tiff bmp docx xlsx pptx html
     google-document-ai            hosted_api         GCP_PROJECT_ID (+ processor id, credentials)
                                                        pdf tiff gif png jpg bmp webp
+    google-gemini                 hosted_api         GEMINI_API_KEY
+                                                       pdf
+    mistral-ocr                   hosted_api         MISTRAL_API_KEY
+                                                       pdf docx pptx png jpg avif
     qwen-vl                       self_hosted_model  QWEN_VL_ENDPOINT (self-hosted)
                                                        png jpg pdf (rasterized)
 

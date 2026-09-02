@@ -136,7 +136,7 @@ def test_file_id_is_forwarded_as_a_gemini_files_uri():
     assert client.last_call is not None
     assert client.last_call["input"][0] == {
         "type": "document",
-        "uri": "files/doc-123",
+        "uri": "https://generativelanguage.googleapis.com/v1beta/files/doc-123",
         "mime_type": "application/pdf",
     }
 
@@ -183,6 +183,14 @@ def test_cost_is_unknown_but_token_quantity_is_preserved():
     assert cost.cost_usd is None
     assert cost.basis is CostBasis.UNKNOWN
     assert cost.billing_target == "caller_account"
+
+
+def test_gemini_is_flagged_non_deterministic_for_compare_and_leaderboard():
+    """A generative VLM drifts run to run; `compare` caps content findings against it at
+    informational and `leaderboard` labels it, both keyed on this one set."""
+    from openreading.comparison.report import _NON_DETERMINISTIC
+
+    assert "google-gemini" in _NON_DETERMINISTIC
 
 
 @pytest.mark.live

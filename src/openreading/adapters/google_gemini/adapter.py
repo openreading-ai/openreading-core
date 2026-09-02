@@ -2,11 +2,15 @@
 
 The adapter is an INLINE, stateless (``store=false``) hosted flow. It accepts either inline
 ``bytes_base64`` or a Gemini Files resource name in ``file_id``; it does not download arbitrary
-URLs or read local paths. The request combines one ``document`` input with one text instruction
-and posts it to ``POST /v1beta/interactions`` using the caller's ``GEMINI_API_KEY``. The default
-model is ``gemini-3.6-flash``; the credential/config broker maps ``GEMINI_MODEL`` to
-``ctx.runtime["model"]``. The ordinary per-request ``request.backend.version`` override wins over
-that environment-derived default.
+URLs or read local paths, and it forwards only PDF and ``text/*`` MIME types (the Interactions
+``document`` part is PDF-native; anything else is refused as ``unsupported_input`` before the
+call rather than surfacing as an opaque vendor 400). The request combines one ``document`` input
+with one text instruction and posts it to ``POST /v1beta/interactions`` using the caller's
+``GEMINI_API_KEY``. The default model is ``gemini-3.6-flash``; the credential/config broker maps
+``GEMINI_MODEL`` to ``ctx.runtime["model"]``. The ordinary per-request ``request.backend.version``
+override wins over that environment-derived default. A ``failed`` or ``cancelled`` interaction
+is a ``TerminalError`` at submit carrying the vendor status and its ``errors[]`` message; any
+other non-``completed`` status normalizes to PARTIAL with ``status.error``.
 
 Parse mode asks for faithful Markdown. Markdown is therefore native model output; plain text,
 layout-element blocks, and table cells are deterministic projections through ``openreading.derive``.
@@ -110,7 +114,7 @@ class GeminiClient(Protocol):
     ) -> dict[str, Any]: ...
 
 
-class _HttpxGeminiClient:  # pragma: no cover - request shape is covered through respx
+class _HttpxGeminiClient:
     def __init__(self, api_key: str) -> None:
         from openreading.adapters._http import build_httpx_client
 
@@ -298,24 +302,36 @@ class GoogleGeminiAdapter(BackendAdapter):
         # A real client is constructed per method call; only constructor injection may live on self.
         return _HttpxGeminiClient(str(api_key))
 
-    def _document_input(self, req: OpenReadingRequest) -> dict[str, Any]:
+    def _document_input(self, req: OpenReadingRequest) -> tuple[dict[str, Any], int | None]:
+        """The Interactions document part plus the PDF page count (None when unknowable)."""
         document = req.document
         mime_type = document.mime_type or "application/pdf"
+        # The Interactions `document` part understands PDF natively and accepts text types as
+        # plain text; an image or Office file posted as a document part is a vendor 400 that
+        # would surface as an opaque `http_400`, so refuse it here in the adapter's own taxonomy.
+        if mime_type != "application/pdf" and not mime_type.startswith("text/"):
+            raise TerminalError(
+                f"Gemini document input accepts PDF or text/* MIME types, not {mime_type}; route "
+                "images and Office files to a backend that lists them in input_formats",
+                backend_code="unsupported_input",
+            )
         if document.bytes_base64 is not None:
             try:
-                base64.b64decode(document.bytes_base64, validate=True)
+                raw_bytes = base64.b64decode(document.bytes_base64, validate=True)
             except ValueError as exc:
                 raise TerminalError(
                     "Gemini inline input must contain valid base64 document bytes",
                     backend_code="unsupported_input",
                 ) from exc
-            return {
-                "type": "document",
-                "data": document.bytes_base64,
-                "mime_type": mime_type,
-            }
+            part = {"type": "document", "data": document.bytes_base64, "mime_type": mime_type}
+            return part, pdf_page_count(raw_bytes)
         if document.file_id:
-            return {"type": "document", "uri": document.file_id, "mime_type": mime_type}
+            # The Files API hands back a resource `name` (`files/abc`) and a `uri`; the document
+            # part takes the uri, so a bare resource name is expanded rather than sent as-is.
+            uri = document.file_id
+            if uri.startswith("files/"):
+                uri = f"{_DEFAULT_BASE_URL}/v1beta/{uri}"
+            return {"type": "document", "uri": uri, "mime_type": mime_type}, None
         raise TerminalError(
             "Gemini needs bytes_base64 or a Gemini Files resource in file_id",
             backend_code="unsupported_input",
@@ -323,12 +339,13 @@ class GoogleGeminiAdapter(BackendAdapter):
 
     def _build_request(
         self, req: OpenReadingRequest, ctx: RunContext
-    ) -> tuple[str, list[dict[str, Any]], dict[str, Any] | None, str]:
+    ) -> tuple[str, list[dict[str, Any]], dict[str, Any] | None, str, int | None]:
         runtime = ctx.runtime or {}
         model = str(req.backend.version or runtime.get("model") or _DEFAULT_MODEL)
-        document = self._document_input(req)
+        document, page_count = self._document_input(req)
         if req.extraction_schema is None:
-            return model, [document, {"type": "text", "text": _PARSE_PROMPT}], None, "parse"
+            inputs = [document, {"type": "text", "text": _PARSE_PROMPT}]
+            return model, inputs, None, "parse", page_count
 
         schema = req.extraction_schema.json_schema or {
             "type": "object",
@@ -342,12 +359,13 @@ class GoogleGeminiAdapter(BackendAdapter):
             [document, {"type": "text", "text": instructions}],
             response_format,
             "extract",
+            page_count,
         )
 
     def submit(self, req: OpenReadingRequest, ctx: RunContext) -> Job:
         self.assert_supports(req)
         client = self._get_client(ctx)
-        model, inputs, response_format, mode = self._build_request(req, ctx)
+        model, inputs, response_format, mode, page_count = self._build_request(req, ctx)
         try:
             raw = client.interact(
                 model=model,
@@ -365,8 +383,19 @@ class GoogleGeminiAdapter(BackendAdapter):
                 "Gemini returned a non-object Interactions response",
                 backend_code="malformed_response",
             )
+        status = raw.get("status")
+        if status in ("failed", "cancelled"):
+            # A synchronous vendor failure is a TerminalError at submit, never a SUCCEEDED job
+            # that normalize has to explain away (adapters runbook: provider-failure responses
+            # at submit time). `errors[]` is the documented `{code, message}` list.
+            raise TerminalError(
+                self._errors_message(raw) or f"Gemini interaction {status}",
+                backend_code=str(status),
+            )
         payload = dict(raw)
-        payload["_pdf_page_count"] = self._page_count(req)
+        # Carried on the payload because normalize() cannot see the bytes (slim_req nulls them);
+        # stripped again before `backend_raw` so the vendor object stays untouched.
+        payload["_pdf_page_count"] = page_count
         job = self.new_job(
             WaitMode.INLINE,
             state=JobState.SUCCEEDED,
@@ -381,13 +410,25 @@ class GoogleGeminiAdapter(BackendAdapter):
         return job
 
     @staticmethod
-    def _page_count(req: OpenReadingRequest) -> int | None:
-        if req.document.bytes_base64 is None:
+    def _errors_message(raw: dict[str, Any]) -> str:
+        """One line from the Interaction's ``errors[]`` (``{code, message}`` each); the vendor
+        body is never echoed wholesale into an error message."""
+        parts: list[str] = []
+        for err in raw.get("errors") or []:
+            if not isinstance(err, dict):
+                continue
+            message = err.get("message")
+            code = err.get("code")
+            if isinstance(message, str) and message:
+                parts.append(f"{code}: {message}" if isinstance(code, str) and code else message)
+        return "; ".join(parts)
+
+    @staticmethod
+    def _token_count(usage: Any, key: str) -> int | None:
+        value = usage.get(key) if isinstance(usage, dict) else None
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
             return None
-        try:
-            return pdf_page_count(base64.b64decode(req.document.bytes_base64, validate=True))
-        except ValueError:
-            return None
+        return int(value)
 
     @staticmethod
     def _output_text(raw: dict[str, Any]) -> str:
@@ -395,7 +436,7 @@ class GoogleGeminiAdapter(BackendAdapter):
             if not isinstance(step, dict) or step.get("type") != "model_output":
                 continue
             parts = [
-                block.get("text", "")
+                str(block.get("text") or "")
                 for block in (step.get("content") or [])
                 if isinstance(block, dict) and block.get("type") == "text"
             ]
@@ -433,34 +474,49 @@ class GoogleGeminiAdapter(BackendAdapter):
                 values = json.loads(output_text)
             except (TypeError, json.JSONDecodeError):
                 values = None
+                problem = "was not valid JSON"
+            else:
+                problem = "was not a JSON object"
+            # A JSON `null` or scalar is as empty as unparseable text: the caller asked for
+            # fields and got none, so the status says PARTIAL instead of a clean SUCCEEDED.
+            if not isinstance(values, dict):
                 response_error = ResponseError(
                     code="malformed_response",
-                    message="Gemini structured output was not valid JSON.",
+                    message=f"Gemini structured output {problem}.",
                     backend_code="malformed_response",
                 )
-            if values is not None and not isinstance(values, dict):
-                response_error = ResponseError(
-                    code="malformed_response",
-                    message="Gemini structured output was not a JSON object.",
-                    backend_code="malformed_response",
-                )
-            if isinstance(values, dict):
+            else:
                 field_types = self._schema_types(slim_req)
                 typed_fields = {
                     name: TypedField(value=value, type=field_types.get(name))
                     for name, value in values.items()
-                }
+                } or None
         else:
             markdown = output_text or None
             plain = md_to_text(output_text) if output_text else ""
             text = plain or None
-            if (outputs.blocks or outputs.tables == "cells") and output_text:
+            # Gated on `outputs.blocks` alone, like every other markdown-derived adapter: table
+            # cells live on blocks, so with blocks off they are warned below, not smuggled in.
+            if outputs.blocks and output_text:
                 blocks = md_to_blocks(output_text)
                 if blocks:
                     pages = [Page(page_number=1, blocks=blocks)]
 
         interaction_completed = raw.get("status") == "completed"
+        if not interaction_completed and response_error is None:
+            # Answered but not finished (`incomplete`, `budget_exceeded`, `requires_action`, ...):
+            # PARTIAL with status.error (C10), keeping whatever text did arrive. `failed` and
+            # `cancelled` never reach here -- submit() raises on them.
+            vendor_status = str(raw.get("status") or "unknown")
+            detail = self._errors_message(raw)
+            response_error = ResponseError(
+                code="interaction_incomplete",
+                message=f"Gemini interaction status was {vendor_status!r}"
+                + (f": {detail}" if detail else ""),
+                backend_code=vendor_status,
+            )
         completed = interaction_completed and response_error is None
+        usage_raw = raw.get("usage")
         response = NormalizedResponse(
             status=Status(
                 state=ResponseState.SUCCEEDED if completed else ResponseState.PARTIAL,
@@ -485,8 +541,8 @@ class GoogleGeminiAdapter(BackendAdapter):
             ),
             typed_fields=typed_fields,
             usage=Usage(
-                input_tokens=(raw.get("usage") or {}).get("total_input_tokens"),
-                output_tokens=(raw.get("usage") or {}).get("total_output_tokens"),
+                input_tokens=self._token_count(usage_raw, "total_input_tokens"),
+                output_tokens=self._token_count(usage_raw, "total_output_tokens"),
             ),
         )
 
@@ -558,7 +614,7 @@ class GoogleGeminiAdapter(BackendAdapter):
                 encoding="json",
                 media_type="application/json",
                 object_class="google.ai.Interaction",
-                payload=raw,
+                payload={k: v for k, v in raw.items() if k != "_pdf_page_count"},
             )
         return response
 
@@ -575,9 +631,10 @@ class GoogleGeminiAdapter(BackendAdapter):
 
     def report_cost(self, job: Job) -> CostReport:
         raw = job.raw.payload if job.raw else {}
-        usage = raw.get("usage") or {}
+        usage = raw.get("usage")
         quantity = float(
-            (usage.get("total_input_tokens") or 0) + (usage.get("total_output_tokens") or 0)
+            (self._token_count(usage, "total_input_tokens") or 0)
+            + (self._token_count(usage, "total_output_tokens") or 0)
         )
         return CostReport(
             native_unit="token",

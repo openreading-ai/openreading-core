@@ -10,14 +10,17 @@ chunk types with a MIME-qualified ``data:...;base64,...`` URL. Local paths and O
 The request opts into native blocks, block confidence, and HTML tables. Page Markdown and blocks
 are native; block bounds are converted from the provider's top-left pixels only when real page
 dimensions are present, and the native average block confidence is retained only in [0,1]. Plain
-text and table-cell grids are deterministic projections. A positive provider page ``index`` is
-preserved as the source page number; a defensive zero is mapped to page 1, never followed by a
-blanket +1 that would shift documented one-based responses.
+text and table-cell grids are deterministic projections. The provider's page ``index`` is
+zero-based — the same base as the request ``pages`` list, which the endpoint reference documents
+as starting from 0 — so ``index + 1`` is the source page number; a missing or unusable index falls
+back to the page's position in the response.
 
 Schema extraction forwards the request JSON Schema as ``document_annotation_format`` and the
-optional instructions as ``document_annotation_prompt``. ``document_annotation`` may be a JSON
-object or a JSON-encoded object. Malformed annotation output produces a PARTIAL response and a
-warning; it is never converted to a fabricated field value.
+optional instructions as ``document_annotation_prompt``; a request whose ``extraction_schema``
+carries no ``json_schema`` sends neither and is plain OCR (``parse``) end to end, including in
+``report_cost``. ``document_annotation`` may be a JSON object or a JSON-encoded object. Malformed
+annotation output produces a PARTIAL response with ``status.error`` and a warning; it is never
+converted to a fabricated field value.
 
 Cost is ESTIMATED, never claimed as the caller's billed amount: ``usage_info.pages_processed`` is
 multiplied by the public list prices accessed below ($4/1000 OCR pages, $5/1000 Document AI pages
@@ -46,6 +49,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import json
+import mimetypes
 from typing import Any, Protocol
 
 from openreading.adapters._http import error_for_status
@@ -89,6 +93,7 @@ from openreading.types.response import (
     Document,
     NormalizedResponse,
     Page,
+    ResponseError,
     Status,
     Usage,
 )
@@ -102,6 +107,15 @@ _BASE_URL = "https://api.mistral.ai"
 _DEFAULT_MODEL = "mistral-ocr-latest"
 _OCR_USD_PER_PAGE = 0.004
 _ANNOTATED_USD_PER_PAGE = 0.005
+
+# The image formats the OCR endpoint documents; the data: URL MIME is derived from the extension
+# when the caller gives none, because a PNG labelled image/jpeg is rejected or mis-decoded.
+_IMAGE_MIME_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".avif": "image/avif",
+}
 
 _BLOCK_TYPES = {
     "title": BlockType.TITLE,
@@ -118,13 +132,18 @@ _BLOCK_TYPES = {
 }
 
 
+def _bare_name(name: str | None) -> str:
+    """Lower-cased filename or URL path with any query string dropped, for extension checks."""
+    return (name or "").lower().split("?", 1)[0]
+
+
 class MistralOCRClient(Protocol):
     """Minimal client seam used by offline fakes and the real HTTP transport."""
 
     def ocr(self, body: dict) -> dict: ...
 
 
-class _HttpxMistralOCRClient:  # pragma: no cover - real network path
+class _HttpxMistralOCRClient:
     def __init__(self, api_key: str) -> None:
         from openreading.adapters._http import build_httpx_client
 
@@ -137,26 +156,26 @@ class _HttpxMistralOCRClient:  # pragma: no cover - real network path
     def ocr(self, body: dict) -> dict:
         response = self._http.post("/v1/ocr", json=body)
         if response.status_code >= 400:
-            detail = ""
-            code = None
-            with contextlib.suppress(Exception):
-                payload = response.json()
-                if isinstance(payload, dict):
-                    message = payload.get("message") or payload.get("detail")
-                    if isinstance(message, str):
-                        detail = message
-                    code_value = payload.get("code") or payload.get("type")
-                    if isinstance(code_value, str):
-                        code = code_value
             # Do not surface an authentication response body. Providers and intermediaries have
             # echoed rejected keys; the execution boundary adds the safe env-var hint instead.
-            if response.status_code in (401, 403):
-                detail = ""
+            auth_rejected = response.status_code in (401, 403)
+            detail = ""
+            code = None
+            if not auth_rejected:
+                with contextlib.suppress(Exception):
+                    payload = response.json()
+                    if isinstance(payload, dict):
+                        message = payload.get("message") or payload.get("detail")
+                        if isinstance(message, str):
+                            detail = message
+                        code_value = payload.get("code") or payload.get("type")
+                        if isinstance(code_value, str):
+                            code = code_value
             raise error_for_status(
                 response.status_code,
                 response.headers,
                 backend_code=code,
-                message=(detail or response.text) if response.status_code not in (401, 403) else "",
+                message="" if auth_rejected else (detail or response.text),
             )
         try:
             result = response.json()
@@ -166,7 +185,7 @@ class _HttpxMistralOCRClient:  # pragma: no cover - real network path
             ) from exc
         if not isinstance(result, dict):
             raise TerminalError(
-                "Mistral OCR returned a non-object response", backend_code="bad_response"
+                "Mistral OCR returned a non-object response", backend_code="malformed_response"
             )
         return result
 
@@ -313,8 +332,16 @@ class MistralOCRAdapter(BackendAdapter):
     def _is_image(mime_type: str | None, name: str | None) -> bool:
         if mime_type:
             return mime_type.lower().startswith("image/")
-        lowered = (name or "").lower().split("?", 1)[0]
-        return lowered.endswith((".png", ".jpg", ".jpeg", ".avif"))
+        return any(_bare_name(name).endswith(suffix) for suffix in _IMAGE_MIME_TYPES)
+
+    @staticmethod
+    def _guess_mime_type(name: str | None) -> str:
+        bare = _bare_name(name)
+        for suffix, mime_type in _IMAGE_MIME_TYPES.items():
+            if bare.endswith(suffix):
+                return mime_type
+        guessed, _ = mimetypes.guess_type(bare)
+        return guessed or "application/pdf"
 
     def _document_arg(self, req: OpenReadingRequest) -> dict[str, str]:
         document = req.document
@@ -331,7 +358,7 @@ class MistralOCRAdapter(BackendAdapter):
                     "Mistral OCR inline input must contain valid base64 document bytes",
                     backend_code="unsupported_input",
                 ) from exc
-            mime_type = document.mime_type or ("image/jpeg" if is_image else "application/pdf")
+            mime_type = document.mime_type or self._guess_mime_type(name)
             return {
                 "type": chunk_type,
                 chunk_type: f"data:{mime_type};base64,{document.bytes_base64}",
@@ -402,31 +429,32 @@ class MistralOCRAdapter(BackendAdapter):
             raise TerminalError(str(exc), backend_code=type(exc).__name__) from exc
         if not isinstance(raw, dict):
             raise TerminalError(
-                "Mistral OCR returned a non-object response", backend_code="bad_response"
+                "Mistral OCR returned a non-object response", backend_code="malformed_response"
             )
         job = self.new_job(
             WaitMode.INLINE,
             state=JobState.SUCCEEDED,
             idempotency_key=ctx.idempotency_key,
         )
+        # "extract" only when an annotation was actually sent: an instructions-only schema buys
+        # plain OCR, and the annotated per-page price would otherwise be charged for it.
         job.raw = RawResult(
             payload=raw,
             media_type="application/json",
             encoding="json",
-            object_class="extract" if req.extraction_schema is not None else "parse",
+            object_class="extract" if "document_annotation_format" in body else "parse",
         )
         return job
 
     @staticmethod
     def _page_number(page: dict[str, Any], fallback: int) -> int:
+        # Zero-based like the request `pages` list. Anything that is not a non-negative int is
+        # not evidence of a page position, so it yields the positional fallback rather than a
+        # coerced guess.
         value = page.get("index")
-        if not isinstance(value, (int, float, str)) or isinstance(value, bool):
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
             return fallback
-        try:
-            number = int(value)
-        except (TypeError, ValueError):
-            return fallback
-        return number if number > 0 else 1
+        return value + 1
 
     @staticmethod
     def _dimensions(page: dict[str, Any]) -> tuple[float | None, float | None, float | None]:
@@ -504,8 +532,8 @@ class MistralOCRAdapter(BackendAdapter):
         fallback_id: str,
     ) -> Block:
         native_type = str(raw.get("type") or "other")
-        content = raw.get("content")
-        content = content if isinstance(content, str) else None
+        raw_content = raw.get("content")
+        content = raw_content if isinstance(raw_content, str) else None
         block_type = _BLOCK_TYPES.get(native_type.lower(), BlockType.OTHER)
         table = self._table_from_content(content) if block_type is BlockType.TABLE else None
         if table is not None:
@@ -651,7 +679,16 @@ class MistralOCRAdapter(BackendAdapter):
         operation = "extract" if job.raw and job.raw.object_class == "extract" else "parse"
         response = NormalizedResponse(
             status=Status(
-                state=ResponseState.PARTIAL if annotation_malformed else ResponseState.SUCCEEDED
+                state=ResponseState.PARTIAL if annotation_malformed else ResponseState.SUCCEEDED,
+                error=(
+                    ResponseError(
+                        code="malformed_response",
+                        message="Mistral OCR document_annotation was not a JSON object.",
+                        backend_code="malformed_response",
+                    )
+                    if annotation_malformed
+                    else None
+                ),
             ),
             backend=BackendInfo(
                 id="mistral-ocr",
@@ -667,7 +704,7 @@ class MistralOCRAdapter(BackendAdapter):
             document=Document(
                 markdown=document_markdown if outputs.markdown else None,
                 text=document_text if outputs.text else None,
-                page_count=(pages_processed if pages_processed is not None else len(pages) or None),
+                page_count=pages_processed,
                 pages=pages or None,
             ),
             typed_fields=typed_fields or None,

@@ -136,3 +136,110 @@ def test_extract_marks_missing_or_non_object_json_partial(response):
     assert resp.status.error.backend_code == "malformed_response"
     assert resp.typed_fields is None
     assert not any(w.code == "interaction_incomplete" for w in resp.warnings or [])
+
+
+def _normalize(adapter: GoogleGeminiAdapter, req: OpenReadingRequest):
+    return adapter.normalize(adapter.submit(req, RunContext()), RunContext(), slim_request(req))
+
+
+@pytest.mark.parametrize("status", ["failed", "cancelled"])
+def test_failed_or_cancelled_interaction_is_terminal_at_submit(status):
+    """A synchronous vendor failure is a TerminalError at submit (adapters runbook), carrying the
+    vendor status as backend_code and the ``errors[]`` message — never a SUCCEEDED job."""
+    response = {
+        "status": status,
+        "steps": [],
+        "errors": [{"code": "https://example/quota", "message": "quota exhausted"}],
+    }
+    with pytest.raises(TerminalError) as exc:
+        GoogleGeminiAdapter(client=_FakeClient(response=response)).submit(_req(), RunContext())
+    assert exc.value.backend_code == status
+    assert "quota exhausted" in str(exc.value)
+
+
+@pytest.mark.parametrize("status", ["incomplete", "budget_exceeded", "requires_action"])
+def test_non_completed_interaction_is_partial_with_status_error(status):
+    """Answered-but-not-finished is PARTIAL with ``status.error`` (C10), keeping whatever text
+    did arrive; the ``interaction_incomplete`` warning stays as the machine-readable flag."""
+    response = {
+        "status": status,
+        "steps": [{"type": "model_output", "content": [{"type": "text", "text": "# partial"}]}],
+        "errors": [{"code": "x", "message": "cut short"}],
+    }
+    resp = _normalize(GoogleGeminiAdapter(client=_FakeClient(response=response)), _req())
+    assert resp.status.state is ResponseState.PARTIAL
+    assert resp.status.error is not None
+    assert resp.status.error.backend_code == status
+    assert "cut short" in (resp.status.error.message or "")
+    assert resp.document.markdown == "# partial"
+    assert any(w.code == "interaction_incomplete" for w in resp.warnings or [])
+
+
+def test_non_string_text_content_is_skipped_not_crashed():
+    response = {
+        "status": "completed",
+        "steps": [
+            {
+                "type": "model_output",
+                "content": [{"type": "text", "text": None}, {"type": "text", "text": "ok"}],
+            }
+        ],
+    }
+    resp = _normalize(GoogleGeminiAdapter(client=_FakeClient(response=response)), _req())
+    assert resp.document.markdown == "ok"
+
+
+def test_blocks_off_means_no_pages_even_when_table_cells_are_requested():
+    """``outputs.blocks=False`` is honoured like every other markdown-derived adapter: table
+    cells live on blocks, so there is nowhere to put them and the channel is warned, not
+    smuggled back in through ``pages``."""
+    response = {
+        "status": "completed",
+        "steps": [
+            {
+                "type": "model_output",
+                "content": [{"type": "text", "text": "| a | b |\n| --- | --- |\n| 1 | 2 |"}],
+            }
+        ],
+    }
+    req = _req(outputs={"blocks": False, "tables": "cells"})
+    resp = _normalize(GoogleGeminiAdapter(client=_FakeClient(response=response)), req)
+    assert resp.document.pages is None
+    codes = {w.code for w in resp.warnings or []}
+    assert "table_cells_unavailable" in codes
+    assert "page_attribution_unavailable" not in codes
+
+
+def test_backend_raw_is_the_untouched_interaction():
+    resp = _normalize(GoogleGeminiAdapter(client=_FakeClient()), _req())
+    assert resp.backend_raw is not None
+    assert "_pdf_page_count" not in resp.backend_raw.payload
+    assert resp.backend_raw.payload["status"] == "completed"
+
+
+def test_empty_extraction_object_yields_no_typed_fields():
+    response = {
+        "status": "completed",
+        "steps": [{"type": "model_output", "content": [{"type": "text", "text": "{}"}]}],
+    }
+    req = _req(
+        outputs={"markdown": False, "text": False, "blocks": False, "typed_fields": True},
+        extraction_schema={"json_schema": {"type": "object", "properties": {}}},
+    )
+    resp = _normalize(GoogleGeminiAdapter(client=_FakeClient(response=response)), req)
+    assert resp.typed_fields is None
+    assert any(w.code == "typed_fields_unavailable" for w in resp.warnings or [])
+
+
+@pytest.mark.parametrize(
+    "mime",
+    ["image/png", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+)
+def test_non_pdf_binary_mime_types_are_rejected_before_the_call(mime):
+    """The Interactions ``document`` part is PDF (plus plain-text types); an image or Office
+    file would come back as an opaque vendor 400 instead of the adapter's own taxonomy."""
+    with pytest.raises(TerminalError) as exc:
+        GoogleGeminiAdapter(client=_FakeClient()).submit(
+            _req({"bytes_base64": PDF_B64, "mime_type": mime}), RunContext()
+        )
+    assert exc.value.backend_code == "unsupported_input"

@@ -90,6 +90,8 @@ def test_malformed_document_annotation_is_partial_and_warned() -> None:
     resp = _normalize(raw, req)
 
     assert resp.status.state is ResponseState.PARTIAL
+    assert resp.status.error is not None
+    assert resp.status.error.backend_code == "malformed_response"
     assert resp.typed_fields is None
     assert any(w.code == "typed_fields_malformed" for w in resp.warnings or [])
 

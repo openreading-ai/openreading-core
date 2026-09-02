@@ -1,6 +1,6 @@
 """Mistral OCR adapter happy paths, all offline through an injected Protocol fake.
 
-The fixture mirrors Mistral's documented OCR response fields: pages with one-based ``index``,
+The fixture mirrors Mistral's documented OCR response fields: pages with zero-based ``index``,
 Markdown, pixel dimensions, native blocks/bounds/confidence, HTML tables, document annotations,
 and ``usage_info.pages_processed``. It remains documented-shape evidence until a keyed live run.
 """
@@ -187,17 +187,37 @@ def test_normalizes_native_pages_blocks_geometry_confidence_and_derived_tables()
     }
 
 
-def test_zero_page_index_maps_to_one_without_shifting_positive_indexes() -> None:
+def test_zero_based_page_index_maps_to_one_based_page_numbers() -> None:
+    """Mistral's ``pages[].index`` starts at 0 (OCRPageObject reference), the same basis as the
+    0-based ``pages`` request filter; ``page_number`` is 1-based, so index 3 is page 4 even when
+    only page 4 was requested. Mapping 0->1 while leaving 1 alone would number two pages 1."""
     raw = _fixture()
-    raw["pages"][0]["index"] = 0
-    raw["pages"] = [raw["pages"][0]]
+    raw["pages"] = [raw["pages"][1]]
+    raw["pages"][0]["index"] = 3
 
-    class _ZeroClient:
+    class _FilteredClient:
         def ocr(self, body: dict) -> dict:
             return raw
 
-    resp, _ = _run(MistralOCRAdapter(client=_ZeroClient()), _req())
-    assert [p.page_number for p in resp.document.pages or []] == [1]
+    req = _req(pages={"ranges": [{"start": 4}]})
+    resp, _ = _run(MistralOCRAdapter(client=_FilteredClient()), req)
+    assert [p.page_number for p in resp.document.pages or []] == [4]
+
+
+def test_extraction_schema_without_json_schema_is_a_plain_ocr_call() -> None:
+    """No ``json_schema`` means no ``document_annotation_format`` goes on the wire, so the job
+    must not be stamped ``extract``: that stamp selects the annotated $5/1000 rate in
+    ``report_cost`` and the ``extract`` operation label for a call Mistral bills as plain OCR."""
+    client = FakeMistralOCRClient()
+    adapter = MistralOCRAdapter(client=client)
+    resp, job = _run(adapter, _req(extraction_schema={"instructions": "summarise"}))
+
+    assert client.last_body is not None
+    assert "document_annotation_format" not in client.last_body
+    assert "document_annotation_prompt" not in client.last_body
+    assert job.raw is not None and job.raw.object_class == "parse"
+    assert resp.backend.operation == "parse"
+    assert adapter.report_cost(job).cost_usd == pytest.approx(2 * 0.004)
 
 
 def test_cost_is_estimated_from_pages_and_annotation_mode() -> None:
