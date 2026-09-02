@@ -1,0 +1,20 @@
+{
+  "id": "interaction_parse_1",
+  "status": "completed",
+  "model": "gemini-3.6-flash",
+  "steps": [
+    {
+      "type": "model_output",
+      "content": [
+        {
+          "type": "text",
+          "text": "# Loan Application\n\nApplicant income summary.\n\n| Region | Revenue |\n| --- | --- |\n| North | 4400 |"
+        }
+      ]
+    }
+  ],
+  "usage": {
+    "total_input_tokens": 2400,
+    "total_output_tokens": 180
+  }
+}

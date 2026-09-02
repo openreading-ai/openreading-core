@@ -1130,7 +1130,7 @@ def create_app(*, cors_origins: list[str] | None = None):
     @app.get("/v1/backends")
     def backends() -> list[dict[str, Any]]:
         # Free, offline, instant, safe — and it stays that way. Folding a liveness CHECK in here
-        # would turn one page load into 13 outbound calls; only the static `liveness_probe`
+        # would turn one page load into 15 outbound calls; only the static `liveness_probe`
         # DECLARATION is added, which is a descriptor read (internal/design/liveness.md §6.1).
         broker = EnvCredentialBroker()
         rows = []
@@ -1153,7 +1153,7 @@ def create_app(*, cors_origins: list[str] | None = None):
         defined as safe and cacheable, and browsers, proxies and link prefetchers are entitled to
         issue one speculatively — which would spend the operator's rate limit without anyone
         asking. ONE backend per call, never a fan-out over the registry: that would be the
-        "silently probe 13 vendors" defect wearing a POST.
+        "silently probe 15 vendors" defect wearing a POST.
 
         Always 200 with a report — including `unreachable` and `unauthorized`. Mapping "the
         backend is down" to 5xx would conflate *openreading failed* with *openreading

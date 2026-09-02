@@ -643,7 +643,7 @@ not record. Each rule names the failure it avoids and where it is enforced.
 - The cost is honest, and honest is not the same as billed. `usage.cost_usd` totals every attempt
   that ran, including winners, losers, shadows, and judges, and the engine adds no estimate of its
   own (`openreading.strategies.plain`, "Guardrails"). What an attempt reported can still be a
-  projection. Six of the thirteen backends declare `basis: estimated`, meaning a published rate
+  projection. Seven of the fifteen backends declare `basis: estimated`, meaning a published rate
   applied to a page count rather than money anyone charged. `usage.cost_basis` folds those bases by
   the priority `billed > estimated > infra_only`, so read that field before you sum a run as spend
   ([Backend adapters](../adapters/README.md#what-each-backend-charges-and-the-ceilings-on-one-request)).

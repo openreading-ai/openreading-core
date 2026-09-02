@@ -24,7 +24,7 @@ just-submitted `Job` through `to_dict`/`json.dumps`/`json.loads`/`from_dict` and
 completion on a brand-new `adapter_factory()` instance, and R3 (JSON-serializable at every stage)
 both immediately after `submit()` and again after the case's own drive-to-completion on `adapter`
 finishes. Omitting `adapter_factory` (the default) skips all three — any adapter not yet proven
-client-free (all 13 built-ins are, as of Ledger T4b; a third-party adapter mid-migration to
+client-free (all 15 built-ins are client-free; a third-party adapter mid-migration to
 protocol v2 may not be yet) keeps passing the kit exactly as before.
 """
 

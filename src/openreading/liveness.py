@@ -44,7 +44,7 @@ distinguishes a case that is actually different and actually actionable; the two
 most are unauthorized vs unreachable ("fix your key" vs "start your container" — opposite actions)
 and error vs unreachable (a 503 from a model server still loading means it IS up).
 
-Four rules make the ladder honest, and they live HERE rather than in 13 adapters that would each
+Four rules make the ladder honest, and they live HERE rather than in 15 adapters that would each
 have to remember them (D-v7-2):
 
 1. **A known negative beats everything.** `not_configured` is exactly `backend_readiness().ready`
@@ -196,14 +196,14 @@ shape must include all six:
 HTTP — `POST /v1/backends/{backend_id}/liveness` (D-v7-5)
 ---------------------------------------------------------
 - Not folded into `GET /v1/backends`, which is free, offline, instant and safe and stays so;
-  folding a check in would turn one page load into 13 outbound calls. That endpoint gains one
+  folding a check in would turn one page load into 15 outbound calls. That endpoint gains one
   additive, static key per row, `liveness_probe` (the declared kind) — a descriptor read that
   lets a UI say "cannot be tested" or "this leaves your network" before probing anything.
 - POST, because a probe is neither safe nor idempotent: it makes an outbound call, may wake a
   cold container, may spend a vendor rate limit. GET is defined safe and cacheable, so browsers,
   proxies and link prefetchers may issue one speculatively — a crawler could spend the operator's
   rate limit. POST says "this does work", is not prefetched and is not cached.
-- One backend per call. A fan-out `POST /v1/liveness` is the "silently probe 13 vendors" defect
+- One backend per call. A fan-out `POST /v1/liveness` is the "silently probe 15 vendors" defect
   wearing a POST. One per request keeps cost bounded, attributable and cancellable, and the
   caller — not the server — decides what gets touched; a client that wants all issues N explicit
   requests and may stop after any (the CLI does exactly that).
@@ -305,7 +305,7 @@ Decisions (internal/decisions/DECISIONS.md)
 -------------------------------------------
 - D-v7-1 — an optional 9th method behind its own Protocol, never an `AdapterProtocol` member. A
   9th member of a `@runtime_checkable` Protocol fails `isinstance` for every adapter lacking it;
-  more importantly liveness is GENUINELY optional, and requiring it would force eight of thirteen
+  more importantly liveness is GENUINELY optional, and requiring it would force ten of fifteen
   built-ins into "unsupported" stubs that teach nothing and tempt authors toward a billed probe.
 - D-v7-2 — the ladder lives in the platform; adapters report only what they observed. Copying
   the ordering, inference and redaction into every adapter is where they would drift.
@@ -314,7 +314,7 @@ Decisions (internal/decisions/DECISIONS.md)
 - D-v7-4 — a probe is never a billed request, and there is no `billable` field because it would
   legitimise the forbidden thing.
 - D-v7-5 — POST, one backend per call, always 200 with a report; avoids prefetch-spent rate
-  limits, the 13-vendor fan-out, and conflating "backend down" with "API failed".
+  limits, the 15-vendor fan-out, and conflating "backend down" with "API failed".
 - D-v7-6 — diagnostic, never routing input; a `LivenessReport` cannot widen the
   compliance-eligible set, and the probe cannot become a data path.
 

@@ -109,6 +109,14 @@ Per-backend reference
             (+GCP_LOCATION)   ops: OCR/FormParser/LayoutParser/CustomExtractor
             limits: sync `:process` <=15 pages (batchProcess not implemented); a non-`us` region
             auto-pins the regional endpoint
+  google-gemini [google-gemini]   auth: GEMINI_API_KEY   config: GEMINI_MODEL (opt,
+            default gemini-3.6-flash)   ops: parse, extract
+            limits: INLINE stateless Interactions; PDF bytes or Gemini Files URI; <=50MB/1000pp;
+            whole-document Markdown has no native page attribution; dollar cost UNKNOWN
+  mistral-ocr [mistral-ocr]   auth: MISTRAL_API_KEY   config: MISTRAL_OCR_MODEL (opt,
+            default mistral-ocr-latest)   ops: parse, extract
+            limits: INLINE OCR/Document AI; public URL or base64 bytes; native Markdown, blocks,
+            bounds and confidence; cost ESTIMATED per processed page
 textract and google-document-ai use IAM keypairs / ADC, not API keys — their descriptors say
 `byo_mode: cloud_credential` (D-v2-6.1b); the per-key truth is always `credentials_spec`.
 

@@ -1,4 +1,4 @@
-"""Ledger T4b §4.3 — the "first zombie" guard, WIDENED to all 13, unscoped, per the design doc's
+"""Ledger T4b §4.3 — the "first zombie" guard, covering all 15 built-ins, per the design doc's
 own §13 (the reading T4a's own scoped version deliberately deferred until this milestone actually
 converted the remaining 5 — internal/eng-council/plans/sprint26-T4b-plan.md §4.3). T4a's own scoped
 version (naming exactly its 8 converted adapters, plus a companion assertion that the other 5 still

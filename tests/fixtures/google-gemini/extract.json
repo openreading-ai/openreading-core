@@ -1,0 +1,20 @@
+{
+  "id": "interaction_extract_1",
+  "status": "completed",
+  "model": "gemini-3.6-flash",
+  "steps": [
+    {
+      "type": "model_output",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"borrower_name\":\"Jane Doe\",\"gross_pay\":4400.0,\"approved\":true,\"line_items\":[{\"sku\":\"A-1\",\"quantity\":2}]}"
+        }
+      ]
+    }
+  ],
+  "usage": {
+    "total_input_tokens": 2600,
+    "total_output_tokens": 75
+  }
+}

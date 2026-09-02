@@ -220,7 +220,7 @@ def slim_request(req: OpenReadingRequest) -> OpenReadingRequest:
     `OpenReadingRequest` with `document.bytes_base64`/`document.password`/`document.url` and
     `async.webhook_url` nulled out via `model_copy(update=...)` — the caller's own `req` is never
     mutated. Introduced (Ledger T4b §4.2, Phase A round 1, alex F1) because `normalize`'s new
-    `(job, ctx, slim_req)` signature needs an actual request OBJECT: every one of the 13 adapters'
+    `(job, ctx, slim_req)` signature needs an actual request OBJECT: every one of the 15 adapters'
     `normalize` bodies reads its request parameter by attribute (`req.options`,
     `req.document.mime_type`, ...), not by dict key, so the dict `slim_request_dict` returns can't
     serve that need directly. `slim_request_dict` is now a thin wrapper over this function, so both

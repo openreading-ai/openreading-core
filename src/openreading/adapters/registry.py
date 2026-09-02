@@ -15,6 +15,8 @@ from openreading.adapters.base import BackendAdapter
 from openreading.adapters.chunkr import ChunkrAdapter
 from openreading.adapters.docling import DoclingAdapter
 from openreading.adapters.google_document_ai import GoogleDocumentAIAdapter
+from openreading.adapters.google_gemini import GoogleGeminiAdapter
+from openreading.adapters.mistral_ocr import MistralOCRAdapter
 from openreading.adapters.nuextract import NuExtractAdapter
 from openreading.adapters.open_ocr import OpenOCRAdapter
 from openreading.adapters.pulse import PulseAdapter
@@ -33,11 +35,13 @@ BUILTIN_ADAPTERS: dict[str, Callable[[], BackendAdapter]] = {
     "docling": DoclingAdapter,
     "qwen-vl": QwenVLAdapter,
     "google-document-ai": GoogleDocumentAIAdapter,
+    "google-gemini": GoogleGeminiAdapter,
     "anthropic-claude": AnthropicClaudeAdapter,
     "chunkr": ChunkrAdapter,
     "pulse": PulseAdapter,
     "nuextract": NuExtractAdapter,
     "open-ocr": OpenOCRAdapter,
+    "mistral-ocr": MistralOCRAdapter,
 }
 
 

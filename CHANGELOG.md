@@ -16,6 +16,19 @@ All notable changes to OpenReading are documented here. The format follows
 
 ## [Unreleased]
 
+### Added — Google Gemini and Mistral OCR backends
+
+`google-gemini` adds stateless INLINE document processing through the Gemini Developer API
+Interactions surface: native Markdown and schema-constrained typed fields, deterministic text,
+blocks and table cells, and deliberately unavailable geometry/confidence. Token counters are
+preserved, but dollar cost remains `unknown` because pricing varies by model and service tier.
+
+`mistral-ocr` adds synchronous Mistral Document AI OCR and annotations for public URLs and inline
+bytes: native Markdown, structural blocks, normalized bounds, block confidence and typed fields,
+with deterministic text/table grids. Cost is `estimated` from provider-reported processed pages
+and the public OCR/Document AI page rates. Both adapters remain capability-`claimed`, fail closed
+on unverified compliance, and declare no native cancellation, idempotency, liveness or batch path.
+
 ### Fixed — the request schema now forbids unknown fields at every nesting level (M12)
 
 `request.v0.1.json` set `additionalProperties: false` at the top level only, while the pydantic

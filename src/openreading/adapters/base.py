@@ -114,7 +114,7 @@ class BackendAdapter(ABC):
     `poll`/`resolve_webhook`.
 
     It also supplies an honest default for the optional 9th method (`probe_liveness`), so every
-    existing adapter — the 13 built-ins and any third-party subclass — keeps working untouched and
+    existing adapter — the 15 built-ins and any third-party subclass — keeps working untouched and
     simply reports "no probe"."""
 
     descriptor: AdapterDescriptor

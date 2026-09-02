@@ -956,7 +956,7 @@ def test_c11_is_reachable_through_the_kit_and_never_raises():
 
 # --- Ledger T4a: R1/R2/R3 negative cases -------------------------------------------------------
 #
-# Phase C review (Finding 4): every existing R1/R2/R3 test (across all 13 adapters' own
+# Phase C review (Finding 4): every existing R1/R2/R3 test (across all 15 adapters' own
 # `adapter_factory=` call sites) only proves "a compliant adapter passes" — none prove the checks
 # actually catch a non-compliant one. These three, following this file's own established
 # deliberately-broken-adapter pattern, give each of R1/R2/R3 at least one genuine negative case.

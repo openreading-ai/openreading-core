@@ -73,13 +73,15 @@ def test_every_builtin_descriptor_validates_against_v06():
 # `aws-textract` flipped to `True` in BL-165 — ClientRequestToken now works, since the S3 upload
 # key is a pure function of content instead of a fresh uuid4 per attempt. The remaining seven —
 # `reducto`/`anthropic-claude`/`azure-document-intelligence`/`chunkr`/`google-document-ai`/
-# `nuextract`/`pulse` — have no vendor-side mechanism found at all.
+# `nuextract`/`pulse`/`google-gemini`/`mistral-ocr` — have no vendor-side mechanism found at all.
 _HONESTLY_UNSUPPORTED = frozenset(
     {
         "anthropic-claude",
         "azure-document-intelligence",
         "chunkr",
         "google-document-ai",
+        "google-gemini",
+        "mistral-ocr",
         "nuextract",
         "pulse",
         "reducto",
@@ -117,6 +119,8 @@ _HOSTED_NO_CANCEL = frozenset(
         "aws-textract",
         "azure-document-intelligence",
         "google-document-ai",
+        "google-gemini",
+        "mistral-ocr",
         "open-ocr",
     }
 )

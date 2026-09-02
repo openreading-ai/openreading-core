@@ -1,6 +1,6 @@
 """OpenReading: one unified API for document processing.
 
-One request shape, one response schema over 13 backends (hosted APIs, OSS libraries, an OCR
+One request shape, one response schema over 15 backends (hosted APIs, OSS libraries, an OCR
 binary, self-hosted models) so a caller swaps `backend` from `pymupdf` to `reducto` to
 `aws-textract` and nothing else changes. Bring-your-own key (charges land on the caller's
 account); a fully-local tier (`pymupdf`, `tesseract`, `docling`) needs no keys and no network.

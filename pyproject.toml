@@ -39,7 +39,9 @@ tesseract = ["pytesseract>=0.3.13", "pillow>=10"]  # requires system `tesseract`
 docling = ["httpx>=0.27"]               # talks to docling-serve over HTTP
 qwen-vl = ["httpx>=0.27"]               # OpenAI-compatible endpoint (user-run vLLM/Ollama)
 google-document-ai = ["google-cloud-documentai>=2.29"]
+google-gemini = ["httpx>=0.27"]           # Gemini Developer API Interactions document processing
 anthropic-claude = ["anthropic>=0.39"]
+mistral-ocr = ["httpx>=0.27"]             # Mistral Document AI OCR + annotations
 http = ["httpx>=0.27"]                   # umbrella for the httpx-based hosted adapters
 server = ["fastapi>=0.110", "uvicorn>=0.29"]  # `openreading serve` HTTP API
 all = [

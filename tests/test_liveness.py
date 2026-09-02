@@ -283,7 +283,7 @@ def test_descriptor_liveness_block_rejects_an_unknown_field():
 
 
 def test_backend_adapter_default_probe_is_unsupported():
-    """The backward-compatibility keystone: every existing adapter — all 13 built-ins and every
+    """The backward-compatibility keystone: every existing adapter — all 15 built-ins and every
     third-party subclass — keeps working untouched and simply reports "no probe"."""
     assert _NoProbeAdapter().probe_liveness(None, timeout_s=1.0).outcome is ProbeOutcome.UNSUPPORTED
 
@@ -330,7 +330,7 @@ def test_liveness_probe_adapter_protocol_is_feature_detectable():
 
 @pytest.mark.parametrize("slug", sorted(BUILTIN_ADAPTERS))
 def test_every_builtin_descriptor_declares_an_honest_probe_kind(slug):
-    """The declaration is static and must round-trip through the vendored schema for all 13, so a
+    """The declaration is static and must round-trip through the vendored schema for all 15, so a
     UI can read "can this be tested" offline with no call."""
     descriptor = make_adapter(slug).descriptor
     schemas.validate_descriptor(descriptor.to_schema_dict())
@@ -764,7 +764,7 @@ def test_infer_liveness_answers_without_a_probe_wherever_it_can():
 def test_offline_suite_never_reaches_a_real_probe():
     """`readiness.backend_readiness` — which IS called all over the offline gate, the CLI's default
     listing, and `GET /v1/backends` — must never call `probe_liveness`. If it ever did, `make
-    verify` would start making network calls on thirteen backends."""
+    verify` would start making network calls on fifteen backends."""
     adapter = _ProbingAdapter(ProbeResult.live())
     from openreading.readiness import backend_readiness
 
