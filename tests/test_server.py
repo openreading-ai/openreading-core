@@ -47,7 +47,7 @@ def test_backends_lists_all_with_readiness(client, monkeypatch):
     r = client.get("/v1/backends")
     assert r.status_code == 200
     rows = {b["slug"]: b for b in r.json()}
-    assert len(rows) == 13
+    assert len(rows) == 15
     assert rows["pymupdf"]["ready"] is True
     assert set(rows["reducto"]) == {
         "slug",
@@ -3096,7 +3096,7 @@ def test_caller_auth_scope_bounds_the_auto_fallback_chain_of_every_batch_item(mo
 
     A batch item's error carries no attempt trail, only the exhaustion message — which counts the
     chain (`len(plan.chain)`), so "all 1" is an exact statement that this item's chain held the one
-    backend the token allows and nothing else. Unscoped, the same request reports all 13.
+    backend the token allows and nothing else. Unscoped, the same request reports all 15.
     """
     monkeypatch.setenv("OPENREADING_API_KEYS", "scoped-token-0028")
     monkeypatch.setenv("OPENREADING_API_KEY_SCOPES", "scoped-token-0028=pymupdf")

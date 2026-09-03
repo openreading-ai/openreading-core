@@ -9,7 +9,7 @@ dependency for testing, so a build agent that adds an adapter, writes its tests,
 misspells the `pyproject.toml` extra sees a fully green `make verify` — the dev group already
 supplies what the tests import — while the *shipped* package is broken for a real end user.
 Eleven consecutive sprints of `internal/eng-council/reviews/sprint{15..25}-priya.md` hand-re-derived
-"thirteen adapters, thirteen extras, one documented exception, clean" from scratch because nothing
+"fifteen adapters, fifteen extras, one documented exception, clean" from scratch because nothing
 mechanical produced that signal. This script is that mechanism.
 
 Three checks, all offline, stdlib-only:

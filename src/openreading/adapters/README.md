@@ -34,6 +34,8 @@ azure-document-intelligence    hosted_api         no          AZURE_DOCUMENT_INT
 chunkr                         hosted_api         no          CHUNKR_API_KEY
 docling                        oss_library        no          DOCLING_SERVE_URL
 google-document-ai             hosted_api         no          GCP_PROJECT_ID, GCP_PROCESSOR_ID
+google-gemini                  hosted_api         no          GEMINI_API_KEY
+mistral-ocr                    hosted_api         no          MISTRAL_API_KEY
 nuextract                      hosted_api         no          NUEXTRACT_API_KEY
 open-ocr                       hosted_api         no          OPENOCR_API_KEY
 pulse                          hosted_api         no          PULSE_API_KEY
@@ -87,6 +89,8 @@ and that output disagree, the output is right and the table needs fixing.
 | `chunkr` | pdf, docx, pptx, xlsx, png, jpg, tiff, webp, html |
 | `docling` | pdf, docx, pptx, xlsx, html, png, jpg |
 | `google-document-ai` | pdf, tiff, gif, png, jpg, bmp, webp |
+| `google-gemini` | pdf |
+| `mistral-ocr` | pdf, docx, pptx, png, jpg, jpeg, avif |
 | `nuextract` | pdf, png, jpg, pptx, odt, txt |
 | `open-ocr` | pdf, png, jpg, gif, webp, tiff, bmp |
 | `pulse` | pdf, docx, pptx, xlsx, png, jpg |
@@ -108,6 +112,8 @@ that kind.
 | `chunkr` | hosted_api | `chunkr` | `CHUNKR_API_KEY` | `CHUNKR_BASE_URL` |
 | `docling` | oss_library | `docling` | `DOCLING_SERVE_URL` | none |
 | `google-document-ai` | hosted_api | `google-document-ai` | `GCP_PROJECT_ID` or `GOOGLE_CLOUD_PROJECT`, `GCP_PROCESSOR_ID` | `GOOGLE_APPLICATION_CREDENTIALS`, `GCP_LOCATION` |
+| `google-gemini` | hosted_api | `google-gemini` | `GEMINI_API_KEY` | `GEMINI_MODEL` |
+| `mistral-ocr` | hosted_api | `mistral-ocr` | `MISTRAL_API_KEY` | `MISTRAL_OCR_MODEL` |
 | `nuextract` | hosted_api | `nuextract` | `NUEXTRACT_API_KEY` or `NUMIND_API_KEY` | `NUEXTRACT_BASE_URL` |
 | `open-ocr` | hosted_api | `open-ocr` | `OPENOCR_API_KEY` | `OPENOCR_ENGINE` |
 | `pulse` | hosted_api | `pulse` | `PULSE_API_KEY` | none |
@@ -134,6 +140,8 @@ runs locally and has nothing to sign up for.
 | `chunkr` | tier_gated | opt_out | false | proprietary (AGPL-3.0 self-host available) | https://chunkr.ai |
 | `docling` | na_local | na_local | true | MIT | none |
 | `google-document-ai` | yes | no | false | proprietary | https://cloud.google.com/document-ai |
+| `google-gemini` | no | unverified | false | proprietary | https://aistudio.google.com/apikey |
+| `mistral-ocr` | no | unverified | false | proprietary | https://console.mistral.ai/api-keys |
 | `nuextract` | no | unverified | false | proprietary (open-weight NuExtract 2.0 [MIT 2B/8B] is self-hostable via vLLM, but its wire protocol differs and would need a separate adapter) | https://nuextract.ai |
 | `open-ocr` | no | unverified | false | proprietary | https://open-ocr.com |
 | `pulse` | tier_gated | unverified | false | proprietary | https://www.runpulse.com |
@@ -209,6 +217,8 @@ items is how many documents the vendor's own bulk endpoint accepts in one job.
 | `chunkr` | 0.008 | 0.03 | estimated | 2000 (soft) | none | none |
 | `docling` | 0.0 | none | infra_only | none | none | none |
 | `google-document-ai` | 0.0006 | 0.03 | estimated | 15 sync / 500 batch | none | none |
+| `google-gemini` | none | none | unknown | 1000 | none | none |
+| `mistral-ocr` | 0.004 | 0.005 | estimated | none | none | none |
 | `nuextract` | none | none | unknown | none | none | none |
 | `open-ocr` | 0.0005 | none | billed | engine-dependent: 200 (tesseract) / 5-20 (vision LLMs) | none | none |
 | `pulse` | 0.015 | 0.02 | estimated | none | none | none |
@@ -254,6 +264,8 @@ that grading enforces, C1 to C11.
 | `chunkr` | `D` | `N` | `N` | `N` | `N` | `D` | `N` |
 | `docling` | `N` | `N` | `N` | `N` | `X` | `N` | `D` |
 | `google-document-ai` | `N` | `D` | `N` | `N` | `N` | `N` | `N` |
+| `google-gemini` | `D` | `N` | `D` | `X` | `X` | `D` | `N` |
+| `mistral-ocr` | `D` | `N` | `N` | `N` | `N` | `D` | `N` |
 | `nuextract` | `D` | `N` | `D` | `X` | `X` | `D` | `N` |
 | `open-ocr` | `N` | `D` | `X` | `X` | `X` | `X` | `X` |
 | `pulse` | `D` | `N` | `N` | `N` | `X` | `D` | `D` |

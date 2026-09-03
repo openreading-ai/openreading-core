@@ -50,12 +50,13 @@ The bar for every commit. No credentials, no network. Sub-targets:
   leaderboard-smoke the real `openreading leaderboard` CLI over the sample dataset with two local
                     backends; a missing tesseract binary scores honest errors, never a crash.
 
-Every hosted adapter is exercised here against respx mocks + injected faults, never live. Seven of
-the eight adapters that build their own real HTTP client (`reducto`, `nuextract`, `pulse`,
-`chunkr`, `open-ocr`, `azure-document-intelligence`, `qwen-vl`) also have a `test_<slug>_http.py`
+Every hosted adapter is exercised here against respx mocks + injected faults, never live. Nine of
+the ten adapters that build their own real HTTP client (`reducto`, `nuextract`, `pulse`,
+`chunkr`, `open-ocr`, `azure-document-intelligence`, `qwen-vl`, `google-gemini`, `mistral-ocr`)
+also have a `test_<slug>_http.py`
 that drives the real `_Httpx*Client` class directly under `@respx.mock` (`respx.post(url).mock(
 return_value=httpx.Response(...))`), not only the higher-level fake in its main test file —
-otherwise the real client has zero coverage anywhere. The eighth, `docling`'s
+otherwise the real client has zero coverage anywhere. The tenth, `docling`'s
 `_HttpxDoclingClient`, is the standing exception: it carries `# pragma: no cover`, no offline test
 references it, and it runs only in the live lane behind `DOCLING_SERVE_URL`
 (`tests/test_docling.py::test_live_convert`). The http tests prove OUR normalization and error

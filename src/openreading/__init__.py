@@ -1,6 +1,6 @@
 """OpenReading: one unified API for document processing.
 
-One request shape, one response schema over 13 backends (hosted APIs, OSS libraries, an OCR
+One request shape, one response schema over 15 backends (hosted APIs, OSS libraries, an OCR
 binary, self-hosted models) so a caller swaps `backend` from `pymupdf` to `reducto` to
 `aws-textract` and nothing else changes. Bring-your-own key (charges land on the caller's
 account); a fully-local tier (`pymupdf`, `tesseract`, `docling`) needs no keys and no network.
@@ -283,6 +283,10 @@ read the error, which does name the variable.
                                                        pdf png jpg tiff bmp docx xlsx pptx html
     google-document-ai            hosted_api         GCP_PROJECT_ID (+ processor id, credentials)
                                                        pdf tiff gif png jpg bmp webp
+    google-gemini                 hosted_api         GEMINI_API_KEY
+                                                       pdf
+    mistral-ocr                   hosted_api         MISTRAL_API_KEY
+                                                       pdf docx pptx png jpg avif
     qwen-vl                       self_hosted_model  QWEN_VL_ENDPOINT (self-hosted)
                                                        png jpg pdf (rasterized)
 

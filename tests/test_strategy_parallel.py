@@ -259,7 +259,7 @@ def test_on_win_drain_leaves_a_losers_job_alone():
 
 def test_multiple_losers_are_cancelled_concurrently_not_serially():
     # BL-164 review (a reviewer, High): adapter.cancel() now issues a real, synchronous vendor HTTP call
-    # for four real adapters (previously an instant in-memory no-op for all thirteen) — a plain,
+    # for four real adapters (previously an instant in-memory no-op for all fifteen) — a plain,
     # unwrapped call per loser inside `_eval_parallel` (an async function) would block THIS
     # process's entire event loop for the sum of every loser's round trip, serially, stalling
     # every other concurrent request on the same worker. Simulates that round trip with a real

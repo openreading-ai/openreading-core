@@ -18,12 +18,14 @@ EXPECTED_CRED_KEYS = {
     "azure-document-intelligence": {"key"},
     "reducto": {"api_key", "webhook_secret"},
     "google-document-ai": {"credentials_path"},
+    "google-gemini": {"api_key"},
     "anthropic-claude": {"api_key"},
     "qwen-vl": {"api_key"},
     "chunkr": {"api_key"},
     "pulse": {"api_key"},
     "nuextract": {"api_key"},
     "open-ocr": {"api_key"},
+    "mistral-ocr": {"api_key"},
     "pymupdf": set(),
     "tesseract": set(),
     "docling": set(),
@@ -32,12 +34,14 @@ EXPECTED_CONFIG_KEYS = {
     "aws-textract": {"region", "s3_bucket"},
     "azure-document-intelligence": {"endpoint"},
     "google-document-ai": {"project_id", "processor_id", "location"},
+    "google-gemini": {"model"},
     "anthropic-claude": {"model"},
     "docling": {"endpoint"},
     "qwen-vl": {"endpoint", "model"},
     "chunkr": {"base_url"},
     "nuextract": {"base_url"},
     "open-ocr": {"engine"},
+    "mistral-ocr": {"model"},
 }
 LOCAL_NO_CONFIG = {"pymupdf", "tesseract"}
 
@@ -140,6 +144,7 @@ def test_accepts_url_only_for_native_url_backends():
         "chunkr",
         "pulse",
         "open-ocr",
+        "mistral-ocr",
     }
 
 

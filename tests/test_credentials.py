@@ -335,6 +335,7 @@ _URL_SOURCED_NO_DEFAULT_KEY_ADAPTERS = (
     "pulse",
     "reducto",
     "open-ocr",
+    "mistral-ocr",
 )
 
 

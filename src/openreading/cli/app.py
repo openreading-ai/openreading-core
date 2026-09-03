@@ -656,7 +656,7 @@ def _check_targets(raw: str | None, adapters: dict) -> list[str] | None:
     """Resolve `--check`'s argument to the slugs to probe. None ⇒ a usage error was printed (the
     caller returns 3); an empty list ⇒ no `--check` was given, so nothing is probed.
 
-    `all` means "every backend that DECLARES a probe" rather than literally all thirteen: probing a
+    `all` means "every backend that DECLARES a probe" rather than literally all fifteen: probing a
     backend whose answer can only ever be the configuration inference spends the user's patience
     for a result `openreading backends` already printed for free."""
     if not raw:

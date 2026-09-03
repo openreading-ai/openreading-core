@@ -71,15 +71,17 @@ def test_every_builtin_descriptor_validates_against_v06():
 # adapter's own comment at its `idempotency_supported=` line for the citation). Pinned so a
 # future refactor can't silently flip one back to the default `True` without a test catching it.
 # `aws-textract` flipped to `True` in BL-165 — ClientRequestToken now works, since the S3 upload
-# key is a pure function of content instead of a fresh uuid4 per attempt. The remaining seven —
+# key is a pure function of content instead of a fresh uuid4 per attempt. The remaining nine —
 # `reducto`/`anthropic-claude`/`azure-document-intelligence`/`chunkr`/`google-document-ai`/
-# `nuextract`/`pulse` — have no vendor-side mechanism found at all.
+# `nuextract`/`pulse`/`google-gemini`/`mistral-ocr` — have no vendor-side mechanism found at all.
 _HONESTLY_UNSUPPORTED = frozenset(
     {
         "anthropic-claude",
         "azure-document-intelligence",
         "chunkr",
         "google-document-ai",
+        "google-gemini",
+        "mistral-ocr",
         "nuextract",
         "pulse",
         "reducto",
@@ -110,6 +112,8 @@ def test_idempotency_supported_matrix_matches_researched_vendor_reality():
 # hosted decliners: their dispatch is INLINE-only, so there is never a live vendor job in flight
 # to cancel in the first place — not "we researched and found no API," the same reasoning the
 # local/self-hosted exemption above uses, just for a `hosted_api`-typed adapter.
+# `google-gemini`/`mistral-ocr` decline for that same INLINE-only reason: one synchronous POST,
+# no vendor job resource to cancel.
 _CANCEL_SUPPORTED = frozenset({"chunkr", "nuextract", "pulse", "reducto"})
 _HOSTED_NO_CANCEL = frozenset(
     {
@@ -117,6 +121,8 @@ _HOSTED_NO_CANCEL = frozenset(
         "aws-textract",
         "azure-document-intelligence",
         "google-document-ai",
+        "google-gemini",
+        "mistral-ocr",
         "open-ocr",
     }
 )

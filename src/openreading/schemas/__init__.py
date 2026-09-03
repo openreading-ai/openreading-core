@@ -61,7 +61,8 @@ where nesting began. Optional blocks: ``schema_version`` (const ``"0.2"``), ``ou
 
 - ``document``: exactly ONE of ``bytes_base64`` (the router may spool/upload where a backend needs
   storage, e.g. Textract's S3 flow), ``url`` (passed through to backends declaring
-  ``accepts_url`` — azure-document-intelligence, chunkr, docling, open-ocr, pulse, reducto —
+  ``accepts_url`` — azure-document-intelligence, chunkr, docling, mistral-ocr, open-ocr, pulse,
+  reducto —
   downloaded to bytes first for the rest), ``path`` (local backends only), ``file_id`` (a
   previously uploaded file, e.g. a reused Chunkr task). Plus ``mime_type`` (inferred from the
   extension by CLI/Python, default ``application/pdf``), ``filename``, ``password``.
@@ -177,7 +178,12 @@ backend cannot produce is ABSENT with a ``warnings[]`` entry — never fabricate
   noteworthy. Codes are an OPEN set; known: ``confidence_unavailable``, ``unsupported_feature``,
   ``fallback_used`` (the router's attempt trail), ``idempotent_replay``, ``baa_tier_confirmed``
   (``require_baa`` satisfied only by the deployment's tier-gated confirmation),
-  ``page_attribution_unavailable``, ``quality_below_threshold`` (every rung gated, best result
+  ``page_attribution_unavailable``, ``<channel>_unavailable`` for ``markdown``, ``text``,
+  ``blocks``, ``block_bbox``, ``block_confidence``, ``table_cells`` and ``typed_fields`` (a
+  requested channel this backend could not produce for this document), ``typed_fields_malformed``
+  (the vendor's structured output was not a JSON object; the response is PARTIAL),
+  ``interaction_incomplete`` (Gemini reported a non-``completed`` interaction; output may be
+  truncated), ``quality_below_threshold`` (every rung gated, best result
   retained), ``quality_escalated`` (a rung gated and a LATER rung answered, so the walk recovered;
   its pair, ``quality_below_threshold``, says the walk did not), ``budget_exhausted`` (the time
   budget, not a gate, ended a strategy walk — the two are separate codes because escalating is
@@ -300,11 +306,13 @@ keeps every older descriptor valid) and no in-band version — filename + ``$id`
   qwen-vl (a retry only re-burns GPU), open-ocr (real ``Idempotency-Key``), aws-textract (real
   ``ClientRequestToken``; the S3 upload key it depends on is derived from the document's content
   digest, not a fresh key per attempt). False: anthropic-claude, azure-document-intelligence,
-  chunkr, google-document-ai, nuextract, pulse, reducto (no vendor-side mechanism found).
+  chunkr, google-document-ai, google-gemini, mistral-ocr, nuextract, pulse, reducto (no
+  vendor-side mechanism found).
 - ``cancel_supported`` (v0.6, default true): true iff ``cancel()`` stops the job AT THE VENDOR,
   not merely locally. True: chunkr (only while still queued), nuextract, pulse, reducto. False:
-  anthropic-claude, aws-textract, azure-document-intelligence, google-document-ai, open-ocr (no
-  vendor cancel API, or inline-only dispatch that never holds a live job). Local/self-hosted
+  anthropic-claude, aws-textract, azure-document-intelligence, google-document-ai, google-gemini,
+  mistral-ocr, open-ocr (no vendor cancel API, or inline-only dispatch that never holds a live
+  job). Local/self-hosted
   inline-only adapters keep the default. Evidence: internal/eng-council/sprint26-BL-164.md and
   internal/eng-council/implementation/sprint26-BL-166.md.
 - ``protocol_version`` (v0.7): the adapter-contract version implemented (1 = poll/

@@ -39,8 +39,8 @@ def test_real_repo_state_is_clean_and_reports_counts():
     report = cep.check_parity(registry_slugs, extras)
 
     assert report.ok, cep.format_errors(report)
-    assert report.registry_slug_count == 13
-    assert report.matching_extra_count == 13
+    assert report.registry_slug_count == 15
+    assert report.matching_extra_count == 15
     assert report.exception_count == 1
     assert report.allowlisted_extra_count == 3  # http, server, all (the web UI left with its extra)
 
@@ -51,7 +51,7 @@ def test_main_against_real_repo_exits_zero(capsys: pytest.CaptureFixture[str]):
 
     assert rc == 0
     assert "extras-parity: OK" in out
-    assert "13 registry slugs" in out
+    assert "15 registry slugs" in out
 
 
 # --- AC-2: missing extra ------------------------------------------------------------------------
@@ -247,7 +247,7 @@ def test_load_pyproject_extras_missing_file_raises_parity_error(tmp_path: Path):
 def test_cli_against_deliberately_broken_fixture_fails_and_names_the_gap(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
-    # A small, self-contained registry — decoupled from this repo's real 13 adapters, so this
+    # A small, self-contained registry — decoupled from this repo's real 15 adapters, so this
     # test stays correct even if the real registry grows or shrinks.
     monkeypatch.setattr(cep, "load_registry_slugs", lambda: {"alpha", "beta-adapter"})
 

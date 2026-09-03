@@ -1038,7 +1038,13 @@ docling = [
 google-document-ai = [
     { name = "google-cloud-documentai" },
 ]
+google-gemini = [
+    { name = "httpx" },
+]
 http = [
+    { name = "httpx" },
+]
+mistral-ocr = [
     { name = "httpx" },
 ]
 nuextract = [
@@ -1104,7 +1110,9 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'azure-document-intelligence'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'chunkr'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'docling'", specifier = ">=0.27" },
+    { name = "httpx", marker = "extra == 'google-gemini'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'http'", specifier = ">=0.27" },
+    { name = "httpx", marker = "extra == 'mistral-ocr'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nuextract'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'open-ocr'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'pulse'", specifier = ">=0.27" },
@@ -1124,7 +1132,7 @@ requires-dist = [
     { name = "svix", marker = "extra == 'reducto'", specifier = ">=1.0" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.29" },
 ]
-provides-extras = ["pymupdf", "textract", "azure-document-intelligence", "reducto", "chunkr", "pulse", "nuextract", "open-ocr", "tesseract", "docling", "qwen-vl", "google-document-ai", "anthropic-claude", "http", "server", "all"]
+provides-extras = ["pymupdf", "textract", "azure-document-intelligence", "reducto", "chunkr", "pulse", "nuextract", "open-ocr", "tesseract", "docling", "qwen-vl", "google-document-ai", "google-gemini", "anthropic-claude", "mistral-ocr", "http", "server", "all"]
 
 [package.metadata.requires-dev]
 dev = [

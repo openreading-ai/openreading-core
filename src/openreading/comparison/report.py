@@ -27,7 +27,7 @@ _SEVERITY_RANK = {"major": 0, "warn": 1, "info": 2}
 # token_stream), so this is a documented constant matching §9's explicitly named generative
 # backends, keyed on backend.id. A content finding that involves one of these subjects caps at
 # informational — run-to-run drift is indistinguishable from a real difference.
-_NON_DETERMINISTIC = frozenset({"anthropic-claude", "qwen-vl", "nuextract"})
+_NON_DETERMINISTIC = frozenset({"anthropic-claude", "google-gemini", "qwen-vl", "nuextract"})
 # Codes that assert CONTENT equivalence (as opposed to structure/packaging/cost).
 _CONTENT_CODES = frozenset(
     {"text_divergence", "field_value_conflict", "block_missed", "table_shape_mismatch"}

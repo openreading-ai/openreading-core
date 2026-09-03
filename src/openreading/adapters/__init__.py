@@ -361,7 +361,7 @@ environment, not measured"), which is honest and useful. A one-page parse to pro
 spends the caller's money on a diagnostic they never asked to pay for, and is worse than not
 answering. Deliberately NOT a `billable: bool` descriptor field -- a field would legitimise the
 thing the rule forbids. Five built-ins probe today (docling, qwen-vl, pymupdf, tesseract,
-anthropic-claude); the other eight declare none, because no free call is verifiable from a
+anthropic-claude); the other ten declare none, because no free call is verifiable from a
 primary source and a guessed URL would be a fabricated descriptor value.
 
 Two pieces:
@@ -392,7 +392,7 @@ Hard rules, all enforceable in review:
 - Return `ProbeResult`, not a verdict (DECISIONS D-v7-2). You report what you OBSERVED; the
   platform owns the ladder (`not_configured` beats everything, the inference, the redaction
   pass). Never decide `not_configured` yourself -- you would duplicate logic that already ran,
-  and copied into thirteen adapters it would drift. Same division `report_cost` uses: the
+  and copied into fifteen adapters it would drift. Same division `report_cost` uses: the
   adapter projects, the platform composes.
 - Honor `timeout_s`, never hang.
 - Never carry a secret, and never echo the provider's response body into `detail`/`version` --
@@ -501,7 +501,7 @@ a 200 whose body cannot be parsed.
 In-tree examples, one per kind: `docling` (`endpoint`, `GET {DOCLING_SERVE_URL}/health`),
 `qwen_vl` (`endpoint`, `GET {QWEN_VL_ENDPOINT}/models`, reporting the served model as
 `version`), `pymupdf`/`tesseract` (`local`), `anthropic_claude` (`vendor`, `models.list()` -- a
-documented non-billing endpoint). The other eight built-ins deliberately declare NO probe, for
+documented non-billing endpoint). The other ten built-ins deliberately declare NO probe, for
 the reasoning above; apply the same reasoning.
 
 Native batch (optional): `BatchIntake` + `submit_many`/`normalize_many`

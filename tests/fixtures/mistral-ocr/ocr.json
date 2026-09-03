@@ -1,0 +1,96 @@
+{
+  "pages": [
+    {
+      "index": 0,
+      "markdown": "# Invoice 1001\n\nBill to Jane Doe.\n\n<table><tr><th>Item</th><th>Amount</th></tr><tr><td>Consulting</td><td>$42.50</td></tr></table>",
+      "dimensions": {
+        "dpi": 200,
+        "height": 2200,
+        "width": 1700
+      },
+      "tables": [
+        {
+          "id": "table-1",
+          "content": "<table><tr><th>Item</th><th>Amount</th></tr><tr><td>Consulting</td><td>$42.50</td></tr></table>",
+          "format": "html"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "title-1",
+          "type": "title",
+          "top_left_x": 85,
+          "top_left_y": 110,
+          "bottom_right_x": 790,
+          "bottom_right_y": 210,
+          "content": "Invoice 1001",
+          "confidence_scores": {
+            "average_content_confidence_score": 0.98,
+            "minimum_content_confidence_score": 0.96,
+            "block_type_confidence_score": 0.99
+          }
+        },
+        {
+          "id": "text-1",
+          "type": "text",
+          "top_left_x": 85,
+          "top_left_y": 260,
+          "bottom_right_x": 920,
+          "bottom_right_y": 340,
+          "content": "Bill to Jane Doe.",
+          "confidence_scores": {
+            "average_content_confidence_score": 0.94,
+            "minimum_content_confidence_score": 0.91,
+            "block_type_confidence_score": 0.98
+          }
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "markdown": "## Terms\n\nDue in 30 days.",
+      "dimensions": {
+        "dpi": 200,
+        "height": 2200,
+        "width": 1700
+      },
+      "tables": [],
+      "blocks": [
+        {
+          "id": "terms-1",
+          "type": "title",
+          "top_left_x": 85,
+          "top_left_y": 110,
+          "bottom_right_x": 500,
+          "bottom_right_y": 190,
+          "content": "Terms",
+          "confidence_scores": {
+            "average_content_confidence_score": 0.97,
+            "minimum_content_confidence_score": 0.95,
+            "block_type_confidence_score": 0.98
+          }
+        },
+        {
+          "id": "text-2",
+          "type": "text",
+          "top_left_x": 85,
+          "top_left_y": 230,
+          "bottom_right_x": 650,
+          "bottom_right_y": 300,
+          "content": "Due in 30 days.",
+          "confidence_scores": {
+            "average_content_confidence_score": 0.93,
+            "minimum_content_confidence_score": 0.9,
+            "block_type_confidence_score": 0.97
+          }
+        }
+      ]
+    }
+  ],
+  "model": "mistral-ocr-4-1",
+  "document_annotation": "{\"invoice_number\":\"1001\",\"total\":42.5}",
+  "usage_info": {
+    "pages_processed": 2,
+    "doc_size_bytes": 12345
+  }
+}
