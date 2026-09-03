@@ -384,5 +384,9 @@ Nothing below exists in the package today. Each line names where the gap is reco
   package docstring (Known gaps).
 - `status.error` is never populated on a single-document response, so a single parse has no error
   code to read. The batch surface does populate `items[].error.code`.
+- There is no run-stats projection: no single block says which backends were eligible, attempted
+  and actually dispatched, why each switch happened, and what it cost. Read the pieces that do
+  exist — `warnings[]`, strategy `orchestration`, the batch summary, an armed ledger. The gap is
+  recorded in the `openreading` package docstring (Known gaps).
 
 <sub>Docs home · [The command line →](cli/README.md)</sub>
