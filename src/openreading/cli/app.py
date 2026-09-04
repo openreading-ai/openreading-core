@@ -1306,6 +1306,206 @@ def cmd_leaderboard(args) -> int:
     return 0
 
 
+def _benchmark_descriptor(args):
+    """Resolve one public benchmark and print lookup failures consistently."""
+    from openreading.evals.benchmarks import get_benchmark
+
+    try:
+        return get_benchmark(args.benchmark)
+    except KeyError as exc:
+        print(f"[benchmark] {exc.args[0]}", file=sys.stderr)
+        return None
+
+
+def _check_benchmark_terms(args, descriptor) -> bool:
+    """Apply the profile's lane gate before any optional import or download."""
+    from openreading.evals.benchmarks import BenchmarkTermsError, require_benchmark_terms
+
+    try:
+        require_benchmark_terms(
+            descriptor,
+            allow_research_only=args.allow_research_only,
+            allow_unverified_terms=args.allow_unverified_terms,
+        )
+    except BenchmarkTermsError as exc:
+        print(f"[benchmark] {exc}", file=sys.stderr)
+        return False
+    return True
+
+
+def cmd_benchmark_list(args) -> int:
+    """List static public benchmark facts without importing an optional package."""
+    from openreading.evals.benchmarks import list_benchmarks
+
+    print(f"{'id':<20} {'status':<10} {'terms':<15} dimensions")
+    for descriptor in list_benchmarks():
+        print(
+            f"{descriptor.id:<20} {descriptor.status:<10} "
+            f"{descriptor.license_lane:<15} {', '.join(descriptor.dimensions)}"
+        )
+    return 0
+
+
+def cmd_benchmark_show(args) -> int:
+    """Show publisher links, separate terms, scale, and installation needs."""
+    descriptor = _benchmark_descriptor(args)
+    if descriptor is None:
+        return 2
+    print(f"{descriptor.title} ({descriptor.id})")
+    print(f"status: {descriptor.status}")
+    print(f"terms lane: {descriptor.license_lane}")
+    print(f"source: {descriptor.source_url}")
+    print(f"data license: {descriptor.data_license}")
+    print(f"data terms: {descriptor.data_license_url}")
+    print(f"code license: {descriptor.code_license}")
+    print(f"code terms: {descriptor.code_license_url}")
+    print(f"revision: {descriptor.default_revision}")
+    print(f"dimensions: {', '.join(descriptor.dimensions)}")
+    if descriptor.estimated_documents is not None:
+        print(f"published scale: {descriptor.estimated_documents} documents")
+    if descriptor.estimated_pages is not None:
+        print(f"published pages: {descriptor.estimated_pages}")
+    if descriptor.package and descriptor.install_extra:
+        print(f"package: {descriptor.package}")
+        print(f"install: pip install 'openreading[{descriptor.install_extra}]'")
+        print(f"presets: {', '.join(descriptor.presets)}")
+    return 0
+
+
+def _benchmark_targets(args):
+    """Parse repeated target flags into the collision-free target contract."""
+    from openreading.evals.targets import BenchmarkTarget
+
+    targets = []
+    for value in args.target or []:
+        try:
+            targets.append(BenchmarkTarget.parse(value))
+        except ValueError as exc:
+            print(f"[benchmark] {exc}", file=sys.stderr)
+            return None
+    return targets
+
+
+def _render_benchmark_estimate(descriptor, preset: str, target_count: int) -> str:
+    """Render counts known before any backend call, without inventing smoke scale."""
+    lines = [f"estimate: {descriptor.id} {preset}, {target_count} target(s)"]
+    if preset == "full":
+        documents = descriptor.estimated_documents
+        pages = descriptor.estimated_pages
+        lines.append(f"documents: {documents if documents is not None else 'publisher-defined'}")
+        lines.append(f"pages: {pages if pages is not None else 'publisher-defined'}")
+        calls = documents * target_count if documents is not None else None
+        lines.append(f"target calls: {calls if calls is not None else 'publisher-defined'}")
+    else:
+        lines.append("documents: publisher smoke subset")
+        lines.append("pages: determined after preparation")
+        lines.append("target calls: determined after preparation")
+    return "\n".join(lines)
+
+
+def cmd_benchmark_estimate(args) -> int:
+    """Print publisher scale and target-call counts without running a backend."""
+    descriptor = _benchmark_descriptor(args)
+    if descriptor is None:
+        return 2
+    targets = _benchmark_targets(args)
+    if targets is None:
+        return 2
+    print(_render_benchmark_estimate(descriptor, args.preset, len(targets)))
+    return 0
+
+
+def cmd_benchmark_prepare(args) -> int:
+    """Prepare a publisher dataset after its terms gate passes."""
+    from openreading.evals.official import (
+        BenchmarkDependencyError,
+        BenchmarkProfileError,
+        prepare_official_benchmark,
+    )
+
+    descriptor = _benchmark_descriptor(args)
+    if descriptor is None or not _check_benchmark_terms(args, descriptor):
+        return 2
+    try:
+        path = prepare_official_benchmark(
+            descriptor.id,
+            cache_dir=Path(args.cache_dir),
+            preset=args.preset,
+            force=args.force,
+        )
+    except (BenchmarkDependencyError, BenchmarkProfileError, ValueError) as exc:
+        print(f"[benchmark] {exc}", file=sys.stderr)
+        return 2
+    print(f"prepared: {path}")
+    return 0
+
+
+def cmd_benchmark_run(args) -> int:
+    """Prepare once, then run each backend or strategy through the official scorer."""
+    from openreading.evals.official import (
+        BenchmarkDependencyError,
+        BenchmarkProfileError,
+        prepare_official_benchmark,
+        run_official_benchmark,
+    )
+
+    descriptor = _benchmark_descriptor(args)
+    if descriptor is None or not _check_benchmark_terms(args, descriptor):
+        return 2
+    targets = _benchmark_targets(args)
+    if targets is None:
+        return 2
+    if not targets:
+        print(
+            "[benchmark] run needs at least one --target backend:NAME or strategy:NAME",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        policy = _load_policy(args.policy)
+    except _PolicyError as exc:
+        print(f"[benchmark] {exc}", file=sys.stderr)
+        return 2
+    print(_render_benchmark_estimate(descriptor, args.preset, len(targets)))
+    try:
+        data_dir = prepare_official_benchmark(
+            descriptor.id,
+            cache_dir=Path(args.cache_dir),
+            preset=args.preset,
+            force=False,
+        )
+        failed = False
+        for target in targets:
+            result = run_official_benchmark(
+                descriptor.id,
+                target,
+                data_dir=data_dir,
+                output_dir=Path(args.output_dir),
+                preset=args.preset,
+                config=args.config,
+                policy=policy,
+                jobs=args.jobs,
+                force=args.force,
+            )
+            if result.exit_code == 0:
+                print(
+                    f"completed: {target.reference} as {result.pipeline_name} in {result.output_dir}"
+                )
+            else:
+                failed = True
+                print(
+                    f"[benchmark] {target.reference} failed with exit code {result.exit_code}",
+                    file=sys.stderr,
+                )
+        return 1 if failed else 0
+    except (BenchmarkDependencyError, BenchmarkProfileError, ValueError) as exc:
+        print(f"[benchmark] {exc}", file=sys.stderr)
+        return 2
+    except _CLEAN_EXIT3_ERRORS as exc:
+        print(f"[benchmark] {exc}", file=sys.stderr)
+        return 3
+
+
 def cmd_strategy_normalize(args) -> int:
     """Print the whole config's strategies in canonical longhand YAML (the `docker compose
     config` analog). Requires a config file."""
@@ -1971,6 +2171,104 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-cost-per-doc", type=float, default=None, help="budget ceiling per doc (e.g. 0.05)"
     )
     calibrate.set_defaults(func=cmd_calibrate)
+
+    benchmark = sub.add_parser(
+        "benchmark",
+        parents=[common],
+        help="discover and run publisher-owned public document benchmarks",
+        description="Discover public document corpora or run an OpenReading backend or strategy "
+        "through a supported publisher's official scorer.",
+    )
+    benchmark_sub = benchmark.add_subparsers(dest="benchmark_command", required=True)
+
+    benchmark_list = benchmark_sub.add_parser(
+        "list", help="list supported and cataloged public benchmarks without network access"
+    )
+    benchmark_list.set_defaults(func=cmd_benchmark_list)
+
+    benchmark_show = benchmark_sub.add_parser(
+        "show", help="show source links, terms, scale, dimensions, and installation needs"
+    )
+    benchmark_show.add_argument("benchmark", help="benchmark identifier from `benchmark list`")
+    benchmark_show.set_defaults(func=cmd_benchmark_show)
+
+    def add_benchmark_selection(parser, *, targets: bool = False) -> None:
+        parser.add_argument("benchmark", help="benchmark identifier from `benchmark list`")
+        parser.add_argument(
+            "--preset",
+            choices=["smoke", "full"],
+            default="smoke",
+            help="publisher smoke subset (default) or the full dataset",
+        )
+        if targets:
+            parser.add_argument(
+                "--target",
+                action="append",
+                default=[],
+                help="backend:NAME or strategy:NAME. Repeat to evaluate several targets.",
+            )
+        parser.add_argument(
+            "--allow-research-only",
+            action="store_true",
+            help="acknowledge the publisher's stated research-only dataset terms",
+        )
+        parser.add_argument(
+            "--allow-unverified-terms",
+            action="store_true",
+            help="acknowledge that dataset or source terms remain unverified",
+        )
+
+    benchmark_prepare = benchmark_sub.add_parser(
+        "prepare", help="download a runnable dataset through its publisher package"
+    )
+    add_benchmark_selection(benchmark_prepare)
+    benchmark_prepare.add_argument(
+        "--cache-dir",
+        type=Path,
+        default=Path.home() / ".cache" / "openreading" / "benchmarks",
+        help="dataset cache root (default ~/.cache/openreading/benchmarks)",
+    )
+    benchmark_prepare.add_argument(
+        "--force", action="store_true", help="ask the publisher downloader to replace its cache"
+    )
+    benchmark_prepare.set_defaults(func=cmd_benchmark_prepare)
+
+    benchmark_estimate = benchmark_sub.add_parser(
+        "estimate", help="show published scale and target-call counts without inference"
+    )
+    add_benchmark_selection(benchmark_estimate, targets=True)
+    benchmark_estimate.set_defaults(func=cmd_benchmark_estimate)
+
+    benchmark_run = benchmark_sub.add_parser(
+        "run", help="prepare, run OpenReading targets, and invoke the official scorer"
+    )
+    add_benchmark_selection(benchmark_run, targets=True)
+    benchmark_run.add_argument("--config", default=None, help="strategy openreading.yaml path")
+    benchmark_run.add_argument(
+        "--policy", default=None, help="policy.json applied to every OpenReading request"
+    )
+    benchmark_run.add_argument(
+        "--cache-dir",
+        type=Path,
+        default=Path.home() / ".cache" / "openreading" / "benchmarks",
+        help="dataset cache root (default ~/.cache/openreading/benchmarks)",
+    )
+    benchmark_run.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("benchmark-results"),
+        help="publisher artifact root (default ./benchmark-results)",
+    )
+    benchmark_run.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help="maximum documents processed concurrently (default 1)",
+    )
+    benchmark_run.add_argument(
+        "--force", action="store_true", help="rerun cases with existing publisher artifacts"
+    )
+    benchmark_run.set_defaults(func=cmd_benchmark_run)
 
     leaderboard = sub.add_parser(
         "leaderboard",

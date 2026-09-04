@@ -33,6 +33,12 @@ from openreading.evals.dataset import EvalCase, load_dataset
 from openreading.evals.leaderboard import run_leaderboard
 from openreading.evals.runner import CaseResult, DatasetReport, run_case, run_dataset
 from openreading.evals.scorers import field_prf, score, table_grid, text_similarity
+from openreading.evals.targets import (
+    BenchmarkTarget,
+    execute_target,
+    project_extract_response,
+    project_parse_response,
+)
 
 __all__ = [
     "score",
@@ -51,4 +57,8 @@ __all__ = [
     "list_benchmarks",
     "get_benchmark",
     "require_benchmark_terms",
+    "BenchmarkTarget",
+    "execute_target",
+    "project_parse_response",
+    "project_extract_response",
 ]
