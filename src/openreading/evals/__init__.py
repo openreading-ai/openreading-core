@@ -22,6 +22,13 @@ is ``src/openreading/evals/README.md``.
 
 from __future__ import annotations
 
+from openreading.evals.benchmarks import (
+    BenchmarkDescriptor,
+    BenchmarkTermsError,
+    get_benchmark,
+    list_benchmarks,
+    require_benchmark_terms,
+)
 from openreading.evals.dataset import EvalCase, load_dataset
 from openreading.evals.leaderboard import run_leaderboard
 from openreading.evals.runner import CaseResult, DatasetReport, run_case, run_dataset
@@ -39,4 +46,9 @@ __all__ = [
     "CaseResult",
     "DatasetReport",
     "run_leaderboard",
+    "BenchmarkDescriptor",
+    "BenchmarkTermsError",
+    "list_benchmarks",
+    "get_benchmark",
+    "require_benchmark_terms",
 ]
