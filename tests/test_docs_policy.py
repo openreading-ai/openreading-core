@@ -1,11 +1,17 @@
 """Documentation lives in code (AGENTS.md). This test is what makes that rule enforceable.
 
 Tracked markdown is limited to the root project files, the GitHub templates under `.github/`,
-and one `README.md` per directory. Everything else — reference docs, design specs, run logs —
+one `README.md` per directory, and design records for work that is **not built yet** under
+`design/` and `product/specs/`. Everything else — reference docs, research packs, run logs —
 belongs in a module docstring next to the code it describes, or in the private
 `openreading` company repo (which checks this repo out as `core/`). A separate
 markdown file that contradicts the code looks authoritative and is wrong, and nothing forces
 anyone to notice; a docstring that contradicts the module below it is caught in review.
+
+The `design/` carve-out does not weaken that: a proposal for unbuilt work has no code to
+contradict. The risk starts the day it ships, which is why AGENTS.md requires the file to be
+deleted — its durable facts moved into the module docstrings — in the PR that finishes the
+implementation. Nothing here can enforce that; a reviewer has to.
 
 Two more drift traps close here: every relative link in the root files must resolve (a README
 that points at a file that moved is the "shredded docs" failure the rule exists to prevent), and
@@ -37,6 +43,11 @@ ALLOWED_ROOT_MD = frozenset(
 )
 
 
+# Design records and product specs for proposed-but-unbuilt work. Reviewed in the open, next to
+# the code they propose to change, and deleted when that code lands (AGENTS.md).
+DESIGN_DIRS = frozenset({"design", "product"})
+
+
 def _tracked(pathspec: str) -> list[str]:
     out = subprocess.run(
         ["git", "ls-files", "--", pathspec],
@@ -54,6 +65,8 @@ def _allowed(rel: str) -> bool:
         return p.name in ALLOWED_ROOT_MD
     if p.parts[0] == ".github":
         return True
+    if p.parts[0] in DESIGN_DIRS:
+        return True
     return p.name == "README.md"
 
 
@@ -61,8 +74,8 @@ def test_only_allowlisted_markdown_is_tracked():
     bad = [f for f in _tracked("*.md") if not _allowed(f)]
     assert bad == [], (
         "documentation lives in code (see AGENTS.md). Move the content of these files into the "
-        "module docstring they describe, or into the private internal/ repo, then git rm them: "
-        + ", ".join(bad)
+        "module docstring they describe, or -- if this is a design record for work that is not "
+        "built yet -- into design/ or product/specs/, then git rm them: " + ", ".join(bad)
     )
 
 
