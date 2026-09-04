@@ -1,9 +1,10 @@
-"""CostReport (adapter_interface.md §1.4).
+"""CostReport, the one cost record every adapter returns.
 
-Aligns 1:1 with pricing_model.md units so report_cost() is a thin projection. `billing_target`
-carries the pass-through-vs-resale fact: BYO-key means the charge lands on the caller's own
-account ("caller_account"), local backends bill the caller's infra ("caller_infra"), and
-"openreading" (resale) is deliberately never used — the business posture is pure pass-through.
+`native_unit` mirrors the unit a backend actually prices in, so `report_cost()` is a thin
+projection rather than a conversion. `billing_target` carries the pass-through fact: BYO-key
+means the charge lands on the caller's own account ("caller_account"), local backends bill the
+caller's own infrastructure ("caller_infra"), and "openreading" (resale) is deliberately never
+used, because every charge is a pass-through to the caller.
 """
 
 from __future__ import annotations

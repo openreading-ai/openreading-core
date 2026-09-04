@@ -24,6 +24,10 @@ from openreading.types.runtime import RunContext
 
 @dataclass
 class CaseResult:
+    """One scored case. `error` set means the backend failed and `overall` is a placeholder 0.0.
+    `overall` is None when the case's `expected` named no recognized dimension, which reads as
+    unscored and never as zero."""
+
     name: str
     overall: float | None  # None = unscored: case.expected named no recognized dimension (BL-86)
     dimensions: dict[str, Any] = field(default_factory=dict)
@@ -32,6 +36,9 @@ class CaseResult:
 
 @dataclass
 class DatasetReport:
+    """One backend's results over one dataset. `mean_overall` excludes errored and unscored
+    cases, so neither drags the mean toward zero."""
+
     backend_id: str
     results: list[CaseResult]
 
@@ -74,6 +81,12 @@ def run_case(
     deadline_ms: float = 60_000,
     router_config: RouterConfig | None = None,
 ) -> CaseResult:
+    """Run one case against `adapter` and score the normalized response.
+
+    The compliance gate runs before `submit()` (BL-121), because nothing else on this path checks
+    `req.compliance` against the adapter's descriptor. Any exception, `ComplianceRefused`
+    included, comes back as `CaseResult(error=...)` with `overall=0.0`. A case whose `expected`
+    names no recognized dimension scores `overall=None`, which means unscored."""
     try:
         req = OpenReadingRequest.model_validate(case.request_body)
         run_ctx = ctx or build_run_context(req, adapter.descriptor)
@@ -106,6 +119,8 @@ def run_dataset(
     *,
     router_config: RouterConfig | None = None,
 ) -> DatasetReport:
+    """Load every `*/case.json` under `dataset_dir` for this adapter and score each one. Returns
+    one `DatasetReport` whose `mean_overall` excludes errored and unscored cases."""
     cases = load_dataset(dataset_dir, backend_id=adapter.descriptor.id)
     return DatasetReport(
         backend_id=adapter.descriptor.id,

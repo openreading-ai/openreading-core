@@ -694,7 +694,7 @@ def test_credential_spec_flags_a_keyed_backend_that_declares_nothing():
         (
             "static",
             "backend needs env credentials/config but declares neither "
-            "credentials_spec nor config_spec (v0.2)",
+            "credentials_spec nor config_spec",
         )
     ]
 
@@ -726,7 +726,7 @@ def test_credential_spec_requires_a_signup_url_on_a_hosted_api():
     desc = _byo_descriptor(
         credentials_spec=[CredentialField(key="api_key", env=["ACME_API_KEY"])], signup_url=None
     )
-    assert _spec_findings(desc) == [("static", "hosted_api must declare a signup_url (v0.2)")]
+    assert _spec_findings(desc) == [("static", "hosted_api must declare a signup_url")]
 
 
 def test_credential_spec_is_silent_on_a_fully_declared_hosted_api():

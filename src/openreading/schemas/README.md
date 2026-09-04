@@ -5,43 +5,45 @@
 You want to know exactly which fields you can rely on in the JSON that OpenReading returns, and
 which fields are optional. This page answers that from the schema files themselves. A JSON Schema
 is a file that states which fields a JSON document must carry and which it may carry. It also
-states what values each field may hold. The files in this directory are the contract for every
-request and response, so code written against them keeps working whichever backend produced the
-output.
+states what values each field may hold. A backend is one parser, such as the local `pymupdf`
+library or a hosted API. The files in this directory are the contract for every request and
+response, so code written against them keeps working whichever backend produced the output.
 
 You get a table of the schema families and the file each one lives in. You get a table of what
 every response guarantees, and the commands that print the live truth from the installed package.
-You need the package installed as the root README describes, and `sample.pdf` from the root README
-for the checks under Notes. OpenReading accepts any document some backend can read, and each
-backend lists its formats in its descriptor. The [Backend adapters](../adapters/README.md) page
-carries that list.
+You need the package installed as the root README describes. You also need `sample.pdf` from the
+root README for every command here that parses a document, and `jq` for the commands that filter
+JSON. OpenReading accepts any document some backend can read. A descriptor is the static record in
+which a backend declares its formats, its environment variables and its compliance posture. Each
+backend's descriptor lists the formats it reads. The [Backend adapters](../adapters/README.md)
+page carries that list.
 
 ## What this is
 
-Code written against these files keeps working on every surface, because the `*.json` files in
-this directory are the contract. Every surface (CLI, Python, HTTP) reads and writes exactly these
-shapes. The pydantic models in `openreading.types` mirror them. When the two disagree, the JSON
-file wins.
+Every surface reads and writes exactly these shapes, so the CLI, the Python API and the HTTP
+server hand you the same JSON. The pydantic models in `openreading.types` mirror the files, and
+when the two disagree the JSON file wins.
 
 ## Validate
 
 One command proves every current schema file is valid. Exit 0 means every file is valid. Exit 1
-means a fixture failed, and exit 2 means no verb was given.
+means a schema file or a fixture failed, and a bad schema file also prints a traceback. Exit 2
+means no verb was given.
 
 ```bash
 uv run python -m openreading.schemas validate
 ```
 
-**You should see:**
-
-```
+```text
 schemas: request.v0.2.json OK, response.v0.3.json OK, adapter-descriptor.v0.7.json OK, … journal.v0.1.json OK
 fixtures: 0 checked, 0 invalid
 ```
 
-`fixtures: 0 checked` is expected today (see "Not built yet"). From Python, you validate one
-instance by calling `validate_<family>(instance)`, for example `validate_response`. The families
-are the rows of the table below. Each function returns `None` or raises
+**You should see** every current file marked OK, and `fixtures: 0 checked`, which is expected
+today ([Not built yet](#not-built-yet)). From Python, you validate one instance with the function
+named in the validator column of the table below, for example `validate_response`. Two of the
+names do not follow the family name: the adapter-descriptor family uses `validate_descriptor` and
+the journal family uses `validate_journal_record`. Each function returns `None` or raises
 `jsonschema.ValidationError`.
 
 ## Files
@@ -55,8 +57,7 @@ if n.endswith('_SCHEMA_FILE')})"`. If the table and that output disagree, the ou
 the table needs fixing.
 
 The in-band version is the marker an instance itself carries, and it is the only version signal a
-consumer gets. The adapter-descriptor family describes a descriptor, which is the static record in
-which a backend declares its formats, its environment variables and its compliance posture.
+consumer gets. The adapter-descriptor family validates a descriptor.
 
 | family | current file | constant | validator | in-band version |
 |---|---|---|---|---|
@@ -77,25 +78,28 @@ Each file's `$id` is the URL inside it that names it, and it is that filename un
 response and strategy-config families put a slash before the version, as in
 `https://openreading.ai/schemas/response/v0.3.json`. Every other current file keeps the dot, as in
 `https://openreading.ai/schemas/journal.v0.1.json`. Code that matches on `$id` must accept both.
+The `$id` is an identifier and not a download location. The files ship in this directory, and
+`openreading.schemas` loads them from the installed package rather than over the network.
 
 Older versions stay in this directory unchanged. `tests/test_schema_evolution.py` pins them byte for
 byte.
 
 ## What a response guarantees
 
-This table tells you which response fields you can rely on. The response is the JSON envelope,
-meaning the one JSON object every backend returns in the same shape. The table lists every
+This table tells you which response fields you can rely on. An envelope is one JSON document with
+a fixed shape, and the response is the envelope every backend returns. The table lists every
 required field, every const, and every enum. A const is a field with exactly one allowed value.
 An enum is a field whose value must come from a fixed list.
 
-You can tell an open set from a closed one by how the schema declares it, and the *may gain
-values* column reports what it found. A field declared as a JSON Schema `enum` is closed. A value
-outside its list fails validation today, and only a MAJOR release may add to the list, so you may
-switch on such a field exhaustively. A field declared as a plain string carries its known values
-in prose instead, and a MINOR release may add to that set at any time, so switch on the values you
-know and send the rest to a default branch. `warnings[].code` and `backend.id` are the two open
-sets that carry a known list to match against. `status.error.code` is open as well and carries no
-list at all, which [Reading an error](#reading-an-error) explains before you branch on it.
+A closed set is a field declared as a JSON Schema `enum`. A value outside its list fails
+validation today, and only a MAJOR release may add to the list. You may therefore switch on such a
+field exhaustively. An open set is a field declared as a plain string whose known values are
+listed in prose. A MINOR release may add to that set at any time. Switch on the values you know
+and send the rest to a default branch. MAJOR and MINOR name the size of a package release, as in
+semantic versioning. The *may gain values* column below reports which kind each row is.
+`warnings[].code` and `backend.id` are the two open sets that carry a known list to match
+against. `status.error.code` is open as well and carries no list at all, which [Reading an
+error](#reading-an-error) explains before you branch on it.
 
 `additionalProperties: false` applies to the top level alone. An unknown key is rejected there,
 and accepted inside `backend`, `usage`, `document`, `status`, a page, and a block. A nested object
@@ -122,7 +126,7 @@ fixing. In the required column, n/a marks a row that names a whole object rather
 | `backend` | yes | object, requires `id` (string) and `type` | n/a | 276–316 |
 | `backend.type` | yes | one of `hosted_api`, `oss_library`, `framework_loader`, `self_hosted_model` | closed, `MAJOR` only | 287–292 |
 | `backend.output_paradigm[]` | no | items one of `markdown`, `typed_fields`, `element_list`, `block_tree`, `block_graph`, `token_stream` | closed, `MAJOR` only | 304–311 |
-| `backend.version` | no | the backend, model or library version actually run. See [Lineage](#lineage) for who populates it | n/a | 297–300 |
+| `backend.version` | no | the backend, model or library version that ran. See [Lineage](#lineage) for who populates it | n/a | 297–300 |
 | `document` | yes | object. At least one of `document.markdown`, `document.text`, `document.pages` is present, or top-level `typed_fields` | n/a | 317–433, 649–682 |
 | `document.pages[]` | see `anyOf` | each item requires `page_number`, an integer ≥ 1 counted in the source document | n/a | 357–368 |
 | `document.pages[].unit` | no | one of `pdf_point`, `pixel`, `inch` | closed, `MAJOR` only | 377–381 |
@@ -136,18 +140,15 @@ fixing. In the required column, n/a marks a row that names a whole object rather
 | `BBox.bbox_native` | no | the raw source geometry, untouched | n/a | 62–91 |
 | `BBox.bbox_native.origin` | no | one of `top_left`, `bottom_left` | closed, `MAJOR` only | 73–76 |
 | `BBox.bbox_native.unit` | no | one of `normalized`, `pdf_point`, `pixel`, `inch` | closed, `MAJOR` only | 79–84 |
-| `usage.cost_usd` | no | a number, and `null` for every local backend. Never sum it without checking `cost_basis` first | n/a | 539–542 |
-| `usage.cost_basis` | no | `billed` means the backend charged this run, so the number is real money. `estimated` means a published rate was applied to a page count, so it is a projection and not spend. `infra_only` means a local backend ran and `cost_usd` is `null`, so your only cost is your own compute. `unknown` means the backend reported no basis at all | closed, `MAJOR` only | 543–550 |
+| `usage.cost_usd` | no | a number when the backend reports a cost. Absent on both local backends today, by the same absence rule as `warnings`. Never sum it without checking `cost_basis` first | n/a | 539–542 |
+| `usage.cost_basis` | no | `billed` means the backend charged this run, so the number is real money. `estimated` means a published rate was applied to a page count, so it is a projection and not spend. `infra_only` means a local backend ran and `cost_usd` is absent, so your only cost is your own compute. `unknown` means the backend reported no basis at all | closed, `MAJOR` only | 543–550 |
 | `warnings[]` | no | items are `{code, message, field}`, all strings. The key is **absent** when nothing warned, never present and empty | `code` is open, `MINOR` | 580–597 |
 | `orchestration` | no | object, present only for a run a strategy or a fallback chain drove. It is declared `additionalProperties: true` with no properties of its own, so the schema names nothing inside it and a validator checks nothing you read there. Every closed set within it is a promise made by code instead, listed field by field in the docs home's [open and closed register](../README.md#what-is-closed-and-what-only-looks-closed) | nothing inside it is closed at the schema level | 627–631 |
-| `channel_provenance` | no | map of channel name to `native` or `derived`. Marked `x-stability: experimental` | experimental, so outside the guarantees entirely | 632–642 |
+| `channel_provenance` | no | map of channel name to `native` or `derived`. A channel is one kind of output inside the envelope, such as text, markdown or blocks. Marked `x-stability: experimental` | experimental, so outside the guarantees entirely | 632–642 |
 
-`warnings[].code` is an open set, so switch on the codes you know and tolerate the rest. The first
-string argument of every `add_warning(` call is a code. This command lists today's codes.
-
-```bash
-grep -rn -A1 "add_warning(" src/openreading
-```
+`warnings[].code` is an open set, so switch on the codes you know and send the rest to a default
+branch. The known codes, each with the condition it reports, are the `warnings[]` entry of the
+Response section in `uv run python -m pydoc openreading.schemas`.
 
 ### Absent is not empty, and not null
 
@@ -168,16 +169,17 @@ uv run openreading parse sample.pdf --backend tesseract | jq -c 'keys'
 
 **You should see** `warnings` on the pymupdf run, which reports `confidence_unavailable`, and no
 `warnings` key at all on the tesseract run. The same rule governs `usage.cost_usd`, which is
-`null` on a local run rather than absent, and `typed_fields`, which is absent when no backend
-produced any.
+absent on a local run, and `typed_fields`, which is absent when no backend produced any.
 
 ### Reading an error
 
 There is no error vocabulary you can branch on from a response today. `status.error.code` is an
-unconstrained string with no enum, so nothing constrains what a backend may put there. One
-shipped adapter populates it, `nuextract`, which sets the literal `backend_validation` when the
-model answers and the answer fails its own template validation. Neither local backend ever sets
-it.
+unconstrained string with no enum, so nothing constrains what a backend may put there. Three
+shipped adapters populate it. `nuextract` sets `backend_validation` when the model answers and the
+answer fails its own template validation. `google-gemini` sets `malformed_response` when its
+structured output is not a JSON object, and `interaction_incomplete` when the vendor reports that
+the interaction did not finish. `mistral-ocr` sets `malformed_response` for the same reason as
+Gemini. Neither local backend ever sets it.
 
 A terminal failure on the CLI gives you no envelope to read at all. The run exits 3, writes zero
 bytes to stdout, and names the reason on stderr instead:
@@ -191,9 +193,9 @@ exit=3
        0
 ```
 
-So branch on the exit code on the CLI, on the `error.category` field over HTTP
-([The HTTP server](../server/README.md)), and on `items[].error.code` in a batch result, where a
-failed item keeps its own error beside the items that succeeded
+So branch on the exit code on the CLI. Over HTTP, branch on the `error.category` field
+([The HTTP server](../server/README.md)). In a batch result, branch on `items[].error.code`, where
+a failed item keeps its own error beside the items that succeeded
 ([Batch runs](../batch/README.md)).
 
 > [!IMPORTANT]
@@ -213,38 +215,46 @@ single-document response answers less about its own origin than its shape sugges
 ### A response does not identify its input
 
 A response carries no identity of the document it parsed. There is no filename, no path, no
-content hash, and no echo of the request you sent. The eight top-level keys a local run produces
-are `schema_version`, `status`, `backend`, `document`, `usage`, `warnings`, `backend_raw` and
-`channel_provenance`, and not one of them names the input. Two responses in a folder are therefore
-indistinguishable except by their content, and `parse --backend pymupdf > out.json` gives you a
-file with no provenance at all. Record the path and the hash yourself at the moment you write the
-response, or use one of the two surfaces that record them for you.
+content hash, and no echo of the request you sent. A local run produces eight top-level keys:
+`schema_version`, `status`, `backend`, `document`, `usage`, `warnings`, `backend_raw` and
+`channel_provenance`. Not one of them names the input. Two responses in a folder are therefore
+indistinguishable except by their content. `parse --backend pymupdf > out.json` gives you a file
+with no provenance at all. Record the path and the hash yourself at the moment you write the
+response. Or use one of the two surfaces that record them for you.
 
 Input identity lives in exactly two places. A batch result carries `items[].source` with
 `filename`, `path`, `relpath`, `size_bytes` and `sha256` per document ([Batch
-runs](../batch/README.md)). A journaled strategy run carries the document's digest and filename in
-its ledger header ([The run ledger](../ledger/README.md), which explains what that header keeps
-after a run is erased).
+runs](../batch/README.md)). A journaled strategy run, meaning one that wrote each step to disk as
+it completed, carries the document's digest and filename in its ledger header. [The run
+ledger](../ledger/README.md) explains what that header keeps after a run is erased.
 
 ### The join keys
 
 Those two artifacts join to each other, and to a strategy response, on values that are byte
-identical rather than merely similar.
+identical rather than merely similar. Build a one-file corpus and one journaled run first, then
+join them.
+
+```bash
+mkdir -p corpus && cp sample.pdf corpus/a.pdf
+export OPENREADING_LEDGER=./.openreading
+uv run openreading parse corpus/a.pdf --strategy offline_first > run.json
+RUN_ID=$(basename .openreading/*.header.json .header.json)
+```
 
 ```bash
 uv run openreading parse corpus/ --backend pymupdf | jq -r '.items[0].source | "\(.relpath)  \(.sha256)"'
 jq -r '.document.digest' .openreading/$RUN_ID.header.json
 ```
 ```text
-a.pdf  ef51b93f5ac23790cfa3055b4b749ca622c3c12281aececb95ee58166a503916
-sha256:ef51b93f5ac23790cfa3055b4b749ca622c3c12281aececb95ee58166a503916
+a.pdf  92cec9cca0bc9f5e745bd259db1b53a8cdac4b4a75750a8c3c4e40fb014a8171
+sha256:92cec9cca0bc9f5e745bd259db1b53a8cdac4b4a75750a8c3c4e40fb014a8171
 ```
 
 **You should see** the same digest twice, once bare and once with a `sha256:` prefix the journal
-adds. Strip the prefix and a batch row joins to a journal record on the document. The second join
-is the config: a strategy response's `orchestration.config_hash` equals the ledger header's
-`config_hash` exactly, prefix included, so a stored response tells you which compiled strategy
-produced it.
+adds. Your own digest differs, because `sample.pdf` carries a fresh random id on every build.
+Strip the prefix and a batch row joins to a journal record on the document. The second join is the
+config. A strategy response's `orchestration.config_hash` equals the ledger header's `config_hash`
+exactly, prefix included, so a stored response tells you which compiled strategy produced it.
 
 ### What names the producer
 
@@ -252,7 +262,7 @@ produced it.
 |---|---|---|
 | `backend.id` | response | every backend, always |
 | `backend.type` | response | every backend, always |
-| `backend.version` | response | no backend shipped today, including both local ones |
+| `backend.version` | response | six hosted or self-hosted adapters (`azure-document-intelligence`, `anthropic-claude`, `google-gemini`, `mistral-ocr`, `open-ocr`, `qwen-vl`), each from a value the vendor echoes back. Neither local backend |
 | `schema_url` | response | no backend shipped today |
 | `orchestration.config_hash` | response, strategy runs only | every strategy run |
 | `resolved_version` | a journal or step record, never a response | recorded per step when a backend reports one |
@@ -260,9 +270,10 @@ produced it.
 | `pinned_eligible` | ledger header only | written on the first arm, read on resume |
 
 > [!WARNING]
-> `backend.version` is the field that answers "which version of the parser produced this row", and
-> nothing populates it yet. Treat it as absent, and record the version of the `openreading`
-> package yourself if you need to reproduce a result later.
+> `backend.version` answers "which version of the parser produced this row". Only the six hosted
+> or self-hosted adapters set it, from a value the vendor echoes back. A `pymupdf` or `tesseract`
+> row has none, so record the version of the `openreading` package yourself if you need to
+> reproduce a result later.
 
 ### Clocks and byte stability
 
@@ -272,8 +283,8 @@ measure an interval and never name an instant, so they cannot stand in for one.
 
 A journal record does carry the time. Its `started_epoch_ms` and `ended_epoch_ms` are absolute UTC
 epoch milliseconds, and so is the retention stamp's `expires_epoch_ms`, so a loader can read them
-as timestamps directly. Those values name a moment because they cross a process boundary, while
-the engine measures its own durations against a monotonic clock that no clock adjustment can move.
+as timestamps directly. Those values name a moment because they cross a process boundary. The
+engine measures its own durations against a monotonic clock that no clock adjustment can move.
 [The run ledger](../ledger/README.md) is where a journal comes from.
 
 Whether two runs of the same input produce the same bytes depends on which envelope you have.
@@ -285,8 +296,9 @@ Whether two runs of the same input produce the same bytes depends on which envel
 | `batch-result` | no | `summary.duration_ms` |
 | `comparison-report` | yes | nothing, and [Compare](../comparison/README.md) explains why |
 
-Hash the whole envelope only for the first and last rows. For the other two, hash `.document`, or
-hash the envelope with the timing fields removed, so a change-detection job does not fire on every
+Hash the whole envelope only for the first and last rows. For a strategy response, hash
+`.document`. For a batch result, hash the envelope with `summary.duration_ms` removed, because a
+batch result has no top-level `.document`. Either way a change-detection job stops firing on every
 run.
 
 ## Versions
@@ -318,53 +330,45 @@ if it and this summary disagree.
 | change what an existing field means | MAJOR | your stored history and your new rows stop being comparable |
 | add a value to any `enum` in a released schema | MAJOR | an exhaustive switch over an enum stays exhaustive until you upgrade |
 
-Growing an enum is a MAJOR because the vocabulary is normalized across every backend, so one
-backend adopting a new value while another leaves the same concept where it was would be a worse
-contract than no new value at all. A new native concept does not need one. An adapter maps it to
-the catch-all value for that field, such as `Block.type: other`, and keeps the vendor's own label
-in `native_type`, so the concept reaches you without a schema change.
+Growing an enum is a MAJOR because the vocabulary is normalized across every backend. One backend
+could adopt a new value while another kept the old one for the same concept. That would be a worse
+contract than no new value at all. A new native concept does not need one. The adapter, the code
+that drives one backend, maps it to the catch-all value for that field, such as
+`Block.type: other`. The vendor's own label stays in `native_type`, so the concept reaches you
+without a schema change.
 
-Two rules sit underneath that table and catch people out. The first is that a documented invariant
-is part of the contract even when the shape does not change. Ask whether a legitimate assertion
-against the old behaviour would fail on new output, and if it would, that is a breaking change
-whichever fields moved. While the package is below `1.0` those changes ride the MINOR slot, and
-each one is named in the CHANGELOG "Changed" table with its invariant id rather than shipped
-quietly. The second is that the in-band `schema_version` const is the only version signal you get,
-because no HTTP header carries it. Assert on that const in your loader and you will see a bump the
-day it arrives.
+Two rules under that table are easy to miss. The first is that a documented invariant is part of
+the contract even when the shape does not change. Ask whether a legitimate assertion against the
+old behaviour would fail on new output. If it would, that is a breaking change whichever fields
+moved. While the package is below `1.0` those changes ride the MINOR slot. Each one is named in
+the CHANGELOG "Changed" table with its invariant id rather than shipped quietly. The second is
+that the in-band `schema_version` const is the only version signal you get, because no HTTP header
+carries it. Assert on that const in your loader and you will see a bump the day it arrives.
 
-You cannot pin a response version. There is no central service to down-convert for you, so the
-package you install decides the version you receive. A MAJOR ships a forward-only
+You cannot pin a response version. Nothing down-converts a newer response for you, so the package
+you install decides the version you receive. A MAJOR ships a forward-only
 `migrate(instance, to_version)` for instances you have already stored. Before anything is removed
-it is marked `deprecated` for at least one MINOR, and using it adds a `warnings[]` entry naming
-it, so the warning reaches you before the removal does.
+it is marked `deprecated` for at least one MINOR. Using a deprecated field adds a `warnings[]`
+entry naming it, so the warning reaches you before the removal does.
 
 ## Notes
 
 - `document.page_count` is the source page count even when you request a subset. To check, run
-  `uv run openreading parse sample.pdf --backend pymupdf --pages 2`, which prints `page_count: 2`
-  and one page.
+  `uv run openreading parse sample.pdf --backend pymupdf --pages 2 | jq -c '{page_count: .document.page_count, pages: [.document.pages[].page_number]}'`,
+  which prints `{"page_count":2,"pages":[2]}`.
 - `backend_raw` is the backend's own response body, copied into the envelope untouched. It travels
   wherever the envelope travels, so it lands in every saved file, batch result, comparison input,
-  and ledger blob. For a run over regulated data that is a second copy of vendor output, shaped by
-  the vendor rather than by this contract, in every artifact. It is outside the versioned contract
+  and ledger blob. For a run over regulated data, that is a second copy of vendor output in every
+  artifact, shaped by the vendor rather than this contract. It is outside the versioned contract
   and may change shape without a version bump. To drop it, set `outputs.include_backend_raw` to
-  `false` in a Python `run()` call or an HTTP request body, which every adapter honors and no CLI
-  flag exposes today.
-- `orchestration` is an empty box as far as this contract is concerned. The schema declares the
-  object and nothing in it, so a field you read there is guaranteed by the code that writes it and
-  by no validator. Before you build an agent on one of its fields, check that field's row in the
-  docs home's [open and closed register](../README.md#what-is-closed-and-what-only-looks-closed),
-  which names where each set actually lives and marks the ones that only look closed.
-- `channel_provenance` is experimental and excluded from backward-compatibility guarantees.
-- A `pymupdf` run also carries `usage`, `backend_raw` and `channel_provenance` today. To see them,
-  run `uv run openreading parse sample.pdf --backend pymupdf | python3 -c "import json,sys;
-  print(list(json.load(sys.stdin)))"`.
+  `false` in a Python `run()` call or an HTTP request body. Every adapter honors the setting, and
+  no CLI flag exposes it today.
 
 ## Not built yet
 
-- `openreading.SCHEMA_VERSION` prints `0.1`, the request family's number, unlabelled. Reproduce it
-  with `uv run python -c "import openreading; print(openreading.SCHEMA_VERSION)"`.
+- `openreading.SCHEMA_VERSION` prints `0.1`, a number that matches no current family, because the
+  request family is at `0.2` and the response family at `0.3`. Nothing says which family it means.
+  Reproduce it with `uv run python -c "import openreading; print(openreading.SCHEMA_VERSION)"`.
 - `validate` reports `fixtures: 0 checked` because its fixture glob names a directory that does not
   exist. Reproduce it with `uv run python -m openreading.schemas validate`.
 - An out-of-range page range returns the whole document with no warning. Reproduce it with `uv run
@@ -373,8 +377,7 @@ it, so the warning reaches you before the removal does.
 
 ## See also
 
-- [Docs home](../README.md) is the documentation home. It lists every guide and explains how to
-  use OpenReading from an agent.
+- [Docs home](../README.md)
 - `uv run python -m pydoc openreading.types` prints the pydantic mirror of these files.
 - `uv run python -m pydoc openreading.server` prints the HTTP status code for each error.
 - [Backend adapters](../adapters/README.md) lists every backend with its formats, its env vars and
@@ -384,12 +387,15 @@ it, so the warning reaches you before the removal does.
 
 ## Maintenance
 
-To cut a new schema version, copy the current file to `<family>.vX.(Y+1).json`. Point its
-`*_SCHEMA_FILE` constant at the new file. Add a row to the Files table above. Update the default in
-`openreading.types`. Add a `CHANGELOG.md` line. Leave the old file untouched, because its hash is
-pinned. A new required field, enum value or const goes in the response table above. A new warning
-code needs no edit here. When a "Not built yet" line stops being true, delete it. The full table
-of what to update for each kind of change is under *Where a change gets documented* in
+To cut a new schema version, copy the current file to `<family>.vX.(Y+1).json`. A new family takes
+the dot form too, `<family>.vX.Y.json`, which is what every file added since response v0.3 uses.
+Its `title` reads `OpenReading <Family In Title Case> v<X.Y>`. Files released before this rule keep
+the titles and the `$id` shapes they shipped with, because their bytes are pinned. Point that
+family's `*_SCHEMA_FILE` constant at the new file. Add a row to the Files table above. Update the
+default in `openreading.types`. Add a `CHANGELOG.md` line. Leave the old file untouched, because
+its hash is pinned. A new required field, enum value or const goes in the response table above. A
+new warning code needs no edit here. When a "Not built yet" line stops being true, delete it. The
+full table of what to update for each kind of change is under *Where a change gets documented* in
 [`AGENTS.md`](../../../AGENTS.md).
 
 <sub>[Docs home](../README.md) · [← Evals](../evals/README.md) · [Backend adapters →](../adapters/README.md)</sub>

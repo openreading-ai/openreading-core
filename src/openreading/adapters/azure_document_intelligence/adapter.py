@@ -1,12 +1,14 @@
 """Azure AI Document Intelligence adapter — LRO (long-running operation) POLL over httpx.
 POST .../documentModels/{modelId}:analyze → 202 + Operation-Location → GET analyzeResults/{id}
 until status=succeeded, honoring the retry-after header. Everything in the AnalyzeResult is
-span-indexed into one `content` string; we map paragraphs[] → reading-order blocks, tables[] →
-cells, styles[].isHandwritten (by span overlap) → text_type, and prebuilt documents[].fields →
-typed_fields. Markdown output mode (outputContentFormat=markdown) gives native markdown.
+span-indexed into one `content` string. The adapter maps paragraphs[] to reading-order blocks,
+tables[] to cells, styles[].isHandwritten (by span overlap) to text_type, and prebuilt
+documents[].fields to typed_fields. Markdown output mode (outputContentFormat=markdown) gives
+native markdown.
 
-BYO endpoint + key (or Entra). HIPAA BAA is included by default via the Microsoft DPA. Geometry
-is per-page unit (inch for PDF, pixel for image); polygons are flat [x1,y1,x2,y2,...].
+BYO endpoint and subscription key. The vendor also documents Entra ID (OAuth2 bearer) auth,
+which this adapter does not implement. HIPAA BAA is included by default via the Microsoft DPA.
+Geometry is per-page unit (inch for PDF, pixel for image); polygons are flat [x1,y1,x2,y2,...].
 """
 
 from __future__ import annotations
@@ -90,7 +92,7 @@ _DEFAULT_PORT_FOR_SCHEME = {"http": 80, "https": 443}
 
 def _origin(url: str) -> tuple[str | None, str | None, int | None]:
     """(scheme, host, port) — normalized so a bare `https://host` and an explicit
-    `https://host:443` compare equal. BL-162 part 3 review (bruce): comparing `.hostname` alone let
+    `https://host:443` compare equal. BL-162: comparing `.hostname` alone let
     a same-host attacker-chosen port, or an HTTPS→HTTP scheme downgrade, through unnoticed. Always
     returns a 3-tuple, even for an unparseable url (never None) — a malformed configured endpoint
     still activates the poll() comparison rather than silently disabling it."""
@@ -98,14 +100,14 @@ def _origin(url: str) -> tuple[str | None, str | None, int | None]:
     scheme = p.scheme.lower() or None
     host = p.hostname.lower() if p.hostname else None
     try:
-        # BL-162 round 2 review (bruce): `p.port` raises ValueError on a non-numeric port (e.g.
+        # BL-162: `p.port` raises ValueError on a non-numeric port (e.g.
         # "https://host:not-a-number/") instead of degrading — a malformed url must still yield a
         # tuple, per this function's own contract, not crash the caller. -1 is not a valid port,
         # so a malformed url on either side of the comparison can never accidentally match.
         numeric_port = p.port
     except ValueError:
         return (scheme, host, -1)
-    # BL-162 round 2 review (alex): `p.port or default` treats an explicit port 0 as absent
+    # BL-162: `p.port or default` treats an explicit port 0 as absent
     # (falsy-zero), silently promoting it to the scheme default. `is not None` doesn't.
     port = numeric_port if numeric_port is not None else _DEFAULT_PORT_FOR_SCHEME.get(scheme or "")
     return (scheme, host, port)

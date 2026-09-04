@@ -1,7 +1,8 @@
-"""Tiny shared HTTP helpers for the httpx-based hosted adapters (Azure DI, Reducto, Docling,
-Qwen-VL). httpx is an optional dep (in each adapter's extra + the `http` extra), imported
-lazily. Keeping this minimal — adapters still own their request shapes; this only removes the
-duplicated client construction, retry-after parsing, and status→error mapping.
+"""Shared httpx helpers for every adapter that speaks HTTP directly rather than through a vendor
+SDK. This module supplies one client builder, Retry-After parsing, and the map from status code
+to error taxonomy. httpx is an optional dependency (each adapter's extra plus the `http` extra)
+and is imported lazily. Adapters still own their own request shapes, so nothing here decides what
+a call looks like.
 """
 
 from __future__ import annotations
@@ -21,8 +22,8 @@ def build_httpx_client(*, base_url: str = "", headers: dict | None = None, timeo
     # stays valid — some adapters request absolute URLs.
     if base_url and not base_url.startswith(("http://", "https://")):
         raise TerminalError(
-            f"backend base URL {base_url!r} must start with http:// or https:// — check the "
-            f"backend's *_BASE_URL / endpoint configuration",
+            f"backend base URL {base_url!r} must start with http:// or https://. Check the "
+            f"backend's *_BASE_URL / endpoint configuration.",
             backend_code="bad_base_url",
         )
     return httpx.Client(base_url=base_url, headers=headers or {}, timeout=timeout)
@@ -45,7 +46,7 @@ def retry_after_seconds(headers) -> float | None:
     try:
         return float(raw)
     except (TypeError, ValueError):
-        return None  # HTTP-date form not handled in v0
+        return None  # HTTP-date form is not parsed, so the caller falls back to its own backoff
 
 
 def error_for_status(

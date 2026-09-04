@@ -1,24 +1,32 @@
 version: 2
 updates:
-  # `uv`, not `pip`: the pip updater only edits pyproject lower bounds and leaves uv.lock — what
-  # CI and `make sync` actually install — untouched.
+  # The ecosystem is `uv`, not `pip`. The pip updater edits only the lower bounds in
+  # pyproject.toml and leaves uv.lock alone, and uv.lock is what CI and `make sync` install.
   - package-ecosystem: uv
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
     ignore:
-      # ruff is pinned exactly (pyproject.toml): `ruff format` output changes between minor
-      # versions, so a bump must land in a commit that also reformats the tree — by hand,
-      # deliberately. An automated bump PR just fails `make verify` on the formatting diff.
+      # ruff is pinned exactly in pyproject.toml, because `ruff format` output changes between
+      # minor versions. A bump therefore has to land in a commit that also reformats the tree,
+      # by hand and deliberately. An automated bump pull request just fails `make verify` on the
+      # formatting diff.
       - dependency-name: ruff
     groups:
-      # One PR for routine patch/minor bumps; majors still arrive separately because those are
-      # the ones that need a human to read a changelog. `make verify` in CI is the gate either way.
+      # Routine patch and minor bumps arrive as one pull request. Majors still arrive separately,
+      # because those are the ones where somebody has to read a changelog. `make verify` in CI is
+      # the gate either way.
       minor-and-patch:
         update-types: [minor, patch]
 
+  # Action bumps get the same treatment, so a stale pin cannot pile up unreviewed. CI pins every
+  # action by commit SHA, so each of these pull requests moves a SHA and its version comment.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      actions-minor-and-patch:
+        update-types: [minor, patch]

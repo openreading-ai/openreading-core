@@ -17,8 +17,8 @@ An import error from a server or hosted-backend command means: run `make sync` b
 Optional system dep: the `tesseract` binary (`brew install tesseract` / `apt install
 tesseract-ocr`) for the OCR backend; its tests skip cleanly without it. Local-library adapters'
 runtime deps (pymupdf, pytesseract, ...) live in the `dev` dependency group so tests can EXECUTE
-them, never in core `dependencies` (DECISIONS D9: the AGPL pymupdf is in dev + its own extra, never
-core; the user install path is the per-adapter extra).
+them, never in core `dependencies` (`internal/decisions/DECISIONS.md` D9: the AGPL pymupdf is in
+dev and in its own extra, never in core. The user install path is the per-adapter extra).
 
 Lane 1 — the offline gate, `make verify`
 ========================================
@@ -33,8 +33,9 @@ The bar for every commit. No credentials, no network. Sub-targets:
                     mypy on the green path — mypy drift stayed invisible for months that way.
   test              full pytest suite at the 91% coverage floor (`--cov-fail-under=91`):
                     coverage below the floor fails the build like a red test. Ratchet up, never
-                    down. Test counts are never quoted anywhere — they drift every sprint; the
-                    live count is `uv run pytest -m "not live" --collect-only -q`.
+                    down. Test counts are never quoted anywhere, because they change with every
+                    commit that adds a test. Read the live count with
+                    `uv run pytest -m "not live" --collect-only -q`.
   schema-validate   request / response / descriptor / strategy JSON Schemas + every captured
                     fixture (`python -m openreading.schemas validate`). The vendored schemas are
                     the authority; pydantic models in `openreading.types` must round-trip through
@@ -90,22 +91,6 @@ stubbing `run_pytest_once`; the script's own docstring has the exact message sig
 Outside `verify`, deliberately:
   - `make serve-smoke` opens a localhost socket (server surface, below).
   - `make verify-live` needs keys (Lane 2).
-
-Two further gates the old runbook described are NOT in this checkout — no Makefile target, no
-script, no test, and `.github/workflows/ci.yml` defines only the `verify` job — so treat them as
-design intent, not tooling: (a) `make productspec-validate` / `productspec-garden`, intent-layer
-checks (product specs, decision traces, agent-run receipts) via the pinned ProductSpec parser over
-`npx`, kept out of `verify` because they need network + Node >= 20; (b) `make verify-backlog
-[BACKLOG_TARGET=<ref>]` (`scripts/check_backlog_merged.py`), a close-out gate for a backlog that
-lives only on the reviewed branch: each item's `**Status:**` (`open` | `implemented-unmerged` |
-`merged` | `wont-fix`) checked with `git merge-base --is-ancestor` — `merged` with a SHA off the
-target, `implemented-unmerged`, or a missing status fails (the unannotated item is the invisible
-state that let worktree-green fixes never reach the reviewed branch); once nothing is
-`implemented-unmerged`, `git status --porcelain -- <packet dir>` must be empty too (the packet
-itself sitting uncommitted), scoped per sprint so a later sprint's own review phase starting does
-not false-positive; exit 0 clean / 1 blocked / 2 usage or environment (e.g. run on `main`);
-offline git plumbing only; a CI job would need `fetch-depth: 0`, since under a depth-1 checkout
-no cited commit exists and every item fails.
 
 Surface: CLI + Python (local backends `pymupdf` / `tesseract`, no keys)
 =======================================================================
@@ -168,13 +153,15 @@ LOCAL SERVICE ADDRESS, and `.env.example` ships both pointed at localhost. A `.e
 either var from an old setup will not skip: `make verify-live` attempts a real connection to
 whatever is (or is not) listening. Remove or comment the var unless that service is running.
 
-Keying a hosted backend: `cp .env.example .env` (every supported var, with signup URLs), append
-the backend's credential line(s) — e.g. `NUEXTRACT_API_KEY=...`, `OPENOCR_API_KEY=...` (slug
-`open-ocr`: the var name is NOT derived from the slug, and `azure-document-intelligence` /
-`aws-textract` / `google-document-ai` take multi-var credential sets; `.env.example` and
-`uv run openreading backends` list the real names), confirm `uv run openreading backends` flips
-it from "no / MISSING ..." to "ready", then `make verify-live` (billed to your account). Also
-drive it through both product
+Keying a hosted backend: append only the credential lines you hold to `.env`, one per line, for
+example `echo 'NUEXTRACT_API_KEY=...' >> .env`. Never run `cp .env.example .env`. That file ships
+`DOCLING_SERVE_URL` and `QWEN_VL_ENDPOINT` with values, so a copy marks `docling` and `qwen-vl`
+configured on a machine where neither is running. Var names are not derived from the slug: the
+`open-ocr` backend reads `OPENOCR_API_KEY`, and `azure-document-intelligence`, `aws-textract` and
+`google-document-ai` each take a multi-var credential set. `.env.example` and
+`uv run openreading backends` list the real names. Confirm `uv run openreading backends` flips the
+backend from "no / MISSING ..." to "ready", then run `make verify-live` (billed to your account).
+Also drive it through both product
 surfaces: `openreading parse sample.pdf --backend <slug>` and a `POST /v1/parse` against
 `openreading serve` with `"backend": {"id": "<slug>"}`.
 

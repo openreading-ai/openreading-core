@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, build]
+    branches: [main]
   pull_request:
 
 # Least privilege: nothing here writes to the repo. Artifacts and the step summary need no
@@ -44,7 +44,7 @@ jobs:
         # silently re-resolved on the runner.
         run: uv sync --locked --all-extras --dev
 
-      # Finding M1: a lockfile can carry a fixed-in advisory indefinitely if nothing but Dependabot
+      # A lockfile can carry a fixed-in advisory indefinitely if nothing but Dependabot
       # ever looks at it — Dependabot opens a PR but does not block the one already-green build
       # that ships a vulnerable lock. This step queries the OSV/PyPI advisory DB against the
       # resolved lock on every push/PR and fails the build on any hit (`make audit` runs
@@ -78,8 +78,8 @@ jobs:
       # Coverage is *enforced* inside `make verify` (--cov-fail-under in the Makefile) on every
       # leg above; this step only reports the measured number where people look. The README
       # badge states the enforced floor rather than this measurement, because a badge that
-      # promises a number the gate does not guarantee would be a lie; a hosted measured badge
-      # (gh-pages coverage.json + shields, the cuttlefish pattern) is a later option. The number
+      # promises a number the gate does not guarantee would be a lie. A badge that reports the
+      # measured number from a coverage.json published on gh-pages is a later option. The number
       # reported is the SAME total the gate checks — coverage's combined line+branch figure via
       # `coverage report --format=total` (pyproject sets `branch = true`; the XML's `line-rate`
       # is line-only and would overstate headroom). When it sits 2+ points above the floor the
@@ -98,7 +98,7 @@ jobs:
             echo "**${PCT}%** coverage (lines + branches) on Python 3.12 (gate: >= ${FLOOR}%, enforced by \`make verify\` on every leg)."
           } >> "$GITHUB_STEP_SUMMARY"
           echo "coverage: ${PCT}% (floor ${FLOOR}%)"
-          uv run python -c "import sys; p, f = float('${PCT}'), float('${FLOOR}'); sys.stdout.write(f'::notice title=Coverage floor can be raised::measured {p}% is {p - f:.1f} points above the {f:.0f}% floor - raise --cov-fail-under in the Makefile and the README badge together\n') if p - f >= 2 else None"
+          uv run python -c "import sys; p, f = float('${PCT}'), float('${FLOOR}'); sys.stdout.write(f'::notice title=Coverage floor can be raised::measured {p}% is {p - f:.1f} points above the {f:.0f}% floor. Raise --cov-fail-under in the Makefile and the README badge together.\n') if p - f >= 2 else None"
 
       - name: Upload coverage.xml
         if: matrix.python-version == '3.12'

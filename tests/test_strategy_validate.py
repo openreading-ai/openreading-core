@@ -421,7 +421,11 @@ def test_cli_validate_unreadable_policy_exits_3_without_a_traceback(_clean_cwd, 
         rc = main(["strategy", "validate", "--config", str(f), "--policy", str(pol)])
         assert rc == 3
         err = capsys.readouterr().err
-        assert err.startswith("[strategy validate] cannot read policy")
+        # A file that will not open and a file whose bytes are not JSON say which one failed.
+        if pol is malformed:
+            assert err.startswith(f"[strategy validate] policy {malformed} is not valid JSON")
+        else:
+            assert err.startswith("[strategy validate] cannot read policy")
         assert len(err.splitlines()) == 1
 
 

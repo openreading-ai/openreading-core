@@ -46,12 +46,15 @@ BUILTIN_ADAPTERS: dict[str, Callable[[], BackendAdapter]] = {
 
 
 def make_adapter(slug: str) -> BackendAdapter:
+    """Build one built-in adapter by slug, then refuse it when its `protocol_version` is below
+    the router's floor. An unknown slug raises `KeyError`, and a below-floor adapter raises
+    `ValueError`."""
     if slug not in BUILTIN_ADAPTERS:
         raise KeyError(f"unknown backend {slug!r}; known: {', '.join(sorted(BUILTIN_ADAPTERS))}")
     adapter = BUILTIN_ADAPTERS[slug]()
-    # Ledger T4a (AC-8), fix for review F2: this is a SECOND adapter-construction entry point,
-    # used directly at ~20 production call sites (including api.prepare_named_backend's common
-    # named-backend path) that never go through router.registry.Registry.register(). Without this,
+    # Ledger T4a (AC-8): this is the second adapter-construction entry point.
+    # `api.prepare_named_backend` and the other direct-named paths call it without ever reaching
+    # `router.registry.Registry.register()`. Without the check here,
     # a below-floor adapter built here sails through to submit()/poll() and fails later, mid-run,
     # as a raw unlabeled error instead of being refused by name here — exactly the "fails later
     # instead of by name at registration" outcome AC-8 exists to prevent.

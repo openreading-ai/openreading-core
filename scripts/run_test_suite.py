@@ -3,12 +3,12 @@ pytest-cov's own `combine()` step hits a stray, schema-incompatible coverage dat
 *mid-run* by a second, genuinely concurrent `pytest --cov` invocation on this same shared checkout
 (BL-69).
 
-`Makefile`'s `rm -f .coverage .coverage.*` (BL-61) clears any stale `.coverage(.*)` file already at
-rest before this script starts — so it can only ever guard the before-the-run case. pytest-cov's
-own `Central.finish()` (`pytest_cov/engine.py`) calls `Coverage.combine()` unconditionally at the
-end of every `--cov` run, after every real test has already run; if a sibling `.coverage.*` file
-uses the opposite schema from this repo's own (`pyproject.toml`'s `[tool.coverage.run]` sets
-`branch = false` repo-wide, so anything branch-mode found on disk is foreign), `coverage`'s own
+This script clears any stale `.coverage(.*)` file already at rest before it starts (BL-61), so that
+sweep can only ever guard the before-the-run case. pytest-cov's own `Central.finish()`
+(`pytest_cov/engine.py`) calls `Coverage.combine()` unconditionally at the end of every `--cov`
+run, after every real test has already run; if a sibling `.coverage.*` file uses the opposite
+schema from this repo's own (`pyproject.toml`'s `[tool.coverage.run]` sets `branch = true`
+repo-wide, so anything statement-mode found on disk is foreign), `coverage`'s own
 `CoverageData.update()` (`coverage/sqldata.py`) raises `DataError` — "Can't combine branch coverage
 data with statement data" or "Can't combine statement coverage data with branch data", both raised
 with `slug="cant-combine"` — from a call site inside `combine_parallel_data()`
@@ -22,7 +22,7 @@ data file(s) again and retry the whole invocation once. Any other failure — a 
 `--cov-fail-under` breach (also exit 1: `pytest_cov/plugin.py`'s own `session.testsfailed += 1`
 path, never exit 3), or an INTERNALERROR that is not this specific DataError — is never retried:
 this script exits with pytest's own real exit code, unaltered, so a genuine failure is exactly as
-loud as it was before this item.
+loud as it was before BL-69.
 
 This script takes no opinion on *which* pytest args to run — the Makefile passes its full, real
 argument list (`-m "not live" --cov=openreading ... --cov-fail-under=91`) through unchanged, so
@@ -44,7 +44,7 @@ from typing import IO
 # pytest's own internal-error exit status (`_pytest/config/__init__.py`'s `ExitCode.INTERNAL_ERROR`).
 _INTERNAL_ERROR_EXIT_CODE = 3
 
-# The two exact `coverage` DataError messages this item guards (`coverage/sqldata.py`'s
+# The two exact `coverage` DataError messages this script guards (`coverage/sqldata.py`'s
 # `CoverageData.update()`) — a schema-incompatible sibling data file, never a real assertion
 # failure, a --cov-fail-under breach, or a genuine coverage-file corruption (e.g. a "Conflicting
 # file tracer name" DataError, which this must NOT swallow).
@@ -55,8 +55,7 @@ _COMBINE_SCHEMA_MISMATCH_SIGNATURES = (
 
 
 def clear_stray_coverage_data_files() -> None:
-    """Mirror the Makefile's own `rm -f .coverage .coverage.*` (BL-61), CWD-relative like the
-    shell glob it replaces."""
+    """Remove any coverage data file at rest, CWD-relative (BL-61)."""
     for path in (Path(".coverage"), *Path().glob(".coverage.*")):
         with contextlib.suppress(FileNotFoundError):
             path.unlink()
@@ -117,7 +116,7 @@ def main(argv: Sequence[str]) -> int:
     if is_stray_combine_failure(returncode, output):
         print(
             "run_test_suite.py: pytest-cov's combine() hit a concurrent, incompatible coverage "
-            "data file (BL-69) -- clearing stray data and retrying once",
+            "data file (BL-69). Clearing stray data and retrying once",
             file=sys.stderr,
         )
         clear_stray_coverage_data_files()

@@ -1,34 +1,6 @@
 """Pydantic mirror of `strategy-config.v0.2.json`, and the reference for what `openreading.yaml`
 may contain — every node kind, every key, every gate predicate, and every validation rule.
 
-DECISIONS D-v3-6: the vendored JSON Schema is the STRICT grammar authority for the node tree
-(same posture as D4: where a pydantic model and the JSON Schema could drift, the schema wins).
-The loader validates the raw file against the schema BEFORE constructing these models. This
-module types the file's top-level shape and the deployment blocks (`policy`/`limits`/`decider`/
-`defaults`); the `strategies` map holds schema-validated raw nodes (`RawNode`). The rich,
-recursive typed node IR — Leaf/Cascade/Parallel/Route/Decide and the gate/budget models — lives
-with the normalizer (`openreading.strategies.normalize`), the stage that actually consumes it
-(shorthand→longhand, `extends`, copy-down). Keeping node typing there, not here, avoids a fragile
-recursive smart-union that would re-encode the grammar the schema already owns.
-
-Companions: `openreading.strategies` (package map, discovery, quickstart); `.engine` (what
-running a tree means: evaluation order, keep-best, cancellation, cost accounting, cache laws);
-`.signals` (the full signal catalog); `.facts` (route facts); `.decider` (the LLM decider and its
-downgrade taxonomy); `.plain` (the Plain dialect desugar); `.validate`; `.normalize`; `.presets`;
-`.calibrate`. Rationale: internal/decisions/DECISIONS.md (D-v3-*),
-internal/design/simple-strategies.md, internal/design/decider-executor.md; why the design looks
-this way — the prior-art survey — is internal/research/strategies/prior-art.md.
-
-Doc contract (D-v3-22; the docs-truth test, `tests/test_docs_truth.py`): every fenced YAML block
-in this docstring — and in the `openreading.strategies` package, `engine`, `signals`, `decider`,
-`presets`, and `plain` docstrings — is extracted and must pass `desugar_config` +
-`validate_config` with no errors (the world-consistency half of `strategy validate`; the test
-does NOT run the loader's JSON-Schema pass — which is how the §2.8 `extends` example survives
-it), so a docstring edit that breaks that contract fails `make verify`. Config-like blocks are
-wrapped into a full config with referenced-but-undefined strategy names stubbed; bare gate /
-error maps, a `{pick, judge}` options snippet, and the preset-definition showcase are skipped, and
-a floor assertion on the block count keeps the classifier from passing vacuously.
-
 A **strategy** is a named recipe for which backends run — in what order or in parallel — and
 when to move on. The file draws rails (eligible actions, thresholds, budgets); any executor — the
 deterministic engine or an LLM decider — walks the same tree inside those rails and leaves the
@@ -45,7 +17,37 @@ same auditable trace. Three laws frame everything below:
 
 The DSL is deliberately sub-Turing: no `Next:` pointers, no loops, no variables, no expression
 language. If a future version ever adds expressions it will be a single existing language (CEL)
-behind a single `expr:` key; nothing in v0.1 depends on it.
+behind a single `expr:` key; nothing in the shipped grammar depends on it.
+
+DECISIONS D-v3-6: the vendored JSON Schema is the STRICT grammar authority for the node tree
+(same posture as DECISIONS D4: where a pydantic model and the JSON Schema could drift, the schema wins).
+The loader validates the raw file against the schema BEFORE constructing these models. This
+module types the file's top-level shape and the deployment blocks (`policy`/`limits`/`decider`/
+`defaults`); the `strategies` map holds schema-validated raw nodes (`RawNode`). The rich,
+recursive typed node IR — Leaf/Cascade/Parallel/Route/Decide and the gate/budget models — lives
+with the normalizer (`openreading.strategies.normalize`), the stage that actually consumes it
+(shorthand→longhand, `extends`, copy-down). Keeping node typing there, not here, avoids a fragile
+recursive smart-union that would re-encode the grammar the schema already owns.
+
+Companions: `openreading.strategies` (package map, discovery, quickstart); `.engine` (what
+running a tree means: evaluation order, keep-best, cancellation, cost accounting, cache laws);
+`.signals` (the full signal catalog); `.facts` (route facts); `.decider` (the LLM decider and its
+downgrade taxonomy); `.plain` (the Plain dialect desugar); `.validate`; `.normalize`; `.presets`;
+`.calibrate`. Rationale: internal/decisions/DECISIONS.md (D-v3-*),
+internal/design/simple-strategies.md, internal/design/decider-executor.md; why the design looks
+this way — the prior-art survey — is internal/research/strategies/prior-art.md. "The spec" below
+means internal/archive/reference-docs-2026-08/strategies/spec.md, the design document this
+grammar was written from. Where that document and the engine disagree, the engine is what ships.
+
+Doc contract (D-v3-22; the docs-truth test, `tests/test_docs_truth.py`): every fenced YAML block
+in this docstring — and in the `openreading.strategies` package, `engine`, `signals`, `decider`,
+`presets`, and `plain` docstrings — is extracted and must pass `desugar_config` +
+`validate_config` with no errors (the world-consistency half of `strategy validate`; the test
+does not run the loader's JSON-Schema pass), so a docstring edit that breaks that contract fails
+`make verify`. Config-like blocks are wrapped into a full config with referenced-but-undefined
+strategy names stubbed; bare gate / error maps, a `{pick, judge}` options snippet, and the
+preset-definition showcase are skipped, and a floor assertion on the block count keeps the
+classifier from passing vacuously.
 
 
 1. File, discovery, precedence
@@ -59,7 +61,6 @@ with `yaml.safe_load` only (D-v3-1: a config file may never construct arbitrary 
 `pyyaml` is imported lazily so the no-config path never pays the import). Top level:
 
 ```yaml
-# yaml-language-server: $schema=https://schemas.openreading.ai/strategy-config.v0.1.json
 version: 1                    # required — config format version (additive evolution)
 
 policy:                       # optional — superset of the existing --policy JSON, same flat keys
@@ -340,8 +341,8 @@ require: all                   # pick best/merge: how many non-shadow branches m
   stagger — the branch always launches (barring deadline). The spec asks for a sibling's *failure*
   to shortcut the remaining delay; the engine has no such wake — a parked hedge sleeps its full
   `start_after` even after every earlier sibling has failed (`.engine`, parallel evaluation §2).
-  v0.1 requires explicit durations — no `auto` (engine-observed percentiles are a named roadmap
-  extension once latency telemetry exists).
+  As shipped, `start_after` takes an explicit duration and rejects `auto`. Engine-observed
+  percentiles are a roadmap extension that waits on latency telemetry.
 - `shadow: true` (per branch) [bool; default `false`] — The branch runs and is fully recorded but is
   excluded from `pick` and can never win; a shadow is always drained. Combine with a route rule on
   `sample_percent` for deterministic audit sampling.
@@ -353,7 +354,7 @@ require: all                   # pick best/merge: how many non-shadow branches m
 - `merge` [object; default absent] — `{typed_fields: vote, text: best}` — the only merge policy
   (§2.4), spelled out for readability.
 
-2.4 `pick: merge` (ensemble), v0.1 scope
+2.4 `pick: merge` (ensemble), as shipped
 ----------------------------------------
 
 Merges `typed_fields` only: per field, majority value across branches; tie → highest reported
@@ -361,7 +362,8 @@ confidence; still tied → cheaper backend (descriptor cost midpoint), then firs
 `document.text/markdown/pages` are taken wholesale from the best-scoring branch (recorded as
 `merge_base` in the trace). Merged fields carry per-field provenance in the trace; a channel no
 branch produced stays absent, and a merged response never fabricates confidence for values whose
-source had none. Text-level alignment voting and block-structure merge are out of scope for v0.1.
+source had none. Text-level alignment voting and block-structure merge are out of scope for the
+shipped merge.
 
 2.5 Route (`route:`)
 --------------------
@@ -447,24 +449,13 @@ page-range support forces document granularity for that rung (validation warns).
 
 `strategies:` is a flat library; deep nesting becomes named references.
 
-**`extends:` is designed, not shipped as a file key.** The example below is the spec's; the
-vendored v0.2 schema has no `extends` property on any node form, so a file containing it fails
-schema validation in the loader (`invalid config at 'strategies/invoices': {...} is not valid
-under any of the given schemas` — exit 3 from every `strategy` subcommand). The merge itself
-exists (`normalize._resolve_extends`, exercised by tests against in-memory `StrategyConfig`s),
-and the block passes the docs-truth test only because that test bypasses the schema. Treat it as
-a stale example the grammar rejects until the schema gains the key.
-
-```yaml
-strategies:
-  base_cheap:
-    budget: { max_duration: 30s }
-    steps: [pymupdf, reducto]
-    escalate_if: default
-  invoices:
-    extends: base_cheap                  # schema-level reuse — never YAML anchors
-    budget: { max_duration: 2m }         # field-level override
-```
+**`extends:` is designed, not shipped as a file key.** The vendored v0.2 schema carries no
+`extends` property on any node form. A file that declares one fails schema validation in the
+loader, which prints `invalid config at 'strategies/invoices': {...} is not valid under any of
+the given schemas` and exits 3 from every `strategy` subcommand. The merge itself exists as
+`normalize._resolve_extends`, which tests exercise against in-memory `StrategyConfig` objects.
+To reuse a preset today, run `openreading strategy show <name>` and paste the printout into your
+own file.
 
 - `extends: <name>` (the normalize-level semantics) copies another strategy (built-in presets
   included) then applies a shallow, field-level merge: a re-declared top-level clause replaces
@@ -528,7 +519,7 @@ definitions, availability, and computation notes; this section is the binding su
   match.
 - `compliance.<field>` [bool/string] — source: the post-union effective compliance (request ∪
   `--policy` ∪ file `policy:`, most-restrictive-wins — the same constraint set that pruned the
-  tree). Consequence: a file `policy:` key makes its matching fact constant for every request.. If
+  tree). Consequence: a file `policy:` key makes its matching fact constant for every request. If
   unavailable: always available.
 - `sample_percent` [number 0–100] — source: deterministic sha256(document bytes) bucket — stable per
   input, idempotency-cache compatible. If unavailable: always available once materialized.
@@ -552,28 +543,28 @@ no-change law binds):
   (the probe does not measure image area; "no text + an image ≈ a scanned page")
 - `text_source: none` — text-layer analysis on PDF inputs. The gate value enum is exactly
   `prior_ocr | none`; `digital` is what the probe reports for a text-bearing PDF, never a gate
-  value (the schema rejects it at load). v0.3 classifies only `digital` (any page has extractable
-  text) vs `none`; `prior_ocr` (an invisible OCR layer over a scan, lower-trust) needs render-mode
-  / image-coverage analysis pypdf does not expose, and the naive "text + any image" heuristic
-  false-positives on a born-digital page with a decorative image, so a `text_source: prior_ocr`
-  gate is evaluated but never matches (D-v3-9)
+  value (the schema rejects it at load). The probe classifies only `digital` (any page has
+  extractable text) vs `none`; `prior_ocr` (an invisible OCR layer over a scan, lower-trust)
+  needs render-mode / image-coverage analysis pypdf does not expose, and the naive
+  "text + any image" heuristic false-positives on a born-digital page with a decorative image,
+  so a `text_source: prior_ocr` gate is evaluated but never matches (D-v3-9)
 - `table_sanity_below: F` — ragged-row / empty-cell composite over emitted tables
 - `zero_blocks: true` — no blocks emitted
 - `matches_regex: "..."` — user regex over document text
 - `sample_percent: N` — same deterministic bucket as §3.1 (audit escalation)
 
-**Cross-branch — `pick: best` parallel steps only.** `disagreement_over: F` (v0.2 schema; the
-Plain `disagree` criterion, §11) is neither Tier 1 nor Tier 2: the engine injects it into the
-snapshot only when gating a `pick: best` parallel step's winner, as the worst pairwise
-1 − token-set Jaccard of `document.text` across the finished non-shadow branches. Writing it on
-any other node's gate is a `strategy validate` ERROR ("disagreement_over compares parallel
-branches — it only works on a `pick: best` parallel step"; Plain likewise confines `disagree` to
-a `compare:` body, §11) — not an inert signal. At run time it is absent from a single-response
-probe and when fewer than two branches finished, where it is an unavailable signal — never
-fires, traced `signal_unavailable` (§3.3). The value is also recorded on the winner attempt as
-telemetry.
+**Cross-branch — `pick: best` parallel steps only.** `disagreement_over: F` (added in
+`strategy-config.v0.2.json`; the Plain `disagree` criterion, §11) is neither Tier 1 nor Tier 2:
+the engine injects it into the snapshot only when gating a `pick: best` parallel step's winner,
+as the worst pairwise 1 − token-set Jaccard of `document.text` across the finished non-shadow
+branches. Writing it on any other node's gate is a `strategy validate` ERROR ("disagreement_over
+compares parallel branches — it only works on a `pick: best` parallel step"; Plain likewise
+confines `disagree` to a `compare:` body, §11) — not an inert signal. At run time it is absent
+from a single-response probe and when fewer than two branches finished, where it is an
+unavailable signal — never fires, traced `signal_unavailable` (§3.3). The value is also recorded
+on the winner attempt as telemetry.
 
-**Tier 2 — backend-reported, present only when the envelope carries them:**
+**Tier 2 — backend-reported, present only when the backend's response carries them:**
 
 - `confidence_below: F` — mean over the pages that REPORT a `pages[].confidence` (aggregation
   defined once, in the engine); the signal is absent when no page reports one
@@ -621,6 +612,9 @@ telemetry.
 
 4. Gate syntax and combination rules
 ====================================
+
+A **gate** is a map of quality conditions attached to a cascade step. The engine evaluates it
+against that step's normalized result and decides whether to accept the result or move on.
 
 4.1 Polarity — the one rule to memorize
 ---------------------------------------
@@ -865,7 +859,7 @@ contract. Every shorthand round-trips: `normalize(shorthand) = longhand`;
 ======================================================================
 
 The grammar and the `Advanced` / `CircuitBreaker` models below accept `defaults.advanced`, but
-NO code reads it in v0.3: the block is schema-validated and then ignored. Concretely —
+NO code reads it as shipped: the block is schema-validated and then ignored. Concretely —
 
 - `circuit_breaker: {max_fails, cooldown}` — Reserved for a per-backend, process-level
   consecutive-failure breaker (design intent: 5 fails / 30s multiplicative cooldown, one half-open
@@ -894,8 +888,8 @@ file) is exit 3 in every `strategy` subcommand. "no openreading.yaml found" is e
 `validate`, `normalize`, and `plan`; `show` and `list` fall back to the presets alone and exit 0.
 
 Two error tiers. The run path (`api`, the server, `prune.compile_strategy`, the engine) runs
-only the first: `validate_config` is called by `strategy validate` and the web UI's strategies
-panel, never by a run. The spec called every row below "load-time"; only the first tier is.
+only the first: `validate_config` is called by `strategy validate`, never by a run. The spec
+called every row below "load-time"; only the first tier is.
 
 **Grammar errors** (JSON Schema in the loader — the file will not load; `ConfigError`):
 
@@ -957,10 +951,11 @@ The config schema is vendored at `src/openreading/schemas/strategy-config.v0.2.j
 predicate additively — the config `version` const stays `1`) — the same schema-authority
 convention as request/response/descriptor (and the same wheel force-include gotcha). Shorthands
 are encoded as titled `oneOf: [string, array, object]` branches so editor completion stays clean.
-It is served for `# yaml-language-server: $schema=` modelines and submitted to SchemaStore under
-the `openreading.yaml` filename pattern — zero-setup autocomplete and inline validation. Schema
+For completion and inline validation in your editor, point a `# yaml-language-server: $schema=`
+modeline at the vendored file. Use the path in your checkout or the copy inside the installed
+package. Nothing serves the schema over HTTP, and SchemaStore carries no entry for it. Schema
 `description` strings are written at tool-description quality: they are simultaneously editor
-hovers, the company web UI's labels, and LLM-decider context — one sentence, three consumers.
+hovers and LLM-decider context, so one sentence serves two consumers.
 
 
 11. The Plain dialect
@@ -1001,7 +996,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # A raw strategy node exactly as it appears in the file after schema validation: a bare string
 # (backend id / "auto" / "strategy:<name>"), a list (cascade shorthand), or a map form. The typed
-# node models arrive in normalize.py (11.2).
+# node models arrive in normalize.py.
 RawNode = str | list[Any] | dict[str, Any]
 
 
@@ -1049,7 +1044,7 @@ class Limits(BaseModel):
 
 class StrategyConfig(BaseModel):
     """The parsed, schema-valid openreading.yaml. `strategies` holds raw nodes (RawNode);
-    normalize.py (11.2) turns each into the canonical typed longhand tree."""
+    normalize.py turns each into the canonical typed longhand tree."""
 
     model_config = ConfigDict(extra="forbid")
 

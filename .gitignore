@@ -38,21 +38,30 @@ htmlcov/
 # scratch
 *.tmp
 scratch/
-at.html
+# Claude Code writes one per-user settings file, and this repository ships CLAUDE.md.
+.claude/settings.local.json
 
-# local compare artifacts — per-backend parse outputs (a.json, b.json, …) stay local
-/[a-z].json
+# The README and the subsystem guides redirect their output into the clone root, which leaves
+# names like pymupdf.json, sample.pdf, openreading.yaml, run.log and .openreading/ behind.
+# None of it is source, so a newcomer sees a clean `git status` after a first parse.
+# A new root file that one of these patterns covers needs `git add -f` to be tracked.
+/*.json
+/*.pdf
+/*.yaml
+/*.txt
+/*.log
+/.openreading/
 
-# local test corpus + all batch/compare outputs (samples/.runs/*.json) — never committed.
-# Add your own docs (any format) under samples/; run scripts/batch_demo.sh.
+# Your own test corpus, and every batch or compare output it produces (samples/.runs/*.json).
+# Put the documents you want to try under samples/, then run scripts/batch_demo.sh.
 samples/
 
-# Working documents — design specs, implementation plans, scratch notes.
-#
-# Deliberately NOT tracked. Documentation that describes the system lives in the code as module
-# docstrings, so it sits next to what it describes and goes stale loudly instead of quietly
-# (AGENTS.md). Anything here worth keeping is either distilled into a module doc or moved to the
-# private `openreading` company repo (design/, runs/, research/) — never committed as a file here.
+# This directory holds working documents: design specs, implementation plans, scratch notes.
+# It is not tracked, and that is deliberate. Documentation that describes the system lives in
+# the code as a module docstring, so it sits next to what it describes and goes stale loudly
+# instead of quietly (AGENTS.md). Anything here worth keeping is distilled into a module
+# docstring, or moved to the private `openreading` company repo (design/, runs/, research/),
+# never committed as a file here.
 /docs/
 
 # Local git worktrees for isolated feature work.

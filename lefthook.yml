@@ -1,12 +1,14 @@
-# Local safety net — skippable with `git commit/push --no-verify`, or by never running
-# `uv run lefthook install`. The real gate is CI on main (.github/workflows/ci.yml), which runs
-# the same `make verify` on every push and pull request.
+# These hooks are a local safety net. Skip them with `git commit --no-verify` or
+# `git push --no-verify`, or by never running `uv run lefthook install`. The real gate is CI
+# (.github/workflows/ci.yml), which runs the same `make verify` on every pull request and on
+# every push to main.
 #
 # One-time per clone:  uv run lefthook install
 #
-# pre-commit is fast and scoped to staged files; pre-push runs the whole offline gate (~1-2 min,
-# no keys, no network). post-merge / post-checkout only *tell* you when uv.lock moved — they never
-# run `uv sync` for you, because on a shared checkout the account that syncs owns the venv.
+# pre-commit is fast and scoped to the staged files. pre-push runs the whole offline gate,
+# which takes one to two minutes and needs no keys and no network. post-merge and
+# post-checkout only tell you when uv.lock moved. They never run `uv sync` for you, because
+# on a shared checkout the account that syncs owns the venv.
 pre-commit:
   parallel: true
   commands:
@@ -37,7 +39,8 @@ post-merge:
 post-checkout:
   commands:
     lock-drift:
-      # {1} {2} are the previous and new HEAD git passes to the hook ({0} would be all args joined).
+      # {1} and {2} are the previous and the new HEAD that git passes to the hook.
+      # ({0} would be all of the hook's arguments joined into one string.)
       run: |
         if [ "{1}" != "{2}" ] && git diff --name-only {1} {2} -- uv.lock 2>/dev/null | grep -q uv.lock; then
           echo ">> uv.lock differs on this checkout: run \`make sync\` before running anything."

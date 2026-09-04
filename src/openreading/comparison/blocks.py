@@ -1,4 +1,4 @@
-"""Dimension D — structural delta (DESIGN §4D). Per page, align blocks (align.py) and classify:
+"""Dimension D, the structural delta. Per page, align blocks (align.py) and classify:
 matched (with type/position conflicts and confidence gaps), block_missed (any capable subject
 lacking a block another capable subject has, majority or not — BL-71), block_unique (only one
 capable subject has it). Subjects with no blocks are `not_capable` here and excluded — a
@@ -7,7 +7,8 @@ shared `evals.scorers.table_grid`.
 
 Two-subject alignment is symmetric via `align_pair`. For N>2 subjects, alignment is anchored on
 the first capable subject (D-v4-13). Full N-way clustering with cross-granularity merge is not
-built (E5), and `unaligned_ratio` surfaces how much the heuristic left unmatched.
+built, and `unaligned_ratio` surfaces how much the heuristic left unmatched. The four dimensions
+and this one's place among them are stated in the `openreading.comparison` docstring.
 """
 
 from __future__ import annotations
@@ -62,10 +63,10 @@ def _subject_text_on_page(resp: dict[str, Any], pn: int) -> str:
 
 
 def _content_present(block: dict[str, Any], resp: dict[str, Any], pn: int) -> bool:
-    """Tranche 1 (§9): is this block's text present in the subject's own page text? If so, a
-    'miss' is a packaging/granularity difference (the words are there, packaged differently), not
-    content loss — the finding demotes from warn to info. The `structure` finding CATEGORY lands
-    with comparison-report v0.2 in Phase C; Phase 0 demotes severity within v0.1's closed enums."""
+    """Is this block's text present in the subject's own page text? If so the 'miss' is a
+    packaging difference, because the words are there and only the segmentation differs. It is not
+    content loss, so `_missed` reports it under the informational `structure` code rather than
+    `block_missed`."""
     needle = normalize_block_text(block.get("text") or "")
     return bool(needle) and needle in _subject_text_on_page(resp, pn)
 
@@ -190,8 +191,8 @@ def blocks_section(
     if total_blocks:
         alignment["unaligned_ratio"] = round((total_blocks - aligned) / total_blocks, 4)
     # else: nothing was attempted (fewer than two subjects were block-capable) — BL-58: omit the
-    # ratio rather than default to 0.0, which would misread as "perfectly aligned" (DESIGN §5's
-    # honesty-signal promise for this field).
+    # ratio rather than default to 0.0, which would misread as "perfectly aligned". The ratio is
+    # an honesty signal, so a value it never measured must not be invented.
     return {"pages": page_summaries}, findings, warnings, alignment
 
 
@@ -259,9 +260,9 @@ def _missed(
     label: str, pn: int, block: dict[str, Any], present: int, *, packaging: bool = False
 ) -> dict[str, Any]:
     if packaging:
-        # Tranche 2 (comparison-report v0.2): content is present in the subject's text — a
-        # granularity/packaging difference, not a content miss → the dedicated informational
-        # `structure` code (was an info-severity block_missed in the tranche-1 stopgap).
+        # Content is present in the subject's own text, so this is a granularity difference and
+        # not a content miss. It gets the dedicated informational `structure` code, which the
+        # comparison-report v0.2 finding enum carries.
         return {
             "code": "structure",
             "severity": "info",
@@ -270,8 +271,8 @@ def _missed(
             "bbox": None,
             "subjects": [label],
             "detail": (
-                f"{label} packages this {_block_type(block)} block's text differently — the content "
-                f"is present in {label}'s text, so this is a granularity/packaging difference, not a "
+                f"{label} packages this {_block_type(block)} block's text differently. The content "
+                f"is present in {label}'s text, so this is a granularity difference, not a "
                 f"content miss"
             ),
             "snippet": _excerpt(block) or None,

@@ -633,7 +633,7 @@ class _WalkCtx:
     # not a fresh real-wall-clock one). Safe for a stateless real clock and a FakeClock in auto-advance mode;
     # NOT safe for a coordinated FakeClock backing a real (non-INLINE) branch that needs an actual
     # backoff sleep inside that boundary — see router/clock.py's own FakeClock docstring for the
-    # cross-event-loop deadlock this can hit (Phase C round-1, alex-phasec F2).
+    # cross-event-loop deadlock this can hit.
     clock: Clock
     trace: Trace
     trees: dict[str, dict[str, Any] | None]
@@ -977,8 +977,7 @@ async def _resolve_decision_point(
     own cooperative scheduling means a coroutine's synchronous stretch between two `await` points
     can never be interleaved by a sibling task, so today's call sites (each reading the record
     immediately after this call returns, no intervening `await`) are already safe under `[-1]`
-    indexing (Phase C round-1, alex-phasec F1, reproduced with a 12-branch/500-trial repro finding
-    zero violations). By-reference return removes the DEPENDENCY on that invariant continuing to
+    indexing. By-reference return removes the DEPENDENCY on that invariant continuing to
     hold as the engine evolves, rather than closing an exploitable gap that exists today."""
     sig = {k: v for k, v in (signals or {}).items() if k not in ctx.mask_fields}
     if typed_fields:  # masked ONCE here → both the port input (dp) and the log see the masked set
@@ -1132,7 +1131,7 @@ class _BranchOutcome:
     # default to values reproducing today's behavior for any path that doesn't populate them. A
     # composite branch (never calls ctx.exec() at its own level — it recurses through _eval_node)
     # keeps journal_seq=None structurally, an explicit, disclosed exclusion from the journal_seq
-    # tie-break below (round-3 alex F11): a composite-vs-leaf tie stays index-order, unchanged.
+    # tie-break below: a composite-vs-leaf tie stays index-order.
     journal_seq: int | None = None
     replayed: bool = False
 
@@ -1206,7 +1205,7 @@ async def _eval_parallel(
                 # `_CANCEL_DISPATCH_EXECUTOR`'s own comment for why that distinction is load-
                 # bearing, not stylistic).
                 #
-                # BL-164 review round 2 (High): concurrency alone doesn't cap the TOTAL
+                # BL-164: concurrency alone doesn't cap the TOTAL
                 # wait — a single slow vendor cancel could still extend the response past the
                 # node's own deadline, breaking the exact Law 6 promise `_drain` already keeps for
                 # a drained loser ("the response never blocks past the node deadline"). Bounded on
@@ -1325,7 +1324,7 @@ async def _run_branch(
     # real response (live or reconstructed from a replay's own blob-resolved JSON); anything else
     # ("skipped"/"cancelled" — "failed" always raises above instead of reaching here) is a real,
     # journaled non-dispatch outcome, not a crash on `_branch_quality(None, ...)`/`_actual_cost
-    # (None)` the way a bare `None` return used to produce (round-2 F6/F7).
+    # (None)`.
     if result.status != "ok":
         status = (
             "skip" if result.status == "skipped" else result.status
@@ -1503,7 +1502,7 @@ def _cancel_webhook_loser(ctx: _WalkCtx, branch: Any, label: str, path: str) -> 
     ctx.trace.webhook_dropped.append({"backend": backend, "node": f"{path}.parallel"})
 
 
-# BL-164 review round 2 (High): dispatching a loser's cancel via `asyncio.to_thread` (the
+# BL-164: dispatching a loser's cancel via `asyncio.to_thread` (the
 # event loop's own DEFAULT executor) means an abandoned-past-deadline future is still tracked by
 # `asyncio.run()`'s own shutdown sequence (`shutdown_default_executor()`), which WAITS for every
 # outstanding default-executor future before returning — even one this function has already
@@ -1525,7 +1524,7 @@ def _swallow_abandoned_cancel_result(future: asyncio.Future) -> None:
     cannot forcibly stop a running thread) once it eventually finishes on its own, unawaited — so
     Python doesn't log an "exception was never retrieved" warning when it does.
 
-    BL-164 review round 3: confirmed by direct execution that this callback is NEVER
+    BL-164: this callback is never
     actually invoked in `run_strategy`'s own architecture — CPython's `asyncio.futures`-internal
     future-chaining silently discards the completion once the per-call event loop this future was
     scheduled on has already closed (which it always has, by the time an abandoned future finishes
@@ -1814,7 +1813,7 @@ def _resolve_parallel(
         bk = r.backend or labels.get(i, "?")
         if r.status.startswith("composite"):
             if i != winner and r.status == "composite_ok":
-                # BL-134/Alex: a composite branch's real spend lives on its nested response's own
+                # BL-134: a composite branch's real spend lives on its nested response's own
                 # usage, never on _BranchOutcome.cost (_run_branch's own composite construction
                 # never passes cost=, so it is always None there) — a composite branch that LOSES
                 # pick: best/merge, or that SHADOWS and completes within the node deadline, must
@@ -2338,20 +2337,17 @@ async def _eval_cascade(
         # a leaf step
         rr = await _run_leaf(step, spath, ctx, deadline_ms)
         if rr.status == "skip":
-            # Ledger T3 (§4.0/§4.3b), corrected Phase C round 1 (two reviewers independently): a
-            # skip — live or replayed — always fails over to the next rung, exactly as a live skip
-            # always has. An earlier version special-cased `rr.replayed` to `return
-            # Outcome.err("missing_credentials")` instead, reasoning it was needed for AC-15's
-            # "terminal on resume" guarantee — but that guarantee is already fully delivered one
-            # layer down, by InlineExecutor.exec's own replay branch: a replayed missing-credentials
-            # skip never re-attempts a live dispatch, regardless of what a live credentials re-check
-            # would say today; it just returns the recorded skip outcome. The special case added no
-            # protection AC-15 needed and instead abandoned any LATER rung's own independently-
-            # terminal record without ever consulting it — turning an ordinary, already-successful
-            # multi-rung cascade (an early rung skipped for missing credentials, a later rung
-            # succeeded) into a hard `PlanExhaustedError` on the very next resume. `continue` is the
-            # whole fix: it falls through to this same rung's own next iteration, which replays that
-            # later rung's terminal record exactly as it would live.
+            # Ledger T3 (§4.0/§4.3b): a skip, live or replayed, always fails over to the next
+            # rung, exactly as a live skip always has. AC-15's "terminal on resume" guarantee
+            # is delivered one layer down, by InlineExecutor.exec's own replay branch, where a
+            # replayed missing-credentials skip returns the recorded outcome and never
+            # re-attempts a live dispatch. Turning a replayed skip into
+            # `Outcome.err("missing_credentials")` here would abandon any later rung's own
+            # terminal record without consulting it, so an ordinary multi-rung cascade (an
+            # early rung skipped for missing credentials, a later rung succeeded) would become
+            # a hard `PlanExhaustedError` on the very next resume. `continue` falls through to
+            # this rung's own next iteration, which replays that later rung's record exactly
+            # as it would live.
             continue
         if rr.status == "exhausted":
             if on_error_action("exhausted", step.get("on_error"), cascade_on_error) == "fail":
@@ -2379,7 +2375,7 @@ async def _eval_cascade(
         # not new to T2). By-reference is defensive hardening against a sibling parallel branch's
         # own concurrent attempt append, not a fix for a proven live bug there — asyncio's
         # cooperative scheduling means that specific interleaving cannot happen today (see
-        # `_resolve_decision_point`'s own docstring; Phase C round-1, alex-phasec F1).
+        # `_resolve_decision_point`'s own docstring).
         assert rr.attempt is not None
         leaf_attempt = rr.attempt
         leaf_attempt.bind_gates(g.records)
@@ -2433,8 +2429,7 @@ class _RunResult:
     # re-deriving "the last one" via `ctx.trace.attempts[-1]`. Defensive hardening, not a fix for a
     # proven live bug: asyncio's cooperative scheduling means a sibling parallel branch's own
     # attempt append cannot actually interleave between this call returning and its caller reading
-    # `[-1]` today (Phase C round-1, alex-phasec F1, reproduced with zero violations across 12
-    # branches / 500 trials) — this removes the DEPENDENCY on that invariant, it doesn't close an
+    # `[-1]` today. This removes the DEPENDENCY on that invariant, rather than closing an
     # exploitable gap.
     attempt: Attempt | None = None
     # Ledger T3 (§4.0): the leaf's own ExecResult.journal_seq/replayed — additive, default to
@@ -2508,12 +2503,16 @@ async def _run_leaf(
         return _RunResult("error", backend, error_class=cls)
 
     if result.status != "ok":
-        # "skipped" (missing_credentials, live or replayed) — a cascade leaf's own step_path is
-        # never subject to task cancellation (only a `parallel:` branch can be), so "cancelled"
-        # is structurally unreachable here; treated the same as "skipped" defensively rather than
-        # left to crash on an unhandled status.
-        detail = ",".join(missing) if missing else "replayed"
-        ctx.trace.record(Attempt(backend, "skipped(missing_credentials)", path, detail=detail))
+        # Two non-dispatch outcomes reach here. "skipped" is missing credentials, live or
+        # replayed. "cancelled" arrives only by replay: interrupting the process cancels the
+        # running leaf's task, InlineExecutor.exec journals a `cancelled` record, and a resume
+        # replays that record instead of re-dispatching the rung. Each keeps its own category,
+        # because a rung that was interrupted was not short of a credential.
+        if result.status == "cancelled":
+            ctx.trace.record(Attempt(backend, "skipped(cancelled)", path, detail="replayed"))
+        else:
+            detail = ",".join(missing) if missing else "replayed"
+            ctx.trace.record(Attempt(backend, "skipped(missing_credentials)", path, detail=detail))
         return _RunResult("skip", backend, journal_seq=result.journal_seq, replayed=result.replayed)
 
     resp = _response_payload(result)
@@ -2543,7 +2542,7 @@ def _step_id(run_id: str, step_path: str, step_seq: int) -> str:
     only form of the key that leaves the process, so it must be deterministic: the same
     `(run_id, step_path, step_seq)` re-journaled (a re-executed walk, a future distributed
     executor's at-least-once redelivery) has to land on the identical `step_id`, which a random
-    UUID structurally cannot do (Phase C round-1, F1)."""
+    UUID structurally cannot do."""
     h = hashlib.sha256()
     h.update(run_id.encode())
     h.update(b"\x00")
@@ -2569,8 +2568,8 @@ def _step_request(
     (streamed for a local path) — never from `document_identity`'s machine-local
     `(realpath, size, mtime_ns)` blob for a path: §5.5 ("Three identities, deliberately distinct")
     names this as the one identity Ledger must not reuse, since a run relocated to a different
-    worker would otherwise compute a different key for byte-identical content (Phase C round-1,
-    F2). `idempotency_key` falls back to the same value unless the caller supplied its own.
+    worker would otherwise compute a different key for byte-identical content.
+    `idempotency_key` falls back to the same value unless the caller supplied its own.
 
     `missing_credentials` (Ledger T3 §4.3b): the caller's own `readiness.missing_required(desc,
     rc)` result, threaded through so `InlineExecutor.exec`'s missing-credentials gate can journal

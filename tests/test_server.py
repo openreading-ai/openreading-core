@@ -53,6 +53,10 @@ def test_backends_lists_all_with_readiness(client, monkeypatch):
         "slug",
         "type",
         "extra_installed",
+        # `extra_installed` is a boolean that points a reader at the pip extra, but for a
+        # subprocess backend it also goes false when a system binary is off PATH, and the pip
+        # extra is not the fix for that. `missing_deps` names whatever did not resolve.
+        "missing_deps",
         "creds_found",
         "creds_missing",
         "ready",
@@ -64,6 +68,20 @@ def test_backends_lists_all_with_readiness(client, monkeypatch):
     assert rows["reducto"]["liveness_probe"] == "none"  # no free vendor liveness call
     assert rows["docling"]["liveness_probe"] == "endpoint"
     assert rows["reducto"]["ready"] is True  # key present
+
+
+def test_backends_names_a_missing_system_binary(client, monkeypatch):
+    """A subprocess backend whose binary is off PATH used to report `extra_installed: false` and
+    nothing else, which sends the reader to `uv sync --extra tesseract` when the fix is
+    `brew install tesseract`. The row now carries what actually did not resolve."""
+    import openreading.adapters.tesseract.adapter as tess
+
+    monkeypatch.setattr(tess.shutil, "which", lambda name: None)
+
+    row = {b["slug"]: b for b in client.get("/v1/backends").json()}["tesseract"]
+
+    assert row["extra_installed"] is False
+    assert any("tesseract binary" in d for d in row["missing_deps"])
 
 
 def test_parse_pymupdf_returns_schema_valid_response(client):
@@ -123,6 +141,20 @@ def test_parse_unknown_backend_is_404(client):
     # schema allows any string id, so this reaches make_adapter → KeyError → 404
     assert r.status_code == 404
     assert r.json()["error"]["category"] == "unknown_backend"
+    # `str()` of a KeyError is the repr of its argument, so the sentence used to arrive on the
+    # wire wrapped in a second pair of quotes.
+    assert r.json()["error"]["message"].startswith("unknown backend")
+
+
+def test_parse_schema_failure_is_one_line_not_the_whole_schema(client):
+    """Forgetting `document` is the commonest first call anyone makes, and `str()` of a
+    `jsonschema.ValidationError` appends the entire vendored request schema after the one useful
+    line. The 400 body was 54 KB, of which the first sentence was all anybody read."""
+    r = client.post("/v1/parse", json={})
+
+    assert r.status_code == 400
+    assert r.json()["error"]["message"] == "'document' is a required property at $"
+    assert len(r.content) < 500
 
 
 def test_parse_missing_credentials_is_424(client, monkeypatch):
@@ -305,6 +337,19 @@ def test_compare_refuses_a_body_bigger_than_the_text_it_would_diff(client, monke
 
     assert r.status_code == 400
     assert "exceeds" in r.json()["error"]["message"]
+
+
+def test_compare_refuses_a_file_path_in_responses(client):
+    """`openreading.comparison.compare` reads a string element as a local path, which over HTTP
+    is a remote file-read primitive on a server whose caller auth is off by default. The refusal
+    text used to report whether the file existed and whether it held JSON, so a caller could
+    probe the filesystem one 400 at a time. The endpoint takes envelopes only."""
+    r = client.post("/v1/compare", json={"responses": ["/etc/hosts", "/etc/hosts"]})
+
+    assert r.status_code == 400
+    message = r.json()["error"]["message"]
+    assert "envelopes" in message
+    assert "/etc/hosts" not in message  # never echoes what it was asked to open
 
 
 def test_compare_under_the_body_cap_is_never_rejected_for_size(client, monkeypatch):
@@ -491,7 +536,7 @@ def test_route_tier_gated_baa_needs_the_deploy_env_confirmation(client, monkeypa
 def test_a_stored_job_never_retains_the_document_payload(client):
     """A JobRecord held the FULL submitted request -- base64 document bytes and
     `document.password` -- for as long as the record existed. A terminal one at least aged out on
-    the TTL; a RUNNING one had no bound at all beyond the global job cap, so a hosted deployment
+    the TTL; a RUNNING one had no bound at all beyond the global job cap, so a long-running server
     kept every in-flight document, and its password, resident. The record now keeps the request
     stripped of exactly the fields the ledger already refuses to persist, which is all its
     remaining readers ever wanted from it."""
@@ -508,8 +553,8 @@ def test_a_stored_job_never_retains_the_document_payload(client):
 
 def test_the_job_cap_is_per_principal_not_only_global(monkeypatch):
     """`_MAX_ASYNC_JOBS` is one global counter, so a single caller filling the store 429s every
-    other caller — a cross-tenant denial of service the moment more than one principal shares a
-    deployment. Each configured key now carries its own allowance as well."""
+    other caller. Two principals sharing one server are enough for one to deny service to the
+    other. Each configured key now carries its own allowance as well."""
     import openreading.server.app as app_module
 
     monkeypatch.setenv("OPENREADING_API_KEYS", "key-a,key-b")
@@ -693,6 +738,11 @@ def test_submit_job_cost_report_warning_redacts_a_secret(monkeypatch):
 def test_jobs_auto_backend_rejected(client):
     r = client.post("/v1/jobs", json=_pdf_body("auto"))
     assert r.status_code == 400
+    # The branch refuses `strategy:none` too, so the message names both. It used to name only
+    # `auto`, telling a caller who sent `strategy:none` that they had sent something else.
+    for body in (_pdf_body("auto"), _pdf_body("strategy:none")):
+        message = client.post("/v1/jobs", json=body).json()["error"]["message"]
+        assert message == "async jobs require a named backend, not 'auto' or 'strategy:none'"
 
 
 def test_jobs_rejects_document_path_by_default(client, monkeypatch):
@@ -735,6 +785,11 @@ def test_jobs_unknown_strategy_is_rejected(tmp_path, monkeypatch):
 def test_get_unknown_job_is_404(client):
     r = client.get("/v1/jobs/omjob_nope")
     assert r.status_code == 404 and r.json()["error"]["category"] == "unknown_job"
+    # The message used to be the bare id with no sentence around it, and it never raised the
+    # likeliest cause: the store is process memory, so a restart or a TTL expiry drops a record.
+    message = r.json()["error"]["message"]
+    assert message.startswith("no job with id 'omjob_nope'")
+    assert "in memory" in message
 
 
 def test_get_job_drives_poll_to_completion():
@@ -1319,6 +1374,7 @@ def test_delete_unknown_job_is_404(client):
     r = client.delete("/v1/jobs/does-not-exist")
     assert r.status_code == 404
     assert r.json()["error"]["category"] == "unknown_job"
+    assert r.json()["error"]["message"].startswith("no job with id 'does-not-exist'")
 
 
 # --- webhook ingress (8.2) -------------------------------------------------------------
@@ -1434,6 +1490,19 @@ def test_webhook_missing_secret_is_401(monkeypatch):
 def test_webhook_unknown_backend_is_404(client):
     r = client.post("/v1/webhooks/does-not-exist", content=b"{}")
     assert r.status_code == 404
+
+
+def test_webhook_non_object_body_is_a_400_envelope_not_a_bare_500(client):
+    """A vendor event is an object, but a list, a string or a number reached the `event[...]`
+    writes below the JSON decode as a `TypeError` and escaped as the framework's plain-text
+    `Internal Server Error`, the one response shape a client written from the documented error
+    ladder cannot parse. This endpoint is exempt from caller auth, so any peer that can reach the
+    port could trigger it."""
+    for bad in (b"[1]", b'"x"', b"5"):
+        r = client.post("/v1/webhooks/chunkr", content=bad)
+        assert r.status_code == 400, bad
+        assert r.headers["content-type"].startswith("application/json"), bad
+        assert r.json()["error"]["category"] == "bad_request", bad
 
 
 def test_webhook_bound_clients_signature_check_succeeds_end_to_end(monkeypatch):
@@ -1944,7 +2013,7 @@ def test_webhook_idless_job_not_hijacked_by_idless_event_chunkr():
     # BL-70: submit() can leave a WaitMode.WEBHOOK job with backend_job_id == webhook_token ==
     # None (a vendor 2xx create-task response that omitted its own id field). Previously
     # `jid in (None, None)` was True for jid = None BY CONSTRUCTION, so an unauthenticated POST
-    # whose body simply omits the id key would resolve straight to this job — hijacking it to
+    # whose body omits the id key would resolve straight to this job — hijacking it to
     # "succeeded" with attacker-controlled content and a fabricated cost. Direct mirror of BL-66's
     # own test_webhook_cross_backend_hijack_is_404 shape, for this defect instead.
     app = create_app()
@@ -1953,6 +2022,9 @@ def test_webhook_idless_job_not_hijacked_by_idless_event_chunkr():
     r = client.post("/v1/webhooks/chunkr", content=json.dumps({}))  # no task_id key at all
     assert r.status_code == 404
     assert r.json()["error"]["category"] == "unknown_job"
+    # The message used to be a stringified Python None on the wire. It names the field the
+    # posted-to backend uses for its own id instead.
+    assert r.json()["error"]["message"].startswith("the event carries no 'task_id' field")
     # the id-less job itself is untouched — not hijacked into "succeeded" via the id-less event.
     assert client.get(f"/v1/jobs/{job_id}").json()["state"] == "running"
 
@@ -2212,6 +2284,24 @@ def test_batch_endpoint_non_string_backend_is_a_400_envelope(client):
         assert r.json()["error"]["category"] == "bad_request"
 
 
+def test_batch_endpoint_backend_refusal_never_names_a_backend_the_caller_did_not(client):
+    """The refusal used to fall back to the literal "pymupdf" whenever the value carried no
+    usable id, so a caller who sent `{}` was told to send `"backend": "pymupdf"` and, following
+    the instruction, ran the whole batch on a backend they never named. That is the silent
+    substitution this refusal exists to prevent."""
+    for bad in ({}, 5, {"operation": "parse"}):
+        r = client.post("/v1/batch", json={"documents": [_batch_doc()], "backend": bad})
+        assert r.status_code == 400, bad
+        message = r.json()["error"]["message"]
+        assert '"backend": "pymupdf"' not in message, bad
+        assert "one string shared by every item" in message, bad
+
+    named = client.post(
+        "/v1/batch", json={"documents": [_batch_doc()], "backend": {"id": "tesseract"}}
+    )
+    assert 'Send "backend": "tesseract"' in named.json()["error"]["message"]
+
+
 def test_batch_endpoint_documents_over_max_is_400(client):
     from openreading.server.app import MAX_BATCH_DOCUMENTS
 
@@ -2227,6 +2317,39 @@ def test_batch_endpoint_jobs_must_be_an_integer(client):
         json={"documents": [_batch_doc()], "backend": "pymupdf", "jobs": "not-a-number"},
     )
     assert r.status_code == 400
+
+
+def test_batch_endpoint_jobs_refuses_every_non_integer_not_just_the_ones_int_rejects(client):
+    """`int()` truncates 2.7 to 2 and parses "3" as 3, so the documented "non-integer jobs is a
+    400" contract only ever held for values `int()` itself refused. A caller who sent 2.7 got
+    silent truncation where the contract promises a refusal."""
+    for bad in (2.7, "3", True):
+        r = client.post(
+            "/v1/batch",
+            json={"documents": [_batch_doc()], "backend": "pymupdf", "jobs": bad},
+        )
+        assert r.status_code == 400, bad
+        assert r.json()["error"]["message"] == '"jobs" must be an integer', bad
+
+    ok = client.post(
+        "/v1/batch", json={"documents": [_batch_doc()], "backend": "pymupdf", "jobs": 2}
+    )
+    assert ok.status_code == 200
+
+
+def test_batch_endpoint_unknown_strategy_is_400_not_n_identical_item_failures(client):
+    """BL-102's rule applied to the other request-shape mistake. A `strategy:` id that names
+    nothing used to answer HTTP 200 with every item failed, the exact shape BL-102 was fixed to
+    avoid, while /v1/parse and /v1/jobs answered 400 for the same id."""
+    r = client.post("/v1/batch", json={"documents": [_batch_doc()], "backend": "strategy:nope"})
+
+    assert r.status_code == 400
+    body = r.json()
+    assert "items" not in body
+    assert body["error"]["category"] == "unknown_strategy"
+
+    parse = client.post("/v1/parse", json=_pdf_body("strategy:nope"))
+    assert parse.json()["error"]["message"] == body["error"]["message"]
 
 
 def test_batch_endpoint_jobs_over_ceiling_is_400(client):
@@ -2255,8 +2378,7 @@ def test_batch_endpoint_echoes_jobs_actually_used(client):
 
 def test_batch_endpoint_empty_documents_surfaces_empty_batch_warning(client):
     # BL-147 criterion (c): the runner-level empty_batch fix is a schema-level change to
-    # assemble_result, so the server's POST /v1/batch picks it up with no server-side code change
-    # — closing the scope-handoff the review 1:1 named but didn't chase.
+    # assemble_result, so the server's POST /v1/batch picks it up with no server-side code change.
     r = client.post("/v1/batch", json={"documents": []})
     assert r.status_code == 200
     env = r.json()
@@ -2385,6 +2507,10 @@ def test_batch_endpoint_jobs_over_ceiling_is_400_naming_count_and_limit(client):
     assert body["error"]["category"] == "bad_request"
     assert str(MAX_BATCH_JOBS + 1) in body["error"]["message"]
     assert str(MAX_BATCH_JOBS) in body["error"]["message"]
+    # The shared helper's message tells the caller to raise the ceiling with --max-jobs or
+    # max_jobs=. Neither exists on this endpoint, where the body is the untrusted boundary.
+    assert "--max-jobs" not in body["error"]["message"]
+    assert "max_jobs=" not in body["error"]["message"]
 
 
 def test_batch_endpoint_jobs_wildly_over_ceiling_is_400_not_5000000_real_threads(client):
@@ -2927,7 +3053,7 @@ def test_create_app_survives_stamps_missing_keys_or_of_the_wrong_top_level_type(
     """Round-2 M7 finding: a stamp that parses as JSON but is missing `expires_epoch_ms`/`run_id`
     (e.g. `{}`) or is the wrong top-level type (e.g. a JSON array) raised KeyError/TypeError past
     round 1's narrower `except (OSError, ValueError)` — validating `run_id`'s shape but trusting
-    the other fields to simply be present was an inconsistent cut of the same "stamps are
+    the other fields to be present was an inconsistent cut of the same "stamps are
     untrusted input" thesis. `create_app()` must still succeed, leave both bad stamps untouched,
     and still reap a valid expired stamp alongside them. Named so the two bad stamps sort BEFORE
     the good one (`missing-keys` / `wrong-type` < `zzz-expired-run`), proving a bad stamp earlier

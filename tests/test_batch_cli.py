@@ -198,7 +198,7 @@ def test_preflight_warns_before_a_big_hosted_batch(tmp_path, capsys, monkeypatch
         _pdf(d / f"f{i:02d}.pdf")
     main(["parse", str(d), "--backend", "reducto"])
     err = capsys.readouterr().err
-    assert "[preflight] 11 items → hosted backend reducto" in err
+    assert "[preflight] 11 items on hosted backend reducto" in err
     assert "per page-equiv" in err or "billed per page" in err
 
 

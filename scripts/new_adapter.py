@@ -6,32 +6,36 @@ Python source package into this repo's own tree is a contributor action, run wit
 
     uv run python scripts/new_adapter.py <slug> --template <existing-slug> --type <type> [--force]
 
-Given a slug and the nearest-shape template adapter, generates every file
-the `openreading.adapters` runbook (src/openreading/adapters/__init__.py) section 2's "Files to CREATE" table names and edits
-every file its "Files to EDIT" table names, in one run, so the seven edits can never partially
-land. Every capability/channel/cost/compliance field it writes takes its safe, unverified, or
-false default — NEVER a value copied from `--template`'s own researched descriptor (the generator
-reads the template for structural shape only: its BackendType, wait_modes, and adapter_impl, which
-are architectural facts about the code shape, not researched claims about a vendor).
+Given a slug and the nearest-shape template adapter, this creates every file the
+`openreading.adapters` runbook (src/openreading/adapters/__init__.py) §2 names in its
+"Files to CREATE" table. It then applies five of the seven edits in that section's
+"Files to EDIT" table in one run, so those five can never partially land. The
+`openreading.credentials` docstring line and the `src/openreading/adapters/README.md` catalog row
+stay manual, and the run prints a HAND reminder for each. Every capability/channel/cost/compliance
+field it writes takes its safe, unverified, or false default — NEVER a value copied from
+`--template`'s own researched descriptor (the generator reads the template for structural shape
+only: its BackendType, wait_modes, and adapter_impl, which are architectural facts about the code
+shape, not researched claims about a vendor).
 
 Every unfinished placeholder — a field still needing primary-source research, a test still needing
 a real fixture — carries the literal marker `TODO-SCAFFOLD`, grep-able and checked by
 `tests/test_scaffold_sentinel.py`, which fails `make verify` until every marker is gone.
 
-Makes NO network call, ever (matches commit 133a3c0's hard ban on live/network calls in this
-repo's own build/discovery tooling) — every value below is either a safe static default or a
-mechanical string transform of the slug you passed on the command line, seeded as a starting guess
-and marked TODO-SCAFFOLD, never asserted as fact. Writes no wire-format logic, no fixture content,
-and no descriptor value that would require primary-source research to assert honestly.
+Makes NO network call, ever. This repo's build and discovery tooling never calls a live service.
+Every value below is either a safe static default or a mechanical string transform of the slug you
+passed on the command line. Each one is seeded as a starting guess and marked TODO-SCAFFOLD, never
+asserted as fact. Writes no wire-format logic, no fixture content, and no descriptor value that
+would require primary-source research to assert honestly.
 
 `--type` is a closed set of the seven shapes named in the openreading.adapters runbook §0's picker table
 (collapsing the two self-hosted rows — an OpenAI-compatible endpoint and a generic container — into
 one `self_hosted_endpoint` type, since both need the same scaffold shape). A `--template`/`--type`
-pair outside that set is declined, never improvised — you're pointed back at a fully manual
-the openreading.adapters runbook §1 pass. The native multi-document-batch shape (`anthropic_claude`'s row) is
-deliberately not offered as a template: generating a `submit_many`/`normalize_many` stub is
-explicitly out of scope (the openreading.adapters runbook §3 already scopes native batch as an opt-in addendum
-most adapters skip), so every generated adapter leaves a one-line comment pointing at it instead.
+pair outside that set is declined, never improvised. The error points you back to the manual
+walkthrough in the openreading.adapters runbook, starting at §1. The native multi-document-batch
+shape (`anthropic_claude`'s row) is deliberately not offered as a template: generating a
+`submit_many`/`normalize_many` stub is explicitly out of scope (the openreading.adapters runbook §3
+already scopes native batch as an opt-in addendum most adapters skip), so every generated adapter
+leaves a one-line comment pointing at it instead.
 """
 
 from __future__ import annotations
@@ -121,7 +125,7 @@ def read_template_shape(template_slug: str) -> TemplateShape:
     if not (type_m and impl_m and wm_m):
         raise GeneratorError(
             f"could not read a structural shape (type=/adapter_impl=/wait_modes=) out of "
-            f"{path} — pick a different --template or finish this adapter by hand per "
+            f"{path}. Pick a different --template or finish this adapter by hand per "
             f"the openreading.adapters runbook §1"
         )
     wait_modes = re.findall(r"WaitMode\.([A-Z]+)", wm_m.group(1))
@@ -138,9 +142,9 @@ def render_init_py(slug: str, shape: TemplateShape) -> str:
     pkg = pkg_name(slug)
     has_client = shape.category != "local"
     body = [
-        f'"""{cls} adapter (optional extra `{slug}`) — scaffolded by `scripts/new_adapter.py`.',
+        f'"""{cls} adapter (optional extra `{slug}`), scaffolded by `scripts/new_adapter.py`.',
         f"Resolve every {MARKER} marker in adapter.py against the vendor's primary docs before",
-        'this is a real adapter — see the openreading.adapters docstring (src/openreading/adapters/__init__.py)."""',
+        'this is a real adapter. See the openreading.adapters docstring (src/openreading/adapters/__init__.py)."""',
         "",
         "from __future__ import annotations",
         "",
@@ -174,14 +178,14 @@ def render_adapter_py(slug: str, template_slug: str, shape: TemplateShape) -> st
     a = lines.append
 
     a(
-        f'"""{cls} adapter — SCAFFOLDED by `scripts/new_adapter.py --template {template_slug} '
+        f'"""{cls} adapter, SCAFFOLDED by `scripts/new_adapter.py --template {template_slug} '
         f"--type <type>`; not yet a real adapter."
     )
     a("")
     a(f"Every {MARKER} marker below is a placeholder seeded by a mechanical guess (never a")
     a("researched claim) and must be resolved from the vendor's own primary docs before this")
     a(
-        "ships — see the openreading.adapters docstring (src/openreading/adapters/__init__.py) §1/§3. Record here once known: what"
+        "ships. See the openreading.adapters docstring (src/openreading/adapters/__init__.py) §1/§3. Record here once known: what"
     )
     a("the backend is + which ops; the exact flow (endpoints, poll target, status vocabulary);")
     a("channel posture; pricing/usage mapping; credential/env conventions; compliance fail-closed")
@@ -271,6 +275,10 @@ def render_adapter_py(slug: str, template_slug: str, shape: TemplateShape) -> st
     a("    return AdapterDescriptor(")
     a(f'        id="{slug}",')
     a(f"        type=BackendType.{shape.backend_type},")
+    # Ledger T4a (AC-8): a scaffold is generated in the current adapter-contract shape, so 2 is
+    # the honest declaration. poll/resolve_webhook/cancel take `ctx` and no client is cached on
+    # `self`, which is exactly what R1/R2 in testing/conformance.py check.
+    a("        protocol_version=2,")
     a(f'        adapter_impl="{shape.adapter_impl}",')
     a(
         f'        operations=["parse"],  # {MARKER}: confirm against vendor docs; add "extract" if supported'
@@ -292,9 +300,9 @@ def render_adapter_py(slug: str, template_slug: str, shape: TemplateShape) -> st
     wm = ", ".join(f"WaitMode.{m}" for m in shape.wait_modes) or "WaitMode.INLINE"
     a(f"        wait_modes=[{wm}],")
     a(
-        f"        capabilities=Capabilities(),  # {MARKER}: every flag is False/empty until verified — see the openreading.adapters runbook §3"
+        f"        capabilities=Capabilities(),  # {MARKER}: every flag is False/empty until verified. See the openreading.adapters runbook §3"
     )
-    a(f"        cost=Cost(),  # {MARKER}: basis defaults 'unknown' — never invent a rate")
+    a(f"        cost=Cost(),  # {MARKER}: basis defaults 'unknown'. Never invent a rate")
     a("        compliance=ComplianceProfile(")
     a(
         f'            trains_on_customer_data="unverified",  # {MARKER}: confirm from a primary source; stays fail-closed until then'
@@ -311,7 +319,7 @@ def render_adapter_py(slug: str, template_slug: str, shape: TemplateShape) -> st
         a("                secret=True,")
         a(f'                env=["{env}_API_KEY"],')
         a(
-            f'                description="{MARKER}: guessed convention — verify against the vendor\'s real auth docs",'
+            f'                description="{MARKER}: guessed convention. Verify against the vendor\'s real auth docs",'
         )
         a("            ),")
         a("        ],")
@@ -324,7 +332,7 @@ def render_adapter_py(slug: str, template_slug: str, shape: TemplateShape) -> st
         a("                secret=True,")
         a(f'                env=["{env}_API_KEY"],')
         a(
-            f'                description="{MARKER}: optional — only if the self-hosted endpoint requires auth",'
+            f'                description="{MARKER}: optional, only if the self-hosted endpoint requires auth",'
         )
         a("            ),")
         a("        ],")
@@ -360,7 +368,7 @@ def render_adapter_py(slug: str, template_slug: str, shape: TemplateShape) -> st
         "        # Native multi-document batch (BatchIntake/submit_many/normalize_many) is a separate,"
     )
     a(
-        "        # opt-in addendum most adapters skip — see the openreading.adapters runbook's 'Native batch' section"
+        "        # opt-in addendum most adapters skip. See the openreading.adapters runbook's 'Native batch' section"
     )
     a("        # and internal/design/batch-intake.md §7 if this vendor actually offers one.")
     a("    )")
@@ -374,7 +382,8 @@ def render_adapter_py(slug: str, template_slug: str, shape: TemplateShape) -> st
     a("        self.descriptor = _descriptor()")
     a("        self._client = client")
     if has_client:
-        a(f"        self._active_client: {cls}Client | None = None")
+        a("        # R2 (testing/conformance.py): never cache a client on self beyond this")
+        a("        # constructor-injected one. _get_client(ctx) builds a fresh one per call.")
     a("")
     a("    def capabilities(self) -> dict:")
     a("        return self.descriptor.capabilities.model_dump(mode='json')")
@@ -410,26 +419,28 @@ def render_adapter_py(slug: str, template_slug: str, shape: TemplateShape) -> st
     if has_client:
         a("        self._get_client(ctx)")
     a("        raise NotImplementedError(")
-    a(f'            "{MARKER}: {slug} submit() not yet implemented — see "')
+    a(f'            "{MARKER}: {slug} submit() not yet implemented. See "')
     a('            "src/openreading/adapters/__init__.py"')
     a("        )")
     a("")
     if has_poll:
-        a("    def poll(self, job: Job) -> Job:")
+        a("    def poll(self, job: Job, ctx: RunContext) -> Job:")
         a(f'        raise NotImplementedError("{MARKER}: {slug} poll() not yet implemented")')
         a("")
     if has_webhook:
-        a("    def resolve_webhook(self, event: dict, job: Job) -> Job:")
+        a("    def resolve_webhook(self, event: dict, job: Job, ctx: RunContext) -> Job:")
         a(
             f'        raise NotImplementedError("{MARKER}: {slug} resolve_webhook() not yet implemented")'
         )
         a("")
-    a("    def cancel(self, job: Job) -> Job:")
-    a("        return super().cancel(job)")
+    a("    def cancel(self, job: Job, ctx: RunContext) -> Job:")
+    a("        return super().cancel(job, ctx)")
     a("")
-    a("    def normalize(self, job: Job, req: OpenReadingRequest) -> NormalizedResponse:")
+    a("    def normalize(")
+    a("        self, job: Job, ctx: RunContext, slim_req: OpenReadingRequest")
+    a("    ) -> NormalizedResponse:")
     a("        raise NotImplementedError(")
-    a(f'            "{MARKER}: {slug} normalize() not yet implemented — see "')
+    a(f'            "{MARKER}: {slug} normalize() not yet implemented. See "')
     a('            "src/openreading/adapters/__init__.py §3"')
     a("        )")
     a("")
@@ -452,7 +463,7 @@ def render_adapter_py(slug: str, template_slug: str, shape: TemplateShape) -> st
 def render_fixtures_placeholder(slug: str) -> str:
     return (
         f"{MARKER}\n\n"
-        f"No fixture content is generated for `{slug}` — `scripts/new_adapter.py` never invents "
+        f"No fixture content is generated for `{slug}`. `scripts/new_adapter.py` never invents "
         "wire-shape data (see the openreading.adapters runbook §1/§4). Add hand-written, documented-shape JSON "
         f"fixtures here (e.g. `parse.json`), then delete this file. Its presence is what makes "
         "`tests/test_scaffold_sentinel.py` fail until real fixtures exist.\n"
@@ -471,10 +482,10 @@ def render_test_happy_py(slug: str, shape: TemplateShape) -> str:
     cred_required = shape.category == "hosted"
     lines: list[str] = []
     a = lines.append
-    a(f'"""{cls} adapter — SCAFFOLDED by scripts/new_adapter.py. Every {MARKER} marker must be')
+    a(f'"""{cls} adapter, SCAFFOLDED by scripts/new_adapter.py. Every {MARKER} marker must be')
     a("resolved (real fixtures added, the fake client wired, the skip removed) before this file")
     a(
-        'represents a finished adapter — see the openreading.adapters docstring (src/openreading/adapters/__init__.py) §4."""'
+        'represents a finished adapter. See the openreading.adapters docstring (src/openreading/adapters/__init__.py) §4."""'
     )
     a("")
     a("from __future__ import annotations")
@@ -525,7 +536,7 @@ def render_test_happy_py(slug: str, shape: TemplateShape) -> str:
     a("")
     a("def test_health_reports_not_ready():")
     a(
-        "    # a fresh scaffold reports not-ready with a reason — never a capability it hasn't earned."
+        "    # a fresh scaffold reports not-ready with a reason, never a capability it hasn't earned."
     )
     a(f"    health = {cls}Adapter().health()")
     a("    assert health.ready is False")
@@ -625,7 +636,7 @@ _FAULT_CHECKLIST_WEBHOOK = [
     ),
     (
         "test_webhook_url_forwarded_to_vendor_on_submit",
-        "submit()'s vendor request actually carries req.async_.webhook_url when set (BL-67) — assert against the fake client's recorded body, not just job.wait_mode",
+        "submit()'s vendor request actually carries req.async_.webhook_url when set (BL-67). Assert against the fake client's recorded body, not just job.wait_mode",
     ),
 ]
 
@@ -641,7 +652,7 @@ def render_test_faults_py(slug: str, shape: TemplateShape) -> str:
 
     lines: list[str] = []
     a = lines.append
-    a(f'"""{cls} adapter — fault-injection checklist, SCAFFOLDED by scripts/new_adapter.py. Every')
+    a(f'"""{cls} adapter fault-injection checklist, SCAFFOLDED by scripts/new_adapter.py. Every')
     a(
         "branch the openreading.adapters runbook §4's standard set names gets one named, skipped stub below; fill"
     )
@@ -730,7 +741,7 @@ def edit_env_example(slug: str, shape: TemplateShape) -> bool:
         return False
     env = env_prefix(slug)
     if shape.category == "local":
-        block = f"\n# --- {slug} — no credentials needed (local library) ---\n"
+        block = f"\n# --- {slug} (no credentials needed, local library) ---\n"
     elif shape.category == "self_hosted":
         block = (
             f"\n# --- {slug} (self-hosted; {MARKER}: confirm no data leaves your infra) ---\n"
@@ -740,23 +751,6 @@ def edit_env_example(slug: str, shape: TemplateShape) -> bool:
     else:
         block = f"\n# --- {slug} (signup: {MARKER} vendor signup URL) ---\n{env}_API_KEY=\n"
     _write(path, text.rstrip("\n") + "\n" + block)
-    return True
-
-
-def edit_readme(already_generated: bool) -> bool:
-    if already_generated:
-        return False
-    path = REPO_ROOT / "README.md"
-    text = _read(path)
-    count_re = re.compile(r"\b(\d+) adapters\b")
-
-    def _bump(m: re.Match) -> str:
-        return f"{int(m.group(1)) + 1} adapters"
-
-    new_text, n = count_re.subn(_bump, text)
-    if n == 0:
-        return False
-    _write(path, new_text)
     return True
 
 
@@ -825,19 +819,20 @@ def _run_ruff(paths: list[Path]) -> None:
 def generate(slug: str, template_slug: str, type_name: str, force: bool) -> list[str]:
     if not _SLUG_RE.match(slug):
         raise GeneratorError(
-            f"invalid slug {slug!r} — must be lowercase, hyphen-separated (e.g. 'foo-vendor')"
+            f"invalid slug {slug!r}: must be lowercase, hyphen-separated (e.g. 'foo-vendor')"
         )
     if type_name not in TYPE_TEMPLATES:
         raise GeneratorError(
             f"unknown --type {type_name!r}. Valid types: {', '.join(sorted(TYPE_TEMPLATES))}. "
-            "A shape outside this set isn't supported — follow the openreading.adapters runbook §1 by hand."
+            "A shape outside this set isn't supported. Follow the openreading.adapters runbook §1 by hand."
         )
     if template_slug not in ALL_TEMPLATE_SLUGS:
         raise GeneratorError(
             f"--template {template_slug!r} is not a supported scaffold template. Supported: "
-            f"{', '.join(sorted(ALL_TEMPLATE_SLUGS))}. (anthropic-claude's native-batch shape is "
-            "deliberately not generated — see the openreading.adapters runbook's 'Native batch' section and "
-            "finish that one by hand.)"
+            f"{', '.join(sorted(ALL_TEMPLATE_SLUGS))}. Not every registered backend is a "
+            "template. anthropic-claude's native-batch shape is deliberately not generated, so "
+            "finish that one by hand from the openreading.adapters runbook's 'Native batch' "
+            "section."
         )
     if template_slug not in TYPE_TEMPLATES[type_name]:
         owning_type = next(t for t, s in TYPE_TEMPLATES.items() if template_slug in s)
@@ -850,7 +845,7 @@ def generate(slug: str, template_slug: str, type_name: str, force: bool) -> list
     pkg_dir = ADAPTERS_DIR / pkg
     already_generated = pkg_dir.exists()
     if already_generated and not force:
-        raise GeneratorError(f"{pkg_dir} already exists — pass --force to regenerate/overwrite it")
+        raise GeneratorError(f"{pkg_dir} already exists. Pass --force to regenerate/overwrite it")
 
     shape = read_template_shape(template_slug)
 
@@ -897,8 +892,12 @@ def generate(slug: str, template_slug: str, type_name: str, force: bool) -> list
         "HAND   src/openreading/credentials.py -- add the backend's line to the docstring's "
         "'Per-backend reference'"
     )
-    if edit_readme(already_generated):
-        report.append("EDIT   README.md")
+    # The adapter catalog (src/openreading/adapters/README.md) is five hand-written tables, one row
+    # per backend across all five. AGENTS.md requires the row. Nothing generates it, so say so.
+    report.append(
+        "HAND   src/openreading/adapters/README.md -- add the backend's row to each of the "
+        "five catalog tables"
+    )
     if edit_test_descriptor_specs(slug, shape):
         report.append("EDIT   tests/test_descriptor_specs.py")
         written_py_paths.append(TESTS_DIR / "test_descriptor_specs.py")
@@ -913,8 +912,9 @@ def generate(slug: str, template_slug: str, type_name: str, force: bool) -> list
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="new_adapter.py",
-        description="Scaffold a new openreading backend adapter (repo-development tool; see "
-        "src/openreading/adapters/__init__.py).",
+        description="Scaffold a new openreading backend adapter. This is a repository-development "
+        "tool, not a verb on the openreading CLI. The runbook it follows is the module docstring "
+        "of src/openreading/adapters/__init__.py.",
     )
     parser.add_argument("slug", help="hyphenated adapter slug, e.g. 'foo-vendor'")
     parser.add_argument(
@@ -924,7 +924,7 @@ def main(argv: list[str] | None = None) -> int:
         "--type",
         required=True,
         choices=sorted(TYPE_TEMPLATES),
-        help="the target API shape (the openreading.adapters runbook §0's picker table)",
+        help="the target API shape, from the picker table in src/openreading/adapters/__init__.py §0",
     )
     parser.add_argument(
         "--force", action="store_true", help="overwrite an already-generated slug's files"
@@ -942,7 +942,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {line}")
     print()
     print(
-        f"`make verify` will fail now — every {MARKER} marker is a real gap. Work "
+        f"`make verify` will fail now. Every {MARKER} marker is a real gap. Work "
         "the openreading.adapters runbook §1/§3 by hand, replacing each one with a sourced value, then remove "
         "the matching `@pytest.mark.skip` as each test is filled in."
     )

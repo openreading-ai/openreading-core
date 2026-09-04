@@ -6,8 +6,8 @@ Two types, deliberately on opposite sides of DECISIONS D5's dataclass/pydantic s
   optional 9th method returns: only what the adapter can honestly *observe*. It is never
   serialized and never leaves the process.
 * `LivenessReport` — the schema-bound **pydantic** model mirroring
-  `src/openreading/schemas/liveness-report.v0.1.json`, which every surface (HTTP API, CLI, web
-  UI) speaks. Round-trip tested against the vendored file.
+  `src/openreading/schemas/liveness-report.v0.1.json`, which every surface (HTTP API, CLI)
+  speaks. Round-trip tested against the vendored file.
 
 The split is the protocol's whole ergonomic claim: an adapter author implements one narrow
 measurement and never has to reproduce the status ladder. `openreading.liveness.check_liveness`

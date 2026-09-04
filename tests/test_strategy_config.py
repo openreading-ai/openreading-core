@@ -361,6 +361,16 @@ def test_parse_config_wraps_schema_error_with_location():
     assert "f.yaml" in str(ei.value)
 
 
+def test_yaml_syntax_error_names_the_source_not_a_placeholder():
+    # PyYAML labels a bare `str` input `<unicode string>`, which contradicted the filename the
+    # ConfigError prefix already printed. The loader passes a named stream so both agree.
+    with pytest.raises(ConfigError) as ei:
+        parse_config("version: 1\nstrategies:\n  a: [unclosed\n", source="bad.yaml")
+    message = str(ei.value)
+    assert "<unicode string>" not in message
+    assert 'in "bad.yaml", line 3' in message
+
+
 def test_parse_config_rejects_non_mapping_and_empty():
     with pytest.raises(ConfigError):
         parse_config("- just\n- a\n- list\n")

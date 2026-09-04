@@ -2,8 +2,9 @@
 
 A **strategy** is a named recipe for which backends run — in what order or in parallel — and
 when to move on. You describe it once in `openreading.yaml`; the file draws rails (eligible
-actions, quality thresholds, budgets), and any executor — the deterministic engine or an optional
-LLM decider — walks the same tree inside those rails and leaves the same auditable trace. The
+actions, quality thresholds, budgets), and any executor walks the same tree inside those rails
+and leaves the same auditable trace. Today the only executor is the deterministic engine, and
+the optional LLM decider is a declared seam with no wire adapter behind it yet. The
 full config grammar (every node kind, key, predicate, and validation rule) is the docstring of
 `openreading.strategies.model`; this docstring is the map. Why the design looks this way — the
 prior-art survey behind the five node kinds, the gate polarity, and the sub-Turing choice — is
@@ -11,6 +12,41 @@ internal/research/strategies/prior-art.md; the decisions are internal/decisions/
 (D-v3-*). Doc contract: every fenced YAML block in this package's docstrings must pass the
 world-consistency half of `strategy validate` (`desugar_config` + `validate_config`; the
 docs-truth test, `tests/test_docs_truth.py`; D-v3-22 — details in `openreading.strategies.model`).
+
+Start here: write one file
+--------------------------
+
+Most people never need the full grammar. Plain is eleven words covering the five things people
+actually want, which are running backends in parallel, cascading on failure, cost tiers,
+escalating on simple criteria, and compare-and-route. Write `./openreading.yaml` and describe
+the run the way you would say it out loud:
+
+```yaml
+version: 1
+strategies:
+  cheap_first:
+    try: [pymupdf, reducto]     # free and local first
+    escalate_when: looks_bad    # climb only when the cheap result cannot be trusted
+```
+
+`looks_bad` is the Plain criterion for a result that shows scanned pages with almost no text,
+garbled characters, or too many empty pages. Invoke that strategy three equivalent ways:
+
+    openreading parse loan.pdf --strategy cheap_first                           # CLI
+    { "document": { "path": "loan.pdf" }, "backend": { "id": "strategy:cheap_first" } }  # wire
+    openreading.run("loan.pdf", strategy="cheap_first")                         # Python
+
+If `pymupdf`'s result passes the gate, that is your answer and it cost nothing. If the gate
+fires, that result is retained as best-so-far and `reducto` runs. If every rung gates, you get
+the best retained result with honest `warnings[]`. If every rung fails outright and nothing
+was retained, you get `PlanExhaustedError` with the full attempt trail, never silence and
+never a fabricated status (the keep-best law, `openreading.strategies.engine`).
+
+Plain desugars into the five-node grammar the rest of this page describes, so everything below
+is what your file becomes rather than a second system. `openreading strategy show cheap_first
+--longhand` prints the exact tree. The advanced dialect writes the same cascade with `steps:`
+and an explicit gate map, and the built-in `escalate_if: default` bundle is wider than
+`escalate_when: looks_bad`, because it also fires on low reported confidence.
 
 Two invariants this package exists to keep
 ------------------------------------------
@@ -69,8 +105,9 @@ The map — what each module documents
   engine; strict no-op on advanced bodies. Full grammar: internal/design/simple-strategies.md.
 - `validate` — world-consistency checks the schema cannot express (unknown backends and refs,
   cycles, `otherwise` membership, gate bindability per backend descriptor, parallel same-backend
-  collisions) and the warning set; located by node path (D-v3-8). Run by `strategy validate`
-  and the web UI only — the run path loads (schema) and compiles but never calls it (`model` §9).
+  collisions) and the warning set, located by node path (D-v3-8). Run by `strategy validate`
+  only. The run path loads the schema and compiles the tree, and it never calls
+  `validate_config` (`model` §9).
 - `prune` — the compile pipeline: route once, normalize, prune compliance-dropped leaves,
   union the file `policy:` into the effective compliance (D-v3-12); `CompiledPlan`.
 - `facts` — pre-parse route facts (`doc_type`, `mime`, page/size probes, `filename_matches`,
@@ -85,6 +122,9 @@ The map — what each module documents
   `OPENREADING_LLM_DECIDER` env; no request field can enable it), the per-request compliance gate
   on the decider/judge backend, engine defaults for every decision point, the downgrade
   taxonomy (`decider_downgraded`), deterministic decision ids, replay.
+  No LLM is called today. No shipped surface constructs a `DeciderPort`, so an enabled decider
+  resolves every decision point to its engine default and traces `decider_downgraded:
+  unavailable`. The wire adapter is designed, not built.
 - `trace` — attempt records and the `orchestration` block (closed attempt-category vocabulary).
 - `calibrate` — `openreading calibrate`: derive gate thresholds from a labeled sample; it
   proposes, never rewrites the file.
@@ -96,52 +136,6 @@ CLI surface: `openreading strategy show|list|validate|normalize|plan`, `openread
 --config`. `strategy validate` exits 3 on any error, 0 otherwise (warnings never fail); a
 `ConfigError` is exit 3 in every `strategy` subcommand.
 
-Start here: the Plain dialect
------------------------------
-
-Most people never need the full grammar. Plain is eleven words that cover the five things people
-actually want (run in parallel, cascade on failure, cost tiers, escalate on simple criteria,
-compare-and-route). It reads like the sentence you'd say out loud:
-
-```yaml
-version: 1
-strategies:
-  main:
-    try: [pymupdf, docling, reducto]   # cheap first
-    escalate_when: looks_bad           # climb only when the result can't be trusted
-```
-
-Plain desugars to the exact five-node grammar below (`openreading strategy show <name>
---longhand` prints the tree) — so everything on this page is what a Plain strategy *becomes*,
-not a separate system.
-
-60-second quickstart
---------------------
-
-The headline scenario: try free, local `pymupdf` first; escalate to `reducto` only when the
-built-in quality gates say the cheap result can't be trusted (scanned pages, garbled text,
-too-empty pages, low confidence where confidence exists). `./openreading.yaml`:
-
-```yaml
-version: 1
-
-strategies:
-  cheap_first:
-    steps: [pymupdf, reducto]
-    escalate_if: default
-```
-
-Invoke it three equivalent ways:
-
-    openreading parse loan.pdf --strategy cheap_first                           # CLI
-    { "document": { "path": "loan.pdf" }, "backend": { "id": "strategy:cheap_first" } }  # wire
-    openreading.run("loan.pdf", strategy="cheap_first")                         # Python
-
-If `pymupdf`'s result passes the gates, that's your answer — cost: $0. If a gate fires, the
-result is retained as best-so-far and `reducto` runs. If everything gates, you get the best
-retained result with honest `warnings[]`; if every rung fails outright (nothing retained), you
-get `PlanExhaustedError` with the full attempt trail — never silence, never a fabricated status
-(the keep-best law, `openreading.strategies.engine`).
 
 The tour: one line to full tree
 -------------------------------
@@ -160,8 +154,15 @@ defaults:
 Applies only when the request says `auto` and names no strategy; `strategy:none` on any request
 forces the legacy path.
 
-2. Named cascade, default gates. The quickstart above — an ordered list of rungs plus
-`escalate_if: default`, the built-in gate bundle (`normalize.DEFAULT_BUNDLE`).
+2. Named cascade, default gates. The same file in the advanced dialect, with the built-in gate
+bundle (`normalize.DEFAULT_BUNDLE`) in place of a Plain criterion:
+
+```yaml
+strategies:
+  cheap_first:
+    steps: [pymupdf, reducto]
+    escalate_if: default
+```
 
 3. Tuned thresholds. Replace the bundle with your own gate map — keys OR (any reason to distrust
 ⇒ move on):
@@ -253,8 +254,10 @@ FAQ
   ignored with a `strategy_overrides_fallback` warning.
 - **Does an LLM have to be involved?** No. Every construct has mandatory engine semantics —
   `review_default` for gray bands, `otherwise:` for decide nodes, a deterministic composite score
-  for `pick: best`. The LLM decider is opt-in, budget-metered, and any decider failure falls back
-  to the engine default with a `decider_downgraded` trace.
+  for `pick: best`. The LLM decider is a declared seam, not a shipped call. Today every decision
+  point resolves to its engine default and the trace says `decider_downgraded: unavailable`.
+  When the wire adapter lands it will be opt-in by two keys, and every decider failure will
+  still fall back to the engine default.
 - **Can a strategy weaken compliance?** Never — see the second invariant above.
 - **How do I debug why a fallback fired — or didn't?** The trace records everything: every
   attempt with its category, and for gate events each predicate's observed value vs. threshold,

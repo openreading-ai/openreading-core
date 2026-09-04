@@ -1,7 +1,10 @@
-"""AdapterDescriptor — the static, machine-readable record each adapter ships
-(adapter_interface.md §6). The router reads it to check eligibility, rank candidates, and
+"""AdapterDescriptor: the static, machine-readable record each adapter ships.
+
+The router reads it to check eligibility, rank candidates, and
 build the capability matrix — which is what keeps the router from ever branching on backend
-type. Mirrors src/openreading/schemas/adapter-descriptor.v0.4.json.
+type. Mirrors the file `openreading.schemas.DESCRIPTOR_SCHEMA_FILE` names, currently
+`src/openreading/schemas/adapter-descriptor.v0.7.json`. Bump the constant and this line
+together.
 """
 
 from __future__ import annotations
@@ -81,8 +84,9 @@ class Capabilities(BaseModel):
 
 
 class OutputChannels(BaseModel):
-    """Per-channel N/D/X grade (normalized_schema.md §4). The router never asks a backend for
-    a channel graded X, and warns (never fabricates) when a requested channel is X."""
+    """Per-channel N/D/X grade (internal/research/openreading/normalized_schema.md §4). The
+    router never asks a backend for a channel graded X, and warns (never fabricates) when a
+    requested channel is X."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -246,10 +250,10 @@ class AdapterDescriptor(BaseModel):
     idempotency_supported: bool = True
     # v0.6 (BL-164) — true iff cancel() actually stops the job at the vendor, not merely locally.
     cancel_supported: bool = True
-    # v0.7 (Ledger T4a, AC-8) — the adapter-contract version this adapter implements. No default:
-    # every adapter, including ones this milestone doesn't touch, must declare one explicitly, or a
-    # future adapter could silently skip declaring it at all (defeating AC-8's own "declares...by
-    # name" requirement). `1` is the pre-Ledger-T4a shape (poll/resolve_webhook/cancel take no
+    # v0.7 (Ledger T4a, AC-8): the adapter-contract version this adapter implements. No default,
+    # so every adapter declares one explicitly. A default would let a new adapter skip the
+    # declaration and still register, which is the failure this field exists to stop.
+    # `1` is the pre-Ledger-T4a shape (poll/resolve_webhook/cancel take no
     # `ctx`, an adapter MAY cache a client on `self`); `2` is T4a's shape (poll/resolve_webhook/
     # cancel take `ctx: RunContext`, and no built-in client is ever cached on `self` — R1/R2 in
     # testing/conformance.py, see internal/design/ledger.md §11-§13). `adapters/registry.py` refuses to

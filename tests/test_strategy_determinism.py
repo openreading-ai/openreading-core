@@ -95,12 +95,12 @@ def test_diamond_reference_same_tree_from_two_paths_is_not_a_false_positive_cycl
 
 
 def test_no_realclock_construction_or_import_in_engine_py():
-    """Import/usage-shaped scan, not a literal substring scan (T2 §8 item 2, alex round-1 F1's
-    concurrence): several prose comments in engine.py mention "RealClock" descriptively to explain
-    why it must not be used, and a naive substring scan would flag that prose the moment its nearby
-    code migrated to ctx.clock. Scoped to the two shapes that actually matter: an import naming
-    RealClock, and a `RealClock(` constructor call — matching AC-18's own
-    `"openreading.enterprise"`/`"import enterprise"` import-shaped precedent."""
+    """Import/usage-shaped scan, not a literal substring scan (T2 §8 item 2): several prose
+    comments in engine.py mention "RealClock" descriptively to explain why it must not be used, and
+    a naive substring scan would flag that prose the moment its nearby code migrated to ctx.clock.
+    Scoped to the two shapes that actually matter: an import naming RealClock, and a `RealClock(`
+    constructor call, matching AC-18's own `"openreading.enterprise"`/`"import enterprise"`
+    import-shaped precedent."""
     path = Path(__file__).resolve().parents[1] / "src" / "openreading" / "strategies" / "engine.py"
     text = path.read_text()
     offenders = [

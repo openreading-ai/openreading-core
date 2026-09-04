@@ -33,12 +33,18 @@ from typing import Protocol
 
 
 class Clock(Protocol):
+    """What the driver and the engine need from time: `now_ms()` for monotonic readings,
+    `now_wall_ms()` for epoch readings, and `sleep()`. The module docstring says which one a
+    given value needs."""
+
     def now_ms(self) -> float: ...
     def now_wall_ms(self) -> float: ...
     async def sleep(self, seconds: float) -> None: ...
 
 
 class RealClock:
+    """The production clock, backed by `time.monotonic`, `time.time` and `asyncio.sleep`."""
+
     def now_ms(self) -> float:
         return time.monotonic() * 1000.0
 
@@ -56,13 +62,13 @@ class FakeClock:
     Two modes:
     - **auto-advance** (default) — a single-task `sleep` bumps `now` immediately. This is what the
       serial POLL driver uses (one task at a time), unchanged from before.
-    - **coordinated** (opt-in, for concurrent branches — harness H1 / integration.md §6 T3) —
+    - **coordinated** (opt-in, for concurrent branches, harness H1) —
       `sleep` registers a wake-time and awaits a future; a driver calls `advance_to_next()` to move
       to the earliest pending wake time only when every runnable task is parked on `clock.sleep`.
       This makes a race between branches with different virtual latencies deterministic.
 
-    **Not safe across an `asyncio.run()` boundary in a different thread** (Ledger T2, disclosed in
-    FOUNDER-INBOX.md 2026-08-22): coordinated `sleep`'s future is bound to
+    **Not safe across an `asyncio.run()` boundary in a different thread** (Ledger T2):
+    coordinated `sleep`'s future is bound to
     `asyncio.get_running_loop()` at call time. `strategies/engine.py`'s `_run_branch` dispatches a
     POLL-mode leaf's driver loop via `asyncio.to_thread(...)` into `router/driver.py`'s
     `run_to_completion`, which wraps its own poll loop in a **fresh** `asyncio.run(...)` — a

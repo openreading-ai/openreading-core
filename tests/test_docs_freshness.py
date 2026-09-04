@@ -1,18 +1,10 @@
 """BL-24 / BL-49 — the numbers the docs quote about the gate must agree with the gate.
 
-Four places cite `make verify`'s coverage floor (two root docs, two module docstrings). Those citations drifted apart (and away from the
-Makefile) for four sprints because nothing checked them. The floor has a single source of truth —
-`--cov-fail-under` in the Makefile — so it is checked against it here.
-
-The offline test count is different: it has no stable value to check against (it grows every
-sprint that adds a test), so BL-24 originally only checked the four docs for INTERNAL agreement —
-every doc must quote the same number. That number itself still drifted for eight sprints running,
-growing further out of date every sprint, because a hard-coded count is the wrong mechanism: there
-is nothing to keep it current. BL-49 replaced it with the opposite discipline — state the floor
-(stable, checked below), drop the count, and point at `pytest -m "not live" --collect-only -q` as
-the live source of truth. So this file now checks the reverse of what it used to: no doc may
-reintroduce a hard-coded offline test count, and the docs that used to carry one must point at the
-live collection command instead.
+Four places cite `make verify`'s coverage floor: two root docs and two module docstrings. The
+floor has one source of truth, `--cov-fail-under` in the Makefile, and this file checks every
+citation against it. The offline test count is different, because it has no stable value to check
+against. No doc may quote one. A doc that needs the number points at
+`pytest -m "not live" --collect-only -q`, which reports it live.
 """
 
 from __future__ import annotations

@@ -3,20 +3,25 @@
 <sub>[Docs home](../README.md) · [← The HTTP server](../server/README.md) · [Evals →](../evals/README.md)</sub>
 
 > **In one sentence.** Every channel in a response is measured, computed by one shared package, or
-> left out and marked absent in `channel_provenance`, so nothing in it is invented.
+> left out and missing from `channel_provenance`, so nothing in it is invented.
 
 ## What this gives you
 
 You parsed a document with `pymupdf`, every block has `confidence: null`, and you cannot tell
 whether the parser or the document is at fault. A backend is one parser, such as the local `pymupdf`
 library or a hosted API. A channel is one kind of output inside the response, such as `text`,
-`blocks`, `table_cells`, or per-block confidence. This page gives you the rule set, C1 to C11, that
-every backend's output is checked against. It also describes the one package, `openreading.derive`,
-that computes the channels a backend does not emit itself. In practice you get plain text that is
-really plain and tables that also appear in the text. A `channel_provenance` map says which channels
-this package derived and which the backend emitted. C12 is listed beside the others, but it is a
-rule about schema files rather than a channel check. You need one saved response, such as
-`pymupdf.json` from the root README, and no key at all.
+`blocks`, `table_cells`, or per-block confidence.
+
+This page gives you the rule set, C1 to C11, that every backend's output is checked against. It also
+describes the one package, `openreading.derive`, that computes the channels a backend does not emit
+itself. In practice you get plain text with no markup in it, and tables whose rows also appear in
+the text. A `channel_provenance` map says which channels this package derived and which the backend
+emitted.
+
+You need no key at all. The walkthrough below builds `sample.pdf`, then writes the `pymupdf.json`
+and `tesseract.json` that the recipes read. It also runs the `tesseract` backend, so install the
+tesseract binary once. Use `brew install tesseract` on macOS, or `sudo apt install tesseract-ocr` on
+Debian and Ubuntu.
 
 ## Mental model
 
@@ -29,7 +34,7 @@ produce it, so it is never filled in.
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif","fontSize":"14px","lineColor":"#94a3b8","textColor":"#334155","primaryTextColor":"#0f172a","edgeLabelBackground":"#eef2f7","clusterBkg":"#f8fafc","clusterBorder":"#cbd5e1","titleColor":"#334155"},"flowchart":{"curve":"basis","nodeSpacing":36,"rankSpacing":44,"padding":8,"useMaxWidth":true}}}%%
 flowchart TD
-  P[/"provider payload"/]:::src --> N["native channel<br>grade N"]:::good
+  P[/"backend payload"/]:::src --> N["native channel<br>grade N"]:::good
   P --> D["openreading.derive<br>md_to_text, cells_to_grid, ..."]:::work
   D --> DC["derived channel<br>grade D"]:::out
   P -. "no faithful way" .-> X["omitted, grade X<br>plus a warning"]:::bad
@@ -56,7 +61,10 @@ downstream.
 
 ## Walkthrough
 
-Build the root README's sample document, then read the grades two local adapters declare.
+Build the root README's sample document, then read the grades two local adapters declare. An
+adapter is the package in `openreading.adapters` that wraps one backend and declares its grades.
+
+### 1. Read the channel grades two adapters declare
 
 ```bash
 uv run python -c 'from openreading.testing.sample_pdf import build_sample_pdf; open("sample.pdf","wb").write(build_sample_pdf())'
@@ -70,8 +78,16 @@ uv run python -c "from openreading.adapters.registry import make_adapter; print(
 {'markdown': 'D', 'text': 'N', 'blocks': 'N', 'block_bbox': 'N', 'block_confidence': 'N', 'typed_fields': 'X', 'table_cells': 'X'}
 ```
 
-**You should see** mirror images. pymupdf has tables and no confidence, and tesseract has
+**You should see** mirror images. `pymupdf` has tables and no confidence, and `tesseract` has
 confidence and no tables.
+
+These commands also print lines to stderr that come from PyMuPDF rather than from openreading. The
+build step and the `tesseract` parse print a line beginning `warning:` about the deprecated `fitz`
+API. The `pymupdf` parse prints `Consider using the pymupdf_layout package`. The three
+`openreading.run` probes further down print the same `warning:` line. None of it changes the JSON
+on stdout.
+
+### 2. Read provenance and warnings
 
 ```bash
 uv run python -c "import json; r = json.load(open('pymupdf.json')); print(r['warnings']); print(r['channel_provenance'])"
@@ -85,10 +101,10 @@ no warnings key at all
 ```
 
 **You should see** an `X` channel missing from provenance on both runs, and a warning about it on
-only one of them. pymupdf names its missing confidence in `warnings`. tesseract has no `warnings`
-key at all, and its missing `table_cells` is announced nowhere except by its absence from
-provenance. Both outputs say `markdown: derived`, because the markdown was built here from native
-text. Check: `grep -c confidence_unavailable pymupdf.json` prints `1`.
+only one of them. `pymupdf` names its missing confidence in `warnings`. `tesseract` has no
+`warnings` key at all, and its missing `table_cells` is announced nowhere except by its absence
+from provenance. Both outputs say `markdown: derived`, because the markdown was built here from
+native text. Check: `grep -c confidence_unavailable pymupdf.json` prints `1`.
 
 ### Which signal to trust when a channel is missing
 
@@ -98,7 +114,7 @@ sometimes named in `warnings[]`, and the difference is not documented anywhere i
 output. Code that checks `warnings[]` to find out whether it lost its tables is code that will
 silently lose its tables.
 
-Compare the two grades that go missing here:
+Compare the three channels that go missing here, all graded `X`:
 
 | the missing channel | provenance | `warnings[]` |
 |---|---|---|
@@ -112,21 +128,17 @@ always missing from `channel_provenance`. It may or may not also be named in `wa
 decide whether you got a channel, compare the provenance map against the grades the backend
 declares, which the first command in this walkthrough prints.
 
-The normative rule is C4 and C5 in `uv run python -m pydoc openreading.derive`, and it reads "an
-`X` channel is never populated; a requested `X` channel warns". The first half holds everywhere.
+The normative rule is C4 and C5 in `uv run python -m pydoc openreading.derive`. It reads "an `X`
+channel is never populated; a requested `X` channel warns". The first half holds everywhere.
 The second half depends on how you asked, which the next section measures.
 
 ### Asking for a channel: `outputs` and `features`
 
-A request can say which channels it wants, through two separate fields that neither README nor
-help text has described until now. `outputs` names the channels to fill. `features` turns on
-capabilities that produce them. They are not interchangeable, and which one a backend watches
-decides whether you get a warning.
-
-| field | keys | default |
-|---|---|---|
-| `outputs` | `markdown`, `text`, `blocks`, `typed_fields` (booleans), `tables` (`none`, `cells`, `markdown`, `html`), `chunking`, `include_backend_raw` | `markdown`, `text`, `blocks` and `include_backend_raw` on, `typed_fields` off, `tables: markdown` |
-| `features` | `ocr`, `ocr_languages`, `layout`, `reading_order`, `tables`, `forms_key_value`, `figures_images`, `signatures`, `classification`, `handwriting` | the schema documents per-key defaults such as `tables: true`, and the object itself is absent unless you pass it |
+A request can say which channels it wants, through two separate fields. `outputs` names the
+channels to fill, such as `typed_fields`. `features` turns on the capabilities that produce them,
+such as `tables`. They are not interchangeable, and which one a backend watches decides whether you
+get a warning. The section headed `Request` in `uv run python -m pydoc openreading.schemas` lists
+every key of both fields and its default.
 
 Requesting `typed_fields` from a backend that cannot produce them does warn:
 
@@ -148,9 +160,9 @@ when you need to be told that a table request could not be met.
 
 > [!WARNING]
 > An adapter tests whether you sent a `features` object at all, and a default request sends none.
-> So a default run gets no `tables_unsupported` warning however badly it needed one, and the
-> per-key default of `tables: true` in the schema does not change that. Check
-> `channel_provenance` rather than relying on this warning to fire.
+> So a default run gets no `tables_unsupported` warning. The per-key default of `tables: true` in
+> the schema does not change that. Check `channel_provenance` rather than relying on this warning
+> to fire.
 
 ## Recipes
 
@@ -168,6 +180,8 @@ uv run python -c "import json; from openreading.types import Table; from openrea
 # 'Region\tUnits\tRevenue\nNorth\t120\t4400\nSouth\t85\t3100\nWest\t42\t1650'
 # True
 ```
+This reads the `pymupdf.json` the walkthrough wrote from `sample.pdf`. The root README's
+bank-statement parse holds no `table` block, so the same line raises `StopIteration` on it.
 One `Table` model is the only structured form. Pipe markdown and tab text are projections of it.
 
 **Build a grid with a merged cell.**
@@ -195,27 +209,33 @@ uv run python -c "from openreading.derive import utf8_slice; s = 'café au lait'
 uv run python -c "from openreading.derive import pdf_page_count; print(pdf_page_count(open('sample.pdf', 'rb').read()))"
 # 2
 ```
-Providers report byte offsets, but Python slices by code point. After the first `é` the two drift
+Backends report byte offsets, but Python slices by code point. After the first `é` the two drift
 apart by one.
 
 ## How it decides
 
 Each rule names the failure it prevents, so you can tell which rule a warning is enforcing. The
-authoritative text of C1 to C12 is the `channel contract` section of
-`uv run python -m pydoc openreading.derive`. Four of them, by example, are these.
+authoritative text of C1 to C12 is the section headed `The channel contract` in
+`uv run python -m pydoc openreading.derive`. C12 sits beside the others there. It is a rule about
+schema files rather than a channel check, so this page leaves it out. Four of the channel rules,
+with an example each:
 
-- C1, plain text is plain. No pipes, headings, fences, or HTML appear in `text`, so a search never
+- C1: plain text is plain. No pipes, headings, fences, or HTML appear in `text`, so a search never
   hits markup.
-- C2, text is complete. Table rows and captions appear in `text` as lines, so cells are searchable.
-- C6, deliver or warn. A channel graded N or D is populated, or a warning names it. Without
+- C2: text is complete. Table rows and captions appear in `text` as lines, so cells are searchable.
+- C6: deliver or warn. A channel graded N or D is populated, or a warning names it. Without
   this rule a backend could declare `D`, derive nothing, and pass every check.
-- C9, page numbers are source pages. Requesting pages 3 to 4 reports 3 and 4, never 1 and 2.
+- C9: page numbers are source pages. Requesting pages 3 to 4 reports 3 and 4, never 1 and 2.
   Page-less blocks live in one synthetic page 1 plus a `page_attribution_unavailable` warning.
 
 C7 adds that every confidence is a float in `[0, 1]`. Word confidences roll up to a block by
-minimum, because a mean hides one garbage word. A grade downgrade lands at once, and an upgrade
-lands only with its implementation. The conformance kit, `openreading.testing.conformance`,
-enforces all of this in the adapter tests.
+minimum, because a mean hides one garbage word.
+
+A backend may lower a channel's grade at any time, because a downgrade only makes today's claims
+true. It may raise a grade only in the change that ships the implementation, because raising it
+first would deepen the lie. The conformance kit, `openreading.testing.conformance`, enforces most
+of these rules in the adapter tests. C11 is advisory there, and C10 is a per-adapter fixture test
+rather than a kit check.
 
 ### A confidence is comparable inside one backend, not across two
 
@@ -244,8 +264,9 @@ applies one vendor's cut to another vendor's scale ([Strategies](../strategies/R
 
 ## Not built yet
 
-- `TypedField.type` is filled only by `anthropic_claude`, `google_document_ai` and
-  `azure_document_intelligence` (`openreading.derive` docstring, the `typed_fields` paragraph).
+- `TypedField.type` is filled only by `anthropic-claude`, `google-gemini`, `google-document-ai`
+  and `azure-document-intelligence` (`openreading.derive` docstring, the `typed_fields`
+  paragraph).
 - C11 (text and blocks agree) is permanently advisory (same docstring, C11).
 - No per-case suppression for the C1 false positive on a real ASCII pipe table (same docstring).
 - `channel_provenance` is experimental and may change shape (`openreading.schemas` docstring).

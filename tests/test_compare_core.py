@@ -289,6 +289,18 @@ def test_rejects_non_response_input() -> None:
         compare([{"not": "a response"}, make_envelope("b")])
 
 
+def test_invalid_input_message_is_one_line_without_the_schema() -> None:
+    # A jsonschema ValidationError stringifies to the whole response schema, ~995 lines of it.
+    # Interpolating the exception turned exit 5 into a terminal-filling dump that reads as a
+    # crash, so only the message and the instance path reach the reader.
+    with pytest.raises(CompareInputError) as caught:
+        compare([{"hello": 1}, make_envelope("b")])
+    message = str(caught.value)
+    assert message == (
+        "input #1 is not a schema-valid response: 'schema_version' is a required property (at $)"
+    )
+
+
 def test_baseline_and_truth_stances_produce_sections() -> None:
     a = make_envelope("a", fields={"Total": "$5"}, text="hi")
     b = make_envelope("b", fields={"Total": "$5"}, text="hi")

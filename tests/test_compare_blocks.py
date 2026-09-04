@@ -100,6 +100,18 @@ def test_packaging_difference_becomes_structure_finding_not_block_missed() -> No
     assert not _find(report, "block_missed"), "packaging difference must NOT be a block_missed"
 
 
+def test_structure_finding_detail_carries_no_em_dash() -> None:
+    """A finding `detail` is rendered output: `openreading compare` prints it and every report
+    carries it. House prose style bans the em dash, so a reader never meets one in a report."""
+    a = make_envelope("a", pages=[[blk("shared"), blk("special marker phrase")]])
+    b = make_envelope("b", pages=[[blk("shared"), blk("special marker phrase")]])
+    c = make_envelope("c", text="shared special marker phrase", pages=[[blk("shared")]])
+    structure = _find(compare([a, b, c]), "structure")
+    assert structure, "expected a structure finding for c's packaging difference"
+    for f in structure:
+        assert "—" not in f["detail"], f"em dash in rendered finding detail: {f['detail']}"
+
+
 def test_block_missed_stays_warn_when_content_genuinely_absent() -> None:
     """Guard against over-demotion: a block whose text is nowhere in the subject's output is a real
     miss and stays warn (still surfaces the real per-backend misses)."""

@@ -302,6 +302,17 @@ def test_preset_name_collision_errors():
         build_library(cfg)
 
 
+def test_preset_name_collision_advice_is_followable():
+    # The old text sent the reader to `extends: cost_saver`, which the loader's schema gate
+    # rejects, so following it produced a second error. The order below is load-bearing:
+    # `strategy show` prints the user's own body until the colliding name is gone.
+    with pytest.raises(NormalizeError) as ei:
+        build_library(_config({"cost_saver": ["pymupdf"]}))
+    message = str(ei.value)
+    assert "extends" not in message
+    assert "Rename it, then run `openreading strategy show cost_saver`" in message
+
+
 def test_normalize_config_covers_all_user_strategies():
     cfg = _config(
         {"a": ["pymupdf"], "b": {"parallel": ["pymupdf", "tesseract"], "pick": "fastest"}}
@@ -361,8 +372,11 @@ def test_duplicate_leaf_candidates_collide():
 
 def test_candidate_named_otherwise_collides_with_the_fallthrough():
     # `otherwise` is the engine's own candidate name; a member claiming it is never dispatched.
-    with pytest.raises(NormalizeError, match="otherwise"):
+    with pytest.raises(NormalizeError, match="otherwise") as ei:
         normalize_node(_decide([{"use": "otherwise"}, "reducto"], "reducto"))
+    # Runtime error text carries no em dash (the house prose rule).
+    assert "—" not in str(ei.value)
+    assert "fallthrough action, so it could never be dispatched" in str(ei.value)
 
 
 # ---- CLI: strategy show | list | normalize ----------------------------------------------------
@@ -386,7 +400,11 @@ def test_cli_strategy_show_preset(_clean_cwd, capsys):
 def test_cli_strategy_show_unknown_errors(_clean_cwd, capsys):
     rc = main(["strategy", "show", "nope"])
     assert rc == 3
-    assert "unknown strategy" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "unknown strategy" in err
+    # Browsing strategy names is this command's whole job, so a missed name names the set, in the
+    # same words `parse --strategy` uses for the same mistake.
+    assert "defined: cost_saver, fast, max_accuracy, offline_first" in err
 
 
 def test_cli_strategy_list_presets(_clean_cwd, capsys):

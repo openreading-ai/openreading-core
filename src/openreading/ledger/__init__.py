@@ -1,13 +1,14 @@
 """The Ledger execution plane: ports, journal contract, replay/resume, retention, and the
 decisions behind them. Open core, zero new required third-party dependencies.
 
-A run leaves a record, and the record is what makes the run repeatable. The plane sits between
-the strategy walk (`openreading.strategies.engine`) and the adapters: every side effect the walk
-performs leaves through one await, `ctx.exec(StepRequest, run=...)`, on an `Executor` port, and
-the executor journals what happened. Same code runs the CLI, `openreading.run`, and the server;
-a durable/distributed substrate is one more implementation of the same ports, admitted by a
-conformance kit and never named by core. Full design (council review, measurements, worked
-substrate examples): internal/design/ledger.md.
+A run leaves a record, and the record is what makes the run repeatable. That record is the
+journal, an append-only log holding one line per step, saying what was attempted and how it ended.
+The plane sits between the strategy walk (`openreading.strategies.engine`) and the adapters: every
+side effect the walk performs leaves through one await, `ctx.exec(StepRequest, run=...)`, on an
+`Executor` port, and the executor journals what happened. Same code runs the CLI,
+`openreading.run`, and the server; a durable/distributed substrate is one more implementation of
+the same ports, admitted by a conformance kit and never named by core. Full design:
+internal/design/ledger.md.
 
 Vocabulary budget: the plane coins exactly two user-facing words, `run_id` and `resume`.
 `Step`, `Journal`, `Executor`, `BlobRef`, ... are Python type names behind the advanced boundary
@@ -15,9 +16,7 @@ and must never appear in a `--help` line or a happy-path doc sentence. `plan`, `
 `worker`, `blob`, `spool`, `latch` were all rejected as user-facing nouns because each already
 means something else one directory away (a second meaning is a permanent tax on every reader).
 `substrate` is claimed as an INTERNAL noun only (design prose and type names for what an executor
-runs on; never a `--help` line or a happy-path doc word). Recorded rule: `strategies/executor.py`
-is claimed by the unbuilt Decider milestone; it must be renamed before Ledger's executor and
-Decider's coexist, or `executor` means two things in one package (no such file exists today).
+runs on; never a `--help` line or a happy-path doc word).
 
 Arming (env only, no CLI flag)
 ------------------------------
@@ -29,19 +28,20 @@ Arming (env only, no CLI flag)
   `blobs/<run_id>/<digest>.bin` (payloads, encrypted under a per-run key), `keys/<run_id>.key`
   (dir 0700, file 0600), and `retention/<run_id>.json` (the expiry stamp).
 - `OPENREADING_LEDGER_RETENTION_HOURS` -- hours a run's payloads live before the reaper shreds
-  its key. Default `retention.DEFAULT_RETENTION_HOURS` (24.0, a placeholder; the real default is
-  an open founder decision). Read once at arm time and stamped as an absolute epoch. Raise it
-  BEFORE the run: after the key is reaped nothing brings the content back.
+  its key. Default `retention.DEFAULT_RETENTION_HOURS` (24.0, a placeholder rather than a tuned
+  value, so set the variable to whatever your own retention policy requires). Read once at arm
+  time and stamped as an absolute epoch. Raise it BEFORE the run: after the key is reaped nothing
+  brings the content back.
 
 What arming covers: `api._arm_ledger` is called from the strategy path and from `resume` only.
-So `parse --strategy X`, `parse` with `defaults.strategy`, `POST /v1/parse` resolving to a
-strategy, and `POST /v1/jobs` with a `strategy:<name>` body (the whole walk runs through
-`api.run_request` -> `_run_strategy_request` -> `_arm_ledger`, so it writes `<run_id>.jsonl`, a
-header, blobs and a retention stamp exactly as `/v1/parse` does; only the `JobRecord` itself --
-in-memory, per-process, no server-side resume -- is unjournaled) journal; `--backend <id>`,
-`parse` with no default strategy, `strategy:none`, a named-backend `POST /v1/jobs`, and native
-`submit_many` batches journal nothing. A batch inherits whichever row its items resolve to (one
-run per item).
+Four entry points journal a run: `parse --strategy X`, `parse` with `defaults.strategy`, `POST
+/v1/parse` resolving to a strategy, and `POST /v1/jobs` with a `strategy:<name>` body. The whole
+walk runs through `api.run_request` -> `_run_strategy_request` -> `_arm_ledger`, so each of the
+four writes `<run_id>.jsonl`, a header, blobs and a retention stamp exactly as `/v1/parse` does.
+Only the `JobRecord` itself is unjournaled, because it is in-memory and per-process with no
+server-side resume. Five journal nothing: `--backend <id>`, `parse` with no default strategy,
+`strategy:none`, a named-backend `POST /v1/jobs`, and native `submit_many` batches. A batch
+inherits whichever row its items resolve to (one run per item).
 
 Exit codes (CLI): `6` = interrupted, resumable -- Ctrl-C or SIGTERM while armed. The two are one
 path, not two: `openreading.cli.app._terminate_as_interrupt` turns a supervisor's stop signal
@@ -129,10 +129,11 @@ The port surface (`openreading.ledger.*`)
 - `sanitizer`  -- `Sanitizer`, the single redaction chokepoint for journal/blob writes.
 
 Core ships one real implementation of every port so `make verify` stays offline and the CLI
-gains resumability with no new dependency. Structural pins: no open-core module imports anything
-named `enterprise` (a pinned import scan, `tests/test_ledger_journal.py`), and `RealClock` is
-banned from the engine (`tests/test_strategy_determinism.py`). The plane's own law -- never
-branch on substrate type -- is a rule, not yet a scan: `_WalkCtx.executor` is typed as the
+gains resumability with no new dependency. Structural pins: nothing under `router`, `strategies`,
+`batch`, `comparison` or `evals` imports a package from outside open core (a pinned import scan,
+`tests/test_ledger_journal.py`), and `RealClock` is banned from the engine
+(`tests/test_strategy_determinism.py`). The plane's own law -- never branch on substrate type --
+is a rule, not yet a scan: `_WalkCtx.executor` is typed as the
 `Executor` Protocol, nothing `isinstance`-checks an executor, and every behavioural difference
 is meant to be read from `executor.descriptor`, exactly as the router reads `AdapterDescriptor`
 and never the adapter's type. The one concrete name core mentions is `InlineExecutor` itself:
@@ -283,38 +284,35 @@ shipped** `_step_request` hardcodes `step_seq=0` and `attempt=1` -- no per-path 
 so the effective key today is `(run_id, step_path)`. `step_id = sha256(run_id + step_path + step_seq)`
 is the only form that leaves the process. The key cannot be `config_hash`-derived: the old
 `config_hash` hashed the pruned tree alone, so three mutually exclusive compliance postures and a
-PHI run resting on an operator BAA confirmation hashed identically (fail-closed became
-fail-equal-hash). `config_hash` now folds in the effective compliance, the router config and
-every participating descriptor's digest; that landed before the journal existed.
+run over protected health information hashed identically. That fourth run rested on a confirmed
+Business Associate Agreement, the HIPAA contract a vendor signs before it may see such data, and
+fail-closed became fail-equal-hash. `config_hash` now folds in the effective compliance, the
+router config and every participating descriptor's digest; that landed before the journal existed.
 
-Batch identity (designed with the child-run tranche): a batch has ONE `run_id` -- the one
-`resume` takes; each item is a child run `run_id = "{batch}/{index}"` with `index` the
-intake-resolved position from `batch.sources` and header `parent_run_id`, so step keys never
-collide across items. The coordinator journals only `(index, blob_ref, state, cost)` records
-under the batch `run_id` (~200 B/item). An executor declaring `child_runs` maps the child
-`run_id` onto its native child-run identity so `resume <batch_id>` re-attaches to every child by
-prefix; otherwise core's own fan-out drives the children. One run-log per batch is arithmetically
-impossible: step count grows with items while any bounded `max_steps_per_run` is a constant.
+Batch identity is designed with the child-run tranche and not built. internal/design/ledger.md
+holds the child `run_id` scheme, the coordinator's per-item records and the `child_runs`
+capability. One run-log per batch is arithmetically impossible, because step count grows with
+items while any bounded `max_steps_per_run` is a constant.
 
 Determinism: the walk must re-execute to the same `ctx.exec` calls. Hash-seed ordering of the
 dropped set is sorted; `clock` is required and `RealClock` is banned from the engine by a pinned
-scan; race winners (`parallel:`, hedges) resolve by journaled completion order (`journal_seq`),
-the one place orchestration reads a recorded fact instead of recomputing it, so the same branch
-wins on replay under any substrate that provides an ordered per-run log. The design's L4 on the
-trace (7.3) names three follow-on record kinds replacing in-place mutation of an appended
-attempt: `attempt.gates_bound`, `attempt.recategorized`, `pages.assigned`. Shipped shape is
-mutate-PLUS-record, not follow-on-only: `Attempt.bind_gates` still assigns `gates` and
+scan; race winners (`parallel:`, hedges) resolve by journaled completion order (`journal_seq`), the
+one place orchestration reads a recorded fact instead of recomputing it, so the same branch wins on
+replay under any substrate that provides an ordered per-run log. The design's L4 on the trace
+(internal/design/ledger.md 7.3) names three follow-on record kinds replacing in-place mutation of
+an appended attempt: `attempt.gates_bound`, `attempt.recategorized`, `pages.assigned`. Shipped
+shape is mutate-PLUS-record, not follow-on-only: `Attempt.bind_gates` still assigns `gates` and
 `recategorize` still assigns `category` in place (every consumer reading the current value keeps
 working) and each additionally appends an `Attempt.revisions` entry (`kind` = `gates_bound` /
-`recategorized`, the latter with `from`/`to`), so the sequence of updates survives beside the
-final state; `Trace.assign_pages` extends `trace.pages` rather than reassigning it, so a second
-paged cascade in one walk cannot clobber the first (there is no `pages.assigned` record).
+`recategorized`, the latter with `from`/`to`), so the sequence of updates survives beside the final
+state; `Trace.assign_pages` extends `trace.pages` rather than reassigning it, so a second paged
+cascade in one walk cannot clobber the first (there is no `pages.assigned` record).
 
-The determinism boundary (5.3.1, the contract): one document run is one orchestration unit, and
-everything the walk reads must enter through its declared input -- the header `{run_id,
-config_hash, plan_hash, registry_fingerprint, pinned_eligible, document: BlobRef,
-slim_request}` -- or come back through `ctx.exec`; nothing else enters. Inside the unit the
-design has `ctx.registry` as a descriptor-only view built from `pinned_eligible`, `ctx.broker`
+The determinism boundary (internal/design/ledger.md 5.3.1, the contract): one document run is
+one orchestration unit, and everything the walk reads must enter through its declared input -- the
+header `{run_id, config_hash, plan_hash, registry_fingerprint, pinned_eligible, document:
+BlobRef, slim_request}` -- or come back through `ctx.exec`; nothing else enters. Inside the unit
+the design has `ctx.registry` as a descriptor-only view built from `pinned_eligible`, `ctx.broker`
 absent (credentials resolve on the worker), `ctx.clock` the executor's clock, the three
 `asyncio.to_thread` sites gone, and `asyncio.create_task` in `_eval_parallel` retained because
 the race is resolved by `journal_seq`, not scheduler order; a pinned test would assert
@@ -326,27 +324,27 @@ the loop); leaf dispatch goes through `ctx.executor.exec`, and its worker thread
 `InlineExecutor.exec`'s own `asyncio.to_thread(run)`, outside the engine. `_WalkCtx` still
 carries the live registry and broker.
 
-`ExecResult` (what `exec` returns): `payload` (exactly `run()`'s own object on a live "ok";
-JSON resolved through the blob store on a replayed one), `status` in `ok | skipped | cancelled`
-only, `journal_seq`, `replayed`. A `failed` outcome -- live or replayed -- always RAISES, the
-recorded `StepError` reconstructed into its taxonomy class (`ComplianceRefused` with
-`constraint=`, else `TerminalError`/`RetryableError`/`UnsupportedFeatureError` by name, unknown
-=> `TerminalError`), with the ORIGINAL exception's message as the reconstructed exception's own
-message (`StepError.detail`, falling back to `code` -- the taxonomy class name -- when a record
-predates M9's fix or a gate refusal never had a longer message to carry), so every call site's
-existing `except (...)` handling works unmodified on both paths. Known gap: replayed errors carry
-taxonomy + message, not `backend_code`/`retry_after` -- `StepError.code` holds the exception's
-CLASS NAME, not its real `backend_code` value, and `StepError` has no `retry_after` field at all;
-full fidelity needs a `step` schema field addition (the schema-evolution procedure), not done.
-Replay is checked before either gate: an outcome once decided replays uniformly even
-if a live re-check would now differ (credentials that appeared since the original run still
-replay the original skip). `asyncio.CancelledError` out of `run()` (a losing `parallel:` branch)
-gets its own `cancelled` terminal record and is re-raised: without it the step is
-indistinguishable on resume from a crash-before-dispatch and would re-dispatch for real. A
-replayed `BlobRef` whose key was shredded raises `TerminalError(backend_code="payload_expired")`
--- not the bare `PayloadExpired`, which the engine's broad `except Exception` would reclassify as
-an anonymous `provider_error`. A ZDR backend's recorded `ok` has `payload=None` by design and
-replays as `TerminalError(zdr_payload_not_retained)` rather than crashing on `validate(None)`.
+`ExecResult` (what `exec` returns): `payload` (exactly `run()`'s own object on a live "ok"; JSON
+resolved through the blob store on a replayed one), `status` in `ok | skipped | cancelled` only,
+`journal_seq`, `replayed`. A `failed` outcome -- live or replayed -- always RAISES, the recorded
+`StepError` reconstructed into its taxonomy class (`ComplianceRefused` with `constraint=`, else
+`TerminalError`/`RetryableError`/`UnsupportedFeatureError` by name, unknown => `TerminalError`),
+with the ORIGINAL exception's message as the reconstructed exception's own message
+(`StepError.detail`, falling back to `code` -- the taxonomy class name -- when a record predates
+the fix for security review finding M9 or a gate refusal never had a longer message to carry), so
+every call site's existing `except (...)` handling works unmodified on both paths. Known gap:
+replayed errors carry taxonomy + message, not `backend_code`/`retry_after` -- `StepError.code`
+holds the exception's CLASS NAME, not its real `backend_code` value, and `StepError` has no
+`retry_after` field at all; full fidelity needs a `step` schema field addition (the
+schema-evolution procedure), not done. Replay is checked before either gate: an outcome once
+decided replays uniformly even if a live re-check would now differ (credentials that appeared since
+the original run still replay the original skip). `asyncio.CancelledError` out of `run()` (a losing
+`parallel:` branch) gets its own `cancelled` terminal record and is re-raised: without it the step
+is indistinguishable on resume from a crash-before-dispatch and would re-dispatch for real. A
+replayed `BlobRef` whose key was shredded raises `TerminalError(backend_code="payload_expired")` --
+not the bare `PayloadExpired`, which the engine's broad `except Exception` would reclassify as an
+anonymous `provider_error`. A ZDR backend's recorded `ok` has `payload=None` by design and replays
+as `TerminalError(zdr_payload_not_retained)` rather than crashing on `validate(None)`.
 
 Missing credentials are a typed, journaled `StepResult(status="skipped",
 code="missing_credentials")`, and only orchestration decides fallback. The design's "terminal on
@@ -367,7 +365,8 @@ a 30 s ceiling, a vendor `retry_after` wins when larger, at most `MAX_CONSECUTIV
 consecutive faults -- a healthy job that merely keeps running is bounded only by the absolute
 deadline), then the leaf fails over; `RetryableError` from `submit` is NOT retried in place --
 `router.executor` falls over to the next backend at once, a deliberate workaround for
-non-idempotent submit (seven hosted adapters double-bill a retried submit). The design's own
+non-idempotent submit (a hosted adapter whose `AdapterDescriptor` sets
+`idempotency_supported: false` double-bills a retried submit). The design's own
 table row for `RetryableError` is "retried in place, 5 attempts, 500 ms -> 30 s, honour
 `retry_after`, fail over after exhaustion" -- the in-place budget for `submit` lands only once
 idempotency exists. `TerminalError` no retry, fail over; `UnsupportedFeatureError` neither;
@@ -398,50 +397,45 @@ refuses; it never best-efforts (`JOURNAL_VERSION = 1` is the only version today)
 whose remaining steps need a password-protected document or an async webhook cannot re-dispatch
 them from the header alone -- a disclosed limitation, not a crash.
 
-Designed header/resume rules, not built: the header also records the executor id and its
-`ExecutorDescriptor` digest so L5 covers substrate change (a resume under an executor whose
-descriptor digest differs refuses with a named reason), and records `key_id`, never key bytes
-(the enterprise key store holds only a key id wrapped by an external KMS). A v2 reader of a v1
-journal re-executes any step missing a v2-only field and records `replay_degraded{step_id,
-reason}`, never silently. Residency binds to the DISPATCH QUEUE -- the one worker-selection
-primitive a dispatcher cannot bypass; `phi_path_constraints` and `data_region_options` select
-the queue at plan time in the same pure pass as the gate, and that selection is journaled even
-inline (the recorded queue is the literal `inline`, and inline has no fence -- stated, not
-hidden) so an inline journal replayed under a distributed executor carries the queue it would
-have needed. A resume that would move a run between queues refuses with `residency_changed`.
+Designed header/resume rules, not built (internal/design/ledger.md, and the gaps list above): the
+executor id and its descriptor digest in the header so L5 covers a substrate change, `key_id`
+recorded rather than key bytes, `replay_degraded` records when a v2 reader meets a v1 journal, and
+residency queues with the `residency_changed` refusal.
 
 Retention, ZDR, erasure
 -----------------------
 Once openreading retains, it holds itself to the bar it enforces on vendors: the ceiling is
 `min(max_retention_hours)` over the HOSTED backends on the run's path. `runs_fully_local`
-descriptors are excluded -- their `0` says the vendor holds nothing, not that openreading may;
-read literally every default cascade would have a zero-hour ceiling and `resume` could never
-serve anything. A hosted `None` (an UNVERIFIED vendor limit) contributes no term;
-`compute_retention_ceiling_hours` reports it as a `retention_unverified` flag, but nothing
-records that flag on the run today (`tighten_retention` discards it; the design has it in the
-header). With no term at all `OPENREADING_LEDGER_RETENTION_HOURS` is the limit. The stamp is
-written at arm time from the operator default ALONE and then only ever tightened, per step, from
-the descriptor of a backend that actually dispatched (`retention.tighten_retention`, called from
-the live "ok" branch). It was once computed over the whole eligible set, and a strict backend
-that was merely eligible -- never named, never dispatched -- collapsed unrelated runs' ceilings
-and forced ZDR on them. The reaper runs at every fresh arm (no cron, no new CLI surface) and
-calls `KeyStore.destroy` -- the exact mechanism a manual shred uses -- so a reaped run and a
-shredded one leave the identical `payload_expired` state; the journal file stays (audit survives
-erasure).
+descriptors are excluded -- their `0` says the vendor holds nothing, not that openreading may; read
+literally every default cascade would have a zero-hour ceiling and `resume` could never serve
+anything. A hosted `None` (an UNVERIFIED vendor limit) contributes no term;
+`compute_retention_ceiling_hours` reports it as a `retention_unverified` flag, but nothing records
+that flag on the run today (`tighten_retention` discards it; the design has it in the header). With
+no term at all `OPENREADING_LEDGER_RETENTION_HOURS` is the limit. The stamp is written at arm time
+from the operator default ALONE and then only ever tightened, per step, from the descriptor of a
+backend that actually dispatched (`retention.tighten_retention`, called from the live "ok" branch).
+It was once computed over the whole eligible set, and a strict backend that was merely eligible --
+never named, never dispatched -- collapsed unrelated runs' ceilings and forced ZDR on them. The
+reaper runs at every fresh arm, once at `openreading serve` startup, and then on the server's
+`OPENREADING_RETENTION_SWEEP_S` timer (`server.app._sweep_retention_forever`, default one hour). A
+CLI-only install has no timer, so it enforces expiry on its next run and the operator owns that
+schedule. The reaper calls `KeyStore.destroy` and removes the run's blob directory and its
+retention stamp, the exact mechanism a manual shred uses, so a reaped run and a shredded one leave
+the identical `payload_expired` state. The journal file stays, so audit survives erasure.
 
 ZDR: a hosted backend whose `zdr_flag` is set implies zero retained CONTENT for its step -- the
 ordinary `attempted`/terminal records are written (topology, digests, cost) but `blobs.put` is
 never called. Scoped per dispatching backend (`InlineExecutor._is_zdr_backend`), for the same
-eligible-vs-on-path reason as the ceiling. The design (9.4) asks for more, and it is NOT built:
-a ZDR-flagged backend implies zero retention for the WHOLE path, not just the vendor leg --
-journal metadata only, no blob, no `backend_raw`, no page text for ANY step, or refuse the run.
-Shipped is per-step only: `_is_zdr_backend` is consulted once per step at the blob-put site, so
-a non-ZDR backend dispatched on the same path still stores its blob; `tighten_retention` records
-a `zdr` flag on the retention stamp that `reap` never reads (it acts on `expires_epoch_ms`
-alone); nothing refuses the run. Journaling inverts the response defaults:
+eligible-vs-on-path reason as the ceiling. The design (internal/design/ledger.md 9.4) asks for
+more, and it is NOT built: a ZDR-flagged backend implies zero retention for the WHOLE path, not
+just the vendor leg -- journal metadata only, no blob, no `backend_raw`, no page text for ANY step,
+or refuse the run. Shipped is per-step only: `_is_zdr_backend` is consulted once per step at the
+blob-put site, so a non-ZDR backend dispatched on the same path still stores its blob;
+`tighten_retention` records a `zdr` flag on the retention stamp that `reap` never reads (it acts on
+`expires_epoch_ms` alone); nothing refuses the run. Journaling inverts the response defaults:
 `backend_raw`, page images and `typed_fields` are never journaled inline, only as a blob,
-retention-capped. Today the whole response body is one blob whenever armed; there is no
-per-field opt-out short of not arming.
+retention-capped. Today the whole response body is one blob whenever armed; there is no per-field
+opt-out short of not arming.
 
 Erasure is crypto-shredding, not tombstones plus compaction (deletion latency would become a
 function of compaction scheduling, and residue survives in replicas and backups). Every payload
@@ -450,16 +444,16 @@ every replica and backup at once. The key is never written to the journal or blo
 would sit in every backup) -- hence the fourth port, `KeyStore`, whose local form is one
 0600 file per run under a 0700 `keys/` directory that operators must exclude from whatever backs
 up `*.jsonl` and `blobs/`. Blobs are addressed `(run_id, digest)`, never globally: cross-run
-dedup is forbidden so replay can never serve another tenant's bytes and shredding one run's key
-affects exactly that run; duplicate plaintext across runs is the accepted price of O(1) erasure.
+dedup is forbidden so replay can never serve another run's bytes and shredding one run's key
+affects exactly that run. Duplicate plaintext across runs is the accepted price of O(1) erasure.
 The port rule on the read side: `BlobStore.get` must reject a `BlobRef` whose `run_id` differs
 from the requesting run. `LocalFsBlobStore.get(ref)` takes no requesting-run argument today; it
 decrypts under `ref.run_id`'s own key, so isolation comes from the addressing, and the explicit
 cross-run rejection is unbuilt. `LocalFsBlobStore` encrypts every blob with AES-256-GCM (M6):
 tampering or on-disk corruption fails the AEAD tag check instead of decrypting to altered
-plaintext (a blob written by T1's original unauthenticated XOR stream, pre-upgrade, still reads
-back correctly, and is checked against the digest its ref carries because that format has no tag
-of its own -- see `localfs`'s own module docstring). A shredded run is permanently
+plaintext (a blob written by the original unauthenticated XOR stream that shipped in T1 still
+reads back correctly, and is checked against the digest its ref carries because that format has
+no tag of its own -- see `localfs`'s own module docstring). A shredded run is permanently
 non-replayable; the journal still answers WHAT happened, just not WITH WHAT content.
 
 `Sanitizer` is the backstop, not the primary defense: one instance per run, armed with the
@@ -469,31 +463,20 @@ keeps secrets out: L7's inline ceiling never triggers on a 300-byte presigned UR
 
 The substrate contract
 ----------------------
-A substrate is anything hosting an executor with four properties (16.2), each stated as a test:
-(a) a durable ordered per-run log (order IS `journal_seq`); (b) at-least-once dispatch honouring
-an idempotency key (a repeated dispatch of a journaled key does no I/O); (c) re-entry after a
-crash between any two records, replaying recorded steps and re-executing exactly the first
-without a result; (d) timers, native or emulated. Conformance to the kit, not membership in a
-list, admits a substrate; core's own facts (KB/page, validator cost) stay in core, a substrate's
-limits live only in its descriptor. Batch at scale is N child runs plus the bounded coordinator
-described above.
+A substrate is anything hosting an executor with four properties (internal/design/ledger.md 16.2),
+each stated as a test: (a) a durable ordered per-run log (order IS `journal_seq`); (b)
+at-least-once dispatch honouring an idempotency key (a repeated dispatch of a journaled key does no
+I/O); (c) re-entry after a crash between any two records, replaying recorded steps and re-executing
+exactly the first without a result; (d) timers, native or emulated. Conformance to the kit, not
+membership in a list, admits a substrate; core's own facts (KB/page, validator cost) stay in core,
+a substrate's limits live only in its descriptor. Batch at scale is N child runs plus the bounded
+coordinator described under Batch identity.
 
-The executor conformance kit (16.3) is DESIGNED, NOT SHIPPED: `src/openreading/testing/` holds
-only the adapter kit (`conformance.py`) plus `adapters.py`, `sample_pdf.py`, `scrub.py`,
-`tesseract_probe.py`, and nothing outside `ledger/` references `ExecutorDescriptor`. Its
-contract, for the build that lands it: ships beside the adapter kit in `testing/`, parameterised
-over registered `(ExecutorDescriptor, executor factory)` pairs -- `InlineExecutor` in
-`make verify`, enterprise executors under `make test-enterprise` (an `enterprise/` package must
-stay inside coverage `source` with its own `--cov-fail-under`, or it rots unmeasured), real
-substrates only in the keyed live lane, skipping cleanly without credentials. Acceptance: the
-same plan produces a byte-identical envelope on every conforming executor, and again from the
-journal alone with adapters that raise on `submit`. One check per 16.2 requirement:
-append-kill-reopen for (a); double dispatch of one idempotency key asserting one recorded result
-and no second side effect for (b); a subprocess harness killing a child between journal records
-for (c); a due-time step across a restart for (d). Plus descriptor honesty: the executor itself
-must enforce its declared limits (an inline payload over the ceiling spills or refuses at `exec`,
-an over-budget plan refuses before the first step), so a wrong descriptor fails the kit rather
-than a run. Today the only executor-level tests are `InlineExecutor`'s own unit/replay tests.
+The executor conformance kit (internal/design/ledger.md 16.3) is designed, not built.
+`src/openreading/testing/` holds only the adapter kit (`conformance.py`) plus `adapters.py`,
+`sample_pdf.py`, `scrub.py` and `tesseract_probe.py`. Nothing outside `ledger/` references
+`ExecutorDescriptor`, and the only executor-level tests are `InlineExecutor`'s own unit and replay
+tests.
 
 Surfaces: HTTP job shape `{job_id, state, backend, created_ms, response, error}` holds unchanged
 -- no `/v2`, no new job field -- as a stated goal. The `/v1/jobs` store stays in-memory,
@@ -507,15 +490,16 @@ ledger="./dir")`, plus `openreading.resume(run_id)`. Only `resume` shipped: `run
 request field), and the Python surface arms exactly as the CLI does -- `OPENREADING_LEDGER` in
 the environment, read by `api._arm_ledger`.
 
-Operational contract (internal/design/ledger.md 11; DESIGNED, NOT BUILT -- `src/openreading`
-has no `signal.`/`SIGTERM`/`atexit` handler, no kill-switch gate in `InlineExecutor.exec`, no
-dead-letter queue, and `StepResult` has no `backend_job_id` field): SIGTERM would stop accepting
-steps, let in-flight `submit` finish (the billing moment), journal `backend_job_id`, then exit
--- never kill between vendor-accept and journal-write; client disconnect would cancel the WAIT,
-never the vendor job, the run continuing and retrievable by `run_id`; a kill switch would be a
-journal-side gate before each `submit`, not a config reload (a fleet already holding work
-ignores config); dead letters would go to a queue owned by the run's initiator, not an on-call
-rotation (per-document data failures, not infrastructure). Shipped: the CLI raises
+Operational contract (internal/design/ledger.md 11). One piece of it ships, the CLI's SIGTERM
+handling described just below. The rest is designed, not built: there is no kill-switch gate in
+`InlineExecutor.exec`, no dead-letter queue, and `StepResult` has no `backend_job_id` field. As
+designed, SIGTERM stops accepting steps, lets an in-flight `submit` finish (the billing moment),
+journals `backend_job_id`, then exits, never killing between vendor-accept and journal-write. A
+client disconnect cancels the WAIT and never the vendor job, so the run continues and stays
+retrievable by `run_id`. A kill switch is a journal-side gate before each `submit` rather than a
+config reload, because a fleet already holding work ignores config. Dead letters go to a queue
+owned by the run's initiator, not an on-call rotation, because these are per-document data
+failures rather than infrastructure failures. Shipped: the CLI raises
 `KeyboardInterrupt` on SIGTERM as well as on Ctrl-C (`openreading.cli.app._terminate_as_interrupt`),
 so a supervisor's stop signal ends the same way an interactive one does -- exit 6, the resumable
 line and its run id, and the in-flight step recorded `cancelled` rather than left an
@@ -530,7 +514,7 @@ guidance, likewise design: cost-per-run p99 against `budget:`, steps in
 `submitted` past 2x declared latency (the orphan detector, the only signal that catches a missed
 journal write), and dead-letter arrival rate -- not queue depth, not individual adapter
 failures, and not `decider_downgraded: unavailable` (no production `DeciderPort` exists, so it
-would fire on 100% of runs). Ledger never caps a run: platform-enforced spend ceilings are cut;
-cost-per-run is only reported against `budget:`. Native `submit_many` stays off the adapter
-Protocol (D-v7-1) and unjournaled until the child-run tranche.
+would fire on 100% of runs). Ledger never caps a run. Cost per run is only reported against
+`budget:`. Native `submit_many` stays off the adapter Protocol (D-v7-1) and unjournaled until
+the child-run tranche.
 """

@@ -20,8 +20,7 @@ or `off`/absent -> nothing) is copied onto each **non-final** step that is a lea
 or a parallel/route/decide node and lacks its own step-position gate, then the cascade-level key
 is dropped. A **nested-cascade step is skipped** by distribution: its `escalate_if` is that inner
 cascade's own level gate, not a step-position gate, so distributing onto it would be ambiguous and
-break idempotency. This narrows spec §7 rule 5's "each step" to "each non-nested-cascade step",
-patched in the spec.
+break idempotency. This narrows spec §7 rule 5's "each step" to "each non-nested-cascade step".
 
 BL-35 (decide candidate identity): a decide node's `among:` members are named by
 `candidate_label` and the engine dispatches on that name alone. Normalization is where the names
@@ -76,8 +75,9 @@ def build_library(config: StrategyConfig | None) -> dict[str, RawNode]:
         for name, node in config.strategies.items():
             if name in PRESET_NAMES:
                 raise NormalizeError(
-                    f"strategy {name!r} collides with a built-in preset; "
-                    f"use `extends: {name}` or rename"
+                    f"strategy {name!r} collides with a built-in preset. Rename it, then "
+                    f"run `openreading strategy show {name}` to copy the preset body "
+                    f"into your file"
                 )
             library[name] = node
     return library
@@ -330,7 +330,7 @@ def _check_candidate_labels(among: list[dict[str, Any]], dpath: str) -> None:
         if label == _FALLTHROUGH:
             raise NormalizeError(
                 f"{dpath}: among[{i}] resolves to the candidate label {label!r}, which is the "
-                f"engine's own fallthrough action — it could never be dispatched. Rename it"
+                f"engine's own fallthrough action, so it could never be dispatched. Rename it"
             )
         if label in seen:
             raise NormalizeError(

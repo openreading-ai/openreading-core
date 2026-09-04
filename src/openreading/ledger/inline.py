@@ -1,7 +1,7 @@
 """`InlineExecutor` — T1's one core `Executor`: runs every step in this process (today's
 behaviour, preserved exactly when unarmed, L1) and journals an `attempted` record strictly before
-dispatch and a terminal record strictly after (internal/design/ledger.md §11, plan §6, resolving Phase
-A round-1 F1). `NullJournal` is the no-op `Journal` L1 wires in when `OPENREADING_LEDGER` is unset
+dispatch and a terminal record strictly after (internal/design/ledger.md §11). `NullJournal` is
+the no-op `Journal` L1 wires in when `OPENREADING_LEDGER` is unset
 — every `append` is dropped and `get` returns nothing, so an unarmed run touches no disk (AC-1).
 
 T1 does not implement §5.3's full `_exec_leaf` submit/drive/emit decomposition — `exec`'s `run`
@@ -120,7 +120,7 @@ class InlineExecutor:
     diverge from its own plan mid-run — there is no second worker to disagree with the pinned set)
     but the mechanism and its test exist, per AC-14's T1 row.
 
-    ZDR (Phase C round-1, High; rescoped Phase C round-2, Findings 8 and 6):
+    ZDR:
     `internal/design/ledger.md` §9.4 requires zero retained CONTENT for a ZDR-flagged backend's own
     step — `exec` still writes the ordinary `attempted`/terminal journal records (topology, digests,
     costs — audit metadata, not content) but never calls `blobs.put(...)` for that step. Originally
@@ -156,7 +156,7 @@ class InlineExecutor:
         self._ledger_root = ledger_root
 
     def _is_zdr_backend(self, backend_id: str | None) -> bool:
-        """Phase C round-2 (Findings 8 and 6, "Narrowest fix"): whether the backend
+        """Whether the backend
         that ACTUALLY dispatched this step (not the run's whole eligible set) is itself ZDR-flagged.
         `backend_id is None` (a composite step) or an unregistered/unresolvable id are both treated
         as "not ZDR" — the same as before this fix, since neither ever populated `descriptors` under
@@ -185,7 +185,7 @@ class InlineExecutor:
     def _gate(self, req: StepRequest) -> StepResult | None:
         """L2 (§5.3): every executor enforces this at `exec`, before any I/O. A refusal writes a
         single `failed` terminal record and no `attempted` write at all — a refused step was never
-        going to dispatch (plan §6, resolving round-2 F2's ordering clarification)."""
+        going to dispatch (plan §6)."""
         if not self._pinned_eligible or req.backend_id is None:
             return None
         pinned_digest = self._pinned_eligible.get(req.backend_id)
@@ -261,7 +261,7 @@ class InlineExecutor:
         permanent failure takes, naming the real reason rather than crashing OR papering over it.
 
         A ZDR-flagged backend's own "ok" record is the other reason `payload` can legitimately be
-        absent (Phase C round-1, two reviewers independently): §9.4's "zero retained content" means
+        absent: §9.4's "zero retained content" means
         `exec`'s own dispatch branch below never calls `blobs.put` for a ZDR run, so the journaled
         `"ok"` record's `payload` is `None` by design, not a missing write. Before this fix, that
         `None` reached `engine.py`'s `_response_payload` unchanged and crashed with an uncaught
@@ -312,11 +312,11 @@ class InlineExecutor:
         if refusal is not None:
             appended = self._journal.append(self._sanitizer_scrub(refusal))
             assert appended.error is not None
-            # Round-4 F13's corrected call shape — matching the idiom every other real call site
-            # already uses (`router/router.py:209`, `evals/runner.py:88`): one positional message,
-            # `constraint=` keyword-only. `_gate`'s own `code` — "not_in_pinned_set" or
-            # "descriptor_digest_mismatch" — becomes `constraint`; the message is synthesized from
-            # it since `_gate` never records a longer human-readable detail.
+            # The same call shape every other real `ComplianceRefused` site uses
+            # (`router/router.py`, `evals/runner.py`): one positional message, `constraint=`
+            # keyword-only. `_gate`'s own `code`, "not_in_pinned_set" or
+            # "descriptor_digest_mismatch", becomes `constraint`. The message is synthesized from
+            # it, because `_gate` never records a longer human-readable detail.
             raise ComplianceRefused(
                 appended.error.detail or appended.error.code, constraint=appended.error.code
             )
@@ -348,7 +348,7 @@ class InlineExecutor:
         try:
             result = await asyncio.to_thread(run)
         except asyncio.CancelledError:
-            # Round-1 F1: a losing `parallel:` branch's task.cancel() raises THIS — a
+            # A losing `parallel:` branch's task.cancel() raises THIS — a
             # BaseException, not an Exception, so the clause below cannot catch it — while `run()`
             # is still in flight inside asyncio.to_thread. Without a terminal record here, this
             # step is indistinguishable on replay from a genuine crash-before-dispatch (AC-12/
@@ -405,7 +405,7 @@ class InlineExecutor:
             )
             raise
 
-        # Phase C round-2 (Findings 8 and 6, "the retention ceiling" half): this
+        # The retention ceiling: this
         # step's own backend just genuinely dispatched — tighten (never widen) the run's stamped
         # ceiling from THIS descriptor's own declared limit, if it's stricter than what's already
         # recorded. A backend that stays merely eligible never reaches this line at all, so it can
@@ -425,11 +425,9 @@ class InlineExecutor:
                     now_epoch_ms=int(self._clock.now_wall_ms()),
                 )
 
-        # Phase C round-1 (Low/confirm-only, not filed as a defect): the full response body —
-        # whatever include_backend_raw/typed_fields/image settings the request itself asked for —
-        # is retained as one blob whenever the ledger is armed; there is no separate opt-out for
-        # just the highest-sensitivity fields short of not arming the ledger at all. §9.4's "opt-in"
-        # framing for those specific fields is ambiguous and not a T1 plan commitment either way.
+        # The full response body is retained as one blob whenever the ledger is armed, whatever
+        # include_backend_raw/typed_fields/image settings the request itself asked for. There is
+        # no separate opt-out for the highest-sensitivity fields short of not arming the ledger.
         payload = None
         zdr = self._is_zdr_backend(req.backend_id)
         if self._blobs is not None and not zdr and hasattr(result, "to_schema_dict"):

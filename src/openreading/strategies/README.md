@@ -3,7 +3,7 @@
 <sub>[Docs home](../README.md) · [← Routing and keys](../router/README.md) · [Compare →](../comparison/README.md)</sub>
 
 > **In one sentence.** A strategy in `openreading.yaml` says which backends run, in order or at
-> once, and when to move on, and every run leaves a replayable trace.
+> once, and when to move on. Every run leaves a replayable trace.
 
 ## What this gives you
 
@@ -18,11 +18,11 @@ on only when its output looks garbled or near-empty.
 The engine walks the strategy, tests each result against quality gates, and keeps the best result so
 far. A gate is one test on one result, for example whether the text is near-empty, judged against a
 threshold. The response is the envelope, the one JSON document every backend returns. The engine
-writes an `orchestration` block, the trace, onto that envelope. The trace records every attempt,
-every gate with its observed value and threshold, every decision point an LLM was allowed to take,
-and every backend dropped by compliance. A plain `pick: best` selection is not one of those points,
-and step 4 shows what it does leave behind. You need `sample.pdf` from the root README, and the
-walkthrough needs no key.
+writes an `orchestration` block, the trace, onto that envelope. The trace records every attempt and
+every gate with its observed value and threshold. It also records every backend dropped by
+compliance and every decision point an LLM was allowed to take. A decision point is a place in the
+strategy where an LLM may choose, and step 7 builds one. You need `sample.pdf` from the root
+README, and the walkthrough needs no key.
 
 ## Mental model
 
@@ -58,11 +58,7 @@ Hold the four facts below in mind, and every command on this page follows from t
 2. A gate is a verdict on one attempt, never on the document. `escalate_when: looks_bad` asks
    openreading's own probe about this backend's output. Is it garbled, near-empty, or a text-layer
    read of a scanned page? A gate that fires keeps the result as best-so-far and moves to the next
-   rung. A rung is one step of a cascade, so the next rung is the next backend in order. Plain
-   hangs its gate on every rung but the last, so a Plain cascade always accepts what its final
-   backend returned. A gate written on the last rung in longhand does fire. The run then returns
-   the best result it kept, with `orchestration.outcome: degraded` and a
-   `quality_below_threshold` warning, which is the row the docs home tells an agent to escalate on.
+   rung. A rung is one step of a cascade, so the next rung is the next backend in order.
 3. Compliance prunes the tree before anything runs. The request's policy, `--policy`, and the file's
    own `policy:` block are combined, and the most restrictive wins. A dropped backend lands in
    `orchestration.dropped[]`. Nothing in the file can bring it back.
@@ -78,20 +74,24 @@ language, and each key is shown in use below.
 
 ## Walkthrough
 
-Start from the root README's sample document. Write four strategies over the two backends every
-install has, `pymupdf` and `tesseract`. Timings vary between runs.
+Start from the root README's sample document. Write four strategies over `pymupdf` and `tesseract`,
+the two local backends the root README sets up. Neither needs a key, though `tesseract` needs its
+system binary. Run `uv run openreading backends` and check that both say `yes` under CONFIGURED.
+Work in `scratch/`, which `.gitignore` already covers, so the walkthrough leaves your clone clean.
+Timings vary between runs.
 
 ```bash
+mkdir -p scratch && cd scratch
 uv run python -c 'from openreading.testing.sample_pdf import build_sample_pdf; open("sample.pdf","wb").write(build_sample_pdf())'
 ```
 
 ### 1. Write the file and validate it
 
-Save this as `openreading.yaml` in the repo root. Commands find it there automatically, and
-`--config PATH` points them elsewhere.
+Save this as `openreading.yaml` in `scratch/`. Commands find `./openreading.yaml` in the directory
+you run them from, and `--config PATH` points them elsewhere.
 
 ```yaml
-version: 1                          # required; the config format version
+version: 1                          # required, the config format version
 strategies:                         # the library of named strategies
   main:
     try: [pymupdf, tesseract]       # run in order
@@ -108,22 +108,20 @@ strategies:                         # the library of named strategies
       missing: [total]              # a typed field you asked for did not come back
 ```
 
-`compare:` needs a sentence of its own, because "better" is narrower here than the word suggests.
-The engine runs both backends and scores each result against the default quality bundle. That
-bundle asks four questions. Is this a scan, is the text garbled, are too many pages near-empty, and
-is the backend's own confidence low? A result's score is the fraction of those four it passes,
-counting only the ones that backend can answer. Not one of the four checks the output against what
-the document actually says. So the score cannot tell you which backend read the words correctly. It
-is a smoke test on the output rather than an accuracy comparison. Two clean results therefore tie
-at 1.0. A tie goes to the cheaper backend, and then to whichever you listed first. Step 4 shows
-that happening on `sample.pdf`. When the question is which backend is correct, the verb for that is
-`leaderboard` against labels you wrote ([Evals](../evals/README.md)).
+In `compare:`, "better" means "passes more of the default quality bundle", not "read the document
+more accurately". The engine runs both backends and scores each result against that bundle, which
+asks four questions. Is this a scan, is the text garbled, are too many pages near-empty, and is the
+backend's own confidence low? A result's score is the fraction of those four it passes, counting
+only the ones that backend can answer. None of the four checks the output against what the document
+says, so two clean results tie at 1.0. A tie goes to the cheaper backend, and then to whichever you
+listed first. Step 4 shows that happening on `sample.pdf`. When the question is which backend is
+correct, run `leaderboard` against labels you wrote ([Evals](../evals/README.md)).
 
 ```bash
 uv run openreading strategy validate
 ```
 ```text
-WARNING …/openreading.yaml:strategies.fields.steps[0].escalate_if: missing: 'pymupdf' cannot produce typed fields, so this criterion fires on every document — this rung will always escalate
+WARNING …/openreading.yaml:strategies.fields.steps[0].escalate_if: missing: 'pymupdf' cannot produce typed fields, so this criterion fires on every document. This rung will always escalate
   main: dialect: plain
       try: [pymupdf, tesseract]
       escalate_when: looks_bad
@@ -136,7 +134,7 @@ WARNING …/openreading.yaml:strategies.fields.steps[0].escalate_if: missing: 'p
 <details><summary>Full output</summary>
 
 ```text
-WARNING …/openreading.yaml:strategies.fields.steps[0].escalate_if: missing: 'pymupdf' cannot produce typed fields, so this criterion fires on every document — this rung will always escalate
+WARNING …/openreading.yaml:strategies.fields.steps[0].escalate_if: missing: 'pymupdf' cannot produce typed fields, so this criterion fires on every document. This rung will always escalate
   main: dialect: plain
       try: [pymupdf, tesseract]
       escalate_when: looks_bad
@@ -165,10 +163,13 @@ printf 'version: 1\nstrategies:\n  trusting:\n    try: [pymupdf, tesseract]\n   
 uv run openreading strategy validate --config lowconf.yaml
 ```
 ```text
-ERROR lowconf.yaml:strategies.trusting.steps[0].escalate_if: the low_confidence check can never fire on 'pymupdf' — it reports no confidence; add a criterion that works everywhere, e.g. `looks_bad: true`
+ERROR lowconf.yaml:strategies.trusting.steps[0].escalate_if: the low_confidence check can never fire on 'pymupdf', which reports no confidence. Add a criterion that works everywhere, e.g. `looks_bad: true`
 …
 lowconf.yaml: 1 error(s), 0 warning(s)
 ```
+
+The `ERROR` line goes to stderr and the summary goes to stdout, so redirect both when you save the
+output.
 
 ### 2. See what Plain compiles to
 
@@ -196,10 +197,13 @@ main:
     max_duration: 2m
 ```
 
-**You should see** `looks_bad` become four predicates joined by `any_of`, attached to `pymupdf`
-only. A predicate is one named check with a threshold, such as `empty_pages_over: 0.2`. `max_time`
-becomes a `budget:` on the root. `strategy normalize` prints every strategy in the file this way. A
-preset prints its built-in longhand, which carries an `intent:` line Plain cannot spell:
+**You should see** `looks_bad` become four predicates under one `any_of`, attached to `pymupdf`
+only. The scan pair is bound by `all_of`, so a scan counts only when the page also came back
+near-empty. A predicate is one named check with a threshold, such as `empty_pages_over: 0.2`.
+`max_time` becomes a `budget:` on the root. Plain hangs its gate on every rung but the last, so a
+Plain cascade always accepts what its final backend returned. A gate written on the last rung in
+longhand does fire. `strategy normalize` prints every strategy in the file this way. A preset
+prints its built-in longhand, which carries an `intent:` line Plain cannot spell:
 
 ```bash
 uv run openreading strategy show cost_saver
@@ -215,15 +219,15 @@ cost_saver:
   escalate_if: default
 ```
 
-Source: `src/openreading/strategies/presets.py` (`PRESETS` and the "≈" table). Live truth: `uv run
-openreading strategy show <preset>`. If this table and that output disagree, the output is right.
-Fix the table.
+Source: `src/openreading/strategies/presets.py` (`PRESETS` and the "≈" equivalence table). Live
+truth: `uv run openreading strategy show <preset>`. If this table and that output disagree, the
+output is right. Fix the table.
 
 | Preset | Plain near-equivalent | Differs from Plain in |
 |---|---|---|
-| `cost_saver` | `try: [pymupdf, docling, auto]` + `escalate_when: {looks_bad: true, low_confidence: true}` | `intent:`; a bare `scanned_pages_detected` instead of the scan pair |
+| `cost_saver` | `try: [pymupdf, docling, auto]` + `escalate_when: {looks_bad: true, low_confidence: true}` | `intent:`, and a bare `scanned_pages_detected` instead of the scan pair |
 | `max_accuracy` | `try: [auto, auto]` + the same `escalate_when` | same |
-| `offline_first` | `try: [pymupdf, tesseract, docling]` + the same `escalate_when` | same; enforcement is `policy: {require_local: true}`, not the preset |
+| `offline_first` | `try: [pymupdf, tesseract, docling]` + the same `escalate_when` | same, and enforcement is `policy: {require_local: true}`, not the preset |
 | `fast` | `race: [pymupdf, tesseract]` | `intent:` only |
 
 ### 3. Run a strategy and read the explanation
@@ -279,8 +283,8 @@ CONTENT: MIXED  (text:agree  table_cells:diverge)
 ```
 
 **You should see** a `disagree` row of `0.0` and the `then: auto` rung never reached. The two texts
-share every word, so nothing disagrees. The findings below the trace are the
-[Compare guide](../comparison/README.md)'s subject.
+share every word, so nothing disagrees. The findings below the trace are the subject of
+[Compare](../comparison/README.md).
 
 Now write the same pair the other way round and run it again.
 
@@ -302,7 +306,8 @@ would rather have when the quality checks cannot separate them.
 
 `judged_lost` is also the entire record of that choice. Check: `jq -c '.orchestration.decisions'
 flipped.json` prints `[]`. `decisions[]` records only the decision points an LLM is allowed to take
-over. Those are a `decide:` node and a `review_if:` gray band, both in step 7. A plain `pick: best`
+over. Those are a `decide:` node and a `review_if:` gray band, both built in step 7. A gray band is
+a range of scores where a result is neither clearly good nor clearly bad. A plain `pick: best`
 selection with no `judge:` block is neither. It leaves no decision record and no quality number
 anywhere in the trace. What you can audit is which backend won, which lost, and under which
 category.
@@ -348,11 +353,11 @@ uv run openreading strategy validate --config local.yaml
 uv run openreading strategy plan sample.pdf --config local.yaml --strategy onprem
 ```
 ```text
-WARNING local.yaml:strategies.onprem.steps[1].backend: 'reducto' is filtered out by the policy (not_local); this step can never run in that compliance context — remove it or relax the policy
+WARNING local.yaml:strategies.onprem.steps[1].backend: 'reducto' is filtered out by the policy (not_local). This step can never run in that compliance context. Remove it or relax the policy
 …
 ```
 ```json
-{ "strategy": "onprem", "config_hash": "sha256:a2597d74…",
+{ "strategy": "onprem", "config_hash": "sha256:…",
   "eligible": ["pymupdf", "docling", "tesseract", "qwen-vl"],
   "dropped": [ { "backend": "reducto", "stage": 1, "code": "not_local", "detail": "require_local set but backend is not fully local" } ],
   "tree": { "steps": [ { "backend": "pymupdf", "escalate_if": { "any_of": [ "…" ] } }, { "backend": "tesseract" } ] } }
@@ -369,20 +374,20 @@ phi.json` on `strategy plan`, `replay`, or `calibrate` combines with the file's 
 > [!IMPORTANT]
 > Nothing in the file can re-admit a dropped backend. A later rung, `then:`, `auto`, and an
 > `intent:` line all leave the drop in place. A BAA is the signed agreement that lets a vendor
-> handle protected health data. Drop codes and how to attest one are in the
-> [Routing and keys guide](../router/README.md).
+> handle protected health data. Drop codes and how to attest one are in
+> [Routing and keys](../router/README.md).
 
 ### 7. Declare a decision point, run it without an LLM, replay it
 
 A decision point lets an LLM choose between strategies while the engine keeps a safe default. A
 `decide:` node names a choice among strategies, and the engine always takes `otherwise:` unless an
 enabled LLM decider picks instead. The other decision point is a `review_if:` gray band on a rung.
-A gray band is a range of values where a result is neither clearly good nor clearly bad, so accept
-or escalate becomes a choice. Save this as `choose.yaml`:
+Inside that band, accepting the result or escalating becomes a choice rather than a rule. Save this
+as `choose.yaml`:
 
 ```yaml
 version: 1
-decider:                                        # the LLM decider; inert until the env gate is also set
+decider:                                        # the LLM decider, inert until OPENREADING_LLM_DECIDER=1 is also set
   llm: { backend: anthropic-claude, timeout: 5s }
 strategies:
   text_layer: { steps: [pymupdf], escalate_if: off }
@@ -391,7 +396,7 @@ strategies:
     decide:
       among: [strategy:text_layer, strategy:ocr]  # the closed candidate list
       otherwise: strategy:text_layer              # the engine's answer, always present
-    intent: Photographed pages do better on OCR; born-digital pages on the text layer.
+    intent: Photographed pages do better on OCR, and born-digital pages on the text layer.
   band:
     steps:
       - backend: pymupdf
@@ -411,10 +416,11 @@ strategy choose  →  pymupdf (ok)
 ```
 
 **You should see** the same choice both times, with a different reason. The first run ends
-`downgraded=env_disabled`, and the second ends `downgraded=unavailable`. With the env gate set, the
-decider is enabled and eligible. A wire executor is the code that makes the real LLM call, and none
-ships yet, so the engine default stands and the record says so. Replay the second run, and every
-decision point takes the choice logged in the trace:
+`downgraded=env_disabled`, and the second ends `downgraded=unavailable`. With
+`OPENREADING_LLM_DECIDER=1` set, the decider is switched on and allowed to choose. A wire executor
+is the code that makes the real LLM call, and none ships yet. The engine default stands, and the
+record says so. Replay the second run, and every decision point takes the choice logged in the
+trace:
 
 ```bash
 uv run openreading replay sample.pdf --config choose.yaml --trace choose2.json > replay.json
@@ -443,12 +449,12 @@ chosen}' band.json` prints `{"point":"gate_band","chosen":"escalate"}`.
 ### 8. Ask for thresholds from a sample
 
 `calibrate` proposes thresholds measured on your own documents instead of leaving you to guess. It
-runs the strategy's first rung over a dataset, scores the results with the eval scorers, sweeps each
-gated threshold across its range, and proposes an `escalate_if:` block. It never rewrites your file.
-Point it at `main`, the Plain strategy from step 1.
+runs the strategy's first rung over a dataset and scores the results with the eval scorers. It then
+sweeps each gated threshold across its range and proposes an `escalate_if:` block. It never
+rewrites your file. Point it at `main`, the Plain strategy from step 1.
 
 ```bash
-uv run openreading calibrate src/openreading/evals/sample --strategy main --target-escalation 0.15
+uv run openreading calibrate ../src/openreading/evals/sample --strategy main --target-escalation 0.15
 ```
 ```json
 { "strategy": "main", "n_docs": 1, "n_scored": 1,
@@ -479,7 +485,7 @@ strategies:
           chars_per_page_below: 100   # flat and numeric, so calibrate can sweep it
       - tesseract
 YAML
-uv run openreading calibrate src/openreading/evals/sample --strategy sweepable \
+uv run openreading calibrate ../src/openreading/evals/sample --strategy sweepable \
   --config longhand.yaml --target-escalation 0.15 \
   | jq -c '{n_docs, n_scored, points: (.sweeps[0].points[0:4]), n_points: (.sweeps[0].points|length), recommended}'
 ```
@@ -489,8 +495,9 @@ uv run openreading calibrate src/openreading/evals/sample --strategy sweepable \
 
 **You should see** 31 operating points where there were none, from the same single document. A
 point is one candidate threshold with what it would have done to this sample. `escalation_rate` is
-the share of documents that would have climbed to rung 2. `cost_per_doc` prices that share at
-descriptor rates. `scorer_agreement` is how often the gate agreed with the labels.
+the share of documents that would have climbed to rung 2. `cost_per_doc` prices that share at the
+per-page rates each backend's descriptor declares. `scorer_agreement` is how often the gate agreed
+with the labels.
 
 Two terms decide that last number and neither has a flag. `quality_bar` is the eval score below
 which a document counts as one that should have escalated, and it is fixed at 0.8 in
@@ -516,7 +523,7 @@ Three reports deserve suspicion before you paste one into your file.
   points and count what is left:
   ```bash
   printf 'version: 1\nstrategies:\n  nosignal:\n    steps:\n      - backend: pymupdf\n        escalate_if: {confidence_below: 0.6, garbled: true}\n      - tesseract\n' > nosignal.yaml
-  uv run openreading calibrate src/openreading/evals/sample --strategy nosignal --config nosignal.yaml \
+  uv run openreading calibrate ../src/openreading/evals/sample --strategy nosignal --config nosignal.yaml \
     | jq -c '[.sweeps[0].points[] | {escalation_rate, scorer_agreement}] | unique'
   ```
   ```json
@@ -528,8 +535,8 @@ Three reports deserve suspicion before you paste one into your file.
   `n_scored: 0` and `scorer_agreement: 0.0` at every point, and still recommends. That zero means
   nothing was measured, not that the gate is wrong.
 
-Build a dataset with the [Evals guide](../evals/README.md), and calibrate on documents you did not
-also score the leaderboard on.
+Build a dataset with [Evals](../evals/README.md), and calibrate on documents you did not also score
+the leaderboard on.
 
 ## Recipes
 
@@ -553,24 +560,26 @@ gather calibration evidence on a slice of traffic.
 [invoice]}, use: strategy:ocr_only}], default: strategy:text_first}` with those two strategies
 defined. `openreading.run("sample.pdf", strategy="front", config="advanced.yaml",
 routing={"doc_type_hint": "invoice"})["orchestration"]["chosen_backend"]` prints `tesseract`.
-Without the hint it prints `pymupdf`. An uncomputable fact never errors, because `default:` catches
-it.
+Without the hint it prints `pymupdf`. A PyMuPDF deprecation line precedes each answer on stdout. It
+comes from the library, not from openreading. An uncomputable fact never errors, because `default:`
+catches it.
 
 **Climb to a hosted rung only on bad quality** (needs `REDUCTO_API_KEY`, a hosted key, so the shape
 is shown and not run). Write `try: [pymupdf, reducto]` with `escalate_when: looks_bad`. On a
-born-digital PDF the trace ends at `pymupdf`, cost `$0`. On a scan the docstring's example shows
-`pymupdf quality_escalated`, then `reducto succeeded` with its billed cost in `usage.cost_usd`. To
-have an LLM judge a `compare` instead of the engine's score, add `judge: {backend: anthropic-claude,
-intent: "Prefer complete line-item tables."}` beside `pick: best` in the longhand. Without
-`OPENREADING_LLM_DECIDER=1` the record says `downgraded=env_disabled`.
+born-digital PDF the trace ends at `pymupdf`, cost `$0`. On a scan the `cheap_first` example in the
+`openreading.strategies.presets` docstring shows `pymupdf quality_escalated`, then `reducto
+succeeded` with its billed cost in `usage.cost_usd`. To have an LLM judge a `compare` instead of the
+engine's score, add `judge: {backend: anthropic-claude, intent: "Prefer complete line-item
+tables."}` beside `pick: best` in the longhand. Without `OPENREADING_LLM_DECIDER=1` the record says
+`downgraded=env_disabled`.
 
 > [!WARNING]
 > Every hosted rung that runs is billed to your key, losers, shadows, and judges included.
 > `usage.cost_usd` sums all of them.
 
 **Audit one agent's run from another.** A second agent can check a strategy run without trusting
-the first, because the trace carries everything the check needs. `config_hash` pins the config that
-ran. `eligible` is the candidate list the engine enumerated, so `chosen in eligible` proves the
+the first. The trace carries everything the check needs. `config_hash` pins the config that ran.
+`eligible` is the candidate list the engine enumerated, so `chosen in eligible` proves the
 choice was in bounds. `decision_id` is byte-stable across a run and its replay, so a replay that
 produces different ids means the inputs were not the same. Gate records carry `skipped` when a
 signal could not be measured, which is what stops an unmeasurable gate from reading as a passing
@@ -601,7 +610,7 @@ uv run python verify_run.py band.json band-replay.json
 ```
 ```text
   unmeasured gate confidence_below: signal_unavailable
-ok: 1 decision(s) in bounds, ids stable, config sha256:3a95198…
+ok: 1 decision(s) in bounds, ids stable, config sha256:…
 ```
 
 **You should see** the gray band's gate reported as unmeasured, because `pymupdf` emits no
@@ -614,9 +623,9 @@ shape, with an integer `chosen` and no `eligible`.
 These rules keep a strategy from widening compliance, hiding a failure, or spending money it did
 not record. Each rule names the failure it avoids and where it is enforced.
 
-- Without a file, nothing changes. Without a config the strategy package is not even imported, so
-  an upgrade cannot alter a request that named its backend. The rule lives in
-  `openreading.strategies` ("Two invariants"), and a subprocess test proves it.
+- Without a config file, nothing changes. The strategy package is not even imported, so an upgrade
+  cannot alter a request that named its backend. The rule lives in `openreading.strategies`
+  ("Two invariants"), and a subprocess test proves it.
 - Compliance is outside the tree. Pruning happens in `openreading.strategies.prune` before the walk,
   and naming `compliance` in `on_error` is a load error. A file authored far from its deployment
   cannot leak a document to a backend the policy dropped.
@@ -624,19 +633,20 @@ not record. Each rule names the failure it avoids and where it is enforced.
   decider's tool schema is that list as an enum (`openreading.strategies.decider` §3). An out-of-set
   choice is impossible, not merely discouraged.
 - The engine keeps the best result. A result that fails a gate is retained, never discarded. When
-  rungs run out, the best retained result returns with a `quality_below_threshold` warning. When
+  rungs run out, the best retained result returns with `orchestration.outcome: degraded` and a
+  `quality_below_threshold` warning. The docs home tells an agent to escalate on that row. When
   the time budget ends the walk instead, the same result returns with a `budget_exhausted` warning.
-  The two codes are distinct, so you can count each cause separately, and escalating to a stronger
-  backend is right for the first and wrong for the second. If
-  nothing is retained, the engine raises `PlanExhaustedError` with the full trail
-  (`openreading.strategies.engine`, Laws 1 to 4). Silence is never an outcome.
+  The two codes are distinct, so you can count each cause separately. Escalating to a stronger
+  backend is right for the first and wrong for the second. If nothing is retained, the engine
+  raises `PlanExhaustedError` with the full trail (`openreading.strategies.engine`, Laws 1 to 4).
+  Silence is never an outcome.
 - A missing signal is never guessed. A criterion the backend cannot report is skipped and traced,
   for example `low_confidence` on `pymupdf`, which reports no confidence
   (`openreading.strategies.signals` §6). A fabricated verdict would be indistinguishable from a
   measured one.
 - Thresholds err toward escalation. A false escalation costs one extra call, but a false
   acceptance costs correctness (`openreading.strategies.signals` §1).
-- The decider needs two keys to turn on. It runs only with a `decider:` block and
+- Turning the decider on takes two separate steps. It runs only with a `decider:` block and
   `OPENREADING_LLM_DECIDER` set, and no request field can enable it
   (`openreading.strategies.decider` §1). A caller cannot talk a service into consulting an LLM its
   operator did not deploy.
@@ -645,16 +655,16 @@ not record. Each rule names the failure it avoids and where it is enforced.
   own (`openreading.strategies.plain`, "Guardrails"). What an attempt reported can still be a
   projection. Seven of the fifteen backends declare `basis: estimated`, meaning a published rate
   applied to a page count rather than money anyone charged. `usage.cost_basis` folds those bases by
-  the priority `billed > estimated > infra_only`, so read that field before you sum a run as spend
+  the priority `billed > estimated > infra_only`. Read that field before you sum a run as spend
   ([Backend adapters](../adapters/README.md#what-each-backend-charges-and-the-ceilings-on-one-request)).
 
 Every threshold this page prints has a written derivation, and they all live in one document. `uv
 run python -m pydoc openreading.strategies.signals` is that catalog. It gives each signal's formula,
-the cut its default sits at, the field-tested source that cut came from, and the failure the signal
-is known to have. It is what makes `garbled obs=0.0073 thr=True` in step 3 readable. The garble
-score is a weighted blend of character-level tells, and `garbled: true` fires above 0.3. The
-word-like test inside it assumes Latin script, so healthy Cyrillic or CJK text scores above that
-cut. Read the catalog before you change one of these numbers, and before you defend one.
+the cut its default sits at, and the field-tested source behind that cut. It also names the failure
+the signal is known to have. It is what makes `garbled obs=0.0073 thr=True` in step 3 readable.
+The garble score is a weighted blend of character-level tells, and `garbled: true` fires above 0.3.
+The word-like test inside it assumes Latin script, so healthy Cyrillic or CJK text scores above
+that cut. Read the catalog before you change one of these numbers, and before you defend one.
 
 This is the ladder a `try` with `escalate_when` walks for each rung:
 
@@ -694,9 +704,9 @@ The category column in `explain` is the closed vocabulary `CATEGORIES` in
   kinds, every predicate, `on_error`, budgets, and `limits:`.
 - `uv run python -m pydoc openreading.strategies.signals` is the threshold catalog: every signal's
   formula, its default cut, the field-tested source behind that cut, and its known failure mode.
-- Also under `openreading.strategies` are `presets` (the cookbook), `engine` (Outcomes and laws,
-  including the score behind `pick: best`), `decider` (decision points, downgrades), and
-  `calibrate` (the sweep report and `quality_bar`).
+- Also under `openreading.strategies` are `presets` (the cookbook) and `engine` (Outcomes and
+  laws, including the score behind `pick: best`). The other two are `decider` (decision points,
+  downgrades) and `calibrate` (the sweep report and `quality_bar`).
 - The schema is `src/openreading/schemas/strategy-config.v0.2.json`. The trace rides on
   `response.v0.3.json`.
 - `uv run openreading strategy --help`, `explain --help`, `replay --help`, and `calibrate --help`

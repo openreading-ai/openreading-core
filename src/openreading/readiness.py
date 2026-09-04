@@ -1,14 +1,14 @@
-"""Backend readiness (GOAL2 milestone 6.3) — is a backend runnable here, and if not, exactly
+"""Backend readiness: is a backend runnable here, and if not, exactly
 which env vars are missing? Drives `openreading backends` and the server's GET /v1/backends. All
 resolution is offline (no network, no key validation): it reports what the broker CAN find in the
 environment, never whether the provider would accept it.
 
-It also owns the other half of the credential story — the key the broker DID find but the provider
-REJECTED (`backend_code="auth_rejected"`). `auth_rejected_hint` renders the one sentence
-the openreading.credentials docstring promises, and `auth_hinted` stamps it onto the failure at the execution
-boundary so every surface (CLI, HTTP API, batch item, plan trail) names the env var to fix without
-each one re-deriving it. `auth_hinted` also redacts any OTHER secret the broker resolved for the
-backend out of every failure's message, not only the auth_rejected one (BL-37).
+It also owns the other half of the credential story, the key the broker DID find but the provider
+REJECTED (`backend_code="auth_rejected"`). `auth_rejected_hint` renders the one sentence the
+`openreading.credentials` docstring promises. `auth_hinted` stamps it onto the failure at the
+execution boundary, so every surface (CLI, HTTP API, batch item, plan trail) names the env var to
+fix without each one re-deriving it. `auth_hinted` also redacts any OTHER secret the broker
+resolved for the backend out of every failure's message, not only the auth_rejected one (BL-37).
 """
 
 from __future__ import annotations
@@ -30,6 +30,14 @@ _AUTH_TRAIL_CATEGORY = "error(auth)"
 
 @dataclass
 class BackendReadiness:
+    """What `openreading backends` and `GET /v1/backends` report for one backend.
+
+    Every field carries env var NAMES, never their values. `ready` means configured on this
+    machine: the extra's dependencies import, every required field resolves, and no `live_gate_env`
+    var is missing. It never means the provider answered, which only `openreading.liveness` can
+    say.
+    """
+
     slug: str
     type: str
     extra_installed: bool
@@ -47,10 +55,9 @@ def missing_reason(readiness: BackendReadiness) -> list[str]:
     an empty `required_missing`), else the missing extras — so a not-ready row is never blank about
     why. Empty only for a backend that is not ready and declares nothing at all.
 
-    One function because every picker that groups backends by readiness must say the same thing
-    about the same backend. Compare, Backends and Run each render "needs credentials" from this
-    single record; three copies of `a or b or c` is how "the same registry, two vocabularies" got
-    filed as a defect in the first place (internal/design/ui-app/qa-ive-v2.md, H11).
+    One function because every surface that groups backends by readiness must say the same thing
+    about the same backend. Keeping three copies of `a or b or c` is how one registry grew two
+    vocabularies, and that is the defect this replaced (internal/design/ui-app/qa-ive-v2.md, H11).
     """
     return list(readiness.required_missing or readiness.creds_missing or readiness.missing_deps)
 
@@ -93,14 +100,14 @@ def _descriptor_for(slug: str):
 
 
 def auth_rejected_hint(backend: str, descriptor=None) -> str:
-    """The one sentence every surface shows for `auth_rejected` (the openreading.credentials docstring): the key was
-    found, the provider said no, here is the var to check. `descriptor=None` resolves it from the
-    registry by slug. NEVER carries the provider's response body — providers have been seen echoing
-    the rejected key back inside it."""
+    """The one sentence every surface shows for `auth_rejected`, the sentence the
+    `openreading.credentials` docstring promises: the key was found, the provider said no, here is
+    the var to check. `descriptor=None` resolves it from the registry by slug. It NEVER carries the
+    provider's response body, because providers have been seen echoing the rejected key back."""
     if descriptor is None:
         descriptor = _descriptor_for(backend)
     env = primary_secret_env(descriptor) if descriptor is not None else None
-    hint = f" — check {env}" if env else ""
+    hint = f": check {env}" if env else ""
     signup = (
         f" (signup: {descriptor.signup_url})"
         if descriptor is not None and descriptor.signup_url
@@ -174,6 +181,13 @@ def _probe_request(slug: str) -> OpenReadingRequest:
 
 
 def backend_readiness(adapter, *, broker: EnvCredentialBroker | None = None) -> BackendReadiness:
+    """One backend's readiness, resolved offline: no network call, no key validation.
+
+    Calls `adapter.health()`, resolves every declared credential and config field through
+    `broker`, and records the primary env var of each field that resolved or is missing. `ready`
+    is False when `health()` says so, or when a required field is unresolved. A missing
+    `live_gate_env` var also makes it False, for the reason the comment below gives.
+    """
     broker = broker or EnvCredentialBroker()
     desc = adapter.descriptor
     health = adapter.health()

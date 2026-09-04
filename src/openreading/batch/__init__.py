@@ -1,4 +1,4 @@
-"""The batch layer ("Manifest", v0.6): one invocation over many documents of any supported format
+"""The batch layer: one invocation over many documents of any supported format
 produces ONE `batch-result.v0.1` JSON, and that JSON is a first-class `compare` subject.
 
 Two modules: intake resolution (`openreading.batch.sources`, invariants M1-M5) and the platform
@@ -25,8 +25,9 @@ single-document pipeline without touching it. Three load-bearing choices:
 3. Corpus compare is the payoff: two batch envelopes pair documents by source identity and yield
    one corpus report answering "which backend is better on MY corpus".
 
-Principles carried over from Canon: deliver-or-warn per item (the batch never silently shrinks);
-compliance is never relaxed by batching (per-item routing runs the same compliance-first
+Principles shared with the channel contract (`openreading.derive`): deliver-or-warn per item (the
+batch never silently shrinks); compliance is never relaxed by batching (per-item routing runs the
+same compliance-first
 elimination as a single run -- no side door); determinism (same inputs => same envelope modulo
 backend nondeterminism: item order is input order, directory expansion is sorted, identity
 hashes are content-based); honesty over convenience (native-batch claims are graded, never
@@ -93,9 +94,9 @@ so every adapter batches correctly on day one.
   / skipped`, `duration_ms`, `pages_processed`, and `backends` (a per-item backend tally).
 - M9 items are full envelopes: a succeeded item's `response` is a complete, schema-valid
   `response.v0.3` document -- anything compare/evals can already consume.
-- Concurrency: default `jobs=1` (serial: deterministic, rate-limit-safe, consistent with the
-  v0.4 "concurrent fan-out deferred" posture; a default of 4 was rejected -- hosted rate limits
-  argue for opt-in concurrency until evidence says otherwise). `jobs>1` uses a bounded thread
+- Concurrency: default `jobs=1`, which is serial, deterministic and rate-limit-safe. A default
+  of 4 was rejected because hosted rate limits argue for opt-in concurrency until evidence
+  says otherwise. `jobs>1` uses a bounded thread
   pool; items are I/O-bound and every item gets a fresh adapter instance (`make_adapter()`
   constructs per call), so there is no shared mutable adapter state. A named backend's
   `descriptor.batch.max_concurrency` caps the pool (`min(requested, cap)`; tesseract declares 4
@@ -151,9 +152,9 @@ zero-match expansion, `documents: []` body) carries a single `empty_batch` entry
 Native batch: the opt-in adapter protocol (`adapters.base.NativeBatchAdapter`)
 -------------------------------------------------------------------------------
 Descriptor block `batch: BatchIntake {native: "verified"|"claimed"|False, max_items,
-max_concurrency, notes}` (adapter-descriptor v0.4, additive; the descriptor still carries no
-in-band schema version -- filename + `$id` only -- and `DESCRIPTOR_SCHEMA_FILE` has since moved
-on to v0.7). Optional methods `submit_many(reqs, ctx) -> Job` and `normalize_many(job, reqs,
+max_concurrency, notes}`. Adapter-descriptor v0.4 added the block, and the current file is
+v0.7. The descriptor carries no in-band schema version, only a filename and an `$id`.
+Optional methods `submit_many(reqs, ctx) -> Job` and `normalize_many(job, reqs,
 credentials) -> list[NormalizedResponse | BatchItemError]` live behind a separate
 runtime-checkable Protocol, NOT in the required eight:
 most backends have no multi-document call, and a required stub that says "unsupported" teaches
@@ -195,7 +196,8 @@ is non-skipped, and the live count is within `batch.max_items`; otherwise platfo
   over S3 objects), chunkr and open-ocr (task/endpoint per document) and the locals have no
   multi-document call; qwen-vl and nuextract are graded none because they are self-hosted
   endpoints where request-level batching is the serving layer's concern, not the adapter's;
-  reducto and pulse are unproven (keys exist, so cheap to audit live).
+  reducto and pulse are unproven, and google-gemini and mistral-ocr have not been audited for a
+  native batch call at all.
 
 Corpus compare (`openreading.comparison.corpus`)
 -------------------------------------------------
@@ -250,21 +252,14 @@ NDJSON streaming output was rejected as the primary surface: the user wants ONE 
 compare can ingest, and an envelope carries summary/warnings honestly (a streaming writer can be
 added later without schema changes).
 
-Testing (offline, in `make verify`)
------------------------------------
-`sources` determinism (shuffled listing => same order), hidden/symlink skips, glob semantics,
-format normalization, M3 skip honesty, M4 guard, mixed URL+file+dir; runner against
-`tests.fakes.ScriptedBackend`: M6 isolation, M8 mixed cost bases, `jobs>1` completes all under
-scripted latency, idempotency derivation, the status truth table, exit 4, `--save-dir` layout;
-envelope round-trip + goldens + forward tolerance; a fake native adapter proving dispatch rule,
-fallback and M10; anthropic `submit_many` against respx fixtures; corpus pairing precedence,
-unpaired handling, rollup math, divergent-only rendering; CLI envelope selection (M2), stdout
-purity and progress-on-stderr; `POST /v1/batch` offline through the ASGI test client (pymupdf,
-no network, like the existing routes): schema-valid envelope with every item `transport:
-platform`, 400 for a missing `documents`, over `MAX_BATCH_DOCUMENTS`, or a non-integer /
-over-ceiling `jobs`, 404 unknown backend, and the echoed `jobs` actually used. Live lane
-(`make verify-live`, skips without keys): one real directory batch per keyed backend, anthropic
-native batch when its key exists; `make serve-smoke` hits `/v1/batch` over a real socket.
+Testing
+-------
+`tests/test_batch_sources.py`, `test_batch_runner.py`, `test_batch_native.py`,
+`test_batch_schema.py`, `test_batch_api.py`, `test_batch_cli.py`, `test_anthropic_batch.py` and
+`test_corpus_compare.py` cover intake, the runner, native dispatch, the envelope, the CLI and
+`POST /v1/batch`, all offline. The keyed live lane (`make verify-live`, `tests/test_batch_live.py`)
+runs one real directory batch per keyed backend. The runbook for both lanes is the
+`tests/conftest.py` docstring.
 
 Deferred (deliberately out of scope): `--retry-failed <batch.json>` merge-rerun; webhook-mode
 batches; server-side directory upload (multipart bundles); corpus-level evals (`--truth` per

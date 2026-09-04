@@ -1,7 +1,9 @@
-"""`make serve-smoke` — boot the real HTTP server on an ephemeral localhost port, POST the bundled
-sample PDF through /v1/parse with the local pymupdf backend, assert the response is schema-valid,
-then shut the server down. This exercises the full ASGI stack over a real socket (not TestClient).
-Not part of `make verify` (which stays offline + fast); run explicitly."""
+"""`make serve-smoke` boots the real HTTP server on an ephemeral localhost port and drives
+it with the local pymupdf backend. It POSTs the bundled sample PDF to /v1/parse and asserts
+the response is schema-valid. It then POSTs two copies of that PDF to /v1/batch and asserts
+the batch envelope reports two successes. Finally it shuts the server down. The point of
+this script is the full ASGI stack over a real socket, not FastAPI's in-process TestClient.
+`make verify` does not run it, because verify stays offline and fast. Run it yourself."""
 
 from __future__ import annotations
 
@@ -52,7 +54,7 @@ def main() -> int:
                 pass
             time.sleep(0.1)
         else:
-            print("serve-smoke: FAIL — server did not start", file=sys.stderr)
+            print("serve-smoke: FAIL. The server did not start", file=sys.stderr)
             return 1
 
         body = {
@@ -68,9 +70,9 @@ def main() -> int:
         schemas.validate_response(data)
         assert data["backend"]["id"] == "pymupdf", data["backend"]
         n = len(data["document"]["pages"][0].get("blocks", []))
-        print(f"serve-smoke: OK — POST /v1/parse pymupdf returned schema-valid JSON ({n} blocks)")
+        print(f"serve-smoke: OK. POST /v1/parse pymupdf returned schema-valid JSON ({n} blocks)")
 
-        # Manifest v0.6: /v1/batch over two documents → one schema-valid batch envelope.
+        # /v1/batch takes many documents and returns one batch-result envelope (Manifest v0.6).
         doc = body["document"]
         br = httpx.post(
             f"{base}/v1/batch",
@@ -82,7 +84,7 @@ def main() -> int:
         schemas.validate_batch_result(env)
         assert env["summary"]["succeeded"] == 2, env["summary"]
         print(
-            f"serve-smoke: OK — POST /v1/batch pymupdf returned {env['summary']['succeeded']}/2 succeeded"
+            f"serve-smoke: OK. POST /v1/batch pymupdf returned {env['summary']['succeeded']}/2 succeeded"
         )
         return 0
     finally:

@@ -1,13 +1,13 @@
 """BYO-credential resolution. The seam the whole product hangs on: a backend declares WHAT it
 needs (descriptor.credentials_spec / config_spec, descriptor schema v0.2 — D-v2-6.1a); this module
 resolves those keys from the caller's own environment and builds the RunContext every execution
-surface (CLI, server, Python API, web UI, evals, chain executor, strategy engine) runs through.
+surface (CLI, server, Python API, evals, chain executor, strategy engine) runs through.
 
 Posture — pure BYO-key pass-through
 -----------------------------------
 You bring the provider's own credential; it is read from the process environment per request,
-held in memory only for that call, and the charge lands on your own account. OpenReading never
-stores, resells, logs, echoes, or bills for it, and never forwards it anywhere but the provider.
+held in memory only for that call, and the charge lands on your own account. This package never
+stores, logs, or echoes the key, and never sends it anywhere but the provider.
 The broker never branches on backend type — it is driven entirely by the descriptor's spec. Each
 run gets a fresh adapter instance (D-v2-6 / D-v2-8.1), so a credential-bound client is never
 shared across requests. Keys never travel in a request body — only `credentials_ref` handles do —
@@ -24,15 +24,18 @@ Precedence (D-v2-1), highest first
      `ANTHROPIC_API_KEY`)
 Step 5 is NOT resolved here: when the broker finds nothing it leaves the value unset and the
 adapter's SDK falls through to its own chain. That is why aws-textract, google-document-ai and
-anthropic-claude work with no OpenReading-specific env on an already-configured machine, and why
-`openreading backends` still reports them ready. `openreading backends` names missing VARS, never
-values.
+anthropic-claude work with no OpenReading-specific env on a machine their own provider tooling
+already configured. `openreading backends` reads the environment only. A backend whose credentials
+sit in `~/.aws/credentials` or in an ADC file prints `no` under CONFIGURED and still runs.
+Readiness also requires the vars a descriptor's `live_gate_env` names, and only the environment can
+satisfy those (`openreading.readiness`). `openreading backends` names missing VARS, never values.
 
 `.env` loading (`load_dotenv`): `KEY=VALUE` lines from a dotenv file enter the environment WITHOUT
 overriding an already-set process var — an exported shell variable always wins over the file, so a
 value exported in an earlier shell command silently beats the file you just edited. The CLI loads
-`./.env` (or `--env-file`) on every invocation; the web UI's `create_app` loads `./.env` once;
-`openreading.run(env_file=)` / `run_batch(env_file=)` load only when given. Do NOT copy
+`./.env` (or `--env-file`) on every invocation, `openreading serve` included. A program that
+imports `openreading.server.app.create_app` directly loads nothing, so it calls `load_dotenv`
+itself. `openreading.run(env_file=)` / `run_batch(env_file=)` load only when given. Do NOT copy
 `.env.example` wholesale: it pre-fills two localhost endpoints (`DOCLING_SERVE_URL`,
 `QWEN_VL_ENDPOINT`), which marks those backends configured on a machine where neither is running
 and sends a document there before the router falls back to one that works. Write only the keys
@@ -104,9 +107,10 @@ Per-backend reference
   azure-document-intelligence [azure-document-intelligence]
             auth: AZURE_DOCUMENT_INTELLIGENCE_KEY   config: AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT
             ops: prebuilt-read/layout/invoice, custom   limits: LRO poll
-  google-document-ai [google-document-ai]   auth: none (ADC only)
-            config: GOOGLE_APPLICATION_CREDENTIALS (ADC), GCP_PROJECT_ID, GCP_PROCESSOR_ID
-            (+GCP_LOCATION)   ops: OCR/FormParser/LayoutParser/CustomExtractor
+  google-document-ai [google-document-ai]   auth: GOOGLE_APPLICATION_CREDENTIALS (opt: a
+            service-account JSON path, else the ambient ADC chain)
+            config: GCP_PROJECT_ID (or GOOGLE_CLOUD_PROJECT), GCP_PROCESSOR_ID, GCP_LOCATION
+            (opt, default us)   ops: OCR/FormParser/LayoutParser/CustomExtractor
             limits: sync `:process` <=15 pages (batchProcess not implemented); a non-`us` region
             auto-pins the regional endpoint
   google-gemini [google-gemini]   auth: GEMINI_API_KEY   config: GEMINI_MODEL (opt,
@@ -129,7 +133,7 @@ Actionable failures
 -------------------
   * `auth_rejected` — a key that is present but rejected by the provider (HTTP 401/403, IAM
     AccessDenied, GCP PermissionDenied/Unauthenticated, an anthropic AuthenticationError). Every
-    surface shows the same key-free sentence, "key was found but rejected by <backend> — check
+    surface shows the same key-free sentence, "key was found but rejected by <backend>: check
     <VAR>" (`openreading.readiness.auth_rejected_hint`): single and batch parse, `route --run`,
     `replay`, `calibrate`, and the HTTP body (424 — the same "fix a var" class as missing
     credentials). The provider's own response body is DROPPED, not appended: providers have been
@@ -141,8 +145,8 @@ Actionable failures
     overlapping secrets leave no fragments) before it reaches any surface — CLI, HTTP, batch trail
     — which covers a self-hosted or misconfigured backend echoing request context in a verbose
     error body. Non-secret config (endpoint, region, project id) is deliberately not redacted.
-  * Liveness reports (`openreading backends --check`, `POST /v1/backends/{id}/liveness`, the UI's
-    Check now) follow the same posture: they name env VARS never values, `detail` is redacted on
+  * Liveness reports (`openreading backends --check`, `POST /v1/backends/{id}/liveness`) follow
+    the same posture: they name env VARS never values, `detail` is redacted on
     the way out, an `unauthorized` finding reuses the key-free sentence, no field carries the
     endpoint URL (a URL can embed `user:token@host`), and a probe never sends a document, so it can
     never become a data path (`openreading.liveness`, internal/design/liveness.md §3.4).
@@ -282,7 +286,7 @@ class EnvCredentialBroker:
             )
         alias = ref[len("env:") :]
         if alias not in _credentials_ref_aliases(self._env):
-            # BL-162 review (bruce): does NOT enumerate the configured allow-list. This message
+            # BL-162: this message does NOT enumerate the configured allow-list. It
             # reaches an unauthenticated caller verbatim (server auth is off by default) — naming
             # the accepted set here would hand a caller the operator's internal alias/vault naming
             # for free, the same class of unauthenticated information exposure this defect exists

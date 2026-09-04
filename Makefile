@@ -1,8 +1,11 @@
 .PHONY: verify lint typecheck typecheck-mypy test schema-validate extras-parity smoke strategy-smoke compare-smoke leaderboard-smoke serve-smoke audit verify-live sync clean
 
-# `make verify` is the gate: nothing red gets committed.
+# `make verify` is the gate. CI runs it on every pull request and on every push to main.
 verify: lint typecheck test schema-validate extras-parity smoke strategy-smoke compare-smoke leaderboard-smoke
 
+# Install every extra and every dev tool into `.venv`, once per clone and again whenever
+# `uv.lock` moves. A venv synced without `--all-extras` lacks `uvicorn` and `boto3`, so
+# `openreading serve` and the API backends fail with `No module named`.
 sync:
 	uv sync --all-extras --dev
 
@@ -10,104 +13,107 @@ lint:
 	uv run ruff check .
 	uv run ruff format --check .
 
-# BL-170: invoke via `python -m`, not the installed console-script (`uv run pyright`) — a venv
-# whose console-script shims carry a stale shebang (e.g. after the .venv directory was relocated
-# or copied) fails to spawn the script but still resolves the module fine through the interpreter.
+# BL-170: this runs pyright through `python -m`, not the installed console-script `uv run pyright`.
+# A relocated or copied .venv leaves the console-script shims carrying a stale shebang, so spawning
+# the script fails. The interpreter still resolves the module, so `python -m` keeps working.
 typecheck:
-	uv run python -m pyright || uv run python -m mypy   # pyright primary; mypy fallback (DECISIONS D1)
+	uv run python -m pyright || uv run python -m mypy   # pyright primary, mypy fallback (DECISIONS D1)
 
-# BL-89: the `||` fallback above only ever runs mypy when pyright itself fails, so mypy's own
-# health — does it still pass clean, independent of whether pyright happens to be up — has no
-# signal on the green path (pyright passing short-circuits `||` every time, whether mypy would
-# have passed too or not). This target runs mypy unconditionally so drift is caught on its own,
-# not only the day pyright's fallback is actually needed. Not in `verify` (D1 keeps pyright
-# primary/mypy fallback as policy — see D1's status note); run this explicitly, or wire it into CI
-# as its own non-blocking step.
+# BL-89: `verify` runs mypy only when pyright fails, so a mypy regression has no signal while
+# pyright is green. This target runs mypy on its own, so drift is caught before the day the
+# fallback is needed. It is not in `verify`, because D1 keeps pyright primary and mypy fallback.
+# Run it explicitly, or wire it into CI as a non-blocking step.
 typecheck-mypy:
 	uv run python -m mypy
 
-# Offline suite + coverage floor. --cov-fail-under is the gate: coverage below the floor fails
-# `make verify` just like a red test. Ratchet the floor up as coverage climbs; never lower it.
-# `scripts/run_test_suite.py` wraps the real `pytest --cov` invocation: it clears any stale
-# .coverage(.*) file before starting (BL-61 — pytest-cov's own combine() step runs unconditionally
-# at the end of every run, and hard-fails with an INTERNALERROR if a leftover parallel data file,
-# e.g. branch-mode schema from a differently-configured concurrent `pytest --cov` run on this
-# shared checkout, doesn't match this repo's statement-mode schema), and retries once — only for
-# that exact combine()-time INTERNALERROR signature, never any other failure — when a second,
-# genuinely concurrent `pytest --cov` invocation writes a fresh incompatible file mid-run, a gap
-# the before-the-run sweep alone can't close (BL-69). See the script's own docstring for the full
-# mechanism.
+# This target runs the offline test suite and enforces the coverage floor. Coverage below
+# `--cov-fail-under` fails `make verify` the same way a red test does. Ratchet the floor up as
+# coverage climbs, and never lower it to make a build pass. The recipe calls
+# `scripts/run_test_suite.py`, which wraps the real `pytest --cov` call for two reasons. First, it
+# deletes any stale `.coverage` or `.coverage.*` file before the run starts (BL-61). pytest-cov
+# ends every run with a combine() step over the coverage data files on disk. That step fails with
+# an INTERNALERROR when a leftover file uses the other coverage schema. This repo measures branch
+# coverage, because `pyproject.toml` sets `branch = true` for the whole tree. A statement-only file
+# from a differently configured concurrent run is the incompatible one here. Second, the script
+# retries once when a concurrent run writes a fresh incompatible file mid-run (BL-69), which the
+# sweep alone cannot prevent. The retry fires only on that combine()-time INTERNALERROR signature,
+# never on any other failure. The script's own module docstring carries the full mechanism.
 test:
 	uv run python scripts/run_test_suite.py -m "not live" --cov=openreading --cov-report=term-missing --cov-fail-under=91
 
 schema-validate:
 	uv run python -m openreading.schemas validate
 
-# Extras parity gate (BL-158): openreading.adapters.registry.BUILTIN_ADAPTERS and
-# pyproject.toml's [project.optional-dependencies] are two independent, hand-maintained sources
-# describing the same "install this to run this adapter" relationship. [dependency-groups] dev
-# already supplies every adapter's runtime dep for tests, so an adapter that's fully tested but
-# missing or misspelled here still sees a green `make verify` while `pip install
-# openreading[<slug>]` ships nothing (or the wrong thing) for a real user. Fast, offline,
-# structural — same shape as schema-validate, next to which it's wired in. No network, no
-# subprocess: reads pyproject.toml and imports the registry module only.
+# Extras parity gate (BL-158): `openreading.adapters.registry.BUILTIN_ADAPTERS` and
+# `pyproject.toml`'s `[project.optional-dependencies]` are two hand-maintained lists of the same
+# thing, which adapter needs which install extra. The dev dependency group already installs every
+# adapter's runtime dependency for the tests. An adapter missing or misspelled in the extras
+# therefore passes `make verify` green, while `pip install openreading[<slug>]` ships nothing for
+# a real user. This check reads `pyproject.toml` and imports the registry module, with no network
+# and no subprocess, which is why it sits next to schema-validate.
 extras-parity:
 	uv run python scripts/check_extras_parity.py
 
-# CLI smoke: generate the deterministic test PDF, parse it through the local PyMuPDF backend via
-# the CLI, and confirm it emits schema-valid JSON (the CLI validates before printing).
+# CLI smoke: this builds the deterministic test PDF and parses it through the local PyMuPDF
+# backend, using the CLI rather than the Python API. The CLI validates before it prints, so
+# schema-valid JSON on stdout is the assertion.
 smoke:
 	@uv run python -c "import os; from openreading.testing.sample_pdf import build_sample_pdf; open(os.path.join(os.environ.get('TMPDIR','/tmp'),'read_smoke.pdf'),'wb').write(build_sample_pdf())"
 	@uv run python -m openreading.cli parse "$${TMPDIR:-/tmp}/read_smoke.pdf" --backend pymupdf --pages 1 \
-	  | uv run python -c "import sys,json; d=json.load(sys.stdin); assert d['document']['pages'], 'no pages'; print('smoke: OK — pymupdf parsed sample PDF, schema-valid JSON (%d blocks)' % len(d['document']['pages'][0].get('blocks',[])))"
+	  | uv run python -c "import sys,json; d=json.load(sys.stdin); assert d['document']['pages'], 'no pages'; print('smoke: OK. pymupdf parsed the sample PDF into schema-valid JSON (%d blocks)' % len(d['document']['pages'][0].get('blocks',[])))"
 
-# Strategy smoke: generate the scanned fixture, run a [pymupdf, tesseract] cascade through
-# `parse --strategy`, assert the quality gate fired + a schema-valid orchestration-carrying
-# response. Fully offline (local backends); green with or without the tesseract binary.
+# Strategy smoke: this builds the scanned fixture and runs a pymupdf-then-tesseract cascade
+# through `parse --strategy`. It asserts that the quality gate fired and that the response is
+# schema-valid and carries its orchestration block. It uses local backends only, so it stays green
+# with or without the tesseract binary.
 strategy-smoke:
 	uv run python scripts/strategy_smoke.py
 
-# Compare smoke: parse the sample PDF through pymupdf live, compare against a second real backend
-# (tesseract live if present, else a deterministic fixture), assert a schema-valid pairwise report
-# with findings. Fully offline (local backends); green on any machine.
+# Compare smoke: this parses the sample PDF through pymupdf, then compares that result against a
+# second backend. The second backend is tesseract when the binary is present, and a deterministic
+# fixture otherwise. It asserts a schema-valid pairwise report that carries findings. It uses
+# local backends only, so it is green on any machine.
 compare-smoke:
 	uv run python scripts/compare_smoke.py
 
-# Leaderboard smoke (BL-160): run `openreading leaderboard` itself (the real CLI entry point, not
-# the Python API) over the deterministic sample dataset with two local backends, assert a
-# schema-valid BenchmarkReport with both backends ranked and a non-empty per-case table. Fully
-# offline (local backends, no keys); green with or without the tesseract binary — a missing binary
-# just means every one of tesseract's cases scores an honest, tallied error, never a crash, which
-# this smoke also treats as a legitimate (if uninteresting) ranking rather than a failure.
+# Leaderboard smoke (BL-160): this runs the real `openreading leaderboard` CLI entry point, not
+# the Python API, over the deterministic sample dataset. It uses two local backends, needs no
+# keys, and asserts a schema-valid BenchmarkReport with both backends ranked and a non-empty
+# per-case table. A missing tesseract binary is fine, because every tesseract case then scores a
+# tallied error rather than crashing. This smoke treats that ranking as legitimate rather than as
+# a failure.
 leaderboard-smoke:
 	uv run python scripts/leaderboard_smoke.py
 
-# Server smoke: boot the real HTTP API on an ephemeral port, POST the sample PDF through /v1/parse,
-# assert schema-valid, shut down. Not in `verify` (uses a localhost socket); run explicitly.
+# Server smoke: this starts the HTTP server on an ephemeral local port and posts the sample PDF to
+# /v1/parse. It checks the response against the schema and then shuts the server down. It is not
+# part of `verify`, because it opens a localhost socket, so run it explicitly.
 serve-smoke:
 	uv run python scripts/serve_smoke.py
 
-# Dependency vulnerability audit (finding M1): queries the OSV/PyPI advisory DB against the
-# resolved lock's third-party dependencies. Not in `verify` — it needs network, so it is a build
-# gate, not part of the offline suite. Blocking on purpose: a vulnerable lock with no CI signal is
-# exactly how PYSEC-2026-3655/3656 (pypdf) and PYSEC-2026-3552 (cryptography) sat unnoticed —
-# Dependabot alone left the lock in place. Audits `uv export`'s output rather than the live
-# environment on purpose: pip-audit's `--strict` treats ANY skipped dependency as fatal — including
-# this project's own editable-installed package (uv installs the checkout that way, and an
-# unpublished local package can't be looked up on PyPI) — so auditing the live environment makes
-# `--strict` fail on every run regardless of real vulnerabilities. `--no-emit-project` keeps that
-# self-reference out of the exported list entirely, so `--strict` only ever fires on a genuine
-# third-party finding. The escape hatch for an advisory with no released fix is an explicit
-# `--ignore-vuln <ID>` argument added in a commit whose body says why, never a silent skip.
+# Dependency vulnerability audit: this queries the OSV/PyPI advisory database against the
+# third-party dependencies in the resolved lock. It is not part of `verify`, because it needs the
+# network, and it blocks the build on any hit. A vulnerable lock with no CI signal is how
+# PYSEC-2026-3655/3656 (pypdf) and PYSEC-2026-3552 (cryptography) sat unnoticed. Dependabot opens
+# a pull request for each one, but it never blocks the green build that ships the lock. The audit
+# reads `uv export`'s output rather than the live environment for one reason. pip-audit's
+# `--strict` treats any skipped dependency as fatal, and the live environment always skips this
+# project itself. uv installs the checkout as an editable package, and PyPI cannot look up an
+# unpublished local package. `--no-emit-project` keeps that self-reference out of the exported
+# list, so `--strict` fires only on a real third-party finding. An advisory with no released fix
+# gets an explicit `--ignore-vuln <ID>` in a commit whose body says why, never a silent skip.
 audit:
 	uv export --format requirements.txt --all-extras --no-emit-project > "$${TMPDIR:-/tmp}/audit-requirements.txt"
 	uv run --with pip-audit pip-audit --strict -r "$${TMPDIR:-/tmp}/audit-requirements.txt"
 
-# Live lane: run ONLY the @pytest.mark.live tests. Each skips cleanly unless its backend's env
-# keys are present (`-rs` surfaces the skip reasons). Never part of the offline `verify` gate.
+# Live lane: this runs only the tests marked `@pytest.mark.live`, and nothing else. Each one skips
+# cleanly unless its backend's environment keys are set, and `-rs` prints the skip reasons. It is
+# never part of the offline `verify` gate, which stays keyless and offline.
 verify-live:
 	uv run pytest -m live -rs
 
+# Remove the tool caches and build output this repo's own commands write. The `.venv` directory
+# and any output files you generated stay where they are.
 clean:
-	rm -rf .pytest_cache .ruff_cache dist build *.egg-info
+	rm -rf .pytest_cache .ruff_cache .mypy_cache .coverage .coverage.* coverage.xml htmlcov dist build *.egg-info
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

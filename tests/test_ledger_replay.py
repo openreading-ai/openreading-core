@@ -245,6 +245,66 @@ def test_resume_replays_a_cancelled_step_with_zero_network_calls(tmp_path):
     assert result.journal_seq == recs[-1].journal_seq
 
 
+def test_a_replayed_cancelled_cascade_rung_keeps_its_own_attempt_category(tmp_path, monkeypatch):
+    """A rung whose journal record is `cancelled` is the shape an interrupted run leaves behind,
+    and the ledger guide's own interrupt-and-resume walkthrough produces one. The resumed walk
+    must not label that rung `skipped(missing_credentials)`, because a local backend needs no
+    credentials and a fabricated reason reads downstream exactly like a measured one."""
+    ledger_root = tmp_path / "ledger"
+    monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
+    reg = scripted_registry(
+        ScriptedBackend("a", local=True, text="from a"),
+        ScriptedBackend("b", local=True, text="from b"),
+    )
+    cfg = _cfg([{"backend": "a"}, {"backend": "b"}])
+    req = _req()
+    run_id = str(uuid.uuid4())
+    clock = RealClock()
+    compiled = compile_strategy(req, "s", cfg, reg, RouterConfig())
+    _arm_ledger(
+        run_id,
+        req,
+        reg,
+        EnvCredentialBroker(),
+        clock,
+        compiled.eligible,
+        config_hash=compiled.config_hash,
+        plan_tree=compiled.root,
+        strategy_name="s",
+    )
+
+    # The interrupted dispatch's own records, written directly: `attempted` then the `cancelled`
+    # terminal record `InlineExecutor.exec`'s CancelledError handler leaves behind (§4.3a).
+    step_req = _step_request(
+        SimpleNamespace(run_id=run_id),
+        "root.steps[0]",
+        "a",
+        reg.get("a").descriptor,
+        req,
+    )
+    journal = JsonlJournal(ledger_root / f"{run_id}.jsonl")
+    for status in ("attempted", "cancelled"):
+        journal.append(
+            StepResult(
+                step_id=_step_id(run_id, "root.steps[0]", 0),
+                run_id=run_id,
+                step_path="root.steps[0]",
+                step_seq=0,
+                backend_id="a",
+                status=status,
+                attempt=1,
+                idempotency_key=step_req.idempotency_key,
+                content_key=step_req.content_key,
+            )
+        )
+
+    resumed = _resume(ledger_root, run_id, reg, cfg, req)
+    cats = [(a["backend"], a["category"]) for a in resumed.orchestration["attempts"]]
+    assert resumed.response.document.text == "from b"
+    assert ("a", "skipped(cancelled)") in cats, cats
+    assert ("a", "skipped(missing_credentials)") not in cats, cats
+
+
 # ---- M9: a replayed failure carries the ORIGINAL message, not a generic taxonomy name ----------
 
 

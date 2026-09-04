@@ -64,6 +64,9 @@ def test_leaderboard_cli_unknown_backend_exits_2(capsys):
     assert rc == 2
     err = capsys.readouterr().err
     assert "[leaderboard]" in err and "not-a-real-backend" in err
+    # The reader is typing a comma-separated list of ids, so the message names the ones that
+    # exist, the way `backends --check` always has.
+    assert "known:" in err and "pymupdf" in err
 
 
 def test_leaderboard_cli_fewer_than_two_backends_exits_2(capsys):
@@ -71,6 +74,8 @@ def test_leaderboard_cli_fewer_than_two_backends_exits_2(capsys):
     assert rc == 2
     err = capsys.readouterr().err
     assert "[leaderboard]" in err and "at least two" in err
+    # the message states the fix, not only the problem
+    assert "--backends" in err and "--all-ready" in err
 
 
 def test_leaderboard_cli_missing_dataset_exits_3(capsys, tmp_path):

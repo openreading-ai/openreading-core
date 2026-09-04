@@ -1,4 +1,4 @@
-"""Deterministic 2-page test PDF, generated exactly like internal/research/openreading/_data/live_runs.md so
+"""Content-stable 2-page test PDF, generated exactly like internal/research/openreading/_data/live_runs.md so
 local-library adapters can be EXERCISED for real and their geometry asserted against the
 empirically-verified coordinates.
 
@@ -19,7 +19,8 @@ TABLE_BBOX = (72.0, 280.0, 432.0, 392.0)
 
 
 def build_sample_pdf() -> bytes:
-    """Return the deterministic test PDF as bytes (identical every call)."""
+    """Return the test PDF as bytes. Pages, text and geometry are identical every call. The PDF
+    trailer /ID is not, so the bytes and their sha256 differ between calls."""
     import fitz  # lazy: PyMuPDF is a dev/test dep, not a core dependency
 
     doc = fitz.open()
@@ -77,8 +78,9 @@ def build_sample_pdf() -> bytes:
 def build_scanned_pdf(pages: int = 2) -> bytes:
     """A scan-like PDF: each page is a full-page raster image with NO text layer. The signal
     probe (via pypdf) must see no extractable text + an image → `scanned_pages_detected` and
-    `text_source: none`. Byte-deterministic. Uses PyMuPDF (a dev/test dep) only to BUILD the
-    fixture — the probe under test reads it with pypdf, never pymupdf."""
+    `text_source: none`. Page content is stable across calls, the trailer /ID is not. Uses
+    PyMuPDF (a dev/test dep) only to BUILD the fixture — the probe under test reads it with
+    pypdf, never pymupdf."""
     import fitz  # lazy: PyMuPDF is a dev/test dep, not a core dependency
 
     doc = fitz.open()
@@ -99,7 +101,7 @@ def build_scanned_pdf(pages: int = 2) -> bytes:
 def build_garbled_pdf() -> bytes:
     """A PDF whose text layer is mojibake — selectable-but-garbage (the OCRmyPDF "damaged
     ToUnicode" failure class). The garble composite must score above the 0.3 `garbled: true` cut.
-    Byte-deterministic."""
+    Page content is stable across calls, the trailer /ID is not."""
     import fitz  # lazy: PyMuPDF is a dev/test dep, not a core dependency
 
     # latin-1 mojibake: runs of accented/symbol chars with no ASCII-vowel words — renders and

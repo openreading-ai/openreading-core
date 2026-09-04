@@ -1,7 +1,13 @@
 name: Feature request
-description: A backend, a signal, a verdict, a surface
+description: Ask for a backend, a signal, a verdict, or a surface that does not exist yet
 labels: [enhancement]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        OpenReading is a library and a command line tool for document parsing. A web
+        interface, a multi-tenant service, and bundled datasets are out of scope. AGENTS.md
+        describes the boundary under "What belongs in this repo".
   - type: textarea
     id: problem
     attributes:
@@ -9,11 +15,16 @@ body:
       description: The job, not the feature. "Compare two backends on my scanned invoices" beats "add flag X".
     validations: { required: true }
   - type: dropdown
-    id: cell
+    id: area
     attributes:
-      label: Which cell of the grid does it deepen?
-      description: The product grows by deepening cells, not by adding beside them.
-      options: [parse (a backend), compare (a verdict/dimension), strategy (a signal/construct), a surface (CLI/API/agent), not sure]
+      label: Which part of OpenReading does this touch?
+      description: OpenReading does three jobs (parse, compare, strategy) on three surfaces (the CLI, the Python API, the HTTP server). Pick the closest one.
+      options:
+        - "parse (a new or changed backend)"
+        - "compare (a verdict or a dimension)"
+        - "strategy (a signal, a gate, or a construct)"
+        - "a surface (CLI, Python API, HTTP server)"
+        - "not sure"
     validations: { required: true }
   - type: textarea
     id: alternatives

@@ -1,10 +1,11 @@
-"""H8 — the end-to-end offline compare smoke (joins `make verify`).
+"""The end-to-end offline compare smoke, which `make verify` runs (H8).
 
-Parse the bundled sample PDF through pymupdf live, then compare it against a second real backend:
-tesseract live when the system binary is present (a genuine cross-backend delta), else a small
-deterministic fixture envelope so the smoke is green on any machine. Assert the report is
-schema-valid, is pairwise, and surfaces at least one finding (the two backends really do differ).
-Fully offline (local backends), zero network — safe inside the `verify` gate.
+This parses the bundled sample PDF through pymupdf, then compares that result against a second
+real backend. The second backend is tesseract when the system binary is present, which gives a
+genuine cross-backend delta. Otherwise it is a small deterministic fixture envelope, so the smoke
+stays green on any machine. It asserts that the report is schema-valid, that it is pairwise, and
+that it carries at least one finding, because the two backends really do differ. It uses local
+backends only and makes no network call, which is what lets it sit inside the `verify` gate.
 """
 
 from __future__ import annotations
@@ -15,8 +16,8 @@ from typing import Any
 
 
 def _fixture_envelope() -> dict[str, Any]:
-    """A deterministic stand-in second subject when the tesseract binary is absent — a markdown-only
-    transcription that deliberately differs from pymupdf's block output."""
+    """A deterministic stand-in second subject for when the tesseract binary is absent. It is a
+    markdown-only transcription that deliberately differs from pymupdf's block output."""
     return {
         "schema_version": "0.3",
         "status": {"state": "succeeded"},
@@ -50,7 +51,7 @@ def main() -> int:
     sim = report["text"]["matrix"][0][1]
     codes = sorted({f["code"] for f in findings})
     print(
-        f"compare-smoke: OK — pymupdf × {second}, schema-valid report, "
+        f"compare-smoke: OK. pymupdf vs {second}, schema-valid report, "
         f"{len(findings)} findings ({', '.join(codes)}), text similarity {sim:.2f}"
     )
     return 0

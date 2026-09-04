@@ -10,14 +10,18 @@
 Two vendors both claim the best accuracy on your kind of document, and their numbers come from their
 own benchmarks. A backend is one parser, such as the local `pymupdf` library or a hosted API. You
 need a score measured on your documents, against your own expected values, that you can rerun
-whenever a backend changes. A response is the one JSON envelope every backend returns. The harness
-has three scorers that grade a response against the expected text, tables, or fields. A runner
-drives any backend over a dataset directory, and a leaderboard ranks two or more backends on one
-dataset. For example, `openreading leaderboard src/openreading/evals/sample --backends
-pymupdf,tesseract` prints one ranked row per backend with its mean score. Every score is measured on
-your documents and never quoted from a vendor, and labeled datasets never land in this repo. The
-repo ships one synthetic case so the harness proves itself offline, and the walkthrough starts
-there with no key.
+whenever a backend changes.
+
+`openreading.evals` is the benchmark harness, and it ships three scorers, a runner, and a
+leaderboard. A response is the one JSON envelope every backend returns. Each scorer grades a
+response against the text, tables, or fields you expected. The runner drives any backend over a
+dataset directory, and the leaderboard ranks two or more backends on one dataset. For example,
+`openreading leaderboard src/openreading/evals/sample --backends pymupdf,tesseract` prints one
+ranked row per backend with its mean score.
+
+Every score is measured on your documents and never quoted from a vendor, and labeled datasets never
+land in this repo. The repo ships one synthetic case so the harness proves itself offline, and the
+walkthrough starts there with no key.
 
 What the score measures is narrower than the word accuracy suggests. Most of these scorers ask
 whether the content you expected is present. They do not ask whether the backend added anything
@@ -36,7 +40,7 @@ number is evidence for you to read.
 
 ## Walkthrough
 
-Build the root README's sample document first, because later steps score against it and no key is
+Build the root README's sample document first, because later steps score against it. No key is
 needed anywhere on this page.
 
 ```bash
@@ -61,7 +65,7 @@ per-case result:
 tally over 1 case(s): 1 win, 0 tie, 0 all-zero, 0 no result
 ```
 
-**You should see** the dataset's identity above the ranking, because the verdict is about these
+**You should see** the dataset's identity above the ranking, because the result is about these
 documents and not a universal one. Both backends found the text, and OCR lost the table grid. The
 `scored` column is the denominator the mean rests on, written as scored cases over total cases. A
 mean over zero scored cases prints as an em dash rather than a number. So a backend that never ran
@@ -105,21 +109,29 @@ as parsed: 1.0
 with an invented total, a row and 400 junk words: 1.0
 ```
 
-**You should see** the same 1.0 twice. This is the failure mode of a backend that writes text
-rather than reading it, and two backends in the catalog do that
-([Backend adapters](../adapters/README.md)). Three ways to cover it, cheapest first. Write
-`expected.text` for a handful of documents instead of `text_contains`, because the full-text ratio
-falls when content is added. Score `typed_fields` where a backend can produce them, because that
-dimension carries a real precision term. Run the two top-ranked backends through
-`compare --format diffs` on the same documents. That view names the lines one side has and the
-other does not ([Compare](../comparison/README.md)).
+PyMuPDF prints one or two notices on stdout in every Python snippet on this page. They name the
+deprecated `fitz` API and the `pymupdf_layout` package. Each notice lands before the scored line
+whose work triggered it, so one can fall between two scored lines. The `openreading` CLI sends the
+same notices to stderr, which is why the command outputs above are clean. They are library noise, so
+read past them to the scored lines.
 
-`--format json` prints the schema-valid `leaderboard-report.v0.1` with three parts: `dataset {path,
-case_count, case_names}`, `backends[] {backend_id, rank, mean_score, n_cases, n_scored, errors,
-cost_per_doc, non_deterministic, dimensions}`, and `cases[] {name, winner, scores}`. The JSON
-`winner` field is byte-stable rather than careful. It names one backend on a tie, breaking the tie
-alphabetically, and it names one on a case every backend scored zero. The human `per-case result`
-block distinguishes those, so tally wins from it and never from `cases[].winner`.
+**You should see** the same 1.0 twice. This is the failure mode of a backend that writes text
+rather than reading it. Four backends in the [catalog](../adapters/README.md) do that today:
+`anthropic-claude`, `google-gemini`, `nuextract`, and `qwen-vl`. `leaderboard --format json` marks
+each of them `non_deterministic: true`, so your own run always shows the current set. Three ways to
+cover it, cheapest first. Write `expected.text` for a handful of documents instead of
+`text_contains`, because the full-text ratio falls when content is added. Score `typed_fields` where
+a backend can produce them, because that dimension carries a real precision term. Run the two
+top-ranked backends through `compare --format diffs` on the same documents. That view names the
+lines one side has and the other does not ([Compare](../comparison/README.md)).
+
+`--format json` prints the schema-valid `leaderboard-report.v0.1`. It carries a `schema_version` of
+`"0.1"` plus three parts: `dataset {path, case_count, case_names}`, `backends[] {backend_id, rank,
+mean_score, n_cases, n_scored, errors, cost_per_doc, non_deterministic, dimensions}`, and `cases[]
+{name, winner, scores}`. The JSON `winner` field is byte-stable and blunt. It names one backend on a
+tie, breaking the tie alphabetically, and it names one on a case every backend scored zero. The
+human `per-case result` block distinguishes those, so tally wins from it and never from
+`cases[].winner`.
 
 ### 2. Read the bundled case
 
@@ -204,8 +216,8 @@ sample size you should copy.
 3. **Label them.** A label here is the `expected` object of a `case.json`, written by a person who
    read the document. Step 2 shows the shape. Write `text` rather than `text_contains` on at least
    a few, so something on the page can see invented content. The cheapest place to start is the
-   documents where two backends already disagree
-   ([Compare](../comparison/README.md), last recipe).
+   documents where two backends already disagree ([Compare](../comparison/README.md), the recipe
+   "Turn two backends' disagreements into a labeled evals dataset").
 4. **Split the labeled set in two before you measure anything.** One slice scores the leaderboard,
    the other tunes a threshold. Keep the split fixed and write down which case went where.
 5. **Rank on the scoring slice.** `openreading leaderboard <scoring-slice> --backends a,b`. Read
@@ -227,10 +239,11 @@ sample size you should copy.
    **You should see** one line per case with its own dimensions, so you can open the worst
    document and look at it. `leaderboard --format json | jq -c '.cases[]'` gives the same per-case
    scores across every backend at once.
-7. **Calibrate the gate on the other slice.** `openreading calibrate <tuning-slice> --strategy …`.
-   A threshold picked on the same documents you scored is fitted to those documents. The score you
-   then report cannot tell you whether the gate learned the corpus or learned the noise. Held out,
-   the score is a prediction about documents the threshold never saw.
+7. **Calibrate the strategy gate on the other slice.** `openreading calibrate <tuning-slice>
+   --strategy …`. A strategy gate is the threshold that decides whether a strategy escalates from
+   one backend to the next. A threshold picked on the same documents you scored is fitted to those
+   documents. The score you then report cannot tell you whether the gate learned the corpus or
+   learned the noise. Held out, the score is a prediction about documents the threshold never saw.
 8. **Ship, and keep the dataset.** Rerun the leaderboard when a backend releases a new version.
    That rerun is the whole reason to have written the labels down.
 
@@ -249,14 +262,13 @@ uv run openreading leaderboard mydata --backends pymupdf,tesseract,reducto --pol
 A backend the policy refuses is counted as an error in its own tally and excluded from its mean,
 never silently skipped. `scored 0/3` with three errors is how you read that reducto never ran.
 That is a different row from a backend that ran and scored zero. The `cost/doc` column is a model
-rather than a price anyone quoted. It is the low end of the backend's declared per-page range,
-multiplied by a fixed assumption of 25 pages a document, which is why reducto reads `0.3750` for a
-rate of `$0.015` a page. That figure drops the high end of the range, which is four times the low
-end on reducto and wider still on others, and it is wrong by the ratio of your real average page
-count to 25. Price a corpus
-from the [cost and limits
-table](../adapters/README.md#what-each-backend-charges-and-the-ceilings-on-one-request) and your
-own page counts instead. `--all-ready` replaces `--backends` with every configured backend. Every
+rather than a price anyone quoted. It takes the low end of the backend's declared per-page range and
+multiplies it by a fixed assumption of 25 pages a document. That is why reducto reads `0.3750` for a
+rate of `$0.015` a page. The figure drops the high end of the range, which is four times the low end
+on reducto and wider still on others. It is also wrong by the ratio of your real average page count
+to 25. Price a corpus from the [cost and limits
+table](../adapters/README.md#what-each-backend-charges-and-the-ceilings-on-one-request) and your own
+page counts instead. `--all-ready` replaces `--backends` with every configured backend. Every
 backend makes a real call per case, so with N backends and M cases a hosted key bills N × M calls.
 
 **Tune a strategy's gates from the sample (the calibrate bridge).** A strategy is a named plan over
@@ -285,11 +297,11 @@ uv run openreading calibrate mydata --strategy main --target-escalation 0.34 \
 Sample size is not what fills `sweeps`. The gate's shape is. The same strategy written in Plain, as
 `try: [pymupdf, tesseract]` with `escalate_when: looks_bad`, returns `"sweeps": []` on three
 documents and on three thousand. That word compiles to an `any_of` block, and `calibrate` sweeps
-only the flat numeric predicates. [Strategies](../strategies/README.md) §8 lists which predicates
-qualify and how to read the points and the recommendation.
+only the flat numeric predicates. [Strategies](../strategies/README.md) step 8 lists which
+predicates qualify and how to read the points and the recommendation.
 
 **Score a compare against a golden.** A golden is a file of expected output. The golden below is the
-`first` case's `expected` block, which describes `sample.pdf`, so parse that document into the two
+`first` case's `expected` block, which describes `sample.pdf`. Parse that document into the two
 envelopes rather than reusing envelopes another page saved from a different document.
 ```bash
 uv run openreading parse sample.pdf --backend pymupdf > pymupdf.json
@@ -364,7 +376,8 @@ print(run_dataset(make_adapter("tesseract"), "mydata").summary())   # backend=te
 - [Docs home](../README.md)
 - [Compare](../comparison/README.md) for `--truth`, and for turning two backends' disagreements
   into the cases worth labeling first.
-- [Strategies](../strategies/README.md) §8 for reading a `calibrate` sweep and its recommendation.
+- [Strategies](../strategies/README.md) step 8 for reading a `calibrate` sweep and its
+  recommendation.
 - [Batch runs](../batch/README.md) · [Backend adapters](../adapters/README.md) · [JSON
   Schemas](../schemas/README.md)
 

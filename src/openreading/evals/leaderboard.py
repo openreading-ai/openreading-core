@@ -1,5 +1,7 @@
-"""evals/leaderboard.py — BL-160: many-backends-over-many-documents, the one cell neither
-`evals/` (one adapter, many docs) nor `comparison/` (many backends, one doc) ever built
+"""Leaderboard (BL-160): rank many backends over many documents.
+
+`evals/` scores one adapter over many documents, and `comparison/` compares many backends on
+one document. Neither covers the cell this module fills
 (internal/product/specs/eval-leaderboard.product-spec.md, "Problem").
 
 `run_leaderboard` runs the SAME dataset (the evals.dataset case.json shape) across N named,
@@ -9,11 +11,10 @@ per-case compliance gate, same five-dimension scorer, no second scoring or gatin
 over `DatasetReport`s `run_dataset` already produces; nothing here re-implements or re-decides
 compliance or scoring.
 
-Deliberately narrow (scope.out): never touches `Router._score` / `_QUALITY_BY_PRIORITY` / any
-adapter's `integration_priority` (AC-9); never persists a run store or trend history across
-invocations (DESIGN.md's E1/E7 — one call, one report, stateless, matching `compare`'s own
-posture); never collects or ships a real labeled corpus — the harness works on whatever dataset
-directory it is handed.
+Deliberately narrow: never touches `Router._score` / `_QUALITY_BY_PRIORITY` / any adapter's
+`integration_priority` (AC-9); never persists a run store or trend history across invocations (one
+call, one report, stateless, matching `compare`'s own posture). It never collects or ships a real
+labeled corpus — the harness works on whatever dataset directory it is handed.
 """
 
 from __future__ import annotations
@@ -44,7 +45,7 @@ def _dimension_means(report: DatasetReport) -> dict[str, float]:
     """Per-dimension mean over the cases that actually exercised that dimension, excluding errored
     cases the exact way DatasetReport.mean_overall already excludes them — never a single blended
     cross-dimension number when different cases in the dataset exercise different `expected`
-    dimensions (scope.cut)."""
+    dimensions."""
     buckets: dict[str, list[float]] = {}
     for r in report.results:
         if r.error is not None:

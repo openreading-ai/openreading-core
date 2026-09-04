@@ -1,22 +1,24 @@
 """Docs-truth test. Every fenced ```yaml strategy block in the `openreading.strategies` module
-docstrings (the cookbook in `presets.py` above all) must parse and pass `strategy validate` with
-NO errors — the cookbook is executable truth, not prose, so a docstring edit that breaks the
-grammar fails `make verify`. Documentation lives in code (AGENTS.md); this is what keeps the
-strategy documentation honest now that it lives next to the engine.
+docstrings (the cookbook in `presets.py` above all), and in the strategies and comparison guides,
+must parse and pass `strategy validate` with NO errors — the cookbook is executable truth, not
+prose, so a docstring edit that breaks the grammar fails `make verify`. Documentation lives in
+code (AGENTS.md); this is what keeps the strategy documentation honest now that it lives next to
+the engine.
 
 Blocks come in several shapes: full configs (`version` + `strategies`), a bare `strategies:` map,
 a single node body, a deployment block, or a preset showcase. Each config-like block is wrapped
 into a full config and validated against the real builtin registry; referenced-but-undefined
-strategy names are stubbed (the analog of GOAL3's "registry stub containing the referenced backend
-ids"). Genuinely partial fragments — a bare gate/error map, a `{pick, judge}` options snippet, the
-preset-definition showcase — are not standalone configs and are skipped (a floor assertion guards
-against a classifier bug that would silently skip everything).
+strategy names are stubbed, the same way a router test stubs a registry with the backend ids its
+fixture names. Genuinely partial fragments — a bare gate/error map, a `{pick, judge}` options
+snippet, the preset-definition showcase — are not standalone configs and are skipped (a floor
+assertion guards against a classifier bug that would silently skip everything).
 """
 
 from __future__ import annotations
 
 import importlib
 import re
+from pathlib import Path
 
 import pytest
 import yaml
@@ -36,6 +38,11 @@ _MODULES = (
     "openreading.strategies.presets",
     "openreading.strategies.plain",
 )
+# The two subsystem guides that carry strategy YAML. A guide is prose a reader copies, so a block
+# it prints has to survive the same gate as a docstring block.
+_GUIDES = ("src/openreading/strategies/README.md", "src/openreading/comparison/README.md")
+ROOT = Path(__file__).resolve().parent.parent
+
 _NODE_KEYS = {"steps", "parallel", "route", "decide"}
 _PLAIN_KEYS = {"try", "race", "compare"}  # Plain map-body discriminators (v0.7)
 _LEAFISH = {"backend", "use", "extends"}
@@ -48,6 +55,10 @@ def _blocks() -> list[tuple[str, int, str]]:
         doc = importlib.import_module(name).__doc__ or ""
         for i, b in enumerate(re.findall(r"```yaml\n(.*?)```", doc, re.DOTALL)):
             out.append((name, i, b))
+    for rel in _GUIDES:
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        for i, b in enumerate(re.findall(r"```yaml\n(.*?)```", text, re.DOTALL)):
+            out.append((rel, i, b))
     return out
 
 
@@ -127,9 +138,9 @@ _CONFIG_BLOCKS = [
 
 
 def test_enough_blocks_are_validated():
-    # a floor so a classifier regression can't silently skip every block and pass vacuously; raised
-    # from 25 with the Plain (v0.7) docs (simple.md + cookbook Plain spellings) — §14 P6.
-    assert len(_CONFIG_BLOCKS) >= 40, f"only {len(_CONFIG_BLOCKS)} doc blocks classified as configs"
+    # a floor so a classifier regression cannot silently skip every block and pass vacuously.
+    # Raised from 25 when the Plain v0.7 spellings were added to the cookbook.
+    assert len(_CONFIG_BLOCKS) >= 45, f"only {len(_CONFIG_BLOCKS)} doc blocks classified as configs"
 
 
 @pytest.mark.parametrize(

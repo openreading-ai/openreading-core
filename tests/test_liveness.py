@@ -395,6 +395,20 @@ def test_not_supported_when_there_is_no_probe_and_nothing_to_infer_from():
     assert "cannot be tested" in report.detail
 
 
+def test_every_inferred_detail_uses_a_colon_not_an_em_dash():
+    """`openreading backends --check` prints these three strings in its DETAIL column, and the
+    house prose rule bans an em dash in text a reader sees at the terminal. One test over all
+    three inferred states, so a separator cannot drift back in one row at a time."""
+    not_configured = check_liveness(_NoProbeAdapter(), broker=_broker()).detail
+    unverified = check_liveness(_NoProbeAdapter(), broker=_broker(FAKE_API_KEY="sk-x")).detail
+    not_supported = check_liveness(_BareAdapter(), broker=_broker()).detail
+
+    assert [d for d in (not_configured, unverified, not_supported) if "—" in d] == []
+    assert not_configured.startswith("not configured: set ")
+    assert unverified.startswith("no free liveness check: ")
+    assert not_supported.startswith("cannot be tested: ")
+
+
 def test_no_builtin_backend_reports_not_supported():
     """Documents the audit in §2 M4 as an executable claim rather than prose."""
     statuses = {

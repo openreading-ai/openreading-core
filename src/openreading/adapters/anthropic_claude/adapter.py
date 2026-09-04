@@ -13,8 +13,8 @@ derived from that markdown (`md_to_blocks`) as bbox-less typed elements in one s
 with a `page_attribution_unavailable` warning (§4.3 container rule) — Claude gives no geometry, so
 block_bbox/block_confidence stay channel X. A `stop_reason=max_tokens` truncation maps to
 ResponseState.PARTIAL (C10). page_location citations feed page_count (or `pdf_page_count` from the
-PDF bytes) and, in extract mode, `TypedField.citations`. Model default claude-opus-4-8 (per the
-claude-api skill); the caller may override.
+PDF bytes) and, in extract mode, `TypedField.citations`. Model default claude-opus-4-8, which the
+caller may override.
 """
 
 from __future__ import annotations
@@ -70,7 +70,8 @@ N = ChannelGrade.NATIVE
 D = ChannelGrade.DERIVABLE
 
 _DEFAULT_MODEL = "claude-opus-4-8"
-# $/1M tokens (input, output) for cost derivation — claude-api skill pricing table (2026-06-24).
+# $/1M tokens (input, output) for cost derivation, from Anthropic's published pricing page
+# (accessed 2026-06-24).
 _MODEL_PRICE: dict[str, tuple[float, float]] = {
     "claude-opus-4-8": (5.0, 25.0),
     "claude-opus-4-7": (5.0, 25.0),
@@ -326,8 +327,8 @@ class AnthropicClaudeAdapter(BackendAdapter):
         a rate limit, which is exactly why the descriptor declares the kind and a UI can warn
         before firing it. It is also the only backend here whose free liveness call this repo could
         name from a primary source it already vendors (the `anthropic` SDK is a declared
-        dependency) — see internal/design/liveness.md §4 for why the other seven hosted backends
-        honestly declare no probe rather than a guessed URL."""
+        dependency). See internal/design/liveness.md §4 for why every other hosted backend
+        honestly declares no probe rather than a guessed URL."""
         creds = (ctx.credentials.values if ctx.credentials else {}) or {}
         client = self._probe_client or _RealAnthropicProbeClient(creds.get("api_key"), timeout_s)
         try:
@@ -384,7 +385,7 @@ class AnthropicClaudeAdapter(BackendAdapter):
             # inside the first `messages.create()` call — which this adapter's own error mapping
             # (`_map_error`, below) has no taxonomy slot for beyond a generic `TerminalError`, so it
             # rendered as an unnamed "Backend error" instead of the named MissingCredentialsError
-            # panel every correctly-required adapter gets (QA closing pass, ui-app). Fail the same
+            # panel every correctly-required adapter gets. Fail the same
             # honest way here, before any client call is attempted.
             signup = (
                 f" Sign up / configure: {self.descriptor.signup_url}"
@@ -470,7 +471,7 @@ class AnthropicClaudeAdapter(BackendAdapter):
         except Exception as e:  # noqa: BLE001
             raise self._map_error(e) from e
 
-        # Ledger T4b fix (Phase C round-1, F1): `normalize()` only ever sees `slim_req`, whose
+        # Ledger T4b: `normalize()` only ever sees `slim_req`, whose
         # `document.bytes_base64`/`.password`/`.url` are nulled by `slim_request`
         # (the openreading.adapters runbook: `normalize` reads `job.raw.payload` ONLY, never a field the caller
         # might have supplied out-of-band via `slim_req`/`req`) — so the exact, byte-derived page
@@ -577,9 +578,9 @@ class AnthropicClaudeAdapter(BackendAdapter):
         escapes its `with` block, and a crash caught right here, inside `normalize_many` itself,
         never does.
 
-        `ctx` (Ledger T4b): `normalize_many` isn't one of the required 8 methods and stays
-        `credentials`-only per its own `NativeBatchAdapter` Protocol signature (out of this
-        tranche's scope), so a minimal `RunContext(credentials=credentials)` is built once, locally,
+        `ctx` (Ledger T4b): `normalize_many` isn't one of the required 8 methods and keeps
+        its `credentials`-only `NativeBatchAdapter` Protocol signature, so a minimal
+        `RunContext(credentials=credentials)` is built once, locally,
         purely to satisfy `normalize`'s new `(job, ctx, slim_req)` shape — no implementation reads
         `ctx.credentials` today. `slim_request` is imported locally (not at module level) to avoid
         the same `adapters.* -> ledger.header -> adapters.registry -> adapters.*` import cycle the
@@ -598,8 +599,8 @@ class AnthropicClaudeAdapter(BackendAdapter):
             rtype = result.get("type")
             if rtype == "succeeded" and result.get("message"):
                 mode = "extract" if req.extraction_schema else "parse"
-                # Ledger T4b fix (Phase C round-2, F4): the native-batch path has its own
-                # exact-page-count blind spot, distinct from round 1's F1 but the same silent-
+                # Ledger T4b: the native-batch path has the same
+                # exact-page-count blind spot as submit(), with the same silent-
                 # degradation shape — `req` here is the i-th item's own REAL, unslimmed request
                 # (normalize_many's Protocol takes `reqs: list[OpenReadingRequest]` directly, never
                 # a slimmed copy, unlike submit()/normalize()'s slim_req split), so the exact count
@@ -820,10 +821,10 @@ class AnthropicClaudeAdapter(BackendAdapter):
         slimmed) and carried on `job.raw.payload["_pdf_page_count"]`; else fall back to the
         distinct-cited-pages heuristic (which undercounts and is None in extract mode).
 
-        Ledger T4b fix (Phase C round-1, F1): this deliberately never reads real document bytes
+        Ledger T4b: this deliberately never reads real document bytes
         itself anymore — it used to call `self._pdf_bytes(req)` on `slim_req`, whose bytes are
         always `None` by design (see `ledger.header.slim_request`), so the exact count silently
-        degraded to this heuristic for every base64/path-intake request. the openreading.adapters runbook's rule:
+        degraded to this heuristic for every base64/path-intake request. The openreading.adapters runbook's rule:
         `normalize()` reads `job.raw.payload` ONLY, never a field the caller might have supplied
         out-of-band via `slim_req`/`req`."""
         if precomputed_page_count is not None:

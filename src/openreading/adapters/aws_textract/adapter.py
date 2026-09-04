@@ -4,12 +4,13 @@ ID-linked Block graph (P5) into the normalized reading-order spine, and maps the
 AWS account (pure pass-through).
 
 boto3 is isolated in the `textract` extra and imported lazily. Two ports keep the adapter
-testable without AWS: `TextractClient` (the 6 client methods used) and `S3Uploader` (async
+testable without AWS: `TextractClient` (the ten Textract calls this adapter makes, four sync
+analyses plus a Start/Get pair for each of the three async ones) and `S3Uploader` (async
 needs the doc in S3). Tests inject fakes that replay real captured Block-graph fixtures.
 
-Geometry: Textract is normalized 0-1 top-left, so its BoundingBox is already canonical — we
-still route it through to_canonical (unit=normalized, page dims 1.0) so bbox_native is recorded
-and the convention is uniform. Confidence is 0-100 → /100. AnalyzeID carries no Geometry.
+Geometry: Textract is normalized 0-1 top-left, so its BoundingBox is already canonical. It still
+goes through to_canonical (unit=normalized, page dims 1.0) so bbox_native is recorded and the
+convention stays uniform. Confidence is 0-100 → /100. AnalyzeID carries no Geometry.
 """
 
 from __future__ import annotations
@@ -290,7 +291,7 @@ def _descriptor() -> AdapterDescriptor:
         signup_url="https://aws.amazon.com/textract/",
         accepts_url=False,
         live_gate_env=["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION"],
-        # ClientRequestToken IS sent (line ~440 below) and, since BL-165, actually works: the S3
+        # ClientRequestToken IS sent by `_submit_async` below and, since BL-165, actually works: the S3
         # upload key is now sha256(content) rather than a fresh uuid4 each attempt, so a retry
         # presents the same token with the same DocumentLocation and AWS deduplicates instead of
         # answering IdempotentParameterMismatchException.
@@ -366,12 +367,17 @@ class AWSTextractAdapter(BackendAdapter):
             # is a genuine missing-credentials state, not a raw SDK error to leak: `NoRegionError`
             # ("You must specify a region.") previously escaped straight out of submit() uncaught,
             # rendering an unnamed, code-less "Backend error" instead of the named
-            # MissingCredentialsError panel every correctly-required adapter gets (QA closing pass,
-            # ui-app). Name it the same honest way here, before any client call is attempted.
+            # MissingCredentialsError panel every correctly-required adapter gets. Name it the same
+            # honest way here, before any client call is attempted.
+            signup = (
+                f" Sign up / configure: {self.descriptor.signup_url}"
+                if self.descriptor.signup_url
+                else ""
+            )
             raise MissingCredentialsError(
-                f"missing required credentials/config for aws-textract: {e} (set "
-                "AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY and AWS_REGION, or configure the ambient "
-                "AWS credential chain).",
+                "missing required credentials/config: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, "
+                f"AWS_REGION ({e}). Set them directly or configure the ambient AWS credential "
+                f"chain.{signup}",
                 missing=["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION"],
             ) from e
 

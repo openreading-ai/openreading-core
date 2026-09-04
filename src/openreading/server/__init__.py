@@ -1,4 +1,4 @@
-"""OpenReading HTTP API (`openreading serve`). `from openreading.server import create_app`.
+"""The HTTP API behind `openreading serve`. Import `create_app` to build the ASGI app yourself.
 
 The same one request shape and one response schema as the CLI and `openreading.api`, over HTTP.
 `POST /v1/parse` speaks the vendored request/response JSON Schemas (`openreading.schemas`) in
@@ -10,10 +10,12 @@ this package. `import openreading` requires neither.
 
 Run
 ---
-    pip install 'openreading[server]'            # fastapi + uvicorn only
-    pip install 'openreading[reducto]'           # plus each backend extra you will call
+Nothing is on PyPI yet, so you install from a clone of the repository.
+
+    uv sync --all-extras --dev                   # every backend extra plus the dev tools
+    python3 -m venv .venv && .venv/bin/pip install -e '.[server,reducto]'   # without uv
     openreading serve                            # binds 127.0.0.1:8787
-    openreading serve --host 0.0.0.0 --port 80   # exposes it; prints a warning (see Security)
+    openreading serve --host 0.0.0.0 --port 8080 # exposes it, and prints a warning (see Security)
     openreading serve --env-file prod.env        # credentials from a .env; never overrides set env
     openreading serve --cors-origin https://app.example.com   # opt-in CORS, repeatable
     make serve-smoke   # boots on an ephemeral port, POSTs the sample PDF, asserts schema-valid
@@ -44,6 +46,10 @@ POST /v1/parse
 POST /v1/route
     Body: vendored request. Response: the plan only, nothing executed —
     {"chosen", "fallbacks": [...], "dropped": {id: {"stage", "code", "reason"}}, "terminal_reason"}.
+    `backend.id` is not read here. The response is always the router's own plan for the document,
+    the same plan an `auto` request would run. To learn whether a named backend is eligible, send
+    it to `/v1/parse` and read the 403 or the 424. This endpoint runs nothing, so a scoped token
+    does not narrow it, and the plan can list backends that token cannot reach.
 POST /v1/compare
     Body: {"responses": [<response>, ...], "baseline"?, "truth"?}. Response: comparison report
     (`comparison-report.v0.2.json`). Pure — compares already-computed envelopes, never executes
@@ -72,9 +78,10 @@ POST /v1/batch
     never takes. `backend` defaults to "auto" (routed per item). `jobs` (default 1) bounds a real
     worker-thread pool and is echoed on `request.jobs`. Directory expansion is client-side; the
     server takes explicit documents. A per-item failure never aborts the batch: 200 even when
-    `status.state` is `partial`; `documents: []` → 200 with one `empty_batch` warning and
-    `summary.total == 0`, mirroring the CLI's empty-directory behaviour. Unknown named backend →
-    404; non-list `documents`, non-integer `jobs`, any unrecognised body key (`max_jobs`
+    `status.state` is `partial`. `documents: []` answers 200 with one `empty_batch` warning,
+    `summary.total == 0` and `status.state: failed`, the answer `openreading.batch` gives a run
+    that produced nothing. This mirrors the CLI's empty-directory behaviour. Unknown named
+    backend → 404; non-list `documents`, non-integer `jobs`, any unrecognised body key (`max_jobs`
     included), or a non-string `backend` → 400. That last one is the shape trap: `backend` here is
     ONE string shared by every item, while /v1/parse and the vendored request schema take the
     object `{"id": ...}`, so a client reusing its own /v1/parse body builder sends the object and
@@ -114,9 +121,10 @@ POST /v1/jobs  /  GET /v1/jobs/{job_id}  /  DELETE /v1/jobs/{job_id}
     `OPENREADING_MAX_ASYNC_JOBS` (default 1000) total records is refused with 429 before its body
     is even parsed, as is one from a key already holding `OPENREADING_MAX_JOBS_PER_PRINCIPAL`
     (default 100) of them — the global cap alone is one shared counter, so without the per-key
-    allowance the caller who fills it denies the endpoint to every other caller. `DELETE /v1/jobs/{job_id}` removes one record immediately and unconditionally
-    — 204, whatever its state — freeing a slot without waiting on the TTL; an unknown id is 404
-    `unknown_job`, the identical envelope GET's own unknown-id case returns.
+    allowance the caller who fills it denies the endpoint to every other caller.
+    `DELETE /v1/jobs/{job_id}` removes one record immediately and unconditionally, answering 204
+    whatever the job's state was. That frees a slot without waiting on the TTL. An unknown id is
+    404 `unknown_job`, the identical envelope GET's own unknown-id case returns.
 POST /v1/webhooks/{backend_id}
     Inbound provider webhook; resolves the job it names and, once terminal, meters it like
     /v1/parse. Response: the job handle. Verification is per-backend, gated on whether the
@@ -154,7 +162,8 @@ POST /v1/backends/{backend_id}/liveness
     endpoint is the same defect wearing a POST. Always 200 with a report, even `unreachable` /
     `unauthorized`: "the backend is down" is a successful diagnostic, and a 5xx would conflate it
     with this API failing. The only non-200s, all before any probe: 404 unknown backend, 403
-    scope_denied, 400 non-numeric `timeout_s`. A probe is never a billed request (D-v7-4): a
+    scope_denied, and 400 for a `timeout_s` that `float()` cannot parse. A digit string and a
+    boolean are coerced rather than refused. A probe is never a billed request (D-v7-4): a
     vendor with no free liveness call declares no probe and reports `configured_unverified`
     instead of spending money to answer.
     Design and full state table: internal/design/liveness.md; implementation
@@ -173,8 +182,11 @@ HTTP status codes
 -----------------
 200  success — including GET /v1/jobs/{id} for a FAILED job (`state` / `error` carry the failure)
 204  DELETE /v1/jobs/{id} removed the record — empty body, whatever the job's state was
-400  body not valid JSON, fails the request schema, or names a `strategy:<name>` that is neither
-     a preset nor defined by the loaded config (`unknown_strategy`; presets run configless)
+400  a body that is not valid JSON, a body that fails the request schema, a `document.path` over
+     HTTP with no `OPENREADING_SERVER_PATH_ROOT` set, `"auto"` on POST /v1/jobs, or a
+     `strategy:<name>` that is neither a preset nor defined by the loaded config
+     (`unknown_strategy`, and presets run configless). Each endpoint entry above lists the
+     body-shape refusals that are its own, such as the batch caps and a bad `timeout_s`.
 401  webhook signature invalid, or the backend declares `webhook_secret` and none is configured
      (`bad_signature`); or caller auth is on and the request carries no `Authorization` header,
      or a bearer matching no configured key (`unauthorized`)
@@ -183,7 +195,11 @@ HTTP status codes
      "auto"/"strategy:none" request's fallback chain or a `strategy:<name>` walk could still
      reach (`scope_denied`) — an out-of-scope top pick is rerouted to an in-scope fallback, not
      refused, so this fires only when no in-scope backend is left
-404  unknown backend id / unknown job id (GET or DELETE)
+404  unknown backend id (`unknown_backend`) on any endpoint that names one, or unknown job id
+     (`unknown_job`) on GET, on DELETE, or on a webhook event naming no waiting job
+404 / 405  an unknown path or a wrong method never reaches this app's handlers, so the framework
+     answers `{"detail": ...}` outside the error envelope. Caller auth runs before routing, so
+     with `OPENREADING_API_KEYS` set those same requests answer 401 in the envelope instead
 413  document exceeds the size limit (`doc_too_large`); OR (M2) the request BODY itself exceeds
      `OPENREADING_MAX_BODY_BYTES` — `server.app._BodyLimitMiddleware` answers this one straight
      off the transport, before routing or body parsing, so it carries the same envelope shape and
@@ -193,23 +209,30 @@ HTTP status codes
 424  a directly-named backend is missing credentials (`missing_credentials`; `missing_env[]`
      names them) or its key was found and REJECTED by the provider (`auth_rejected`; the
      message names the var to check, never the key)
-429  POST /v1/jobs at or over `OPENREADING_MAX_ASYNC_JOBS` (`rate_limited`) — the job store's own
-     capacity bound, refused before the body is parsed; not a per-caller request-rate throttle
+429  POST /v1/jobs at or over `OPENREADING_MAX_ASYNC_JOBS`, or from a key already holding
+     `OPENREADING_MAX_JOBS_PER_PRINCIPAL` jobs of its own (`rate_limited`). Both are the job
+     store's capacity bounds, refused before the body is parsed. Neither is a request-rate
+     throttle.
 502  plan exhausted — every backend failed (`plan_exhausted`, `trail`) — or other terminal error,
      which INCLUDES two permanent request-shape refusals a client must not retry:
      `credentials_ref_alias_not_allowed` and `endpoint_not_request_configurable`. Read
      `backend_code` before deciding a 502 is a server outage
 504  deadline exceeded, retryables exhausted (`retryable_exhausted`)
-500  an unhandled server error. This is the ONE status that does not carry the error body below:
-     the ASGI framework returns the plain text `Internal Server Error`, so a client parsing every
-     response as the envelope crashes on exactly the response it least expected. Branch on the
-     status before parsing, and treat a 500 as a bug to report rather than a caller-side
-     condition to handle — every condition this server knows about has a coded row above.
+500  a server fault. Two bodies are possible here. A malformed `policy:` block in the loaded
+     config answers the envelope with `category: "error"` and a message naming the bad key,
+     once a request engages a strategy. Anything no handler caught falls through to the ASGI
+     framework, which returns the plain text `Internal Server Error`. Branch on the status
+     before you parse a body, and report a 500 as a bug rather than handling it.
 
 Error body — also the shape of a failed job's `error` (`missing_env` only for missing
 credentials, `trail` only for `plan_exhausted`):
     {"error": {"category": "terminal", "message": "...", "backend_code": "missing_credentials",
                "missing_env": ["REDUCTO_API_KEY"]}}
+
+`backend_code` is an open set. The codes this ladder names come from the router, such as
+`missing_credentials` and `doc_too_large`. A backend that fails on its own terms reports its
+exception class name instead, such as `FileDataError` from PyMuPDF. Branch on `category`, which
+is closed, and read `backend_code` as detail (`openreading.adapters`, `_map_error`).
 
 Timeouts: a directly-named hosted async backend hard-caps at the generic 120 s
 `credentials.DEFAULT_DEADLINE_MS` over HTTP — /v1/parse and /v1/jobs have no `deadline_ms` field

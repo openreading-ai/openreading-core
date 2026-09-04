@@ -66,6 +66,39 @@ def test_path_arm_load_failures_carry_the_fitz_class(tmp_path, contents, expecte
     assert exc.value.backend_code == expected_code
 
 
+def test_a_format_this_backend_cannot_read_is_named_before_the_open(tmp_path):
+    """A .txt and a .docx used to fail as `PyMuPDF failed: Failed to open stream`, the same line a
+    truncated PDF gives, naming neither the problem nor the fix. The folder path already answers
+    `skip_reason: unsupported_format`, so the single-document path answers the same way.
+
+    Both request shapes are checked because they are the two a caller can arrive in: the CLI and
+    the Python API read the file into `bytes_base64` and carry the name in `filename`, while a
+    hand-built request can still hold `path`."""
+    notes = tmp_path / "notes.txt"
+    notes.write_text("hello\n")
+    shapes = [
+        {"path": str(notes), "mime_type": "text/plain"},
+        {"bytes_base64": CORRUPT_B64, "filename": "notes.txt", "mime_type": "text/plain"},
+    ]
+    for document in shapes:
+        with pytest.raises(TerminalError) as exc:
+            _submit(_req(document=document))
+        assert exc.value.backend_code == "unsupported_format"
+        # the file by name, and the formats read from the descriptor rather than restated
+        assert "notes.txt" in str(exc.value)
+        assert "pdf, xps, epub, mobi, cbz, svg" in str(exc.value)
+
+
+def test_a_corrupt_file_of_a_supported_format_keeps_the_pymupdf_error(tmp_path):
+    # The extension is all the format check can see, so a .pdf whose bytes are junk must still
+    # reach fitz and come back with the fitz class the batch envelope reports.
+    doc_path = tmp_path / "loan.pdf"
+    doc_path.write_bytes(CORRUPT_BYTES)
+    with pytest.raises(TerminalError) as exc:
+        _submit(_req(document={"path": str(doc_path), "mime_type": "application/pdf"}))
+    assert exc.value.backend_code == "FileDataError"
+
+
 def test_no_document_source_keeps_its_unsupported_input_code():
     # _open's OWN TerminalError must pass through unwrapped — not re-mapped to
     # backend_code="TerminalError" by the generic handler.
