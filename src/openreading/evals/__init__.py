@@ -43,6 +43,7 @@ from openreading.evals.scorers import field_prf, score, table_grid, text_similar
 from openreading.evals.targets import (
     BenchmarkTarget,
     execute_target,
+    pipeline_name,
     project_extract_response,
     project_parse_response,
 )
@@ -66,6 +67,7 @@ __all__ = [
     "require_benchmark_terms",
     "BenchmarkTarget",
     "execute_target",
+    "pipeline_name",
     "project_parse_response",
     "project_extract_response",
 ]

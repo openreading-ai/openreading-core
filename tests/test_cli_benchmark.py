@@ -150,3 +150,23 @@ def test_benchmark_estimate_makes_no_backend_calls(capsys) -> None:
     assert "documents: 370" in out
     assert "pages: 4869" in out
     assert "target calls: 370" in out
+
+
+def test_benchmark_estimate_refuses_a_cataloged_profile(capsys) -> None:
+    # Published scale with nothing to spend it on reads as a run you could start. GovDocs1 is a
+    # million documents, so the number is the whole message if it prints at all.
+    assert main(["benchmark", "estimate", "govdocs1", "--allow-unverified-terms"]) == 2
+    err = capsys.readouterr().err
+    assert "cataloged for discovery but has no runnable profile" in err
+
+
+def test_benchmark_run_rejects_bad_jobs_before_downloading(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        "openreading.evals.official.prepare_official_benchmark",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not download")),
+    )
+
+    rc = main(["benchmark", "run", "parsebench", "--target", "backend:pymupdf", "--jobs", "0"])
+
+    assert rc == 2
+    assert "--jobs must be at least 1" in capsys.readouterr().err

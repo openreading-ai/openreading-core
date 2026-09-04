@@ -13,6 +13,8 @@ these dictionaries against the publisher's Pydantic models before scoring.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
@@ -21,27 +23,34 @@ from openreading import api
 TargetKind = Literal["backend", "strategy"]
 BenchmarkProduct = Literal["parse", "extract"]
 
+# ParseBench resolves a label mapper by provider key, and a provider it does not know falls
+# through to its CanonicalPassthroughMapper. That mapper calls `CanonicalLabel(label)` with no
+# normalization, so a segment whose label is not verbatim Canonical17 raises
+# UnknownRawLayoutLabelError and its page's layout evidence is lost. These are the enum's own
+# values (`parse_bench.schemas.layout_ontology.CanonicalLabel`), not a lowercase spelling of them.
+# `tests/test_benchmark_publisher_contract.py` re-checks every value against the installed enum.
 _PARSEBENCH_LAYOUT_LABELS = {
-    "title": "title",
-    "section_header": "section-header",
-    "header": "page-header",
-    "footer": "page-footer",
-    "page_number": "text",
-    "text": "text",
-    "list": "list-item",
-    "list_item": "list-item",
-    "table": "table",
-    "table_cell": "table",
-    "figure": "picture",
-    "image": "picture",
-    "caption": "caption",
-    "formula": "formula",
-    "code": "code",
-    "key_value": "key-value-region",
-    "form_field": "form",
-    "selection_mark": "checkbox-selected",
-    "table_of_contents": "document-index",
+    "title": "Title",
+    "section_header": "Section-header",
+    "header": "Page-header",
+    "footer": "Page-footer",
+    "page_number": "Text",
+    "text": "Text",
+    "list": "List-item",
+    "list_item": "List-item",
+    "table": "Table",
+    "table_cell": "Table",
+    "figure": "Picture",
+    "image": "Picture",
+    "caption": "Caption",
+    "formula": "Formula",
+    "code": "Code",
+    "key_value": "Key-Value Region",
+    "form_field": "Form",
+    "selection_mark": "Checkbox-Selected",
+    "table_of_contents": "Document Index",
 }
+_PARSEBENCH_DEFAULT_LABEL = "Text"
 
 
 @dataclass(frozen=True)
@@ -69,6 +78,39 @@ class BenchmarkTarget:
         return f"{self.kind}:{self.name}"
 
 
+def pipeline_name(
+    benchmark_id: str,
+    target: BenchmarkTarget,
+    *,
+    config: str | None,
+    policy: dict[str, Any] | None,
+) -> str:
+    """Name the publisher pipeline one target plus one configuration produces.
+
+    The publisher keys its artifact directory, its resume logic, and its leaderboard rows on this
+    name, so two runs that share it share a directory. The benchmark id is part of the hashed
+    identity for that reason: `benchmark run parsebench --target backend:pymupdf` and
+    `benchmark run extractbench --target backend:pymupdf` default to the same `--output-dir`, and
+    without the id they would write parse results and extract results into one directory and then
+    resume across products. Config and policy are in it because the same backend under a different
+    compliance policy is a different measurement, and stable ordering keeps a rerun's name
+    identical so the publisher can resume rather than redo.
+    """
+
+    identity = json.dumps(
+        {
+            "benchmark": benchmark_id,
+            "target": target.reference,
+            "config": config,
+            "policy": policy,
+        },
+        sort_keys=True,
+    )
+    suffix = hashlib.sha256(identity.encode()).hexdigest()[:10]
+    safe_name = "".join(char if char.isalnum() else "_" for char in target.name)
+    return f"openreading_{target.kind}_{safe_name}_{suffix}"
+
+
 def execute_target(
     source: str,
     target: BenchmarkTarget,
@@ -80,9 +122,14 @@ def execute_target(
 ) -> dict[str, Any]:
     """Run one publisher case through the public OpenReading API."""
 
+    # `operation=` is deliberately absent. It is `request.backend.operation`, a per-backend
+    # SUB-operation ("AnalyzeExpense", "prebuilt-layout", "vlm"), not the benchmark's product.
+    # Forcing "parse" there made aws-textract raise `unknown Textract operation 'parse'` on every
+    # document and made azure-document-intelligence request a model id that does not exist. Left
+    # unset, each adapter picks its own default and derives extract-vs-parse from the presence of
+    # `extraction_schema`, which is what a plain `openreading parse` already does.
     kwargs: dict[str, Any] = {
         "config": config,
-        "operation": product,
         "policy": policy,
     }
     if target.kind == "backend":
@@ -92,17 +139,47 @@ def execute_target(
     if product == "extract":
         if extraction_schema is None:
             raise ValueError("an ExtractBench case requires its extraction schema")
-        kwargs["extraction_schema"] = extraction_schema
+        # The publisher hands over a bare JSON Schema. `request.extraction_schema` is the wrapper
+        # around one (`json_schema` / `instructions` / `citations`) and forbids extra keys, so a
+        # bare schema fails request validation before any backend runs. `citations` is on because
+        # ExtractBench scores word and page grounding F1, which is only measurable when per-field
+        # geometry is asked for; a backend that cannot ground says so in `warnings[]`.
+        kwargs["extraction_schema"] = {"json_schema": extraction_schema, "citations": True}
         kwargs["outputs"] = {"typed_fields": True}
     return api.run(source, **kwargs)
 
 
+def _string(value: Any) -> str:
+    """The value when it is a non-blank string, otherwise the empty string."""
+
+    return value if isinstance(value, str) and value.strip() else ""
+
+
 def _page_markdown(page: dict[str, Any]) -> str:
-    markdown = page.get("markdown")
-    if isinstance(markdown, str):
+    """Per-page markdown, assembled from blocks when the backend fills no page channel.
+
+    ``pages[].markdown`` is native for only a few backends (LlamaParse, Mistral, MinerU). Falling
+    straight from a missing one to ``pages[].text`` hands ParseBench's table and formatting rules
+    a flat string, and the backend scores zero on markup it did produce. Block-level ``markdown``
+    and ``html`` are populated much more widely (Chunkr segment content, Reducto block content,
+    Azure and MinerU table HTML), so a page that carries markup in even one block is assembled
+    from its blocks in reading order instead. A page whose blocks carry only plain text gains
+    nothing from that and keeps the page's own text.
+    """
+
+    markdown = _string(page.get("markdown"))
+    if markdown:
         return markdown
-    text = page.get("text")
-    return text if isinstance(text, str) else ""
+    blocks = [block for block in (page.get("blocks") or []) if isinstance(block, dict)]
+    if any(_string(block.get("markdown")) or _string(block.get("html")) for block in blocks):
+        rendered = [
+            _string(block.get("markdown"))
+            or _string(block.get("html"))
+            or _string(block.get("text"))
+            for block in blocks
+        ]
+        return "\n\n".join(piece for piece in rendered if piece)
+    return _string(page.get("text"))
 
 
 def _layout_item(block: dict[str, Any]) -> dict[str, Any]:
@@ -114,17 +191,24 @@ def _layout_item(block: dict[str, Any]) -> dict[str, Any]:
     }
     bbox = block.get("bbox")
     if isinstance(bbox, dict) and all(key in bbox for key in ("x", "y", "w", "h")):
+        # The canonical bbox is already normalized to [0,1] against the page, which is the space
+        # LayoutSegmentIR documents for normalized page coords. Its `page` key is dropped because
+        # the segment already sits inside its own page's layout entry.
         box = {key: float(bbox[key]) for key in ("x", "y", "w", "h")}
-        label = _PARSEBENCH_LAYOUT_LABELS.get(item["type"], "text")
-        raw_confidence = block.get("confidence")
-        confidence = (
-            float(raw_confidence)
-            if isinstance(raw_confidence, (int, float)) and not isinstance(raw_confidence, bool)
-            else 0.0
-        )
+        segment: dict[str, Any] = {
+            **box,
+            "label": _PARSEBENCH_LAYOUT_LABELS.get(item["type"], _PARSEBENCH_DEFAULT_LABEL),
+        }
         item["bbox"] = box
-        item["layout_segments"] = [{**box, "label": label, "confidence": confidence}]
-        item["score"] = confidence
+        item["layout_segments"] = [segment]
+        raw_confidence = block.get("confidence")
+        if isinstance(raw_confidence, (int, float)) and not isinstance(raw_confidence, bool):
+            segment["confidence"] = float(raw_confidence)
+            item["score"] = float(raw_confidence)
+        # A deterministic parser reports no confidence, and both publisher fields are optional
+        # for exactly that case ("None for parse-pipeline items"). Omitting is the channel
+        # contract: a fabricated 0.0 is indistinguishable from a measured one, and ParseBench's
+        # own layout adapters read a falsy confidence as 1.0 in some paths and 0.0 in others.
     return item
 
 

@@ -8,14 +8,19 @@ while the raw artifact retains the complete normalized OpenReading response.
 
 from __future__ import annotations
 
-import hashlib
-import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from openreading.evals.official import BenchmarkDependencyError, OfficialComparison, OfficialRun
-from openreading.evals.targets import BenchmarkTarget, execute_target, project_extract_response
+from openreading.evals.targets import (
+    BenchmarkTarget,
+    execute_target,
+    project_extract_response,
+)
+from openreading.evals.targets import (
+    pipeline_name as build_pipeline_name,
+)
 
 _SUPPORTED_VERSION = "0.1.0"
 _SUPPORTED_REVISION = "0880af24f579236bff24291bc7f15e18c2fa51e3"
@@ -58,17 +63,6 @@ def prepare(*, data_dir: Path, smoke: bool, force: bool) -> int:
     return int(BenchCLI().download(data_dir=data_dir, force=force, test=smoke))
 
 
-def _pipeline_name(
-    target: BenchmarkTarget, config: str | None, policy: dict[str, Any] | None
-) -> str:
-    identity = json.dumps(
-        {"target": target.reference, "config": config, "policy": policy}, sort_keys=True
-    )
-    suffix = hashlib.sha256(identity.encode()).hexdigest()[:10]
-    safe_name = "".join(char if char.isalnum() else "_" for char in target.name)
-    return f"openreading_{target.kind}_{safe_name}_{suffix}"
-
-
 def _register(target: BenchmarkTarget, *, config: str | None, policy: dict[str, Any] | None) -> str:
     (
         _,
@@ -81,7 +75,7 @@ def _register(target: BenchmarkTarget, *, config: str | None, policy: dict[str, 
         RawInferenceResult,
         ProductType,
     ) = _imports()
-    pipeline_name = _pipeline_name(target, config, policy)
+    pipeline_name = build_pipeline_name("extractbench", target, config=config, policy=policy)
     provider_name = pipeline_name
 
     class OpenReadingExtractProvider(Provider):

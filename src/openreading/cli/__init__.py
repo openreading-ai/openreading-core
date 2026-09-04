@@ -358,9 +358,18 @@ targets also produce the publisher's cross-pipeline leaderboard.
 A commercial lane needs no CLI acknowledgement. Research-only terms require
 `--allow-research-only`. Missing, mixed, or source-specific terms require the separate
 `--allow-unverified-terms` flag. Neither flag makes a cataloged profile runnable or claims a use is
-lawful. Exits: 0 complete; 1 publisher inference, scoring, or comparison failure; 2 invalid profile,
-target, preset, terms acknowledgement, optional package, or preparation; 3 an OpenReading
-cannot-run fault such as compliance refusal or missing credentials.
+lawful. `estimate` refuses a cataloged profile too, because its published scale would otherwise
+read as a run you could start.
+
+A per-document fault is the publisher's to record, not this command's to raise. The official
+harness catches whatever one document's provider call throws, marks that case failed, and keeps
+going, so a `ComplianceRefused` or a missing key on document 40 of 300 surfaces as exit 1 with a
+failed case in the publisher's report, never as exit 3. Read the report to find out which
+documents fell over and why. Exit 3 is left for a fault raised outside that per-document
+boundary. Exits: 0 complete; 1 publisher inference, scoring, or comparison failure, including
+documents the publisher recorded as failed; 2 invalid profile, target, preset, `--jobs`, terms
+acknowledgement, optional package, or preparation; 3 an OpenReading cannot-run fault raised
+before or around the publisher run.
 
 strategy <verb> / explain / replay / calibrate
 ----------------------------------------------
@@ -456,14 +465,16 @@ Exit codes
   2  usage: unknown `--backend` (argparse) or `--strategy` on a single document; `parse` with an
      unresolvable source, more files than `--max-items`, or more `--jobs` than `--max-jobs`;
      `compare` misuse (<2 subjects, unknown fan-out backend, `--format diff` with != 2 subjects,
-     mixed subject kinds); `leaderboard` misuse (<2 backends, unknown id); `benchmark` profile,
-     target, preset, terms, package, or preparation errors; `replay` with no strategy name
-     anywhere.
+     mixed subject kinds); `leaderboard` misuse (<2 backends, unknown id); `benchmark` profile
+     (unknown, or cataloged where a runnable one is required), target, preset, `--jobs`, terms,
+     package, or preparation errors; `replay` with no strategy name anywhere.
   3  cannot run: missing credentials (names the exact vars + signup URL), `auth_rejected`,
      `unsupported_feature`, an unreadable `--config` / `--policy` / document / `--trace` /
      `explain` argument, a `--policy` file that is not a valid policy object (an unknown key, a
      non-object top level, or a value of the wrong type), a `ComplianceRefused` refusal (from
-     `parse`, `strategy plan`, `replay`, `calibrate`, `compare`, `leaderboard`, `benchmark`), a
+     `parse`, `strategy plan`, `replay`, `calibrate`, `compare`, `leaderboard`; under `benchmark`
+     only when it is raised outside the publisher's own per-document boundary, which otherwise
+     records the refusal as a failed case at exit 1), a
      plan-exhausted `route --run`, `serve` without its extra or with a malformed
      `OPENREADING_API_KEYS` / `OPENREADING_API_KEY_SCOPES` (one `[serve] ...` line naming the
      bad entry's position, never its value), an unresolvable/empty `leaderboard` dataset, a

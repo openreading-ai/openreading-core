@@ -71,6 +71,10 @@ parsebench = [
     # OpenReading target. Without it, layout cases are recorded as worker failures.
     "llama-cloud>=1.4.1; python_version >= '3.12'",
 ]
+# ExtractBench publishes no wheel, so this extra carries a PEP 440 direct reference. PyPI rejects
+# an upload whose metadata contains one, so this extra must be dropped or repointed at a released
+# `extract-bench` before `openreading` is published. Until then it installs from a clone
+# (`pip install -e '.[extractbench]'`) and from a git URL, and not from PyPI.
 extractbench = ["extract-bench @ git+https://github.com/run-llama/ExtractBench.git@0880af24f579236bff24291bc7f15e18c2fa51e3 ; python_version >= '3.12'"]
 # Every adapter's runtime dependency, and nothing else. `openreading serve` needs the separate
 # `server` extra, so the install that covers everything is `.[all,server]`.

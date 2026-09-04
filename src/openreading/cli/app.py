@@ -1409,6 +1409,15 @@ def cmd_benchmark_estimate(args) -> int:
     descriptor = _benchmark_descriptor(args)
     if descriptor is None:
         return 2
+    # A cataloged profile has published scale and no way to spend it. Printing "target calls:
+    # 1000000" for one reads as a run you could start, and the next command is the one that says
+    # no. Refuse here, where the numbers would otherwise be the only answer.
+    if descriptor.status != "runnable":
+        print(
+            f"[benchmark] {descriptor.id} is cataloged for discovery but has no runnable profile",
+            file=sys.stderr,
+        )
+        return 2
     targets = _benchmark_targets(args)
     if targets is None:
         return 2
@@ -1462,6 +1471,11 @@ def cmd_benchmark_run(args) -> int:
             "[benchmark] run needs at least one --target backend:NAME or strategy:NAME",
             file=sys.stderr,
         )
+        return 2
+    # Checked before preparation, not inside the dispatcher. The publisher downloader runs first
+    # and a full ParseBench set is gigabytes, so a rejected --jobs used to cost that download.
+    if args.jobs < 1:
+        print("[benchmark] --jobs must be at least 1", file=sys.stderr)
         return 2
     try:
         policy = _load_policy(args.policy)
