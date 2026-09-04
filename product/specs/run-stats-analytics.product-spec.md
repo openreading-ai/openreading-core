@@ -2,10 +2,10 @@
 spec_format_version: "0.1"
 title: "Run Stats and Routing Analytics"
 artifact_type: "prd"
-spec_revision: 1
+spec_revision: 2
 author: "Akshay"
 created_at: "2026-09-03T16:13:35Z"
-updated_at: "2026-09-03T16:13:35Z"
+updated_at: "2026-09-04T00:22:46Z"
 applies_to:
   - path: "src/openreading/schemas/"
   - path: "src/openreading/router/"
@@ -65,10 +65,12 @@ armed, Ledger already own. It is not a separately mutable trace. Detailed gates,
 and model rationale stay in `orchestration`; durable replay facts stay in Ledger. Cache and replay
 are labeled as reuse and never presented as fresh dispatch or newly incurred cost.
 
-The same contract has four views. Callers may read `.stats` directly from a successful artifact,
-run `openreading stats` to extract or render it, call `openreading.stats(...)` in Python, or post a
-supplied artifact to a stateless `POST /v1/stats`. JSON is canonical for programs and agents; a
-table is an optional human rendering. None of these views runs a backend or creates a store.
+The same contract has three views. Callers may read `.stats` directly from a successful artifact,
+run `openreading stats` to extract or render it, or call `openreading.stats(...)` in Python. JSON is
+canonical for programs and agents; a table is an optional human rendering. None of these views runs
+a backend or creates a store. A stateless `POST /v1/stats` was cut in revision 2: a caller holding
+the artifact already holds the block, and transmitting a whole payload to receive one of its own
+fields is not a saving.
 
 There is no run-history endpoint and no new run identifier. Saving an output naturally saves the
 block inside it, just as saving any response does, but open core keeps no independent stats
@@ -81,13 +83,13 @@ add retention, search, aggregation, and deeper introspection outside core.
 in:
   - "Attach one versioned, bounded stats block automatically to every newly executed outer response, batch result, and terminal async-job artifact."
   - "Cover directly named, automatic, and strategy-selected backends through the same statistics contract."
-  - "Distinguish eligibility, attempts, live dispatches, dispatched documents, cache hits, Ledger replays, result backends, and output contributors."
-  - "Record serial backend transitions and parallel selection outcomes with stable reason codes, including fallback, race, best, merge, shadow, judge, and page-routing roles when they occur."
-  - "Expose async wait mode, completion source, poll activity, and cancellation disposition without claiming that a cancellation stopped vendor billing."
-  - "Publish every backend allocation as a named numerator and denominator, so percentages have explicit meaning."
-  - "Report wall time, overlapping attempt time, and newly reported cost with measurement coverage and unknown values kept distinct from zero."
-  - "Give Python and HTTP failures the same statistics shape, give failed and partial batches root statistics, and offer an explicit machine-readable CLI error mode without changing default stderr behavior."
-  - "Provide JSON-first CLI, Python, and stateless HTTP projections that accept a supplied artifact and never execute a backend."
+  - "Distinguish attempts, live dispatches, dispatched documents, cache hits, Ledger replays, result backends, and output contributors."
+  - "Record serial backend transitions and parallel selection outcomes with stable reason codes on each attempt, including fallback, race, best, merge, shadow, judge, and page-routing roles when they occur, with co-launched attempts joined by a group reference."
+  - "Give a terminal async-job artifact the same statistics block, counting no poll as a dispatch and never claiming that a cancellation stopped vendor billing."
+  - "Publish backend allocation as integer counts, with every derivable measure's numerator and denominator fixed by a published registry, so percentages have explicit meaning wherever they are rendered."
+  - "Report wall time, per-attempt durations, and newly reported cost with measurement coverage counts, keeping unknown values distinct from zero."
+  - "Give Python and HTTP failures the same statistics shape and give failed and partial batches root statistics, without changing default CLI stderr behavior, exit codes, or HTTP statuses."
+  - "Provide JSON-first CLI and Python projections that accept a supplied artifact and never execute a backend."
   - "Keep the projection free of document content, credentials, signed links, provider job identifiers, raw provider errors, and free-form model rationale."
 out:
   - "Do not retain, index, query, search, or aggregate statistics across runs in open core."
@@ -102,7 +104,13 @@ cut:
   - "Cut opt-in capture; capture is automatic, while alternate presentation is optional."
   - "Cut inference of complete statistics from legacy warning prose or permissive orchestration objects."
   - "Cut a public raw-event stream; the first contract is the bounded artifact projection."
-  - "Cut rounded percentages from canonical JSON; canonical shares carry exact numerators and denominators, and renderers compute display percentages."
+  - "Cut rounded percentages from canonical JSON; canonical output carries integer counts only, and renderers compute display percentages against a published measure registry."
+  - "Cut the published shares array in revision 2; every share restates counts the block already carries, so a registry fixes the denominators instead of a second copy of the numbers."
+  - "Cut the decisions array and the parallel-group object in revision 2; an attempt carries its role, source backend, reason code, and group reference, while gate, judge, and decider evidence waits for a later stats version."
+  - "Cut the stateless POST /v1/stats endpoint in revision 2; a caller who holds the artifact already holds the block."
+  - "Cut the machine-readable CLI error mode in revision 2; it changes the CLI failure contract and is proposed separately."
+  - "Cut async poll accounting in revision 2; a terminal job artifact still carries a block, but wait mode, completion source, poll counts, and cancellation disposition wait for a later stats version."
+  - "Cut plan-stage eligibility and drop rows in revision 2; existing compliance-drop warnings remain the record until decision rows land."
 ```
 
 ## User Experience
@@ -138,12 +146,13 @@ open-ocr    1/1         1/2 (50.0%)     0/1 (0.0%)    fallback source
 reducto     1/1         1/2 (50.0%)     1/1 (100.0%)  result
 ```
 
-The table labels each denominator; the JSON does not reduce `1/2` to an unexplained `50%`.
+The table labels each denominator and computes it from counts the JSON already carries; the JSON
+itself publishes no ratio at all, so nothing in it can be read as an unexplained `50%`.
 Document reach can sum above 100% when the same file is sent to several backends, while result
 share has one final response backend per successful document. Merge and page composition identify
 additional contributors separately instead of pretending there was one winner.
 
-Python and HTTP expose the same object:
+Python exposes the same object:
 
 ```python
 result = openreading.run(request, strategy="fast")
@@ -152,25 +161,14 @@ assert result.stats.totals.live_dispatches == 2
 compact = openreading.stats(result)
 ```
 
-```http
-POST /v1/stats
-Content-Type: application/json
+An HTTP caller reads `.stats` from the response it already received; revision 2 adds no endpoint.
 
-<a response, batch result, terminal job artifact, or bare stats block>
-```
-
-The default CLI failure remains a diagnostic on stderr with the established exit code. An agent
-that needs a failure artifact opts into structure explicitly:
-
-```console
-$ openreading parse invoice.pdf --strategy fast --error-format json
-{"error":{"code":"plan_exhausted","message":"..."},"stats":{...}}
-```
-
-That JSON is written to stdout and prose is suppressed for that invocation. Successful calls need
-no flag. Python attaches the block to the existing exception as `exc.stats`; HTTP and terminal job
-errors place `stats` beside `error`. The exception class, HTTP status, CLI exit code, and human
-default all remain unchanged.
+Failure keeps its current shape on every surface. Python attaches the block to the existing
+exception as `exc.stats`; HTTP and terminal job errors place `stats` beside `error`; a failed or
+partial batch carries root statistics. The exception class, HTTP status, CLI exit code, and human
+stderr default all remain unchanged. Revision 2 adds no CLI failure flag, so an agent driving the
+CLI still reads a failure from the exit code and stderr; a machine-readable CLI error mode is
+proposed separately.
 
 An agent can therefore answer “where did this run go?” from stable fields, discard the potentially
 large document result, and branch on counts and codes. It never has to interpret warning messages,
@@ -184,29 +182,29 @@ table spacing, or strategy prose.
 - id: AC-2
   criterion: Direct, automatic, and strategy execution report the exact backend attempts, live dispatches, dispatched documents, result backends, and output contributors observed at their real execution boundaries, without deriving facts from warning prose.
 - id: AC-3
-  criterion: Every published backend share names its measure and carries its numerator and denominator; the JSON contains no bare or pre-rounded percentage, and a zero denominator is represented as unavailable rather than zero percent.
+  criterion: Canonical JSON publishes integer counts only and contains no percentage, ratio, or denominator-free numerator; every measure a renderer may compute is defined with a fixed numerator and denominator drawn from fields the block already carries, and a zero denominator renders as unavailable rather than zero percent.
 - id: AC-4
-  criterion: A serial move from one backend to another records the source, destination, decision kind, and stable reason code, while an initial selection or parallel winner is not miscounted as a fallback transition.
+  criterion: A serial move from one backend to another records the source backend, the destination backend, the role it moved under, and a stable reason code on the destination attempt, while an initial selection or parallel winner is not miscounted as a fallback transition.
 - id: AC-5
   criterion: Race, best, merge, shadow, judge, and page-routing execution identify participants and selected or contributing outcomes, and a losing branch whose vendor cancellation is unconfirmed is never reported as stopped, free, or zero-cost.
 - id: AC-6
-  criterion: An async backend attempt records requested wait mode, actual completion source, poll-call and poll-fault counts, and final cancellation disposition without counting polls as backend dispatches.
+  criterion: A terminal async-job artifact carries one statistics block whose counts never treat a poll as a backend dispatch; requested wait mode, completion source, poll-call and poll-fault counts, and cancellation disposition are deferred to a later stats version.
 - id: AC-7
   criterion: For the same ten-input fixture with one intake skip, seven successes, and two execution failures, native batch reports one live submit-many dispatch while platform batch reports nine per-document live dispatches; both report the same document outcomes and neither double-counts nested responses.
 - id: AC-8
   criterion: A cache hit and a completed Ledger replay create a new outer artifact with zero new live dispatches and zero newly reported vendor cost; historical usage on the reused payload remains distinguishable from invocation statistics, and replay never retimes or rebills original execution facts.
 - id: AC-9
-  criterion: Wall duration and overlapping attempt-duration sum are separately labeled, and cost and timing totals carry covered and total counts so a partial or unknown measurement cannot be read as complete or as zero.
+  criterion: Wall duration is labeled separately from per-attempt durations, which may legitimately sum above it under parallel execution; timing carries timed and total live-attempt counts and cost carries covered and total dispatch counts, so a partial or unknown measurement cannot be read as complete or as zero.
 - id: AC-10
-  criterion: Existing Python exception classes carry stats on a stats attribute, HTTP and terminal-job errors carry stats beside the error, and failed or partial batches carry root stats; default CLI failure bytes and exit codes remain unchanged, while an explicit JSON error mode returns the same shape on stdout.
+  criterion: Existing Python exception classes carry stats on a stats attribute, HTTP and terminal-job errors carry stats beside the error, and failed or partial batches carry root stats; default CLI failure bytes and exit codes remain unchanged, and no CLI failure flag is added in this version.
 - id: AC-11
-  criterion: Reading an embedded block, invoking openreading stats, calling the Python stats function, and posting the same artifact to POST /v1/stats produce the same canonical JSON, make zero adapter calls, and create no file, index, history row, or process-wide counter.
+  criterion: Reading an embedded block, invoking openreading stats, and calling the Python stats function produce the same canonical JSON, make zero adapter calls, and create no file, index, history row, or process-wide counter.
 - id: AC-12
   criterion: A byte scan over every stats-bearing success and failure fixture finds no planted document content, credential, password, signed URL, provider job identifier, raw provider error, or free-form model rationale.
 - id: AC-13
   criterion: Pure comparison performs no dispatch and creates no stats block; CLI comparison fan-out leaves statistics only on the independently executed source responses and never inserts acquisition facts into a comparison report.
 - id: AC-14
-  criterion: A legacy artifact with no stats block is rejected with a stable stats_unavailable code rather than reconstructed from incomplete fields, and a supported stats projection remains bounded by documents, attempts, decisions, and parallel groups rather than extracted payload size.
+  criterion: A legacy artifact with no stats block is rejected with a stable stats_unavailable code rather than reconstructed from incomplete fields, and a supported stats projection remains bounded by documents and attempts rather than extracted payload size.
 - id: AC-15
   criterion: A pre-dispatch compliance refusal or missing credential reports zero live dispatches, while a failure after submit but before normalization reports one; Python, HTTP, async-job, and batch carriers normalize those facts identically.
 ```
@@ -244,8 +242,9 @@ table spacing, or strategy prose.
 
 **A precise-looking percentage tells the wrong story.** “Backend A handled 60%” could mean live
 calls, distinct documents reached, final results, pages, or cost. This is worse than no statistic
-because it gives a wrong answer authority. The product carries named measures and exact
-denominators, and the table repeats the denominator label rather than shortening it away.
+because it gives a wrong answer authority. The product publishes counts only, fixes every
+measure's numerator and denominator in a registry, and repeats the denominator label in the table
+rather than shortening it away.
 
 **Stats becomes a third execution log.** Strategy Trace and Ledger can already drift today. A new
 recorder independently updated at call sites would multiply that problem and violate Ledger's
@@ -278,13 +277,16 @@ satisfied with an invented target.
    yes. It is the only option that adds no invocation complexity and gives an agent the facts at
    the moment it receives a result. The cost is a deliberate response and batch schema version
    advance, not byte identity.
-2. **Should machine-readable CLI failures use `--error-format json`?** Recommended: yes, as a
-   shared flag on executing verbs. Successful artifacts need no flag; default human stderr and
-   exit codes stay untouched. A sidecar path is harder to compose and quietly introduces file
-   lifecycle concerns.
-3. **How much detail belongs inside the block?** Recommended: compact attempt, decision, and
-   parallel-group rows stay because they answer “why did it change?”; gate trees, candidate
-   responses, signal prose, and model rationale remain only in orchestration.
+2. **Should machine-readable CLI failures use `--error-format json`?** Deferred in revision 2.
+   The need is real and the flag is still the recommended shape, but it changes the CLI *failure*
+   contract and should not ride on an addition to the *success* contract, where one objection would
+   block both. Python and HTTP failures already carry statistics in this version; the CLI is the
+   only surface left waiting.
+3. **How much detail belongs inside the block?** Revised in revision 2: compact attempt rows stay
+   because they answer “why did it change?” — each carries its role, source backend, reason code
+   and group reference. Separate decision rows and the parallel-group object are deferred, because
+   for a serial switch they restate what the attempt already says. Gate trees, candidate responses,
+   signal prose, and model rationale remain only in orchestration.
 4. **Should router score components be published in v0.1?** Recommended: no. Current routing
    computes and discards them, their meaning is not a public contract, and selected/dropped codes
    answer the stable question. Add scores only through a later schema version if a real tuning
@@ -309,8 +311,8 @@ satisfied with an invented target.
   section_id: acceptance_criteria
   item_id: AC-2
 - type: engineering_spec
-  url: "design/run-stats-analytics.md#7-aggregation-semantics"
-  title: "Named measures, denominators, native batch, cache, and replay"
+  url: "design/run-stats-analytics.md#8-aggregation-semantics-and-edge-cases"
+  title: "Measure registry, native batch, cache, and replay"
   section_id: acceptance_criteria
   item_id: AC-3
 - type: engineering_spec
@@ -319,7 +321,7 @@ satisfied with an invented target.
   section_id: acceptance_criteria
   item_id: AC-10
 - type: engineering_spec
-  url: "design/run-stats-analytics.md#11-proof-matrix"
+  url: "design/run-stats-analytics.md#14-offline-proof-matrix"
   title: "Adversarial offline proof matrix"
   section_id: acceptance_criteria
   item_id: AC-15
