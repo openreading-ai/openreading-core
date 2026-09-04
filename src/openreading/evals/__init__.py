@@ -1,4 +1,4 @@
-"""Benchmark harness: score any backend on documents you labeled yourself.
+"""Benchmark harness for public corpora and documents you labeled yourself.
 
 A vendor publishes accuracy numbers measured on the vendor's own documents. This package
 measures a backend on a dataset you own, so a routing decision rests on a number you can
@@ -10,7 +10,14 @@ defines that layout. ``run_dataset`` drives one adapter over the directory. ``sc
 the five dimensions a case may declare: text similarity, text-contains fraction, markdown
 similarity, typed-field precision, recall and F1, and table-cell accuracy
 (``openreading.evals.scorers``). ``run_leaderboard`` ranks several named backends on one
-dataset (``openreading.evals.leaderboard``).
+dataset (``openreading.evals.leaderboard``). ``openreading.evals.benchmarks`` provides
+offline discovery and terms lanes for public corpora. ``openreading.evals.official``
+registers targets inside ParseBench and ExtractBench. Those publishers retain ownership
+of case loading, metric code, aggregation, and detailed reports.
+
+The public bridge downloads nothing until ``benchmark prepare`` or ``benchmark run``.
+Its default cache stays outside the repository. Research-only and unverified terms use
+different acknowledgement flags, so one flag cannot authorize the other accidentally.
 
 One synthetic sample ships at ``src/openreading/evals/sample/loan_page1/case.json``. Labeled
 data over real documents never lands in this repository, and

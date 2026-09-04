@@ -40,7 +40,7 @@ same surfaces today, and a native tool surface is [not built](#not-built-yet).
 | `parse` | `parse doc.pdf --backend X` | `run()`, `run_batch()`; `POST /v1/parse`, `POST /v1/batch` | the exit code, then `status.state` and `warnings[]` |
 | `compare` | `compare a.json b.json` | `compare()`; `POST /v1/compare` | `headline.verdict`: `equivalent`, `divergent`, `mixed` |
 | `strategy` | `parse --strategy X`; `route doc.pdf --policy p.json` | `run(strategy=)`, `route()`; `backend.id "strategy:X"`; `POST /v1/route` | `orchestration.outcome`, `attempts[].category`, `decisions[]` |
-| `evals` | `leaderboard DIR --backends X,Y` | CLI only | the ranked rows, and the score per backend |
+| `evals` | `benchmark run NAME --target backend:X`; `leaderboard DIR --backends X,Y` | CLI only | official reports or the ranked rows |
 
 Source: `src/openreading/__init__.py` (The 3x3). Live truth: `uv run python -m pydoc openreading`.
 
@@ -127,7 +127,7 @@ The table below tells you which guide answers which need and how long each takes
 | resume, replay, or erase a run from its journal | [The run ledger](ledger/README.md) | 8 min |
 | run the same engine over HTTP, with auth | [The HTTP server](server/README.md) | 10 min |
 | understand why a field is absent rather than wrong | [The channel contract](derive/README.md) | 5 min |
-| label your own documents and rank backends by measured score, to learn which backend is **correct** | [Evals](evals/README.md) | 5 min |
+| run a public benchmark, then rank backends on your labeled documents | [Evals](evals/README.md) | 10 min |
 | decide whether to approve this for regulated data | [What this software protects, and what it does not](../../SECURITY.md#what-this-software-protects-and-what-it-does-not) | 10 min |
 | look up the exact JSON shapes and enums | [JSON Schemas](schemas/README.md) | look up as needed |
 | look up a backend's variables, license, and compliance posture | [Backend adapters](adapters/README.md) | look up as needed |

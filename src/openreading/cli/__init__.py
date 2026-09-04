@@ -325,6 +325,43 @@ router's scoring or any adapter's `integration_priority`. Exits: 0; 2 <2 backend
 `--backends` id; 3 unreadable policy, an unresolvable/empty dataset directory, or a cannot-run
 fault.
 
+benchmark <list|show|prepare|estimate|run>
+-------------------------------------------
+A benchmark profile connects one public dataset and official scorer to OpenReading. A target is
+one backend or strategy evaluated on that dataset. Discovery is offline and requires no optional
+package.
+
+    openreading benchmark list
+    openreading benchmark show parsebench
+    openreading benchmark prepare parsebench --preset smoke
+    openreading benchmark estimate parsebench --preset full --target backend:pymupdf
+    openreading benchmark run parsebench --target backend:pymupdf --target strategy:max_accuracy
+
+`list` displays runnable and cataloged profiles with separate dataset-terms lanes. `show` prints
+publisher sources, data and code licenses, published scale, metric dimensions, and the install
+extra. Runnable profiles are ParseBench and ExtractBench. Their official packages require Python
+3.12 or newer and stay outside the base installation.
+
+`prepare` uses the publisher's downloader and writes beneath `~/.cache/openreading/benchmarks` by
+default. `run` prepares the same cache, executes every repeated `--target`, and writes publisher
+artifacts beneath `./benchmark-results`. The smoke preset is default. `--preset full` is always
+explicit because a hosted target can create material charges. `--jobs` controls document
+concurrency. `--force` replaces complete publisher artifacts, while an ordinary rerun resumes by
+letting the official harness skip valid results.
+
+Every document calls `openreading.run`, including a `strategy:NAME` target selected with
+`--config`. `--policy` therefore keeps its normal compliance behavior. The raw publisher artifact
+retains the complete OpenReading response. The official normalized artifact receives Markdown and
+layout for ParseBench, or typed values and citations for ExtractBench. Two or more successful
+targets also produce the publisher's cross-pipeline leaderboard.
+
+A commercial lane needs no CLI acknowledgement. Research-only terms require
+`--allow-research-only`. Missing, mixed, or source-specific terms require the separate
+`--allow-unverified-terms` flag. Neither flag makes a cataloged profile runnable or claims a use is
+lawful. Exits: 0 complete; 1 publisher inference, scoring, or comparison failure; 2 invalid profile,
+target, preset, terms acknowledgement, optional package, or preparation; 3 an OpenReading
+cannot-run fault such as compliance refusal or missing credentials.
+
 strategy <verb> / explain / replay / calibrate
 ----------------------------------------------
 Inspect and drive `openreading.yaml` strategies. `openreading.strategies` maps the package and
@@ -419,13 +456,14 @@ Exit codes
   2  usage: unknown `--backend` (argparse) or `--strategy` on a single document; `parse` with an
      unresolvable source, more files than `--max-items`, or more `--jobs` than `--max-jobs`;
      `compare` misuse (<2 subjects, unknown fan-out backend, `--format diff` with != 2 subjects,
-     mixed subject kinds); `leaderboard` misuse (<2 backends, unknown id); `replay` with no
-     strategy name anywhere.
+     mixed subject kinds); `leaderboard` misuse (<2 backends, unknown id); `benchmark` profile,
+     target, preset, terms, package, or preparation errors; `replay` with no strategy name
+     anywhere.
   3  cannot run: missing credentials (names the exact vars + signup URL), `auth_rejected`,
      `unsupported_feature`, an unreadable `--config` / `--policy` / document / `--trace` /
      `explain` argument, a `--policy` file that is not a valid policy object (an unknown key, a
      non-object top level, or a value of the wrong type), a `ComplianceRefused` refusal (from
-     `parse`, `strategy plan`, `replay`, `calibrate`, `compare`, `leaderboard`), a
+     `parse`, `strategy plan`, `replay`, `calibrate`, `compare`, `leaderboard`, `benchmark`), a
      plan-exhausted `route --run`, `serve` without its extra or with a malformed
      `OPENREADING_API_KEYS` / `OPENREADING_API_KEY_SCOPES` (one `[serve] ...` line naming the
      bad entry's position, never its value), an unresolvable/empty `leaderboard` dataset, a

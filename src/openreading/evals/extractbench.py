@@ -14,10 +14,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from openreading.evals.official import BenchmarkDependencyError, OfficialRun
+from openreading.evals.official import BenchmarkDependencyError, OfficialComparison, OfficialRun
 from openreading.evals.targets import BenchmarkTarget, execute_target, project_extract_response
 
 _SUPPORTED_VERSION = "0.1.0"
+_SUPPORTED_REVISION = "0880af24f579236bff24291bc7f15e18c2fa51e3"
 
 
 def _imports():
@@ -33,7 +34,8 @@ def _imports():
 
     if extract_bench.__version__ != _SUPPORTED_VERSION:
         raise BenchmarkDependencyError(
-            f"ExtractBench {extract_bench.__version__} is unsupported. Install extract-bench=={_SUPPORTED_VERSION}."
+            f"ExtractBench {extract_bench.__version__} is unsupported. Install the publisher "
+            f"revision {_SUPPORTED_REVISION} through openreading[extractbench]."
         )
     return (
         BenchCLI,
@@ -171,3 +173,18 @@ def run(
         )
     )
     return OfficialRun("extractbench", target, pipeline_name, output_dir, code)
+
+
+def compare(*, pipeline_names: tuple[str, ...], output_dir: Path) -> OfficialComparison:
+    """Generate ExtractBench's own cross-pipeline leaderboard."""
+
+    BenchCLI, *_ = _imports()
+    artifact = output_dir / "openreading-leaderboard.html"
+    code = int(
+        BenchCLI().leaderboard(
+            *pipeline_names,
+            output_dir=output_dir,
+            output_file=artifact,
+        )
+    )
+    return OfficialComparison("extractbench", pipeline_names, artifact, code)

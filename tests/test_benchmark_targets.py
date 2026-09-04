@@ -117,6 +117,9 @@ def test_parse_projection_preserves_pages_markdown_and_layout() -> None:
         "w": 0.3,
         "h": 0.1,
     }
+    assert projected["layout_pages"][0]["items"][0]["layout_segments"] == [
+        {"x": 0.1, "y": 0.2, "w": 0.3, "h": 0.1, "label": "title", "confidence": 0.0}
+    ]
 
 
 def test_extract_projection_preserves_values_and_citations() -> None:

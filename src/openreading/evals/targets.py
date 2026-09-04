@@ -21,6 +21,28 @@ from openreading import api
 TargetKind = Literal["backend", "strategy"]
 BenchmarkProduct = Literal["parse", "extract"]
 
+_PARSEBENCH_LAYOUT_LABELS = {
+    "title": "title",
+    "section_header": "section-header",
+    "header": "page-header",
+    "footer": "page-footer",
+    "page_number": "text",
+    "text": "text",
+    "list": "list-item",
+    "list_item": "list-item",
+    "table": "table",
+    "table_cell": "table",
+    "figure": "picture",
+    "image": "picture",
+    "caption": "caption",
+    "formula": "formula",
+    "code": "code",
+    "key_value": "key-value-region",
+    "form_field": "form",
+    "selection_mark": "checkbox-selected",
+    "table_of_contents": "document-index",
+}
+
 
 @dataclass(frozen=True)
 class BenchmarkTarget:
@@ -92,10 +114,17 @@ def _layout_item(block: dict[str, Any]) -> dict[str, Any]:
     }
     bbox = block.get("bbox")
     if isinstance(bbox, dict) and all(key in bbox for key in ("x", "y", "w", "h")):
-        item["bbox"] = {key: float(bbox[key]) for key in ("x", "y", "w", "h")}
-    confidence = block.get("confidence")
-    if isinstance(confidence, (int, float)) and not isinstance(confidence, bool):
-        item["score"] = float(confidence)
+        box = {key: float(bbox[key]) for key in ("x", "y", "w", "h")}
+        label = _PARSEBENCH_LAYOUT_LABELS.get(item["type"], "text")
+        raw_confidence = block.get("confidence")
+        confidence = (
+            float(raw_confidence)
+            if isinstance(raw_confidence, (int, float)) and not isinstance(raw_confidence, bool)
+            else 0.0
+        )
+        item["bbox"] = box
+        item["layout_segments"] = [{**box, "label": label, "confidence": confidence}]
+        item["score"] = confidence
     return item
 
 

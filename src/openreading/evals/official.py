@@ -40,6 +40,16 @@ class OfficialRun:
     exit_code: int
 
 
+@dataclass(frozen=True)
+class OfficialComparison:
+    """Publisher-generated leaderboard over two or more successful targets."""
+
+    benchmark_id: str
+    pipeline_names: tuple[str, ...]
+    artifact: Path
+    exit_code: int
+
+
 def _preset_is_smoke(preset: str) -> bool:
     if preset not in {"smoke", "full"}:
         raise ValueError(f"unknown benchmark preset {preset!r}; choose smoke or full")
@@ -133,6 +143,34 @@ def run_official_benchmark(
             from openreading.evals import extractbench
 
             return extractbench.run(**kwargs)
+    except ModuleNotFoundError as exc:
+        raise _dependency_error(descriptor.id, exc) from exc
+    raise BenchmarkProfileError(f"no profile implementation for {descriptor.id}")
+
+
+def build_official_comparison(
+    benchmark_id: str,
+    runs: list[OfficialRun],
+    *,
+    output_dir: str | Path,
+) -> OfficialComparison:
+    """Ask the publisher to compare successful target reports without rescoring."""
+
+    descriptor = _runnable(benchmark_id)
+    successful = tuple(run for run in runs if run.exit_code == 0)
+    if len(successful) < 2:
+        raise ValueError("an official comparison needs at least two successful target runs")
+    pipeline_names = tuple(run.pipeline_name for run in successful)
+    kwargs = {"pipeline_names": pipeline_names, "output_dir": Path(output_dir)}
+    try:
+        if descriptor.id == "parsebench":
+            from openreading.evals import parsebench
+
+            return parsebench.compare(**kwargs)
+        if descriptor.id == "extractbench":
+            from openreading.evals import extractbench
+
+            return extractbench.compare(**kwargs)
     except ModuleNotFoundError as exc:
         raise _dependency_error(descriptor.id, exc) from exc
     raise BenchmarkProfileError(f"no profile implementation for {descriptor.id}")

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from openreading.cli import main
-from openreading.evals.official import OfficialRun
+from openreading.evals.official import OfficialComparison, OfficialRun
 from openreading.evals.targets import BenchmarkTarget
 
 
@@ -82,6 +82,15 @@ def test_benchmark_run_prepares_then_runs_each_target(monkeypatch, tmp_path, cap
         )
 
     monkeypatch.setattr("openreading.evals.official.run_official_benchmark", fake_run)
+    monkeypatch.setattr(
+        "openreading.evals.official.build_official_comparison",
+        lambda benchmark_id, runs, output_dir: OfficialComparison(
+            benchmark_id,
+            tuple(run.pipeline_name for run in runs),
+            Path(output_dir) / "leaderboard.html",
+            0,
+        ),
+    )
 
     rc = main(
         [
@@ -114,6 +123,7 @@ def test_benchmark_run_prepares_then_runs_each_target(monkeypatch, tmp_path, cap
     assert "estimate:" in out and "2 target(s)" in out
     assert "completed: backend:pymupdf" in out
     assert "completed: strategy:main" in out
+    assert "comparison: " in out and "leaderboard.html" in out
 
 
 def test_benchmark_run_requires_a_target(capsys) -> None:

@@ -1,9 +1,9 @@
-# Evals: score backends on your own documents
+# Evals: public benchmarks and your own documents
 
 <sub>[Docs home](../README.md) · [← The channel contract](../derive/README.md) · [JSON Schemas →](../schemas/README.md)</sub>
 
-> **In one sentence.** Put a `case.json` holding the expected text, tables, or fields beside each
-> document, and `leaderboard` ranks backends on those documents by measured score.
+> **In one sentence.** Run an official public benchmark first, then use labeled documents from
+> your traffic to decide whether its result transfers to your workload.
 
 ## What this gives you
 
@@ -26,6 +26,86 @@ walkthrough starts there with no key.
 What the score measures is narrower than the word accuracy suggests. Most of these scorers ask
 whether the content you expected is present. They do not ask whether the backend added anything
 you did not expect. Step 1 shows which dimension does what, and how to cover the gap.
+
+## Start with a public benchmark
+
+A benchmark profile connects a publisher's dataset and scorer to OpenReading. A target is one
+backend or strategy you evaluate. The publisher still owns case loading, normalization, metrics,
+and detailed reports. OpenReading supplies the target and keeps the complete normalized response
+inside each raw benchmark artifact.
+
+Use Python 3.12 or newer for the two runnable profiles. Install only the profile you need.
+
+```bash
+pip install 'openreading[parsebench]'
+openreading benchmark list
+openreading benchmark show parsebench
+openreading benchmark estimate parsebench --preset full --target backend:pymupdf
+openreading benchmark run parsebench --preset smoke \
+  --target backend:pymupdf --target strategy:max_accuracy
+```
+
+The smoke preset is the default. ParseBench selects three files per category. ExtractBench selects
+six documents. Request `--preset full` only after `estimate`, especially for hosted targets.
+Publisher results and the cross-target official leaderboard land in `./benchmark-results` by
+default. Data lands under `~/.cache/openreading/benchmarks`, never in this repository.
+
+`backend:NAME` and `strategy:NAME` are explicit because both identifiers share one namespace in
+other commands. A strategy uses the same `openreading.yaml` you run in production.
+
+```bash
+openreading benchmark run extractbench --preset smoke \
+  --target backend:nuextract --target strategy:fields --config openreading.yaml
+```
+
+ParseBench reports its official rule results across tables, charts, content faithfulness, semantic
+formatting, and visual grounding. Its current public set has 2,078 unique pages from 1,211
+documents and 169,011 rules. See the [publisher repository](https://github.com/run-llama/ParseBench)
+and [dataset card](https://huggingface.co/datasets/llamaindex/ParseBench).
+
+ExtractBench reports Unified value F1 plus word and page grounding F1. Its current public set has
+370 documents, 4,869 pages, 67 schemas, and eight domains. See the
+[publisher repository](https://github.com/run-llama/ExtractBench) and
+[dataset card](https://huggingface.co/datasets/llamaindex/ExtractBench).
+
+Every repeated target gets a separate publisher report. Two or more successful targets also get
+the publisher's cross-pipeline leaderboard. This is the direct test for whether an OpenReading
+strategy improves over the backends it can invoke. The raw result retains `usage`, `warnings`, and
+`orchestration`, so you can inspect cost, latency, missing channels, and escalation behavior beside
+the official quality result.
+
+### Choose the corpus for the question
+
+The catalog distinguishes runnable profiles from research candidates. It also separates dataset
+terms from scorer-code terms. Run `benchmark show NAME` before downloading any corpus.
+
+| Question | Public evidence | Status and terms lane |
+|---|---|---|
+| broad parse fidelity and grounding | [ParseBench](https://github.com/run-llama/ParseBench) | runnable, commercial |
+| schema-guided values and citations | [ExtractBench](https://github.com/run-llama/ExtractBench) | runnable, commercial |
+| block classification and geometry | [DocLayNet](https://github.com/DS4SD/DocLayNet) | cataloged, commercial |
+| table detection and structure | [PubTables-1M](https://github.com/microsoft/table-transformer) | cataloged, commercial |
+| receipt text and semantic fields | [CORD](https://github.com/clovaai/cord) | cataloged, commercial |
+| text, tables, formulas, layout, and order | [OmniDocBench](https://github.com/opendatalab/OmniDocBench) | cataloged, research only |
+| form entities and links | [FUNSD](https://guillaumejaume.github.io/FUNSD/) and [XFUND](https://github.com/doc-analysis/XFUND) | cataloged, research only |
+| structured Markdown continuity | [READoc](https://github.com/DongfuJiang/READoc) | cataloged, unverified |
+| OCR impact on retrieval and generation | [OHR-Bench](https://github.com/opendatalab/OHR-Bench) | cataloged, unverified |
+| OCR behavior assertions | [olmOCR Bench](https://github.com/allenai/olmocr/tree/main/olmocr/bench) | cataloged, unverified |
+| fields, locations, and line items | [DocILE](https://github.com/rossumai/docile) | cataloged, unverified |
+| long-report extraction | [Kleister Charity](https://github.com/applicaai/kleister-charity) | cataloged, unverified |
+| cross-domain field extraction | [FieldBench](https://github.com/Zipstack/fieldbench) | cataloged, unverified |
+| hard multilingual extraction | [DocuBench](https://github.com/Anni-Zou/DocuBench) | cataloged, unverified |
+| format robustness and throughput | [GovDocs1](https://digitalcorpora.org/corpora/file-corpora/govdocs1/) | cataloged, unverified |
+
+A commercial lane means the publisher states terms compatible with the default evaluation path.
+It is not legal advice. A research-only profile requires `--allow-research-only`. An unverified
+profile requires the separate `--allow-unverified-terms` flag after you review every source.
+Cataloged profiles do not download or run yet, even after acknowledgement.
+
+No public accuracy corpus proves compliance filtering, retry taxonomy, interruption recovery, or
+batch isolation. Those are engine invariants. The offline suite tests them with controlled faults.
+Use the private-dataset workflow below to test whether public quality results transfer to your own
+documents.
 
 ## Mental model
 

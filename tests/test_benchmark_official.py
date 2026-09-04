@@ -9,7 +9,9 @@ import pytest
 from openreading.evals.official import (
     BenchmarkDependencyError,
     BenchmarkProfileError,
+    OfficialComparison,
     OfficialRun,
+    build_official_comparison,
     prepare_official_benchmark,
     run_official_benchmark,
 )
@@ -87,6 +89,52 @@ def test_run_dispatches_target_and_returns_publisher_artifact(monkeypatch, tmp_p
             "force": True,
         }
     ]
+
+
+def test_comparison_uses_publisher_leaderboard(monkeypatch, tmp_path) -> None:
+    runs = [
+        OfficialRun(
+            "parsebench",
+            BenchmarkTarget.parse("backend:pymupdf"),
+            "pipe_a",
+            tmp_path,
+            0,
+        ),
+        OfficialRun(
+            "parsebench",
+            BenchmarkTarget.parse("strategy:main"),
+            "pipe_b",
+            tmp_path,
+            0,
+        ),
+    ]
+    calls = []
+
+    def fake_compare(**kwargs):
+        calls.append(kwargs)
+        return OfficialComparison(
+            "parsebench", ("pipe_a", "pipe_b"), tmp_path / "leaderboard.html", 0
+        )
+
+    monkeypatch.setattr("openreading.evals.parsebench.compare", fake_compare)
+
+    result = build_official_comparison("parsebench", runs, output_dir=tmp_path)
+
+    assert result.exit_code == 0
+    assert result.artifact == tmp_path / "leaderboard.html"
+    assert calls == [{"pipeline_names": ("pipe_a", "pipe_b"), "output_dir": tmp_path}]
+
+
+def test_comparison_needs_two_successful_runs(tmp_path) -> None:
+    run = OfficialRun(
+        "extractbench",
+        BenchmarkTarget.parse("backend:nuextract"),
+        "pipe_a",
+        tmp_path,
+        0,
+    )
+    with pytest.raises(ValueError, match="two successful"):
+        build_official_comparison("extractbench", [run], output_dir=tmp_path)
 
 
 @pytest.mark.parametrize("preset", ["tiny", "all", ""])

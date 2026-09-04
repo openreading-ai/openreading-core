@@ -24,6 +24,12 @@ private and is not published. The web UI and the `webui` extra are not part of t
 Research, design records and labeled data stay private as well, so nothing in this file links to
 them.
 
+### Added
+
+- `openreading benchmark` discovers public corpora and runs backends or strategies through the
+  official ParseBench and ExtractBench scorers. Static catalog entries keep source and dataset
+  terms visible for additional research corpora without downloading or claiming support.
+
 ### Changed
 
 **The project is `openreading`, was `openmanifold`.** The vendors this repository integrates all

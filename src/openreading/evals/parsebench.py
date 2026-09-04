@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from openreading.evals.official import BenchmarkDependencyError, OfficialRun
+from openreading.evals.official import BenchmarkDependencyError, OfficialComparison, OfficialRun
 from openreading.evals.targets import BenchmarkTarget, execute_target, project_parse_response
 
 _SUPPORTED_VERSION = "1.0.2"
@@ -164,3 +164,18 @@ def run(
         )
     )
     return OfficialRun("parsebench", target, pipeline_name, output_dir, code)
+
+
+def compare(*, pipeline_names: tuple[str, ...], output_dir: Path) -> OfficialComparison:
+    """Generate ParseBench's own cross-pipeline leaderboard."""
+
+    BenchCLI, *_ = _imports()
+    artifact = output_dir / "openreading-leaderboard.html"
+    code = int(
+        BenchCLI().leaderboard(
+            *pipeline_names,
+            output_dir=output_dir,
+            output_file=artifact,
+        )
+    )
+    return OfficialComparison("parsebench", pipeline_names, artifact, code)

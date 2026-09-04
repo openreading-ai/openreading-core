@@ -6,6 +6,7 @@ and prints the one response schema.
     openreading route   <file> --policy phi.json --run  # compliance-first plan (+ execute chain)
     openreading backends                                # which backends are configured, and why not
     openreading backends --check docling                # ...and is it actually answering? (probes)
+    openreading benchmark list                          # public corpora and their terms lanes
 
 Credentials never travel on the CLI: they are read from the environment by the broker
 (OPENREADING_<SLUG>_<KEY> or the service-native var, e.g. REDUCTO_API_KEY). A `.env` in the
@@ -1359,7 +1360,7 @@ def cmd_benchmark_show(args) -> int:
     print(f"data terms: {descriptor.data_license_url}")
     print(f"code license: {descriptor.code_license}")
     print(f"code terms: {descriptor.code_license_url}")
-    print(f"revision: {descriptor.default_revision}")
+    print(f"scorer revision: {descriptor.default_revision}")
     print(f"dimensions: {', '.join(descriptor.dimensions)}")
     if descriptor.estimated_documents is not None:
         print(f"published scale: {descriptor.estimated_documents} documents")
@@ -1445,6 +1446,7 @@ def cmd_benchmark_run(args) -> int:
     from openreading.evals.official import (
         BenchmarkDependencyError,
         BenchmarkProfileError,
+        build_official_comparison,
         prepare_official_benchmark,
         run_official_benchmark,
     )
@@ -1475,6 +1477,7 @@ def cmd_benchmark_run(args) -> int:
             force=False,
         )
         failed = False
+        runs = []
         for target in targets:
             result = run_official_benchmark(
                 descriptor.id,
@@ -1487,6 +1490,7 @@ def cmd_benchmark_run(args) -> int:
                 jobs=args.jobs,
                 force=args.force,
             )
+            runs.append(result)
             if result.exit_code == 0:
                 print(
                     f"completed: {target.reference} as {result.pipeline_name} in {result.output_dir}"
@@ -1495,6 +1499,18 @@ def cmd_benchmark_run(args) -> int:
                 failed = True
                 print(
                     f"[benchmark] {target.reference} failed with exit code {result.exit_code}",
+                    file=sys.stderr,
+                )
+        if len([run for run in runs if run.exit_code == 0]) >= 2:
+            comparison = build_official_comparison(
+                descriptor.id, runs, output_dir=Path(args.output_dir)
+            )
+            if comparison.exit_code == 0:
+                print(f"comparison: {comparison.artifact}")
+            else:
+                failed = True
+                print(
+                    f"[benchmark] official comparison failed with exit code {comparison.exit_code}",
                     file=sys.stderr,
                 )
         return 1 if failed else 0
