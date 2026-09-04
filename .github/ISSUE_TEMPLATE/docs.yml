@@ -1,0 +1,25 @@
+name: Documentation
+description: A page, a docstring, or a help string that is wrong, stale, or unclear
+labels: [documentation]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: Where is it?
+      description: The file path or the URL, plus the heading or the line number.
+    validations: { required: true }
+  - type: textarea
+    id: says
+    attributes:
+      label: What does it say today?
+    validations: { required: true }
+  - type: textarea
+    id: truth
+    attributes:
+      label: What is true instead?
+      description: If the page shows command output, paste the command you ran and what it printed.
+    validations: { required: true }
+  - type: textarea
+    id: wording
+    attributes:
+      label: Suggested wording

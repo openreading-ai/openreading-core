@@ -1,19 +1,29 @@
 [project]
 name = "openreading"
 version = "0.3.0"
-description = "One unified API for document processing — one request shape, one response schema over many backends."
+description = "One JSON shape from every document parser, so switching, comparing, or routing between parsers never changes your code."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-authors = [{ name = "OpenReading" }]
-keywords = ["document-processing", "ocr", "pdf", "idp", "router", "unified-api"]
+authors = [{ name = "Multiversal Ventures" }]
+keywords = [
+    "document-processing", "document-parsing", "pdf", "ocr", "pdf-parser", "document-ai",
+    "unified-api", "backend-router", "compare-parsers", "json-schema", "compliance",
+]
 classifiers = [
-    "License :: OSI Approved :: Apache Software License",
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Topic :: Text Processing",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+    "Typing :: Typed",
 ]
 # Core is Apache-2.0 with ZERO copyleft deps. Adapters live in optional extras below.
 dependencies = [
@@ -21,14 +31,23 @@ dependencies = [
     "jsonschema>=4.21",
     "pyyaml>=6.0",     # MIT — safe_load only, lazy-imported for the optional openreading.yaml (D-v3-1)
     "pypdf>=6.15.0",   # BSD — PDF-layer signal probe (scan/text-source); pymupdf (AGPL) never in core (D-v3-4)
-    "cryptography>=50.0",  # Apache-2.0/BSD — AES-256-GCM for ledger blobs (localfs.py, M6); the
-                            # ledger is core, not an extra, so this is a base dep, not [server]/[http]
+    "cryptography>=50.0",  # Apache-2.0/BSD, AES-256-GCM for ledger blobs (localfs.py, M6).
+                           # The ledger is core rather than an extra, so this is a base dep,
+                           # not a [server] or [http] one.
 ]
 
+[project.urls]
+Homepage = "https://github.com/multiversal-ventures/openreading-core"
+Documentation = "https://github.com/multiversal-ventures/openreading-core/blob/main/src/openreading/README.md"
+Repository = "https://github.com/multiversal-ventures/openreading-core"
+Issues = "https://github.com/multiversal-ventures/openreading-core/issues"
+Changelog = "https://github.com/multiversal-ventures/openreading-core/blob/main/CHANGELOG.md"
+Security = "https://github.com/multiversal-ventures/openreading-core/security/policy"
+
 [project.optional-dependencies]
-# --- adapter extras (installed per-phase; AGPL deps isolated here, never in core) ---
+# --- adapter extras, one per backend, then the http, server and all umbrellas ---
 pymupdf = ["pymupdf>=1.24"]              # AGPL-3.0 — isolated; imported lazily; license-flagged in descriptor
-textract = ["boto3>=1.34"]              # SigV4 → official SDK (see DECISIONS D3)
+textract = ["boto3>=1.34"]              # SigV4 signing needs the official SDK (internal/decisions/DECISIONS.md D3)
 azure-document-intelligence = ["httpx>=0.27"]
 reducto = ["httpx>=0.27", "svix>=1.0"]   # svix = webhook signature verification
 chunkr = ["httpx>=0.27"]                 # task API; self-hostable (AGPL) via CHUNKR_BASE_URL
@@ -44,6 +63,9 @@ anthropic-claude = ["anthropic>=0.39"]
 mistral-ocr = ["httpx>=0.27"]             # Mistral Document AI OCR + annotations
 http = ["httpx>=0.27"]                   # umbrella for the httpx-based hosted adapters
 server = ["fastapi>=0.110", "uvicorn>=0.29"]  # `openreading serve` HTTP API
+# Every adapter's runtime dependency, and nothing else. `openreading serve` needs the separate
+# `server` extra, so the install that covers everything is `.[all,server]`.
+# `scripts/check_extras_parity.py` fails if an adapter extra's package is missing from this list.
 all = [
     "pymupdf>=1.24", "boto3>=1.34", "httpx>=0.27",
     "pytesseract>=0.3.13", "pillow>=10",
@@ -67,16 +89,18 @@ dev = [
     "ruff==0.15.22",
     "pyright>=1.1.380",
     "mypy>=1.11",
-    # adapter runtime deps needed to EXECUTE local-library adapters in tests. These are dev-only
-    # (not shipped in core); the shipped install path is the per-adapter optional extra. PyMuPDF
-    # is AGPL — it lives here for testing and in the `pymupdf` extra for users, never in core deps.
+    # Adapter runtime deps that let the tests execute the local-library adapters. They are
+    # dev-only and are not shipped in core. The shipped install path is the per-adapter optional
+    # extra. PyMuPDF is AGPL-3.0, so it lives here for testing and in the `pymupdf` extra for
+    # users, never in core dependencies.
     "pymupdf>=1.24",
     "pytesseract>=0.3.13",  # tesseract adapter (also needs the system `tesseract` binary)
     "pillow>=10",
-    "fastapi>=0.110",  # server (Phase 8) — TestClient drives the ASGI app offline
+    "fastapi>=0.110",  # server: TestClient drives the ASGI app offline
     "svix>=1.0",  # webhook signature verification (reducto) — sign/verify in offline tests
-    # Git hooks (lefthook.yml): pre-commit ruff + docs policy, pre-push `make verify`. PyPI wrapper,
-    # no separate brew install; one-time `uv run lefthook install` per clone.
+    # Git hooks (lefthook.yml): pre-commit runs ruff plus the docs policy, pre-push runs
+    # `make verify`. This is the PyPI wrapper, so there is no separate brew install. Run
+    # `uv run lefthook install` once per clone.
     "lefthook>=2.1",
 ]
 
@@ -107,7 +131,9 @@ select = ["E", "F", "I", "UP", "B", "SIM", "D100", "D104"]
 ignore = ["E501"]  # long lines tolerated in schema-mirroring literals / docstrings
 
 [tool.pytest.ini_options]
-# A caller's own `-q` stacks with this addopts `-q` rather than no-op'ing — two `-q`s reach pytest verbosity -2, which suppresses pytest's own final summary line (see the tests/conftest.py docstring).
+# A caller's own `-q` stacks with this addopts `-q` rather than replacing it. Two `-q`s reach
+# pytest verbosity -2, which suppresses pytest's own final summary line (see the
+# tests/conftest.py docstring).
 addopts = "-q"
 testpaths = ["tests"]
 pythonpath = ["."]
@@ -129,15 +155,15 @@ packages = ["openreading"]
 
 [tool.coverage.run]
 source = ["src/openreading"]
-# adapter extras are lazy-imported; measure what the offline suite actually exercises
-# Ledger T2 (§7, §12): statement-only coverage measures the wrong thing for a durable plane, which
-# is nothing but resume/no-resume branches. --cov-branch on a healthy tree already measures ~95%,
-# so this is not expected to threaten the 91% floor (internal/design/ledger.md §12) — verified by
-# running make verify after the flip, not assumed.
+# Adapter extras are lazy-imported, so this measures what the offline suite actually exercises.
+# Ledger T2 (internal/design/ledger.md §7, §12): the ledger's logic is almost entirely
+# resume-or-do-not-resume branches, and statement-only coverage cannot see a branch that was
+# never taken. Branch mode measures about 95% on a healthy tree, so it does not threaten the
+# 91% floor.
 branch = true
 
 [tool.coverage.report]
 show_missing = true
 # The floor is enforced in `make verify` via --cov-fail-under (see Makefile). It guards against
-# silent regressions; raise it as coverage climbs, never lower it to make a red build pass.
+# silent regressions. Raise it as coverage climbs, and never lower it to make a red build pass.
 precision = 0

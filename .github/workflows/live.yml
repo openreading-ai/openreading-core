@@ -1,8 +1,9 @@
 name: Live
 
-# Manual-only: exercises the REAL backends. Each live test skips cleanly unless its backend's
-# secrets are present (skip_unless_creds), so this is safe to run even with no secrets configured —
-# it will simply skip everything. Never runs on push/PR (that's the offline `CI` workflow).
+# This workflow calls the real backends, so it runs only when someone dispatches it by hand.
+# It never runs on a push or a pull request, which the offline `CI` workflow covers. Each
+# live test skips unless its backend's secrets are present (skip_unless_creds), so a run
+# with no secrets configured skips everything.
 on:
   workflow_dispatch:
 
@@ -19,7 +20,7 @@ concurrency:
 jobs:
   verify-live:
     runs-on: ubuntu-latest
-    # More generous than the offline jobs since this fans out across eleven live backends serially,
+    # More generous than the offline jobs since this fans out across every keyed backend serially,
     # but still bounded well short of GitHub's 360-minute default (BL-56) — a hung provider call or
     # stuck poll/retry loop shouldn't sit on a runner indefinitely with real secrets live.
     timeout-minutes: 60
