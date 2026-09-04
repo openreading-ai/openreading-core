@@ -509,7 +509,7 @@ is a code-level guarantee only; `status.error` is never populated on a single-do
 what one invocation actually did (backends eligible, attempted, dispatched; every switch and its
 reason; time and cost with honest unknowns) is spread across `warnings[]` prose, strategy
 `orchestration`, the batch summary and an armed ledger, with no common carrier
-(design record: `internal/design/run-stats-analytics.md`).
+(design record: `design/run-stats-analytics.md`).
 
 Extending it (agent-executable)
 ===============================
