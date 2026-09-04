@@ -508,7 +508,11 @@ Known gaps: no MCP surface (integrate via CLI/JSON, Python dicts, or HTTP); no s
 lists today's known codes, which is a list to read rather than an enum to validate against); the
 `orchestration` block's inner shape is not itself schema-validated, so every closed set inside it
 is a code-level guarantee only; `status.error` is never populated on a single-document response;
-`confidence` is populated only where a backend honestly has one.
+`confidence` is populated only where a backend honestly has one; there is no run-stats
+projection. What one invocation actually did (backends eligible, attempted, dispatched; every
+switch and its reason; time and cost with honest unknowns) is spread across `warnings[]` prose,
+strategy `orchestration`, the batch summary and an armed ledger, with no common carrier
+(design record: `design/run-stats-analytics.md`).
 
 Extending it (agent-executable)
 ===============================

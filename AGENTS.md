@@ -15,10 +15,10 @@ methods.
 ## The one rule that shapes everything else
 
 **Documentation lives in code.** Module docstrings, type annotations, inline comments at
-decision points. No standalone markdown files beyond `README.md` in a directory and the root
-project files (this file, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`,
-`CHANGELOG.md`). If something needs explaining, explain it where the code is. Keep the
-documentation in code and its README consistent, concise, and relevant.
+decision points. No standalone markdown files *describing code that exists*, beyond `README.md`
+in a directory and the root project files (this file, `CONTRIBUTING.md`, `SECURITY.md`,
+`CODE_OF_CONDUCT.md`, `CHANGELOG.md`). If something needs explaining, explain it where the code
+is. Keep the documentation in code and its README consistent, concise, and relevant.
 
 The reason is not tidiness. A separate document that contradicts the code looks authoritative
 and is wrong, and nothing forces anyone to notice. A module docstring that contradicts the
@@ -26,11 +26,17 @@ module below it is caught in review. It is the one place an agent editing that m
 guaranteed to read. `tests/test_docs_policy.py` enforces the allowlist. Ruff `D100`/`D104`
 require every module and package to carry a docstring.
 
-`docs/` is gitignored. Design specs and plans may live there while work is in flight. They are
-working documents, not deliverables. When something in one turns out to be a durable fact about
-the system, **move it into a module docstring**. History worth keeping goes to the private
-`openreading` company repo instead, never into this one. A design record, a research pack and a
-run log all belong there (see [the company repo](#the-company-repo)).
+**Work that is not built yet is the exception.** A design record or product spec for a feature
+this repo has not shipped lives in `design/` and `product/specs/`. It is tracked and reviewed
+here, in the open, next to the code it proposes to change. That does not weaken the rule above.
+The rule exists because a document contradicting the code looks authoritative and is wrong, and
+a proposal has no code to contradict. The risk begins the day it ships. When the work lands, its
+durable facts move into the module docstrings and **the design file is deleted in the same PR**.
+Nothing mechanizes that. A reviewer has to.
+
+`docs/` stays gitignored. It holds scratch, working notes and in-flight plans, nothing a reader
+depends on. Research packs, run logs and the decision log go to the private `openreading` company
+repo (see [the company repo](#the-company-repo)).
 
 ## What belongs in a module docstring
 
@@ -98,7 +104,7 @@ error messages.
 | warning or finding code | the `warnings[]` known-codes list in the `openreading.schemas` docstring (open set); for `compare`, the closed set in the `openreading.comparison` docstring and the `comparison-report` schema enum | closed set: `tests/test_compare_core.py` (reports validate); open set: none |
 | something a README example shows | re-run the README from a fresh clone; paste the new output | none yet |
 | a Known-gaps line becomes false | delete the line where it lives (a directory README or a package docstring) | reviewer |
-| design record / "not built" note | one line in the owning package docstring's Known gaps list; the prose goes to the company repo | `tests/test_docs_policy.py` |
+| design record / "not built" note | the record in `design/` (plus `product/specs/` when it has product intent); one line in the owning package docstring's Known gaps list naming it | `tests/test_docs_policy.py` |
 | subsystem guide (`src/openreading/<pkg>/README.md`) | the same eight sections and nav line as the existing guides (the docs home, `src/openreading/README.md`, fixes the Prev/Next order); a row in the docs home map; the root README "Where the docs are" row for that need | `tests/test_docs_policy.py` (one README per directory); link and YAML-fence checks over guides: none yet |
 | a CLI verb, flag or Python kwarg that changes what a guide's walkthrough shows | re-run that guide's commands from a fresh clone; paste the new output; bump nothing else | none yet |
 | a "Not built yet" line becomes true | delete the line in the guide AND the docstring's "designed, not built" marker, in the same PR | reviewer |
@@ -207,8 +213,12 @@ of those is closed, not reviewed.
 
 ## Things not to do
 
-- Do not add a markdown file outside the allowlist. Put it in a module docstring or in the
-  company repo. `tests/test_docs_policy.py` fails otherwise.
+- Do not add a markdown file outside the allowlist. Documentation of code that exists goes in a
+  module docstring. A design record for unbuilt work goes in `design/` or `product/specs/`.
+  `tests/test_docs_policy.py` fails otherwise.
+- Do not leave a design record in `design/` once its feature ships. Move the durable facts into
+  the module docstrings and delete the file in the PR that finishes the work. A stale spec for
+  shipped code is exactly the authoritative-and-wrong document the rule exists to prevent.
 - Do not commit run scratch (`GOAL*.md`, `PROGRESS.md`, prompts) at the root. That is the
   company repo's `runs/`.
 - Do not widen the compliance-eligible set from a strategy, route, or fallback.
