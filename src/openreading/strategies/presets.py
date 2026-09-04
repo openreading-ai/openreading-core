@@ -5,20 +5,20 @@ held here as raw nodes; `openreading.strategies.normalize` expands them like any
 Contract:
 
 * `openreading strategy show <name>` prints a preset's exact vendored longhand for forking (a
-  user strategy prints as written — Plain prints Plain; `--longhand` prints the canonical tree
-  for either, and `openreading strategy normalize` prints the whole config's strategies in
-  canonical longhand — `normalize_config`), and `extends: <preset>` copies it with a shallow
-  field-level merge (a re-declared top-level clause replaces the base's wholesale; never YAML
-  anchors).
+  user strategy prints as written, and Plain prints Plain). `--longhand` prints the canonical
+  tree for either, and `openreading strategy normalize` prints the whole config's strategies in
+  canonical longhand (`normalize_config`). Forking a preset means pasting that printout into
+  your own file under a new name. `extends:` is designed but not accepted in a file
+  (`openreading.strategies.model` §2.8).
 * A user config that defines a strategy under a preset's name is rejected the first time it is
   normalized — `strategy validate`, `show --longhand`, `strategy normalize`, or a run — by
   `build_library` in `openreading.strategies.normalize`, a `NormalizeError`: "strategy
-  'cost_saver' collides with a built-in preset; use `extends: cost_saver` or rename". The
-  loader's schema gate and desugar pass do not reject it, and neither does a bare
-  `strategy show <name>`: that path (`openreading.cli.app._strategy_body_as_written`) re-reads
-  the source file and prints the body without normalizing, so the collision surfaces only on
-  the normalizing paths. Silent shadowing would make one name mean two trees depending on which
-  file loaded.
+  'cost_saver' collides with a built-in preset. Rename it, then run `openreading strategy show
+  cost_saver` to copy the preset body into your file". The loader's schema gate and desugar pass
+  do not reject it, and neither does a bare `strategy show <name>`: that path
+  (`openreading.cli.app._strategy_body_as_written`) re-reads the source file and prints the body
+  without normalizing, so the collision surfaces only on the normalizing paths. Silent shadowing
+  would make one name mean two trees depending on which file loaded.
 * `escalate_if: default` is `DEFAULT_BUNDLE` in `openreading.strategies.normalize` —
   `{scanned_pages_detected: true, garbled: true, empty_pages_over: 0.2, confidence_below: 0.6}`,
   copied onto every cascade step except the last. `confidence_below` is inapplicable on a backend
@@ -43,13 +43,15 @@ widen it.
 Cookbook
 ========
 
-Twelve complete examples of `openreading.yaml`. Every fenced YAML block below is executable
-truth: `tests/test_docs_truth.py` parses each one and runs `strategy validate`, so an edit that
-breaks the grammar fails `make verify`. Fragments showing only `strategies:` belong in a file
-with `version: 1` at the top. Invoke a named strategy with `backend.id: "strategy:<name>"`, CLI
-`--strategy <name>`, or `openreading.run(..., strategy="<name>")`. Where a shorter Plain
-spelling exists (`openreading.strategies.plain`) it follows the longhand; it desugars to that
-longhand. Execution laws cited here live in `openreading.strategies.engine`; the grammar in
+Twelve complete examples of `openreading.yaml`. Every fenced YAML block below is checked by
+`tests/test_docs_truth.py`. The test parses each block and runs the world-consistency half of
+`strategy validate`, so an edit that breaks a cross-reference fails `make verify`. It does not
+run the loader's JSON-Schema gate, which is the separate check on the file's grammar. Fragments
+showing only `strategies:` belong in a file with `version: 1` at the top. Invoke a named
+strategy with `backend.id: "strategy:<name>"`, CLI `--strategy <name>`, or
+`openreading.run(..., strategy="<name>")`. Where a shorter Plain spelling exists
+(`openreading.strategies.plain`) it follows the longhand; it desugars to that longhand.
+Execution laws cited here live in `openreading.strategies.engine`; the grammar in
 `schemas/strategy-config.v0.2.json` and `openreading.strategies.normalize`.
 
 1. The headline: free local first, paid rung only when quality demands it
@@ -438,9 +440,9 @@ rung (`validate` warns).
 12. The maximal composition — everything at once
 ------------------------------------------------
 
-One file exercising the whole grammar: an operator ceiling, a compliance-fact route, `extends`,
-a cascade nesting a hedged judged parallel, an `auto` leaf, an error map, shadow sampling, a
-deployment default.
+One file exercising the whole grammar: an operator ceiling, a compliance-fact route, a cascade
+nesting a hedged judged parallel, an `auto` leaf, an error map, shadow sampling, a deployment
+default.
 
 ```yaml
 version: 1
@@ -461,13 +463,14 @@ strategies:
     on_error:                                          # governs all steps; step maps override key-by-key
       invalid_input: fail                              # corrupt doc: stop, don't burn rungs
       transient: next                                  # timeout/rate_limited/provider_error advance
+    escalate_if: default                               # the §4.4 bundle, copied onto every
+                                                       #   non-final step (§7 rule 5)
     steps:
       - backend: pymupdf                               # free local first
-        escalate_if: default                           # the built-in bundle (§4.4)
       - label: hosted_duel                             # stable trace identity across reorders
         parallel:
           - reducto                                    # primary, launches at t=0
-          - backend: aws-textract
+          - backend: google-document-ai
             start_after: 30s                           # pure stagger under pick: best (the node
                                                        #   can't resolve early, so this branch
                                                        #   always launches; a true winner-cancels
@@ -479,9 +482,10 @@ strategies:
         on_win: cancel                                 # losers cancelled; billed cost still recorded
       - auto                                           # router's pick among eligible − attempted
 
-  tables_heavy:                                        # shallow field-level merge, never YAML anchors;
-    extends: base_cascade                              #   a re-declared clause replaces the base's wholesale
-    budget: { max_duration: 6m }
+  tables_heavy:                                        # a second cascade written out in full:
+    budget: { max_duration: 6m }                       #   `extends:` is designed, not a file key
+    escalate_if: default                               #   (§2.8), so a fork is a copy
+    steps: [pymupdf, reducto]
 
   local_only:                                          # nothing leaves the machine
     { steps: [pymupdf, docling], escalate_if: default }
@@ -507,12 +511,12 @@ strategies:
 
 What happens: an `auto` request routes through `front_door`. A `require_local` request takes
 `local_only` — and the compliance filter has *already* pruned every hosted leaf, so even a
-routing mistake could not reach one. An invoice takes `tables_heavy`, the `extends` copy of
-`base_cascade` with a bigger duration budget. Inside `base_cascade`: pymupdf, then the hedged
-judged duel inside the cascade's 4m budget inside the operator's 10m ceiling (children clamp,
-never extend; `limits:` binds strategy-engaged runs only, never a direct-named request), then an
-`auto` rung that can only pick a backend the walk has not touched — the attempted set spans
-rungs, branches, shadows, and losers. The `compliance` route fact is a nested `{field: value}`
+routing mistake could not reach one. An invoice takes `tables_heavy`, a second cascade with a
+bigger duration budget. Inside `base_cascade`: pymupdf, then the hedged judged duel inside the
+cascade's 4m budget inside the operator's 10m ceiling (children clamp, never extend; `limits:`
+binds strategy-engaged runs only, never a direct-named request), then an `auto` rung that can
+only pick a backend the walk has not touched — the attempted set spans rungs, branches, shadows,
+and losers. The `compliance` route fact is a nested `{field: value}`
 map, keys ANDed, never a dotted key (DECISIONS D-v3-11). Every decision, gate evaluation, prune,
 and dollar lands in one trace.
 

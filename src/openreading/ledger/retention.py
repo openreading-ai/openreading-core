@@ -1,18 +1,18 @@
-"""Retention ceiling computation + reaper (internal/design/ledger.md §9.4, plan §7).
+"""Retention ceiling computation and reaper (internal/design/ledger.md §9.4).
 
-Openreading's own retention ceiling is `min(max_retention_hours)` over the **hosted** descriptors
-on a run's path (`runs_fully_local=True` descriptors excluded — their `0`/`None` states the vendor
-holds nothing, not that openreading may hold nothing). A `None` `max_retention_hours` on a hosted
-descriptor contributes no term and marks the run `retention_unverified`; a ZDR-flagged descriptor
-forces the whole path to zero content. The default below the ceiling is an open founder decision
-(plan §7, §18 item 4) — T1 ships a placeholder (the most conservative hosted ceiling observed among
-built-in adapters, currently AWS Textract-family territory; `OPENREADING_LEDGER_RETENTION_HOURS`
-overrides it) and logs the placeholder to FOUNDER-INBOX.md rather than presenting it as settled.
+OpenReading's own retention ceiling is `min(max_retention_hours)` over the **hosted**
+descriptors on a run's path. `runs_fully_local=True` descriptors are excluded, because their
+`0` or `None` states that the vendor holds nothing rather than that OpenReading may hold
+nothing. A `None` `max_retention_hours` on a hosted descriptor contributes no term and marks
+the run `retention_unverified`. A ZDR-flagged descriptor forces the whole path to zero
+content. The default below the ceiling is 24 hours, which is a placeholder rather than a
+settled policy. `OPENREADING_LEDGER_RETENTION_HOURS` overrides it, and the open question is
+tracked in internal/eng-council/FOUNDER-INBOX.md.
 
-The reaper is an at-run-start sweep (Open Questions §9 item 2, recommendation (a) — no new CLI
-surface): it scans every stamped run under the ledger root and, for one whose ceiling has passed,
-calls `KeyStore.destroy` — the exact mechanism a manual shred uses — so a reaped run and a
-manually-shredded one leave the journal in the identical `payload_expired` state. Finding M7:
+The reaper is an at-run-start sweep that adds no new CLI surface: it scans every stamped run under
+the ledger root and, for one whose ceiling has passed, calls `KeyStore.destroy` — the exact
+mechanism a manual shred uses — so a reaped run and a manually-shredded one leave the journal in
+the identical `payload_expired` state. Finding M7:
 an at-arm-only sweep left an idle server holding expired content indefinitely, since nothing new
 was ever arming to trigger it — so expiry is now enforced when a new run arms, once at server
 startup (`api.reap_expired_now`, called from `server.app.create_app`), AND on a timer for as long
@@ -36,7 +36,7 @@ caught it. Over-retention is still the compliance defect: it holds PHI past a wi
 attested to. `tighten_retention` and `reap` must read the SAME base as the stamp; see the note at
 `InlineExecutor.exec`'s `tighten_retention` call for what mixing them does.
 
-**Arm-time vs. dispatch-time (Ledger T3 round-2, Findings 8 and 6).** A fresh run's
+**Arm-time vs. dispatch-time (Ledger T3, findings 8 and 6).** A fresh run's
 FIRST stamp (`_arm_ledger`, before anything has dispatched) uses the operator default alone — not
 `compute_retention_ceiling_hours` over the whole registry-wide eligible set, which conflated
 "eligible for this document type" with "on this run's actual path" and let an unrelated,
@@ -54,7 +54,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-DEFAULT_RETENTION_HOURS = 24.0  # placeholder (plan §7) — founder-overridable, see FOUNDER-INBOX.md
+DEFAULT_RETENTION_HOURS = 24.0  # placeholder, overridden by OPENREADING_LEDGER_RETENTION_HOURS
 
 # Canonical run-id shape (matches what _arm generates). Persisted stamps are data, not
 # trusted input: retention deletes recursively, so anything joined onto blobs_root must be
@@ -98,9 +98,10 @@ def stamp_run(root: Path, run_id: str, *, expires_epoch_ms: int, zdr: bool) -> N
 
 
 def tighten_retention(root: Path, run_id: str, descriptor: Any, *, now_epoch_ms: int) -> None:
-    """Ledger T3 round-2 (Findings 8 and 6, "the retention ceiling" half of the
-    fix — see `InlineExecutor._is_zdr_backend` for the ZDR/blob-suppression half): narrows, never
-    widens, a run's already-stamped ceiling in response to `descriptor` ACTUALLY dispatching.
+    """Narrow, never widen, a run's already-stamped ceiling when `descriptor` actually dispatches.
+
+    This is the retention-ceiling half of the Ledger T3 fix for findings 8 and 6. See
+    `InlineExecutor._is_zdr_backend` for the ZDR and blob-suppression half.
 
     `_arm_ledger` used to compute the fresh-run stamp from `compute_retention_ceiling_hours` over
     the run's WHOLE registry-wide eligible set (`Router.route`'s stage-1/2 survivors for the
@@ -117,7 +118,7 @@ def tighten_retention(root: Path, run_id: str, descriptor: Any, *, now_epoch_ms:
     completes, narrowing the stamp if (and only if) that ONE descriptor's own declared limit is
     stricter than what's already recorded. A backend that stays merely eligible never calls this at
     all, so it has zero effect on the stamp — matching AC-11's "on that run's path," not the
-    registry-wide eligible set. Mirrors this tranche's own append-only-tightening pattern elsewhere
+    registry-wide eligible set. Mirrors the append-only tightening pattern used elsewhere
     (`strategies/trace.py`'s `Attempt.bind_gates`/`.recategorize`: update the field, never
     recompute it from scratch, and only ever move it in the safe direction).
 

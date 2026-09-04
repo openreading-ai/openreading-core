@@ -1,10 +1,11 @@
-"""Alignment engine (DESIGN §5 — the technical heart). Backends disagree on *segmentation*, not
-just content: one's paragraph is another's three lines. `align_pair` matches blocks text-first,
-validates with canonical-bbox IoU when present, and handles granularity by letting a merged run of
-adjacent same-type blocks on the finer side match a single coarser block. Deterministic: candidate
-pairs are scored, then accepted greedily by (score, IoU, index) — no randomness, no deps beyond
-stdlib. Thresholds are documented constants here, never flags (DESIGN §5). Calibrating them
-against adjudicated corpora is company-repo work (E5), not a knob this package exposes.
+"""Alignment engine. The `openreading.comparison` docstring's "Alignment" section states the
+contract this module implements. Backends disagree on *segmentation*, not just content: one's
+paragraph is another's three lines. `align_pair` matches blocks text-first, validates with
+canonical-bbox IoU when present, and handles granularity by letting a merged run of adjacent
+same-type blocks on the finer side match a single coarser block. Deterministic: candidate pairs
+are scored, then accepted greedily by (score, IoU, index), with no randomness and no deps beyond
+stdlib. Thresholds are documented constants here, never flags. Calibrating them against
+adjudicated corpora is company-repo work, not a knob this package exposes.
 """
 
 from __future__ import annotations

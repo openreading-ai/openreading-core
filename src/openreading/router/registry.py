@@ -1,8 +1,8 @@
-"""In-memory backend registry: descriptor.id → adapter. The router reads descriptors from
-here and never branches on backend type. A production deployment swaps in a shared/dynamic
-registry behind the same surface; eligibility is always recomputed per request from current
-descriptor state (internal/research/openreading/routing_and_compliance.md §5.5 — never cache
-eligibility across term changes).
+"""In-memory backend registry: descriptor.id maps to its adapter. The router reads descriptors
+from here and never branches on backend type. Any other process model can supply its own
+registry behind this same surface. Eligibility is always recomputed per request from the
+current descriptors, never cached across a term change
+(internal/research/openreading/routing_and_compliance.md §5.5).
 """
 
 from __future__ import annotations
@@ -11,18 +11,13 @@ from collections.abc import Iterator
 
 from openreading.adapters.base import BackendAdapter
 
-# Ledger T4a (AC-8): the router's own current adapter-contract floor. A descriptor declaring
-# `protocol_version` below this is refused BY NAME at register() time — never silently accepted
-# and left to fail later, mid-run, the first time poll()/cancel() is called without the `ctx` the
-# v2 Protocol requires. `1` (not `2`): T4a converts only 8 of the 13 built-in adapters to v2 this
-# milestone (internal/design/ledger.md §13's own "first zombie" guard, T4b finishes the rest) — the
-# floor only needs to reject a version that predates the CURRENT adapter contract's own minimum
-# (v1, the pre-Ledger shape), not force every adapter to already be v2.
-#
-# Review F3 (Phase C round 1): this floor is deliberately NOT the same number as the built-in fleet's
-# own `==2` discipline bar, enforced separately by tests/test_protocol_version_guard.py, not by
-# this floor — a third-party adapter that hasn't migrated to v2 can still register and run (with
-# reduced resume guarantees); this floor only refuses protocol_version < 1.
+# Ledger T4a (AC-8): the router's own adapter-contract floor. A descriptor declaring a
+# `protocol_version` below this floor is refused BY NAME at register() time, never accepted
+# and left to fail mid-run the first time poll()/cancel() is called without the `ctx` the v2
+# Protocol requires. The floor is 1 rather than 2 on purpose. Every built-in adapter declares
+# 2, and tests/test_protocol_version_guard.py holds the fleet to that. A third-party adapter
+# still on v1 may register and run, with reduced resume guarantees, so this floor refuses only
+# protocol_version < 1.
 PROTOCOL_VERSION_FLOOR = 1
 
 

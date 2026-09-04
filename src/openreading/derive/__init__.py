@@ -1,9 +1,10 @@
 r"""Shared, deterministic derivation layer — where a ``D`` (derivable) channel grade is made true.
 
-One unit-tested package replaces ~13 hand-rolled near-copies of the same GFM/HTML/table/geometry
-transforms. Every function is pure, deterministic, and stdlib-only (``pdf_page_count`` may use an
-in-tree optional dep). Adapters import ONLY from ``openreading.derive``. Outside ``adapters/``
-the only importer today is ``openreading.comparison`` (the GFM cell escape
+One unit-tested package holds every GFM, HTML, table and geometry transform an adapter needs,
+so no adapter carries its own copy. Every function is pure, deterministic, and stdlib-only
+(``pdf_page_count`` may use an in-tree optional dep). Adapters import ONLY from
+``openreading.derive``. Outside ``adapters/`` the only importer today is
+``openreading.comparison`` (the GFM cell escape
 ``openreading.derive.tables._esc_pipe`` for report rendering); ``evals`` imports nothing from here,
 and the kit's C11 check (below) uses ``openreading.comparison.align.token_similarity`` over raw
 block texts, not these projections. When a ``D`` grade says "the platform derives this channel,"
@@ -13,17 +14,17 @@ this is where that derivation lives — once. It is a package rather than an
 
 Why one shared layer (the failure it avoids)
 --------------------------------------------
-An audit of every built-in adapter found the mapping quality — the product — systematically
-under-delivered while the conformance kit stayed green: markdown shipped verbatim as ``text``;
-``text == markdown`` byte-identical with zero derivation work; declared-``D`` channels with no
-derivation written at all ("vapor grades" — routing on those grades was routing on fiction); table
-content missing from ``text``; reading order fabricated by class-grouping; pages renumbered under
-subsetting; UTF-8 byte offsets sliced as code points (garbling every non-ASCII document); provider
-truncation normalized as ``SUCCEEDED``; ``str()``-coerced and last-writer-wins typed fields; merged
-cells given wrong grid coordinates; confidences on unconverted scales. Each transform had been
-reimplemented (or was needed and absent) in >= 3 adapters, and every copy had its own bug. The
-verdict was execution and enforcement, not architecture: (a) named channel semantics, (b) this
-shared layer so ``D`` means "a derivation exists", (c) kit enforcement of the positive direction
+Mapping quality was systematically under-delivered while the conformance kit stayed green:
+markdown shipped verbatim as ``text``; ``text == markdown`` byte-identical with zero derivation
+work; declared-``D`` channels with no derivation written at all ("vapor grades" — routing on
+those grades was routing on fiction); table content missing from ``text``; reading order
+fabricated by class-grouping; pages renumbered under subsetting; UTF-8 byte offsets sliced as
+code points (garbling every non-ASCII document); provider truncation normalized as
+``SUCCEEDED``; ``str()``-coerced and last-writer-wins typed fields; merged cells given wrong
+grid coordinates; confidences on unconverted scales. Each transform had been reimplemented (or
+was needed and absent) in >= 3 adapters, and every copy had its own bug. The verdict was
+execution and enforcement, not architecture: (a) named channel semantics, (b) this shared layer
+so ``D`` means "a derivation exists", (c) kit enforcement of the positive direction
 (deliver-or-warn), (d) a real versioning policy (``openreading.schemas``).
 
 Grades: what N / D / X mean (``openreading.types.enums.ChannelGrade``)
@@ -108,10 +109,10 @@ follows document order (``order_by_position``) when the provider array groups by
 ``typed_fields`` keep native JSON types (no ``str()`` coercion), repeated names collect into a
 list (never last-writer-wins), nested provider structures map to nested values (no dotted-key
 flattening), and when the provider returns per-field geometry or page anchors
-``TypedField.citations[]`` is populated — citations are part of the N/D obligation. The spec
-also asks that the extraction schema's declared type fill ``TypedField.type``; as shipped only
-``anthropic_claude``, ``google_document_ai`` and ``azure_document_intelligence`` populate it —
-the other adapters leave ``type`` ``None``.
+``TypedField.citations[]`` is populated. Citations are part of the N and D obligation. The spec
+also asks that the extraction schema's declared type fill ``TypedField.type``. As shipped,
+``anthropic_claude``, ``azure_document_intelligence``, ``google_document_ai`` and
+``google_gemini`` populate it, and every other adapter leaves ``type`` at ``None``.
 ``table_cells``: one ``Table`` model is the only structured representation (HTML/pipe are
 projections of it); grid coordinates are true positions under merged cells, spans recorded as
 ``row_span``/``col_span``, ``Table.rows`` holds the value at the span origin and ``None`` at
@@ -159,31 +160,33 @@ Function contracts (each: what it guarantees / the defect class it retires)
 - ``pdf_page_count(data) -> int | None`` — exact page count from PDF bytes via an in-tree PDF
   library, ``None`` when unavailable/unparseable (replaces cited-pages page_count heuristics).
 
-Enforcement and rollout (``openreading.testing.conformance``)
--------------------------------------------------------------
-The kit historically enforced only the negative direction (C4/C5 X-never-populated and
-requested-X-warns, C8, schema validity, determinism) and raised on the first failure, so the
-positive-direction invariants could not be introduced without breaking every adapter at once.
-``check_adapter_conformance`` therefore returns a ``ConformanceReport`` with ``.violations``
-(raise-worthy) and ``.advisories``, and takes ``strict_checks`` naming which invariant IDs are
-violations for this run (``raise_on_violation=True`` keeps the historical raise). Rollout ladder:
-C7 (confidence-bounds walk over Block/TableCell/Page/doc_type/Citation) and C3 (weak parse check —
-strict GFM linting was rejected because real backends legally embed HTML in markdown) strict from
-the start; C1 and C6 advisory by default and promoted per adapter as each was remediated; once
-every built-in adapter was remediated the default flipped to all-strict (``_DEFAULT_STRICT`` =
-{C1, C6}) — a downstream, not-yet-remediated adapter passes ``strict_checks=frozenset()`` to opt
-back to advisory. C11 is permanently advisory. The C1 detector targets syntax that round-trips as
-parseable GFM/HTML STRUCTURE (a GFM table SEPARATOR row such as ``|---|---|`` — a ``| a | b |``
-data row with no separator is not flagged — an ATX heading line, an HTML tag pair), not bare
-characters. The residual false positive (a scanned document whose genuine text is an ASCII pipe
-table with a separator row) has NO per-case suppression hook in the kit: the only lever is
-omitting ``"C1"`` from ``strict_checks``, which demotes the whole check to advisory for that run
-(built-in adapter tests pass ``{"C1", "C6"}``; ``anthropic_claude`` and ``qwen_vl`` add
-``"C10"``, which no kit check records — a no-op id there). C10 is a per-adapter fixture
-obligation.
+Enforcement (``openreading.testing.conformance``)
+-------------------------------------------------
+``check_adapter_conformance`` returns a ``ConformanceReport`` with ``.violations``
+(raise-worthy) and ``.advisories`` rather than stopping at the first failure. That split exists
+because the positive-direction invariants could not otherwise be introduced without breaking
+every adapter at once. ``strict_checks`` names the invariant ids that count as violations for
+one run, and it defaults to ``_DEFAULT_STRICT`` = {C1, C6}. C7 and C3 are always strict, and
+C11 is permanently advisory. A downstream adapter that is not yet remediated passes
+``strict_checks=frozenset()`` to demote C1 and C6 back to advisories.
+
+C3 is a weak parse check rather than a strict GFM lint, because real backends legally embed
+HTML in markdown. The C1 detector targets syntax that round-trips as parseable GFM or HTML
+STRUCTURE: a GFM table separator row such as ``|---|---|``, an ATX heading line, an HTML tag
+pair. A ``| a | b |`` data row with no separator is not flagged. One false positive has no
+per-case suppression hook in the kit, a scanned document whose genuine text really is an ASCII
+pipe table with a separator row. The only lever there is omitting ``"C1"`` from
+``strict_checks``, which demotes the whole check to advisory for that run. C10 is a
+per-adapter fixture obligation rather than a kit check, and the ``anthropic_claude``,
+``google_gemini`` and ``qwen_vl`` tests pass ``"C10"`` in ``strict_checks`` where it is a
+no-op id.
+
 Release identity: this contract landed as response schema v0.3 + adapter-descriptor v0.3, and the
 stability note written into ``response.v0.3.json`` is the pin — "invariants C1-C11 are enforced
 progressively during v0.5 development and are hard guarantees as of the v0.5 package release".
+The ``v0.5`` in that quoted note is the Canon milestone label rather than a package version.
+The shipped package version is ``0.3.0``, and ``openreading.schemas`` carries the manifest that
+maps a milestone label onto its schema files.
 
 Descriptor re-grades follow one direction rule: honesty-restoring DOWNGRADES land immediately
 (they make today's claims true with no implementation), capability-raising UPGRADES land only

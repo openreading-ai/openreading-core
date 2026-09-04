@@ -4,9 +4,8 @@ loop over the Job state machine while the adapter's wait_mode + poll()/resolve_w
 the mechanics.
 
 INLINE backends never enter the loop (submit() already returned terminal). POLL backends are
-polled with backoff honoring retry_after. WEBHOOK backends have no push-await mechanism here (the
-dead `WebhookBus` machinery was deleted, Ledger T4a) — they degrade straight to polling, same as
-they always did in production.
+polled with backoff honoring retry_after. WEBHOOK backends are polled too, because this driver
+has no push-await path (Ledger T4a), so a webhook job degrades to the POLL loop below.
 """
 
 from __future__ import annotations
@@ -21,8 +20,7 @@ from openreading.types.runtime import RunContext
 # BL-169: this bounds CONSECUTIVE FAULTS (job.attempts, incremented only inside `except
 # RetryableError` below), not total polls — a merely-slow, healthy job that keeps returning
 # RUNNING without ever faulting never increments it and is bounded only by the absolute
-# deadline. Renamed from MAX_POLL_ATTEMPTS, which claimed a broader guarantee than the code (or
-# the docs) ever delivered.
+# deadline.
 MAX_CONSECUTIVE_FAULTS = 120
 _BASE_BACKOFF_MS = 500.0
 _MAX_BACKOFF_MS = 30_000.0
@@ -65,10 +63,8 @@ async def await_result(
     `ctx` (Ledger T4a): passed straight through to every `adapter.poll(job, ctx)` call below — a
     POLL adapter builds its own client from `ctx` rather than assuming one bound at submit() time
     survived on this instance, which is what lets a fresh, freshly-constructed instance resume
-    driving the job (AC-5). A WEBHOOK-wait-mode job has no push-await mechanism here (that dead
-    machinery — `WebhookBus` — was deleted per Ledger T4a; the design doc's own scope-cut ledger
-    had already called it dead code with no live call site) — it degrades straight to polling
-    below, same as it always did in production."""
+    driving the job (AC-5). A WEBHOOK-wait-mode job takes the POLL path below (Ledger T4a), as the
+    module docstring explains."""
     clk = clock or RealClock()
 
     # INLINE backends are already terminal; the loop body never runs.

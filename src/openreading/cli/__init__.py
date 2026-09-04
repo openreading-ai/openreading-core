@@ -7,24 +7,26 @@ goes to one backend, a strategy, or the router, and the one response schema is p
 
 Invariants shared by every subcommand
 -------------------------------------
-- `--env-file PATH` is accepted everywhere (default `./.env` when present). It never overrides an
-  already-set process variable, so an exported value always beats the file.
+- `--env-file PATH` is accepted by every verb (default `./.env` when present). On `strategy`
+  it belongs before the sub-verb (`openreading strategy --env-file ci.env validate`). It never
+  overrides an already-set process variable, so an exported value always beats the file.
 - `openreading --version` prints `openreading <version>` on stdout and exits 0, with no
   subcommand -- the same string as `openreading.__version__` and the `version` field of the
   server's `GET /healthz`, so an incident's first question has an answer that does not require a
   running server.
 - stdout carries ONLY the JSON envelope (or the rendered report). Progress, cost preflight,
   backend chatter (stdout is redirected during the run) and every error line go to stderr, so
-  `> out.json` is always safe. stderr lines carry a bracket tag. `[<command>]` (`[route]`,
-  `[resume]`, `[compare]`, `[calibrate]`, ...) is the common shape, but a single-document
-  `parse` tags its error lines with the RUN LABEL, not the command: the backend slug,
-  `strategy:<name>` or `auto` (`[pymupdf] missing credentials ...`); `[parse]` appears only on
-  selector misuse, a slug that fails catalog lookup, and the interrupt lines. A batch `parse`
-  prints `[batch]` for usage / unexpected errors and the `empty_batch` warning, `[i/N]` for
-  progress, `[preflight]` for the two pre-run advisories (cost, and a `--jobs` request the named
-  backend's descriptor caps), and the run label (not `[batch]`) for its exit-3
-  cannot-run line; a `compare` fan-out prints `[<backend>]` per fanned-out backend. The one
-  untagged line is `strategy validate`'s grammar error (below).
+  `> out.json` is always safe.
+- stderr lines carry a bracket tag. `[<command>]` (`[route]`, `[resume]`, `[compare]`,
+  `[calibrate]`, ...) is the common shape. A single-document `parse` tags its error lines with
+  the RUN LABEL instead of the command: the backend slug, `strategy:<name>` or `auto`
+  (`[pymupdf] missing credentials ...`). On that path `[parse]` appears only on selector
+  misuse, a slug that fails catalog lookup, and the interrupt lines. A batch `parse` prints
+  `[batch]` for usage and unexpected errors and for the `empty_batch` warning, `[i/N]` for
+  progress, and `[preflight]` for the two pre-run advisories (cost, and a `--jobs` request the
+  named backend's descriptor caps). Its exit-3 cannot-run line carries the run label, not
+  `[batch]`. A `compare` fan-out prints `[<backend>]` per fanned-out backend. The one untagged
+  line is `strategy validate`'s grammar error (below).
 - A printed response/envelope is schema-validated first (`schemas.validate_response` /
   `validate_batch_result`), so a non-conforming document never reaches stdout. Only the batch
   path turns a conformance failure into a coded exit (its validation sits inside the try, BL-84);
@@ -68,6 +70,8 @@ Single-document flags:
                       A directly-named backend that cannot do it raises `unsupported_feature`
                       (exit 3) instead of silently returning geometry-only output, which would
                       deny the ask (DECISIONS D13); the router pre-filters such backends.
+                      `--pages` and `--extract` take a variable number of values, so name FILE
+                      before them or close the flag list with `--`.
   --keep-candidates   retain every strategy branch's output under `orchestration.candidates[]`
                       (what `compare --from` reads). Off by default (payload bloat); no effect on
                       a direct backend run; in batch mode it applies per item (DECISIONS D-v4-14).
@@ -214,10 +218,10 @@ touches the network.
 the user typed is the consent a page load can never be. Reports print as they complete, so a slow
 backend never hides the ones that already answered.
 
-    BACKEND   PROBE     STATUS                 MEASURED  LATENCY  DETAIL
-    docling   endpoint  unreachable            yes       20ms     no response (DOCLING_SERVE_URL)
-    chunkr    none      configured_unverified  no        -        configured, but not verified
-    pymupdf   local     live                   yes       0ms      responding
+    BACKEND                        PROBE      STATUS                 MEASURED  LATENCY   DETAIL
+    pymupdf                        local      live                   yes       0ms       responding, the library imports and runs in this process
+    chunkr                         none       not_configured         no        -         not configured: set CHUNKR_API_KEY
+    docling                        endpoint   not_configured         no        -         not configured: set DOCLING_SERVE_URL
 
 Status ladder (`openreading.types.liveness.LivenessStatus`, internal/design/liveness.md), seven
 states ascending in what is known: `not_supported` (no probe AND nothing declared to infer from --
@@ -289,7 +293,7 @@ leaderboard <dataset_dir> (--backends a,b[,...] | --all-ready) [--policy p.json]
 -----------------------------------------------------------------------------------------------
 Rank N registered backends on ONE dataset -- measured, not vendor-claimed. Runs the same
 `case.json` corpus (`openreading.evals.dataset`; the repo ships one under
-`openreading/evals/sample`) through the unchanged `openreading.evals.runner.run_case` path for
+`src/openreading/evals/sample`) through the unchanged `openreading.evals.runner.run_case` path for
 every named backend -- the same per-case compliance gate, the same five-dimension scorer, no second
 scoring or gating path -- and prints one ranked `BenchmarkReport`: measured mean score,
 per-dimension breakdown, per-case result table, error tally, and each backend's cost basis
@@ -312,9 +316,9 @@ erroring. A non-deterministic backend's row is marked in place -- its mean is on
 The per-case block states `winner=`, `tie=`, `no winner (every scored backend got 0.00)` or
 `no result (no backend produced a score)`, and totals the four, because the report's own `winner`
 field breaks a tie alphabetically for byte-stability and printing that as a result turns ties and
-mutual failures into a clean sweep for anyone tallying the block. The JSON `winner` is unchanged. A backend's per-case compliance refusal,
-or any other per-case fault, is that backend's own scored, error-carrying case -- in its error
-tally, excluded from its mean -- never a silently skipped case,
+mutual failures into a clean sweep for anyone tallying the block. The JSON `winner` is unchanged.
+A backend's per-case compliance refusal, or any other per-case fault, is that backend's own scored,
+error-carrying case -- in its error tally, excluded from its mean -- never a silently skipped case,
 never a crash. Every backend makes a REAL call per case: `--all-ready` over a large dataset is N x M
 billable calls, not N + M. The numbers are evidence a human reads and are never fed back into the
 router's scoring or any adapter's `integration_priority`. Exits: 0; 2 <2 backends or an unknown
@@ -323,11 +327,12 @@ fault.
 
 strategy <verb> / explain / replay / calibrate
 ----------------------------------------------
-Inspect and drive `openreading.yaml` strategies (`openreading.strategies`; internal/design/ for the
-grammar). Every verb takes `--config PATH` (else the discovery order above); those marked with
-`--policy` take a compliance context. `validate`, `plan`, `normalize`, `replay` and `calibrate`
-need a config and exit 3 without one ("no openreading.yaml found"); `list` and `show` run
-config-free on the built-in presets (an unparseable config is exit 3 for every verb).
+Inspect and drive `openreading.yaml` strategies. `openreading.strategies` maps the package and
+`openreading.strategies.model` is the grammar reference. Every verb takes `--config PATH` (else the
+discovery order above); those marked with `--policy` take a compliance context. `validate`, `plan`,
+`normalize`, `replay` and `calibrate` need a config and exit 3 without one ("no openreading.yaml
+found"); `list` and `show` run config-free on the built-in presets (an unparseable config is exit 3
+for every verb).
 
     openreading strategy validate [--policy p.json]
     openreading strategy plan doc.pdf --strategy NAME [--policy p.json]
@@ -387,11 +392,10 @@ config-free on the built-in presets (an unparseable config is exit 3 for every v
 serve
 -----
 `serve [--host H] [--port P] [--cors-origin O ...]` runs the HTTP API (`openreading.server`;
-needs the `[server]` extra, else exit 3). Default `127.0.0.1:8787`. (The web UI is not part of
-this package: it ships as `openreading-ui` from the company's `openreading_webui` package, which
-depends on this one.) Binding any host other than `127.0.0.1` prints a warning: anyone who can reach the socket spends your vendor keys, so put it
-behind your own auth/proxy. The server never reads the working directory for a config -- pass
-`OPENREADING_CONFIG`.
+needs the `[server]` extra, else exit 3). Default `127.0.0.1:8787`. (This package ships no web UI.
+`serve` exposes the JSON API only.) Binding any host other than `127.0.0.1` prints a warning:
+anyone who can reach the socket spends your vendor keys, so put it behind your own auth/proxy. The
+server never reads the working directory for a config -- pass `OPENREADING_CONFIG`.
 
 Startup and readiness. The listening socket is claimed BEFORE uvicorn is handed control, so a
 port conflict is one `[serve] cannot bind ...` line and exit 3 with nothing served, and every
@@ -427,12 +431,11 @@ Exit codes
      bad entry's position, never its value), an unresolvable/empty `leaderboard` dataset, a
      `resume` refusal / unknown run / expired payloads, an `OPENREADING_LEDGER` pointing at a
      path this process cannot journal to (`ledger_unavailable`; an armed ledger is a hard
-     dependency, so the run fails rather than parsing unjournalled), an unknown
-     `backends --check` slug, or
-     a `RetryableError` reaching a directly-named backend on `parse` / `compare` (rate-limit
-     exhaustion, or a poll job past its deadline /
-     `openreading.router.driver.MAX_CONSECUTIVE_FAULTS` -- a named backend has no next rung to
-     fall back to).
+     dependency, so the run fails rather than parsing unjournalled), an unknown `backends --check`
+     slug, a `serve` port already bound (one `[serve] cannot bind ...` line), or a `RetryableError`
+     reaching a directly-named backend on `parse` / `compare` (rate-limit exhaustion, or a poll job
+     past its deadline / `openreading.router.driver.MAX_CONSECUTIVE_FAULTS` -- a named backend has
+     no next rung to fall back to).
   4  `route`: no compliant backend for the policy (the empty plan is printed as JSON);
      batch `parse`: partial -- some items failed.
   5  `compare`: inputs are not schema-valid responses, or `--from` on a run that kept no

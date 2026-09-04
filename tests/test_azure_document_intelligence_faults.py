@@ -160,7 +160,7 @@ def test_poll_refuses_when_a_fresh_instance_resumes_a_tampered_job():
 
 
 def test_poll_refuses_a_same_host_different_port():
-    # BL-162 review (bruce, High): comparing hostname alone let a same-host attacker-chosen port
+    # BL-162: comparing hostname alone let a same-host attacker-chosen port
     # through unnoticed — a real bypass of the check's own purpose. x.cognitiveservices.azure.com
     # is the real host; :4444 is not the configured origin.
     client = _ScriptedClient()
@@ -174,7 +174,7 @@ def test_poll_refuses_a_same_host_different_port():
 
 
 def test_poll_refuses_a_scheme_downgrade():
-    # BL-162 review (bruce, High): an HTTPS->HTTP downgrade on the same host also passed the
+    # BL-162: an HTTPS->HTTP downgrade on the same host also passed the
     # hostname-only check — the credential header would go out over plaintext.
     client = _ScriptedClient()
     adapter = AzureDocumentIntelligenceAdapter(client=client)
@@ -199,7 +199,7 @@ def test_poll_succeeds_when_operation_location_origin_matches_configured_endpoin
 
 
 def test_poll_refuses_rather_than_crashes_on_a_malformed_port():
-    # BL-162 round 2 review (bruce, Medium): a non-numeric port makes urlparse's `.port` raise
+    # BL-162: a non-numeric port makes urlparse's `.port` raise
     # ValueError instead of degrading — must still yield a clean TerminalError refusal, never an
     # unhandled crash, on either side of the comparison (a configured endpoint typo or an
     # attacker-influenced operation-location).
@@ -214,7 +214,7 @@ def test_poll_refuses_rather_than_crashes_on_a_malformed_port():
 
 
 def test_poll_refuses_explicit_port_zero_not_the_scheme_default():
-    # BL-162 round 2 review (alex, Low): `p.port or default` treated an explicit port 0 as
+    # BL-162: `p.port or default` treated an explicit port 0 as
     # absent (falsy-zero) and silently promoted it to the scheme default (443) — port 0 must
     # compare as its own distinct origin, not match a default-port endpoint.
     client = _ScriptedClient()
@@ -228,7 +228,7 @@ def test_poll_refuses_explicit_port_zero_not_the_scheme_default():
 
 
 def test_poll_origin_check_activates_even_for_an_unparseable_configured_endpoint():
-    # BL-162 review (alex/bruce, dormant Low): a truthy-but-unparseable configured endpoint used
+    # BL-162: a truthy-but-unparseable configured endpoint used
     # to leave _expected_host as None, silently disabling the check entirely (indistinguishable
     # from "no endpoint configured"). _origin() always returns a 3-tuple, so the comparison stays
     # active and correctly refuses rather than waving a real vendor response through.

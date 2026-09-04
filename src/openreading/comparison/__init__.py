@@ -1,21 +1,19 @@
 """Compare — the cross-backend delta layer.
 
-Every backend extracts slightly differently; that is the product's founding observation. Because
-every result is the same response envelope, comparison is a pure function over N schema-valid
-responses: ``compare([response, ...], *, baseline=None, truth=None) -> ComparisonReport``, a
-read-only, deterministic, offline function that classifies every field, block and run fact as
-agreeing, disagreeing, missed, unique, or honestly not-capable. No adapter, router, engine or
-response-schema change was needed to add it.
+Every backend extracts slightly differently, which is the observation this package exists for.
+Because every result is the same response envelope, comparison is a pure function over N
+schema-valid responses: ``compare([response, ...], *, baseline=None, truth=None) ->
+ComparisonReport``, a read-only, deterministic, offline function that classifies every field,
+block and run fact as agreeing, disagreeing, missed, unique, or honestly not-capable. No
+adapter, router, engine or response-schema change was needed to add it.
 
 Laws (non-negotiable)
 ---------------------
 - L1 purity: compare never executes, retries, cancels or bills. Acquiring responses and comparing
-  them are separate acts; the library function is always pure. Two surfaces compose them as
-  sugar: the CLI's ``compare <doc> --backends`` fan-out, and -- outside this repo -- the company
-  web UI's ``/compare`` page (``openreading_webui``), which runs the upload through each selected
-  backend via ``api.run()`` and then calls ``build_report``. Both spend; the report builder never
-  does.
-- L2 adjacency (leaf): the spec's rule is "this package + one CLI verb + one pure server
+  them are separate acts, and the library function is always pure. One surface composes them as
+  sugar, the CLI's ``compare <doc> --backends`` fan-out. That surface spends, and the report
+  builder never does.
+- L2 adjacency (leaf): the adjacency rule is "this package + one CLI verb + one pure server
   endpoint; deleting the package changes nothing else". The load-bearing half holds as shipped:
   nothing in ``router/`` or ``strategies/`` imports it (``strategies/plain.py`` only names it in
   a docstring), and it imports no adapter/router/engine execution path. Its cross-package
@@ -26,10 +24,8 @@ Laws (non-negotiable)
   wider than the spec says: beyond ``openreading compare`` / ``POST /v1/compare`` and the
   ``openreading.compare`` re-export, ``cli explain`` renders a report via ``render_table``,
   ``evals.leaderboard`` reads ``report._NON_DETERMINISTIC``, ``testing.conformance`` (C11)
-  reuses ``align.token_similarity``, and outside this repo the company web UI's compare route
-  imports ``corpus``/``ingest``/``report`` -- so deleting the package would break those too.
-  None of them feeds a run (L3); the web UI route is the one that also dispatches (see L1). The
-  single schema integration point
+  reuses ``align.token_similarity``, so deleting the package would break those too. None of them
+  feeds a run (L3). The single schema integration point
   (``orchestration.candidates[]``) is an opt-in additive key inside a block that is already
   ``additionalProperties: true``.
 - L3 no influence: report output never feeds routing, ranking, gating or ``pick: best``. ``pick``
@@ -233,17 +229,15 @@ real text?) from structure (how the same content is packaged). Four sections:
 3. TYPES: blocks the subjects label differently (``type_conflict`` findings).
 4. GRANULARITY: block counts -- who over-fragments (about one block per cell).
 
-Field deltas follow when typed fields disagree. A 184-finding wall collapses to one screen.
+Field deltas follow when typed fields disagree. A long finding list collapses to one screen.
 
 Python: ``openreading.compare(inputs, *, baseline=None, truth=None) -> dict`` (dicts or paths)
 joins ``run``/``route`` in the top-level ``__all__``. There is no fan-out in the Python API; a
 Python user composes ``run()`` calls with their own concurrency and error handling -- there is
-no second execution API to maintain. Fan-out exists only as CLI sugar and, outside this
-repo, as the company web UI's ``/compare`` page (L1).
+no second execution API to maintain. Fan-out exists only as CLI sugar (L1).
 
 Server: ``POST /v1/compare`` with ``{"responses": [...], "baseline"?, "truth"?}`` returns the
-report. Pure (L1): it never executes a backend. Fan-out over the JSON API is not offered. The
-only HTTP fan-out is the company web UI's page, not here.
+report. It is pure (L1) and never executes a backend. Fan-out over the JSON API is not offered.
 
 Corpus compare -- two batch runs
 --------------------------------
@@ -257,7 +251,7 @@ identity key. ``--format table|md`` = one verdict line per document + rollup. ``
 is value-first: rollup, one line per document, and under each divergent one the actual content
 each backend captured that the other missed (``content_deltas.unique``, token-coverage matched),
 capped at about 8 lines per side with a "... N more" tail -- values, not counts or structure,
-because that is what exposes an OCR misread or a 397-vs-24 values split at a glance. Structure
+because that is what exposes an OCR misread or a lopsided values split at a glance. Structure
 (tables/types/granularity) stays in ``--format table`` and the single-pair four-section view: a
 corpus-wide four-section diff is a wall. The footer prints a ``jq`` one-liner to dump one
 document's full text; ``parse <dir> --save-dir`` per backend then ``compare outA/<doc>.json
@@ -284,14 +278,12 @@ What compare is NOT
   or a golden);
 - not a storage/history system (this package compares what you hand it, statelessly).
 
-The private company repo builds on top of this package, never instead of it: a run store with
-drift detection keyed by (doc hash x backend x adapter/provider version); a visual bbox-overlay
-delta UI; disagreement-driven labelling
-(disagreements are the highest-value annotation targets and grow golden datasets); an LLM
-equivalence judge (inert without an explicit operator gate, every judgment logged/replayable);
-alignment calibration against adjudicated corpora; governed per-tenant router feedback (the only
-sanctioned crossing of L3); server-side corpus fan-out and CI regression gates with delta
-budgets; report retention/redaction policies.
+The private company repo builds on top of this package, never instead of it. It holds a run
+store with drift detection keyed by document hash, backend and adapter version. It holds a
+visual bbox-overlay delta view, disagreement-driven labelling (disagreements are the
+highest-value annotation targets and grow golden datasets), an LLM equivalence judge that
+stays inert without an explicit operator gate, and alignment calibration against adjudicated
+corpora.
 
 Deliberately deferred (recorded so they are not relitigated ad hoc): chunk-level comparison;
 page-provenance-aware comparison of ``granularity: page`` runs; threshold flags; ``compare``

@@ -442,7 +442,7 @@ def test_merge_reconciles_cost_basis_across_base_and_source_branches():
     assert res.response.usage.cost_basis == "billed"
 
 
-# ---- BL-134/Alex: a composite branch's cost never reaches any fold at all ---------------------
+# ---- BL-134: a composite branch's cost never reaches any fold at all --------------------------
 
 
 def test_composite_loser_cost_is_not_dropped():

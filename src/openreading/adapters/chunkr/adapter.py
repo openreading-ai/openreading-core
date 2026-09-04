@@ -7,7 +7,9 @@ markdown description for pictures). Extract returns three parallel trees: result
 citations, and metrics (per-leaf confidence rating) — flattened into typed_fields here.
 
 BYO API key (Authorization header; CHUNKR_API_KEY). Also self-hostable (AGPL, Docker) with the
-identical API — point CHUNKR_BASE_URL at your container. Credit-based ($0.008–0.015/page).
+identical API — point CHUNKR_BASE_URL at your container. Credit-based pricing. The descriptor
+estimates $0.008 to $0.03 per page-equivalent, and `report_cost` projects $0.01 per page until a
+live run refines it.
 Compliance: BAA is enterprise-tier (hipaa_baa=tier_gated, so a require_baa policy drops Chunkr
 unless the operator confirms it via `baa_tier_confirmed`); the no-train guarantee is scoped to
 Scale-tier+ so it is modelled as opt_out (drops under a no-train policy unless the operator

@@ -1,35 +1,37 @@
-# Backend adapters
+# Backend adapters: what each backend reads, needs, and promises
 
 <sub>[Docs home](../README.md) · [← JSON Schemas](../schemas/README.md)</sub>
 
+> **In one sentence.** These tables are what every backend declares about itself: its formats, its
+> variables, its price and its compliance posture.
+
 You want to know which backend can read your file, what key it needs, and whether your policy
 allows it. This page answers all three from the descriptor each backend ships. A backend is one
-document-processing engine behind OpenReading, for example a hosted API such as Reducto or a
-local library such as PyMuPDF. An adapter is the package that wraps one backend. Its descriptor
-is the static record in which the backend declares the formats it reads, the environment
-variables it needs and its compliance posture.
+parser, such as the local `pymupdf` library or a hosted API. An adapter is the package that wraps
+one backend. Its descriptor is the static record in which the backend declares the formats it
+reads, the environment variables it needs and its compliance posture.
 
-You get five tables. The first lists the formats each backend reads. The second lists the install
-extra and the environment variables each backend needs. The third lists each backend's compliance
-posture, license and signup page. The fourth lists what each backend charges per page and the
-ceilings it puts on one request. The fifth lists which parts of a response each backend can fill.
-You also get the command that shows which backends are ready on this machine. You need the package
-installed with `uv sync --all-extras --dev`, and a key for any hosted backend you want to call.
-Local backends such as `pymupdf` and `tesseract` need no key.
+The five tables under [Catalog](#catalog) cover what each backend reads, needs, promises, charges,
+and can put in a response. You need the package installed with `uv sync --all-extras --dev`, and a
+key for any hosted backend you want to call. Local backends such as `pymupdf` and `tesseract` need
+no key.
 
 ## What this is
 
 One command tells you which backends are ready on this machine. Each backend lives in its own
 package, and `BUILTIN_ADAPTERS` in `registry.py` is the only registration point. Run
 `uv run openreading backends` to see readiness. "Configured" means the backend's install extra
-imports and its declared environment variables resolve. It never means the vendor accepted the
-key, which `uv run openreading backends --check <id>` measures. After `uv sync --all-extras --dev`,
-with no keys set, you should see this output.
+imports and its declared environment variables resolve. An install extra is a named optional
+dependency group in `pyproject.toml`, so a backend's client library installs only when you ask for
+it. "Configured" never means the vendor accepted the key.
+`uv run openreading backends --check <id>` measures that by calling the vendor, and a vendor with
+no free liveness call reports `configured_unverified` instead of spending your money. After
+`uv sync --all-extras --dev`, with no keys set, you should see this output.
 
 ```
 BACKEND                        TYPE               CONFIGURED  MISSING
-anthropic-claude               hosted_api         no          -
-aws-textract                   hosted_api         no          -
+anthropic-claude               hosted_api         no          ANTHROPIC_API_KEY, ANTHROPIC_MODEL
+aws-textract                   hosted_api         no          AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, AWS_REGION, OPENREADING_TEXTRACT_S3_BUCKET
 azure-document-intelligence    hosted_api         no          AZURE_DOCUMENT_INTELLIGENCE_KEY, AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT
 chunkr                         hosted_api         no          CHUNKR_API_KEY
 docling                        oss_library        no          DOCLING_SERVE_URL
@@ -45,6 +47,13 @@ reducto                        hosted_api         no          REDUCTO_API_KEY
 tesseract                      oss_library        yes         -
 ```
 
+The two commands below run against `sample.pdf`, the generated document every guide uses. Build it
+first.
+
+```bash
+uv run python -c 'from openreading.testing.sample_pdf import build_sample_pdf; open("sample.pdf","wb").write(build_sample_pdf())'
+```
+
 Using a backend without its key gives exit code 3, not a crash. `uv run openreading parse sample.pdf
 --backend reducto` prints this message.
 
@@ -52,22 +61,32 @@ Using a backend without its key gives exit code 3, not a crash. `uv run openread
 [reducto] missing required credentials/config: REDUCTO_API_KEY. Sign up / configure: https://platform.reducto.ai
 ```
 
+Every adapter is tested offline against recorded vendor responses and injected faults, and that
+offline suite is what the CI badge covers. Real vendor calls run only in a manual, key-gated lane
+(`make verify-live`), so nothing here proves a hosted backend answered today. Measure that yourself
+with `uv run openreading backends --check <id>`, which probes the vendor.
+
+Every adapter passes a conformance kit before it ships, which checks bbox geometry, channel
+honesty, cost shape and determinism. Channel honesty means a channel graded `N`, `D` or `X` in
+[the fifth table](#what-each-backend-can-put-in-a-response) behaves that way.
+
 ## Catalog
 
-The five tables below cover what each backend reads, needs, promises, charges, and can put in a
-response. A table cell
-reading none means the descriptor sets no value for that field, which is different from a value of
-zero. A required env var has `required: true` in the backend's
-descriptor (its `AdapterDescriptor`). A backend with no required var uses its SDK's own
-credential chain when nothing is set.
+A table cell reading none means the descriptor sets no value for that field, which is different
+from a value of zero. A required env var has `required: true` in the backend's descriptor (its
+`AdapterDescriptor`). A backend with no required var uses its SDK's own credential chain when
+nothing is set.
 
 Source: `src/openreading/adapters/registry.py` (the `BUILTIN_ADAPTERS` mapping) and each
 `make_adapter(id).descriptor` (`credentials_spec`, `config_spec`, `compliance`, `runtime.license`,
-`signup_url`). The install extra is the `pyproject.toml` extra of the same name. The exception is
-the entry in `scripts/check_extras_parity.py` (`EXTRA_NAME_EXCEPTIONS`). Live truth: `uv run
+`signup_url`). The install extra is the `pyproject.toml` extra of the same name. The one exception
+is `aws-textract`, whose extra is named `textract`. `scripts/check_extras_parity.py` holds it in
+`EXTRA_NAME_EXCEPTIONS`. Live truth: `uv run
 openreading backends` (readiness) and `uv run python -c "from openreading.adapters.registry import
 make_adapter; print(make_adapter('reducto').descriptor.to_schema_dict())"` (every field). If a
 table and that output disagree, the output is right and the table needs fixing.
+
+### What each backend reads
 
 The first table gives the formats each backend reads. Every backend declares them in
 `capabilities.input_formats` of its descriptor. When a request names the file's MIME type, the
@@ -99,10 +118,10 @@ and that output disagree, the output is right and the table needs fixing.
 | `reducto` | pdf, png, jpg, docx, xlsx, pptx |
 | `tesseract` | png, jpg, tiff, bmp, pdf (rasterized) |
 
-The second table gives each backend's install extra and environment variables. An install extra
-is a named optional dependency group in `pyproject.toml`, so a backend's client library installs
-only when you ask for it. In the env columns, none means the backend declares no variable of
-that kind.
+### What each backend needs to run
+
+The second table gives each backend's install extra and environment variables. In the env columns,
+none means the backend declares no variable of that kind.
 
 | id | type | install extra | required env | optional env |
 |---|---|---|---|---|
@@ -118,9 +137,16 @@ that kind.
 | `open-ocr` | hosted_api | `open-ocr` | `OPENOCR_API_KEY` | `OPENOCR_ENGINE` |
 | `pulse` | hosted_api | `pulse` | `PULSE_API_KEY` | none |
 | `pymupdf` | oss_library | `pymupdf` | none | none |
-| `qwen-vl` | self_hosted_model | `qwen-vl` | `QWEN_VL_ENDPOINT` | `QWEN_VL_MODEL`, `QWEN_VL_API_KEY` |
+| `qwen-vl` | self_hosted_model | `qwen-vl` | `QWEN_VL_ENDPOINT` | `QWEN_VL_API_KEY`, `QWEN_VL_MODEL` |
 | `reducto` | hosted_api | `reducto` | `REDUCTO_API_KEY` | `REDUCTO_WEBHOOK_SECRET` |
 | `tesseract` | oss_library | `tesseract` | none (needs the system `tesseract` binary) | none |
+
+Two rows read `none` under required env and still fail without a key. `anthropic-claude` and
+`aws-textract` resolve credentials through their vendor SDK's own chain, so the descriptor marks
+those fields optional. Run either with nothing set and the command exits 3 with a message naming
+the variable.
+
+### What each backend promises about your data
 
 The third table gives each backend's compliance posture, license and signup page. A backend's
 compliance posture is the set of claims its descriptor makes about data handling. A BAA (Business
@@ -154,11 +180,12 @@ runs locally and has nothing to sign up for.
 
 The compliance cells in the third table are vendor claims, and each descriptor records the pages a
 maintainer read. Each descriptor carries a `sources` list whose entries are `{url, accessed,
-supports}`, where `accessed` is the day a maintainer read the page and `supports` names what that
-page established. Sources are recorded per descriptor, not per compliance field, so a cell can have
-no source that speaks to it. Four `hipaa_baa` cells cite no source for that claim today. Two of them
-read `tier_gated` (`chunkr` and `pulse`) and two read `no` (`nuextract` and `open-ocr`). Filter a
-backend's sources to see what they say about a BAA and when they were read.
+supports}`. `accessed` is the day a maintainer read the page, and `supports` names what that page
+established. Sources are recorded per descriptor, not per compliance field, so a cell can have
+no source that speaks to it. Six `hipaa_baa` cells cite no source for that claim today. Two of them
+read `tier_gated` (`chunkr` and `pulse`) and four read `no` (`google-gemini`, `mistral-ocr`,
+`nuextract` and `open-ocr`). Filter a backend's sources to see what they say about a BAA and when
+they were read.
 
 ```bash
 uv run python -c "
@@ -173,16 +200,17 @@ for s in make_adapter('azure-document-intelligence').descriptor.to_schema_dict()
 ```
 
 Change the id for any other backend, and keep the filter so the output stays on the BAA claim.
-Some descriptors carry further citations that this filter hides, including private references that
-are not published here. Vendor terms move after the date in that column, and nothing here re-reads
-them on a schedule, so the table is where your own verification starts rather than where it ends.
-A cell that no longer matches its source is a reportable defect under
+Some descriptors carry further citations that this filter hides, and every source URL among them is
+public. A `supports` line may open with a review id such as `BL-166`, which
+[`AGENTS.md`](../../../AGENTS.md) explains. Vendor terms move after the date in that column, and
+nothing here re-reads them on a schedule. The table is where your own verification starts rather
+than where it ends. A cell that no longer matches its source is a reportable defect under
 [`SECURITY.md`](../../../SECURITY.md), which names a lying descriptor field as a compliance-filter
 bypass.
 
 Descriptors record four more compliance facts that no policy key gates: `soc2`, `gdpr`, `pci` and
 `phi_path_constraints`. A fifth field, `data_retention`, is read by nothing either. It restates in
-prose what the enforced `max_retention_hours` holds as a number, so it is not counted above. Print
+prose what the enforced `max_retention_hours` holds as a number, so it is not one of the four. Print
 them with `make_adapter(id).descriptor.to_schema_dict()['compliance']` and use them for your own
 reporting, not for routing. The router guide lists that gap under
 [Not built yet](../router/README.md#not-built-yet).
@@ -198,16 +226,18 @@ single page. That declaration is a range, and `usd_per_page_equiv_low` and
 twelve-page document costs twelve times the rate in this table.
 
 The `basis` column says how far to trust that pair. `billed` means the response carries the charge
-the vendor actually made. `estimated` means the adapter projects the rate from a published price
-list. `infra_only` means the backend runs on hardware you already pay for, so the response reports
-a null price rather than an invented one. `unknown` means the vendor publishes no rate at all, and
+the vendor made. `estimated` means the adapter projects the rate from a published price
+list. `infra_only` means the backend runs on hardware you already pay for, so the response omits
+`cost_usd` rather than inventing a number. `unknown` means the vendor publishes no rate at all, and
 the adapter declines to guess one.
 
 The three limit columns say how much work one request may carry. Max pages per request is the page
-count the vendor accepts, quoted from the descriptor, and the router's stage-2 filter reads it. The
-batch concurrency cap is the ceiling that `--jobs` is reduced to for that backend, which the batch
-guide covers under [Sizing a large run](../batch/README.md#sizing-a-large-run). Native batch max
-items is how many documents the vendor's own bulk endpoint accepts in one job.
+count the vendor accepts, quoted from the descriptor as free text. Nothing in the router or the
+batch runner reads it, so check it yourself before you send a long document. The batch concurrency
+cap is the ceiling that `--jobs` is reduced to for that backend, which the batch guide demonstrates
+in
+[walkthrough step 2](../batch/README.md#2-a-single-file-a-glob-several-files---jobs-the-size-guard-a-strategy).
+Native batch max items is how many documents the vendor's own bulk endpoint accepts in one job.
 
 | id | low $/page-equiv | high $/page-equiv | `basis` | max pages per request | batch concurrency cap | native batch max items |
 |---|---|---|---|---|---|---|
@@ -230,16 +260,21 @@ items is how many documents the vendor's own bulk endpoint accepts in one job.
 Source: `Cost`, `Capabilities.max_pages_per_request` and `BatchSupport` in
 `src/openreading/types/descriptor.py`, read through `make_adapter(id).descriptor`. Live truth: `uv
 run python -c "from openreading.adapters.registry import make_adapter, BUILTIN_ADAPTERS; [print(i,
-make_adapter(i).descriptor.to_schema_dict()['cost']) for i in BUILTIN_ADAPTERS]"`, with `['batch']`
-and `['capabilities']['max_pages_per_request']` for the other columns. If the table and that output
+make_adapter(i).descriptor.to_schema_dict()['cost']) for i in BUILTIN_ADAPTERS]"`, with
+`.get('batch')` and `['capabilities'].get('max_pages_per_request')` for the other columns, because
+`to_schema_dict()` drops a field the descriptor leaves unset. If the table and that output
 disagree, the output is right and the table needs fixing.
 
 A corpus turns that spread into a decision. Two hundred thousand documents averaging twelve pages
-is 2.4 million page-equivalents. That corpus bills $1,200 at `open-ocr`'s low end and $192,000 at
-`anthropic-claude`'s high end, a factor of 160 between the two. Both are published rates rather
-than quotes you negotiated, so treat the pair as a range and not as a price. Every cost estimate
-elsewhere in this project is built from these two columns. The `cost/doc` figure that `openreading
-leaderboard` prints is one of them, and it multiplies the low end alone by an assumed page count.
+is 2.4 million page-equivalents. That corpus bills $1,200 at `open-ocr`'s low end and $24,000 at
+`anthropic-claude`'s. Comparing published floors, the factor is 20. At `anthropic-claude`'s high
+end the same corpus bills $192,000, so the full published spread is a factor of 160. Every figure
+here is a published rate rather than a quote you negotiated. Treat the low and high columns as a
+range, not as a price. Every cost estimate elsewhere in this project is built from these two
+columns. The `cost/doc` figure that `openreading leaderboard` prints is one of them, and it
+multiplies the low end alone by an assumed page count. A corpus that size runs in shards rather
+than one invocation. A single run holds every response in memory and has no resume of its own.
+[Sizing a large run](../batch/README.md#sizing-a-large-run) gives the ceiling and the shard size.
 
 ### What each backend can put in a response
 
@@ -296,34 +331,41 @@ openreading route sample.pdf --policy phi.json`.
 - `na_local` backends pass every column.
 - Your policy sets the eligible set, and three of its keys widen it deliberately. Nothing after the
   policy widens it again, so no request, strategy, fallback or resume can readmit a dropped
-  backend. The three keys are named under
-  [How it decides](../router/README.md#how-it-decides) in the router guide.
+  backend. The three keys are the ones in the bullets above. The router guide's
+  [How it decides](../router/README.md#how-it-decides) tabulates every drop code alongside them.
 
 ## Override form
 
-You can set one OpenReading-specific variable and it wins over the vendor's own variable name.
-`OPENREADING_<SLUG>_<KEY>` beats the service-native var. `<SLUG>` is the id with `-` replaced by
-`_`, and `<KEY>` is the descriptor's spec key. For example, `OPENREADING_REDUCTO_API_KEY` beats
-`REDUCTO_API_KEY`. Source: `credentials.py` (`_slug_env`). The precedence rules are in `uv run
-python -m pydoc openreading.credentials`.
+Set `OPENREADING_<SLUG>_<KEY>` and it wins over the vendor's own variable name. `<SLUG>` is the id
+in upper case with `-` replaced by `_`, and `<KEY>` is the descriptor's spec key in upper case. For
+example, `OPENREADING_REDUCTO_API_KEY` beats `REDUCTO_API_KEY`. Source: `credentials.py`
+(`_slug_env`). The precedence rules are in `uv run python -m pydoc openreading.credentials`.
 
 ## Not built yet
 
-- `uv run openreading backends` prints `-` under MISSING for `anthropic-claude` and `aws-textract`
-  while reporting `no`. `GET /v1/backends` names the vars. Reproduce it with `uv run openreading
-  backends | grep -E "anthropic-claude|aws-textract"`.
-- The `openreading.credentials` docstring says `openreading backends` "still reports them ready"
-  with no env set. They are reported `no`. Reproduce it with `grep -n "reports them ready"
-  src/openreading/credentials.py`.
-- `CHANGELOG.md` says `google-document-ai` declares an empty `credentials_spec`. The descriptor has
-  one optional entry. Reproduce it with `uv run python -c "from openreading.adapters.registry import
-  make_adapter;
-  print(make_adapter('google-document-ai').descriptor.to_schema_dict()['credentials_spec'])"`.
+- Nothing reads `capabilities.max_pages_per_request`. A document over the vendor's ceiling fails at
+  the vendor rather than at the router's stage 2. Reproduce it with
+  `grep -rn max_pages_per_request src/openreading/router src/openreading/batch`, which prints
+  nothing.
+- `framework_loader` is one of the four backend types the schemas allow, and no adapter declares
+  it. A wrapper around a framework's document loaders would be the first. Reproduce it with
+  `uv run openreading backends`, which prints only `hosted_api`, `oss_library` and
+  `self_hosted_model`.
+
+## Maintenance
+
+This section is the bookkeeping a backend owes this page, and it is not the work of building one.
+Once the adapter itself works, register it in `BUILTIN_ADAPTERS`. Add one row to each of the five
+tables here from its descriptor. Add a block to `.env.example`. Add the extra to `pyproject.toml`.
+`scripts/check_extras_parity.py` fails until the extra exists. It also fails until a slug that
+differs from its extra name is in `EXTRA_NAME_EXCEPTIONS`. A changed compliance value, format, env
+var, rate, limit or channel grade is one cell here. When a "Not built yet" line stops being true,
+delete it. The full table of what to update for each kind of change is under *Where a change gets
+documented* in [`AGENTS.md`](../../../AGENTS.md).
 
 ## See also
 
-- [Docs home](../README.md) is the documentation home. It lists every guide and explains how to
-  use OpenReading from an agent.
+- [Docs home](../README.md)
 - [`.env.example`](../../../.env.example) lists every var with its signup URL.
 - `uv run python -m pydoc openreading.credentials` prints the precedence and the `.env` rules.
 - [Routing and keys](../router/README.md#how-it-decides) tabulates every drop code with the policy
@@ -332,25 +374,5 @@ python -m pydoc openreading.credentials`.
 - `uv run python -m pydoc openreading.adapters` prints the runbook for adding a backend, and
   [`scripts/new_adapter.py`](../../../scripts/new_adapter.py) scaffolds it.
 - [JSON Schemas](../schemas/README.md) describes the response every backend returns.
-
-## Maintenance
-
-This section is the bookkeeping a backend owes this page, and it is not the work of building one.
-Writing the adapter comes first, and it is the larger job. An adapter is a static
-`AdapterDescriptor` plus eight methods. Every method that reaches a vendor builds its own client,
-so a freshly constructed instance can finish a job the first one started. That rule is what
-`protocol_version=2` names. The conformance kit checks it, along with bboxes, channel honesty, cost
-shape and determinism, before a backend may ship. `uv run python -m pydoc openreading.adapters` is
-the runbook for all of that, and it lists twelve touchpoints a new backend lands in. Start with
-[`scripts/new_adapter.py`](../../../scripts/new_adapter.py), which creates every file and makes
-every edit in one run, so the twelve can never land partially.
-
-Once the adapter itself works, register it in `BUILTIN_ADAPTERS`. Add one row to each of the five
-tables here from its descriptor. Add a block to `.env.example`. Add the extra to `pyproject.toml`.
-`scripts/check_extras_parity.py` fails until the extra exists. It also fails until a slug that
-differs from its extra name is in `EXTRA_NAME_EXCEPTIONS`. A changed compliance value, format, env
-var, rate, limit or channel grade is one cell here. When a "Not built yet" line stops being
-true, delete it. The full table of what to update for each kind of change is under *Where a
-change gets documented* in [`AGENTS.md`](../../../AGENTS.md).
 
 <sub>[Docs home](../README.md) · [← JSON Schemas](../schemas/README.md)</sub>

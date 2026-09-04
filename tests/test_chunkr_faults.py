@@ -286,7 +286,7 @@ def test_webhook_on_already_terminal_job_is_a_noop():
 
 
 def test_webhook_idless_event_against_idless_job_is_ignored():
-    # BL-81: BL-70 (sprint 12) added an adapter-level guard, independent of the dispatcher's own
+    # BL-81: BL-70 added an adapter-level guard, independent of the dispatcher's own
     # (server/app.py), so an id-less event can never match an id-less job. Without it,
     # `eid in (job.webhook_token, job.backend_job_id)` is `None in (None, None)` — True by
     # construction — the moment a vendor create-task 2xx response omits its own id field (leaving

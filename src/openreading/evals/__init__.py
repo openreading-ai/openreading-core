@@ -1,6 +1,24 @@
-"""OpenReading eval harness — score any backend on your own documents (recommendations.md:
-own eval harness before trusting any vendor number). Uniform scoring across all backend types
-because they all return the same NormalizedResponse."""
+"""Benchmark harness: score any backend on documents you labeled yourself.
+
+A vendor publishes accuracy numbers measured on the vendor's own documents. This package
+measures a backend on a dataset you own, so a routing decision rests on a number you can
+check. Scoring is uniform across backend types because every backend returns the same response
+envelope.
+
+A dataset is a directory of ``<case>/case.json`` files, and ``openreading.evals.dataset``
+defines that layout. ``run_dataset`` drives one adapter over the directory. ``score`` measures
+the five dimensions a case may declare: text similarity, text-contains fraction, markdown
+similarity, typed-field precision, recall and F1, and table-cell accuracy
+(``openreading.evals.scorers``). ``run_leaderboard`` ranks several named backends on one
+dataset (``openreading.evals.leaderboard``).
+
+One synthetic sample ships at ``src/openreading/evals/sample/loan_page1/case.json``. Labeled
+data over real documents never lands in this repository, and
+``tests/test_evals_benchmark_only.py`` fails if any does. Pass such a dataset as a path
+instead. ``openreading.comparison`` (truth mode) and ``openreading.strategies.calibrate``
+import these scorers rather than re-implementing them, so there is one metric stack. The guide
+is ``src/openreading/evals/README.md``.
+"""
 
 from __future__ import annotations
 

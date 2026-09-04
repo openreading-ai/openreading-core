@@ -1,4 +1,4 @@
-"""Chain executor (GOAL2 milestone 7.2) — the piece that makes fallback EXECUTABLE, not just
+"""Chain executor: the piece that makes fallback EXECUTABLE, not just
 demonstrable. `execute_plan` walks a RoutePlan chosen→fallbacks and returns the first successful
 NormalizedResponse.
 
@@ -69,9 +69,9 @@ _TAXONOMY = (TerminalError, RetryableError, UnsupportedFeatureError, ComplianceR
 @dataclass
 class Attempt:
     backend: str
-    category: (
-        str  # "skipped" | "TerminalError" | "RetryableError" | "UnsupportedFeatureError" | ...
-    )
+    # "skipped" | "terminal" (a crash outside the taxonomy) | "TerminalError" |
+    # "RetryableError" | "UnsupportedFeatureError" | "ComplianceRefused"
+    category: str
     code: str
     detail: str = ""
 
@@ -223,15 +223,13 @@ def execute_plan(
             trail.append(Attempt(desc.id, category, code, str(e)))
             continue
         except Exception as e:
-            # BL-99: adapter.normalize() is ordinary adapter code, not one of the four _TAXONOMY
-            # types above — a plain KeyError/IndexError/ValueError/AttributeError out of it used to
-            # propagate straight out of this function uncaught, past a healthy fallback backend,
-            # contradicting this module's own docstring ("Terminal / Retryable-exhausted /
-            # UnsupportedFeature fall to the next backend"). Treated as a terminal failure for THIS
-            # backend (fall back, never retried) — the same fallback behavior _TAXONOMY gets.
-            # execute_plan has never routed through readiness.auth_hinted (it predates it, BL-37) —
-            # its own redaction has always been this hand-copied sequence, so the identical redact()
-            # call is mirrored here by hand rather than delegated.
+            # BL-99: adapter.normalize() is ordinary adapter code, not one of the four
+            # _TAXONOMY types above. A plain KeyError/IndexError/ValueError/AttributeError out
+            # of it must fall to the next backend exactly like a TerminalError, never escape
+            # this function past a healthy fallback. It is recorded as "terminal" so the
+            # trail shows that the class is outside the taxonomy. execute_plan does not route
+            # through readiness.auth_hinted (BL-37), so the same redact() call is mirrored
+            # here by hand.
             e.args = (redact(str(e), secret_values(desc, ctx.credentials)),)
             trail.append(Attempt(desc.id, "terminal", "", str(e)))
             continue

@@ -27,8 +27,9 @@ them is complete and correct -- you never have to implement either.
 -----------------------------------------------------------------------------
 Run `uv run python scripts/new_adapter.py <slug> --template <existing-slug> --type <type>` -- a
 repository-development tool, not a verb on the shipped `openreading` CLI. One run creates every
-file in §2's CREATE list and makes all seven EDITs, so the twelve touchpoints can never land
-partially. `--type` is one of the seven shapes the picker table below groups the templates into
+file in §2's CREATE list and makes five of the seven EDITs. The other two are yours, and the run
+report prints HAND next to each, so the mechanical touchpoints cannot land partially. `--type` is
+one of the seven shapes the picker table below groups the templates into
 (`hosted_api`, `hosted_sync_async`, `hosted_webhook`, `hosted_aggregator`,
 `self_hosted_endpoint`, `cloud_sdk`, `in_process`; e.g. `--template chunkr --type hosted_api`);
 a template/type pair outside that set is declined, never improvised -- fall back to the manual
@@ -121,8 +122,11 @@ Files to EDIT -- each guarded by a test that fails if you forget it:
     openreading.credentials         one line in the module docstring's "Per-backend reference"
                                     (a hand-written list; the generator prints a HAND reminder
                                     and does not edit it). Guard: reviewer eyes.
-    README.md                       the "N adapters" count (2 places may mention counts).
-                                    Guard: reviewer eyes.
+    src/openreading/adapters/README.md  one row in each of the five Catalog tables (input
+                                    formats, install extra and env, compliance, cost and
+                                    limits, response channels), every value copied from the
+                                    descriptor, plus the pasted `openreading backends` table
+                                    re-run. Guard: reviewer eyes.
     tests/test_descriptor_specs.py  `EXPECTED_CRED_KEYS["<slug>"]`,
                                     `EXPECTED_CONFIG_KEYS["<slug>"]`; add the slug to the
                                     `test_accepts_url_only_for_native_url_backends` set IFF
@@ -346,6 +350,10 @@ Omitting `adapter_factory` is not a shortcut to a passing build -- it is a DIFFE
 claim (the baseline checks stay green either way, since they say nothing about instance
 independence), and `protocol_version=2` is specifically the R1/R2/R3 claim.
 
+Two optional capabilities follow before §4: liveness and native batch. Skip both unless the
+provider offers a free non-billing liveness call or a genuine multi-document endpoint, and go
+straight to "4. Tests -- the recipe" below.
+
 Liveness (optional): `LivenessProbe` + `probe_liveness`
 The platform half (`check_liveness`, the status ladder, inference, redaction, `probe_http`) is
 `openreading.liveness`. `health()` answers "are my Python deps importable here";
@@ -542,7 +550,8 @@ does:
   be recorded in descriptor `notes`, but as shipped it lives only in the design doc's Appendix A
   audit list, `internal/design/batch-intake.md`, and in `google_document_ai`'s module
   docstring);
-  `reducto`/`pulse` are unaudited (platform until proven); `aws-textract`, `chunkr`, `open-ocr`,
+  `reducto`, `pulse`, `google-gemini` and `mistral-ocr` are unaudited (platform until proven).
+  `aws-textract`, `chunkr`, `open-ocr`,
   the locals and the self-hosted endpoints have no multi-document call (request-level batching
   for `qwen-vl`/`nuextract` is the serving layer's concern, not the adapter's).
 
@@ -620,7 +629,8 @@ coverage dip (add fault tests, never lower the floor), a descriptor schema viola
 - [ ] live test skips cleanly without the key; runs against the real API with it
 - [ ] liveness: either a real probe (free, non-billing, declared + tested offline and live) or
       NO `liveness` block at all -- never a billed call, and never a guessed endpoint URL
-- [ ] README adapter count updated
+- [ ] `src/openreading/adapters/README.md` catalog rows added and the pasted `backends` table
+      re-run
 - [ ] commit message records flow, channel posture, cost basis, and deliberate non-choices
 
 Known-honest caveat to state in the PR/commit: the `_Httpx*` real-network client is excluded

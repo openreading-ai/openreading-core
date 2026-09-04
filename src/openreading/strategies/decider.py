@@ -6,9 +6,9 @@ the deterministic engine. The file grammar that declares decision points is
 `openreading.strategies.model` (+ `schemas/strategy-config.v0.2.json`); the walk that consults them
 is `openreading.strategies.engine` (`_resolve_decision_point`, `_decide`, `_select_best`,
 `_pairwise_judge`, `_replay_decision`). Nothing here adds a node type, a signal, or an action the
-engine does not already have. Section numbers below match the `decider.md §n` citations in this
-module's and the engine's comments. Decisions: internal/decisions/DECISIONS.md D-v3-15, D-v3-17,
-D-v3-18, D-v3-24.
+engine does not already have. The `decider.md §n` citations in this module's and the engine's
+comments name the numbered sections of this docstring, which absorbed that design record.
+Decisions: internal/decisions/DECISIONS.md D-v3-15, D-v3-17, D-v3-18, D-v3-24.
 
 Status
 ------
@@ -224,7 +224,7 @@ resolves the decision point to its engine default with the reason traced as
   here). `validate` does NOT check `decider.llm.backend` / `judge.backend` against the registry
   — its unknown-backend error runs only on leaf `backend:` nodes and cascade steps — so a
   misspelled decider/judge backend passes `validate` and first surfaces as a run-time
-  `unavailable` (the code comment in `_backend_eligible` claiming a load-time check is stale).
+  `unavailable`.
 - `trace_missing` — replay mode only: a decision point has no logged choice in the trace, or the
   logged choice is no longer a valid candidate for this run (§5).
 - `otherwise_pruned` — a `decide:` node's own `otherwise:` was pruned by compliance while at least
@@ -584,7 +584,8 @@ def _backend_eligible(
     except ComplianceRefused:
         return "compliance"
     except KeyError:
-        # unknown backend id — validate flags this at load time; at run time treat as unavailable.
+        # Unknown backend id: `validate` never checks the decider or judge backend against
+        # the registry, so a misspelling first surfaces here. Treat it as unavailable.
         return "unavailable"
     return None
 

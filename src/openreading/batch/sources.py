@@ -66,8 +66,8 @@ _GLOB_CHARS = set("*?[")
 # BL-132: the one owned default for the `max_items` ceiling below. `server/app.py`'s `POST
 # /v1/batch` ceiling on `documents[]` (`MAX_BATCH_DOCUMENTS`) imports this constant rather than
 # hardcoding its own copy of `200`, so the CLI's directory-expansion default and the server's
-# request-body default cannot drift apart the way they had for five prior sprints (named at
-# sprints 15-19; see `internal/eng-council/backlog/`).
+# request-body default cannot drift apart, which they repeatedly did while each surface owned
+# its own number.
 DEFAULT_MAX_ITEMS = 200
 
 
@@ -194,13 +194,12 @@ def _streaming_sha256(p: Path) -> str:
     """1 MB-chunked sha256 — bounds peak memory to one chunk regardless of file size, instead of
     loading the whole file into memory just to hash it (`hashlib.sha256(p.read_bytes())`'s prior
     shape). Output is byte-identical to the whole-file digest (L1: the hash itself never changes,
-    only how it's computed) — the file is still read once here and once more by the caller that
-    actually needs the bytes (`api.py`'s `_document_dict`); closing that second read for every
-    batch item without holding every item's bytes in memory at once (`run_batch` receives the
-    WHOLE resolved list before dispatch begins, per `batch/runner.py`'s own two-phase
-    resolve-then-dispatch shape) needs interleaving read-and-dispatch per item, not a signature
-    change — bigger than this milestone's scope; disclosed to FOUNDER-INBOX.md rather than
-    implemented as a memory-scaling regression or silently dropped."""
+    only how it's computed).
+
+    Known gap: the file is read once here and once more by `api._document_dict`, which needs the
+    bytes themselves. Closing that second read means interleaving read-and-dispatch per item in
+    `batch/runner.py`, which today resolves the whole list before dispatch begins. Holding every
+    item's bytes at once instead would be a memory-scaling regression, so the second read stays."""
     h = hashlib.sha256()
     with p.open("rb") as fh:
         for chunk in iter(lambda: fh.read(_HASH_CHUNK_BYTES), b""):

@@ -3,14 +3,16 @@
 
     {
       "name": "loan_page1",
-      "input": {"builtin_sample": true, "pages": [1]}    // or {"path": "input.pdf"} or {"bytes_base64": "..."}
+      "input": {"builtin_sample": true, "pages": [1]},   // or "path", "bytes_base64", or "url"
       "backend": {"operation": "..."},                    // optional per-case backend overrides
       "compliance": {"require_local": true},              // optional per-case compliance (BL-112)
       "expected": { "text_contains": [...], "tables": [[...]], "typed_fields": {...} }
     }
 
-`builtin_sample` resolves to the generated 2-page test PDF (openreading.testing.sample_pdf) so a
-committed dataset needs no binary. Real datasets ship an `input.pdf` next to `case.json`.
+`input` takes exactly one of four forms. `builtin_sample` resolves to the generated 2-page test
+PDF (openreading.testing.sample_pdf), so a committed dataset needs no binary. `path` names a file
+beside `case.json`, which is what real datasets ship. `bytes_base64` inlines the document, and
+`url` passes a URL straight through to the backend.
 """
 
 from __future__ import annotations

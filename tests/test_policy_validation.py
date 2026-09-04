@@ -266,8 +266,8 @@ def test_the_guard_sits_in_the_shared_fold_not_in_its_callers(sample_pdf):
 
 
 def test_cli_strategy_plan_refuses_a_malformed_file_policy(sample_pdf, tmp_path, capsys):
-    """sophia's repro shape, end to end: one tagged stderr line and exit 3, the same ladder rung a
-    malformed `--policy` file already got."""
+    """A malformed file policy, end to end: one tagged stderr line and exit 3, the same ladder
+    rung a malformed `--policy` file already got."""
     config = tmp_path / "openreading.yaml"
     config.write_text(
         'version: 1\npolicy: {no_train_on_data: true, allow_unverified_compliance: "false"}\n'

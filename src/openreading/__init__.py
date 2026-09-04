@@ -2,10 +2,12 @@
 
 One request shape, one response schema over 15 backends (hosted APIs, OSS libraries, an OCR
 binary, self-hosted models) so a caller swaps `backend` from `pymupdf` to `reducto` to
-`aws-textract` and nothing else changes. Bring-your-own key (charges land on the caller's
-account); a fully-local tier (`pymupdf`, `tesseract`, `docling`) needs no keys and no network.
+`aws-textract` and nothing else changes. You bring your own key, so the charges land on your own
+account. Two backends run with no key and no setup, `pymupdf` and `tesseract`. `docling` and
+`qwen-vl` also stay on your own hardware, once you run the service yourself and point
+`DOCLING_SERVE_URL` or `QWEN_VL_ENDPOINT` at it.
 
-This docstring is the self-contained briefing for an LLM or agent USING the library. Every
+This docstring is the self-contained briefing for anyone, human or agent, USING the library. Every
 backend id, flag and JSON shape below is taken from the vendored schemas
 (`openreading/schemas/*.json`, the source of truth). Do not invent others. An agent EXTENDING
 the library (a new backend) reads the `openreading.adapters` docstring (`src/openreading/adapters/__init__.py`) instead.
@@ -26,7 +28,7 @@ otherwise never discovers:
     compare    compare a.json b.json            compare()                 POST /v1/compare
     strategy/  parse --strategy X;              run(strategy=), route()   backend.id "strategy:X";
     route      route doc.pdf --policy p.json                              POST /v1/route
-    evals      leaderboard DIR --backends X,Y   (CLI only)                (CLI only)
+    evals      leaderboard DIR --backends X,Y   evals.run_leaderboard()   (none)
 
 `compare` says WHERE two backends disagree and never which one is right, because it has no
 ground truth to judge against. `leaderboard` says which one is CORRECT, by scoring each backend
@@ -304,8 +306,8 @@ backends{id: count}}`. Batch status: `succeeded` (>=1 ok, 0 failed) / `partial` 
 `corpus-report.v0.1`: `{schema_version, subjects[], documents[{source, verdict:
 equivalent|divergent|mixed|unpaired, report?}], rollup}`.
 
-Rules an LLM must not get wrong
-===============================
+Rules a caller must not get wrong
+=================================
 - Never fabricate a channel. No confidence / blocks / tables from a backend means absent plus a
   `warnings[]` code saying why. Do not tell the user to expect it.
 - Compliance fails closed, and the policy is the ONLY thing that sets the eligible set. Exactly
@@ -341,7 +343,8 @@ Rules an LLM must not get wrong
   backend's RetryableError, which has no next rung) · 4 partial batch (some items failed); `route`
   with no compliant backend · 5 compare inputs not schema-valid · 6 interrupted while
   `OPENREADING_LEDGER` was armed (resumable; a single document names its run id, a batch names
-  none).
+  none) · 143 terminated by SIGTERM with no ledger armed, so nothing was resumable. An unarmed
+  Ctrl-C is an ordinary KeyboardInterrupt and exits 130.
 - `compare` is pure ONLY over saved envelopes: `compare(a, b)` on dicts or paths, and the CLI's
   `compare a.json b.json`, run no backend and cost nothing. The fan-out form,
   `compare doc.pdf --backends x,y,z`, runs every backend named and bills each hosted one. Do not
@@ -524,13 +527,16 @@ one. `AGENTS.md` in this repo carries the rules an extension has to satisfy.
 Where deeper docs live
 ======================
 - `openreading.api`: the Python surface contract, every exception, the env vars it reads.
-- `openreading.cli.app` / `openreading --help`: every verb, flag and exit code.
-- `openreading.server.app`: endpoints, request/response shapes, the HTTP status mapping, auth.
+- `openreading.cli` / `openreading --help`: every verb, flag and exit code.
+- `openreading.server`: endpoints, request/response shapes, the HTTP status ladder, auth.
+  `openreading.server.app` lists every environment variable the server reads.
 - `openreading.schemas` (JSON) mirrored by `openreading.types` (pydantic, round-trip tested).
+- `openreading.derive`: the channel contract, and why a channel is absent rather than wrong.
 - `openreading.comparison`: compare dimensions, stances, `--format diffs`, corpus mode.
 - `openreading.evals`: the scorer, the runner, and `leaderboard`: the verb that answers which
   backend is CORRECT on documents you labeled, where `compare` only says where two disagree.
 - `openreading.batch`: intake resolution + platform runner.
+- `openreading.router` (`compliance`): the three stages, the compliance filter, the drop reasons.
 - `openreading.strategies` (`loader`, `decider`): grammar, execution, the decider.
 - `openreading.credentials`: key resolution order, `.env` handling, security posture.
 - `openreading.ledger`: the journal / resume plane.

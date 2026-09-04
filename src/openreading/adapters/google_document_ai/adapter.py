@@ -5,8 +5,9 @@ boundingPoly.normalizedVertices (top-left, 0-1). Confidence is already 0-1 (NOT 
 
 Paragraphs → reading-order blocks, tables → cells, formFields + entities (extractor processors)
 → typed_fields. BYO GCP (project + service-account/ADC). Self-serve HIPAA BAA (Document AI is on
-the GCP covered-products list); does not train on customer data. INLINE :process (sync, ≤15pp);
-:batchProcess via GCS is a future POLL path.
+the GCP covered-products list); does not train on customer data. INLINE :process (sync, ≤15pp).
+:batchProcess stages through GCS and is not implemented here, so the platform fans out instead
+(see the openreading.adapters runbook, Native batch).
 """
 
 from __future__ import annotations

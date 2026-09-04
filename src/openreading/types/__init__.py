@@ -1,4 +1,19 @@
-"""OpenReading type surface: schema-bound pydantic models + control-plane dataclasses."""
+"""OpenReading type surface: pydantic mirrors of the vendored JSON Schemas, plus control-plane
+dataclasses.
+
+The JSON Schemas in `openreading.schemas` are the contract. Where a model and its schema could
+drift, the schema wins (DECISIONS D4). `tests/test_types_roundtrip.py` validates the request,
+response, descriptor and leaderboard envelopes back against their files.
+
+Anything that travels on the wire is pydantic: `request`, `response`, `blocks`, `descriptor`,
+`geometry`, `batch`, `leaderboard`, and `liveness.LivenessReport`. Anything that stays inside the
+process is a dataclass (DECISIONS D5): `job`, `cost`, `runtime`, and `liveness.ProbeResult`.
+`enums` holds `StrEnum` values and `errors` holds the exception taxonomy.
+
+Read one module at a time. `python -m pydoc openreading.types.request` is the request envelope and
+`python -m pydoc openreading.types.response` is the response envelope. `pydoc openreading.types`
+itself prints pydantic's generated internals for every model and is not a useful read.
+"""
 
 from __future__ import annotations
 

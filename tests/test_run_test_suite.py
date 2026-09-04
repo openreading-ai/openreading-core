@@ -3,13 +3,11 @@
 second, genuinely concurrent `pytest --cov` invocation writing an incompatible sibling coverage
 data file *mid-run*, past the point the Makefile's own sweep can reach.
 
-These tests exercise the module's decision logic and file-clearing helper directly, at pytest
-speed, with no real pytest subprocess and no real INTERNALERROR reproduced — matching this item's
-own acceptance criteria, which allows the harder-to-synthesize end-to-end retry behavior to be
-verified manually and recorded in the implementation receipt instead (mirroring `BL-61`'s own
-precedent for the same difficulty). What *is* fully asserted here, automatically, is the
-selectivity the acceptance criteria requires outright: this must retry for pytest-cov's own
-combine()-time schema-mismatch DataError and that failure alone, never for a normal red test, a
+These tests exercise the module's decision logic and its file-clearing helper directly, at pytest
+speed, with no real pytest subprocess and no real INTERNALERROR. The end-to-end retry needs a
+genuinely concurrent run to reproduce, so it was checked by hand when BL-69 landed. The tests do
+cover the selectivity that matters: this must retry for pytest-cov's own combine()-time
+schema-mismatch DataError and that failure alone. It never retries a normal red test, a
 `--cov-fail-under` breach, or any other INTERNALERROR.
 
 `TestMain` (BL-72) closes the remaining gap: `main`'s own retry-once orchestration — the actual

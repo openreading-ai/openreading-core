@@ -1,7 +1,8 @@
-"""Scorers for the eval harness. OpenReading's own eval harness is a build prerequisite, not a
-nice-to-have: 123 of 127 profiled backends have no independent benchmark (recommendations.md), and
-the two highest-value wedge doc types (bank statements/paystubs, IDs) have none at all. Quality
-routing can only use numbers you measured yourself, on your own lending/health documents.
+"""Scorers for the eval harness.
+
+Few backends publish an independent benchmark, and the ones that do measure documents that are
+not yours. Quality routing can only use numbers you measured yourself, on the documents you
+actually process.
 
 Three scorers over the normalized response, so any backend is scored on the same axes:
 - text_similarity: difflib ratio on normalized text/markdown, plus a contains-fraction check.
@@ -92,7 +93,7 @@ def response_markdown(resp: dict) -> str:
 
 
 def canonical_text(resp: dict) -> str:
-    """The ONE canonical text derivation shared by evals and compare (DESIGN §4C): document
+    """The ONE canonical text derivation shared by evals and compare: document
     text, else document markdown, else block text concatenated in reading order. A single rule so
     every consumer derives 'the text of this response' identically. Text is preferred over
     markdown because it is the guaranteed, packaging-immune channel (C1): two subjects can have

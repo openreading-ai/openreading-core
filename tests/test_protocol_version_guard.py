@@ -1,10 +1,10 @@
-"""Ledger T4b §4.3 — the "first zombie" guard, covering all 15 built-ins, per the design doc's
-own §13 (the reading T4a's own scoped version deliberately deferred until this milestone actually
-converted the remaining 5 — internal/eng-council/plans/sprint26-T4b-plan.md §4.3). T4a's own scoped
-version (naming exactly its 8 converted adapters, plus a companion assertion that the other 5 still
-declared v1) is replaced outright, not kept alongside this one — the whole point of T4b's own
-completion is that the distinction it drew no longer needs drawing.
-`registry.register(...)`'s own floor-refusal is a separate, `router/registry.py`-level test.
+"""Guard: no built-in adapter is left behind on protocol v1 after the Ledger T4b conversion.
+
+Every entry in `BUILTIN_ADAPTERS` must declare `protocol_version` 2, and no allow-list may except
+one (Ledger T4b §4.3, internal/eng-council/plans/sprint26-T4b-plan.md §4.3, design doc §13). An
+allow-list would go stale the moment a new adapter lands, so this test reads the registry itself.
+The protocol floor that `registry.register(...)` refuses to accept below has its own test at the
+`router/registry.py` level.
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from openreading.adapters.registry import BUILTIN_ADAPTERS
 
 
 def test_every_builtin_adapter_declares_protocol_version_2():
-    # No hardcoded allow-list (Ledger T4b §4.3): every entry in BUILTIN_ADAPTERS, unconditionally —
-    # this is what actually resolves the disclosed §5/§6 tension in FOUNDER-INBOX.md, since the
+    # No hardcoded allow-list (Ledger T4b §4.3): every entry in BUILTIN_ADAPTERS, unconditionally.
+    # That resolves the disclosed §5/§6 tension in internal/eng-council/FOUNDER-INBOX.md, since the
     # guard is now both meaningful (it checks something real) and green (the underlying condition
     # is really met, not merely scoped around the adapters that don't yet meet it).
     for slug, factory in BUILTIN_ADAPTERS.items():
