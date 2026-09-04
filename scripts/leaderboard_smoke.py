@@ -1,18 +1,18 @@
-"""BL-160 — the end-to-end offline leaderboard smoke (joins `make verify`).
+"""The end-to-end offline leaderboard smoke, which `make verify` runs (BL-160).
 
-Run the REAL `openreading leaderboard` CLI command (through `openreading.cli.main`, the same
-entry point a shell invocation reaches) over the one dataset this repo ships
-(`src/openreading/evals/sample`, the deterministic built-in sample PDF — no binary fixture
-needed) across two local, no-network, no-key backends: pymupdf and tesseract. Assert the printed
-`--format json` output is a schema-valid BenchmarkReport with both backends ranked and a non-empty
-per-case table.
+This runs the real `openreading leaderboard` CLI command through `openreading.cli.main`, the same
+entry point a shell invocation reaches. It runs over the one dataset this repository ships, the
+deterministic built-in sample PDF at `src/openreading/evals/sample`, so no binary fixture is
+needed. Two local backends do the work, pymupdf and tesseract, with no network and no key. The
+assertion is that the printed `--format json` output is a schema-valid BenchmarkReport, that both
+backends are ranked, and that the per-case table is not empty.
 
-Deliberately does NOT branch on whether the `tesseract` system binary happens to be installed
-(unlike compare-smoke/strategy-smoke, which must): `run_leaderboard` reuses `evals.runner.run_case`
-unchanged, which turns a missing-binary failure into that backend's own scored, error-carrying
-case (never a crash) — so this smoke is green either way, and a genuinely missing tesseract binary
-just means tesseract's row shows real errors instead of real scores, which is itself the harness
-working correctly, not a reason to special-case the assertion.
+This smoke deliberately does not branch on whether the `tesseract` system binary is installed,
+unlike the compare and strategy smokes, which must. `run_leaderboard` reuses `evals.runner.run_case`
+unchanged, and that turns a missing-binary failure into a scored, error-carrying case for that
+backend rather than a crash. The smoke is therefore green either way. A genuinely missing binary
+just means tesseract's row shows real errors instead of real scores, which is the harness working
+correctly rather than a reason to special-case the assertion.
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ def main() -> int:
 
     best = report["backends"][0]
     print(
-        f"leaderboard-smoke: OK — {len(report['backends'])} backend(s) ranked over "
+        f"leaderboard-smoke: OK. {len(report['backends'])} backend(s) ranked over "
         f"{report['dataset']['case_count']} case(s); best={best['backend_id']} "
         f"mean={best['mean_score']:.3f} cost/doc={best['cost_per_doc']:.4f}"
     )
