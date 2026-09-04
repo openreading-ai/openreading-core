@@ -28,6 +28,7 @@ def _imports():
     from parse_bench.schemas.parse_output import ParseOutput
     from parse_bench.schemas.pipeline import PipelineSpec
     from parse_bench.schemas.pipeline_io import InferenceResult, RawInferenceResult
+    from parse_bench.schemas.product import ProductType
 
     if parse_bench.__version__ != _SUPPORTED_VERSION:
         raise BenchmarkDependencyError(
@@ -42,6 +43,7 @@ def _imports():
         PipelineSpec,
         InferenceResult,
         RawInferenceResult,
+        ProductType,
     )
 
 
@@ -74,6 +76,7 @@ def _register(target: BenchmarkTarget, *, config: str | None, policy: dict[str, 
         PipelineSpec,
         InferenceResult,
         RawInferenceResult,
+        ProductType,
     ) = _imports()
     pipeline_name = _pipeline_name(target, config, policy)
     provider_name = pipeline_name
@@ -126,7 +129,7 @@ def _register(target: BenchmarkTarget, *, config: str | None, policy: dict[str, 
             PipelineSpec(
                 pipeline_name=pipeline_name,
                 provider_name=provider_name,
-                product_type="parse",
+                product_type=ProductType.PARSE,
                 config={},
             )
         )
