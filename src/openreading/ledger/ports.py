@@ -4,15 +4,15 @@ each a `typing.Protocol`. Core reaches an executor only through the `Executor` P
 `isinstance`-check one (§5.2's own pin; `strategies/engine.py`'s `_WalkCtx.executor` field is typed
 `Executor`, never `InlineExecutor`).
 
-`Executor.exec`'s `run` parameter is T1's own scoping decision (plan §10 leaves exact signatures to
-Build): the design doc's canonical form is `ctx.exec(StepRequest)` alone, appropriate for a
-substrate that reconstructs the call from the request's slim projection. T1 ships only
-`InlineExecutor`, which runs in-process and therefore does not reconstruct anything — it needs the
-caller's already-built closure over the real adapter/request/broker to actually do the work; the
-`StepRequest` it receives is the audit-facing shape, not the dispatch mechanism. A future
-distributed executor's `exec` would ignore `run` (or the Protocol drops it once decomposition and
-reconstruction-from-request are real, in T3+) — named as an interim shape, not a mock of the final
-one, matching the plan's own framing of `ctx.exec` throughout T1.
+`Executor.exec`'s `run` parameter is T1's own scoping decision. The design doc's canonical form is
+`ctx.exec(StepRequest)` alone, appropriate for a substrate that reconstructs the call from the
+request's slim projection. T1 ships only `InlineExecutor`, which runs in-process and therefore does
+not reconstruct anything — it needs the caller's already-built closure over the real
+adapter/request/broker to actually do the work; the `StepRequest` it receives is the audit-facing
+shape, not the dispatch mechanism. A future distributed executor's `exec` would ignore `run` (or the
+Protocol drops it once decomposition and reconstruction-from-request are real, in T3+) — named as an
+interim shape, not a mock of the final one, matching the design doc's own framing of `ctx.exec`
+throughout T1.
 """
 
 from __future__ import annotations
@@ -71,14 +71,17 @@ class LedgerArmingError(TerminalError):
 
 
 class Executor(Protocol):
+    """The one port the strategy walk dispatches through. `exec` journals the intent, runs the
+    step, journals the outcome, and serves a recorded outcome back instead of re-running it."""
+
     @property
     def descriptor(self) -> ExecutorDescriptor: ...
 
     async def exec(self, req: StepRequest, *, run: Callable[[], Any]) -> ExecResult:
-        """Ledger T3 (§4.0, resolving round-2 F7): journal an `attempted` record, invoke `run()`,
-        journal the terminal record, and return an `ExecResult` wrapping whatever `run()` returned
-        as `payload` (T1's own bare-payload return, additively wrapped — every existing "ok" path's
-        payload is unchanged, just unpacked one level).
+        """Ledger T3: journal an `attempted` record, invoke `run()`, journal the terminal record,
+        and return an `ExecResult` wrapping whatever `run()` returned as `payload` (T1's own
+        bare-payload return, additively wrapped — every existing "ok" path's payload is unchanged,
+        just unpacked one level).
 
         A step already terminal in the journal (replay, §4.3) short-circuits before `run()` is ever
         called: a non-`"failed"` recorded status returns its recorded outcome as an `ExecResult`
@@ -91,20 +94,26 @@ class Executor(Protocol):
 
 
 class Journal(Protocol):
+    """Append-only per-run log of `StepResult` records. `get` returns every record at one key, in
+    append order."""
+
     def append(self, result: StepResult) -> StepResult:
-        """Ledger T3 (§4.0): returns the same record, with `journal_seq` populated (a per-run
-        monotonic append count) — additive to L1's original no-return contract; every existing
-        caller that ignores the return value is unaffected. `NullJournal.append` returns its
-        argument unchanged, `journal_seq` staying `None` (L1's zero-delta guarantee)."""
+        """Ledger T3: returns the same record, with `journal_seq` populated (a per-run monotonic
+        append count) — additive to L1's original no-return contract; every existing caller that
+        ignores the return value is unaffected. `NullJournal.append` returns its argument unchanged,
+        `journal_seq` staying `None` (L1's zero-delta guarantee)."""
         ...
 
     def get(self, ref: StepRef) -> list[StepResult]:
-        """Every record at `ref`, in append order — never a single value (plan §8, resolving
-        Phase A round-2 F1): a completed leaf's key holds `[attempted, <terminal>]`."""
+        """Every record at `ref`, in append order, never a single value: a completed leaf's key
+        holds `[attempted, <terminal>]`."""
         ...
 
 
 class BlobStore(Protocol):
+    """Content-addressed payload store keyed by `(run_id, digest)`. `get` raises `PayloadExpired`
+    once the run's key is gone."""
+
     def put(self, run_id: str, digest: str, data: bytes, media_type: str) -> BlobRef: ...
 
     def get(self, ref: BlobRef) -> bytes:
@@ -114,6 +123,9 @@ class BlobStore(Protocol):
 
 
 class KeyStore(Protocol):
+    """One encryption key per run. `destroy` is the erasure primitive the retention sweep
+    calls."""
+
     def get_or_create(self, run_id: str) -> bytes: ...
 
     def get(self, run_id: str) -> bytes:

@@ -126,6 +126,19 @@ def test_fanout_unknown_backend_exit_2(tmp_path, capsys, fake_run) -> None:
     doc = tmp_path / "doc.pdf"
     doc.write_bytes(b"%PDF-1.4")
     assert main(["compare", str(doc), "--backends", "pymupdf,made-up"]) == 2
+    err = capsys.readouterr().err
+    # The reader is typing a comma-separated list of ids, so the message names the ones that
+    # exist, the way `backends --check` always has.
+    assert "made-up" in err and "known:" in err and "pymupdf" in err
+
+
+def test_fanout_refuses_backends_and_all_ready_together(tmp_path, capsys, fake_run) -> None:
+    # --all-ready silently won, so a typed --backends list was discarded whole, an unknown id in
+    # it included. Refusing is the only way the reader learns their list was ignored.
+    doc = tmp_path / "doc.pdf"
+    doc.write_bytes(b"%PDF-1.4")
+    assert main(["compare", str(doc), "--backends", "pymupdf,tesseract", "--all-ready"]) == 2
+    assert "--backends and --all-ready are alternatives" in capsys.readouterr().err
 
 
 def test_fanout_save_dir_roundtrips(tmp_path, capsys, fake_run) -> None:

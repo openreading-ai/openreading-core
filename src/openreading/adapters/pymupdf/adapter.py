@@ -5,10 +5,10 @@ License: PyMuPDF is AGPL-3.0. It is isolated in the `pymupdf` optional extra, im
 INSIDE this module (never by core), and flagged in the descriptor so the router can surface it.
 
 Geometry: PyMuPDF reports top-left/y-down PDF points with ascender-inflated span boxes
-(internal/research/openreading/_data/live_runs.md: the title span top is 58.5 = 80 − 20×1.075, not the tight glyph box). We route
-every box through to_canonical (top_left, pdf_point) → canonical [0,1] with bbox_native, so the
-inflation is preserved, not fabricated away. confidence is structurally impossible for a
-deterministic parser → channel X + a warning, never a fake score.
+(internal/research/openreading/_data/live_runs.md: the title span top is 58.5 = 80 − 20×1.075, not
+the tight glyph box). Every box goes through to_canonical (top_left, pdf_point) to canonical [0,1]
+with bbox_native, so the inflation is preserved rather than fabricated away. confidence is
+structurally impossible for a deterministic parser → channel X + a warning, never a fake score.
 
 Concurrency: PyMuPDF extraction is NOT thread-safe. find_tables() flips the process-global
 `pymupdf._globals.small_glyph_heights` (a plain module attribute, not thread-local) to True for
@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import base64
 import threading
+from pathlib import PurePath
 from typing import Any
 
 from openreading.adapters.base import BackendAdapter
@@ -138,7 +139,7 @@ def _descriptor() -> AdapterDescriptor:
         # it costs nothing. internal/design/liveness.md §3.3.
         liveness=LivenessProbe(
             probe="local",
-            method="import fitz",
+            method="import pymupdf",
             notes="In-process: no network, no timeout, nothing billable. Instant and free to run.",
         ),
         sources=[
@@ -169,14 +170,14 @@ class PyMuPDFAdapter(BackendAdapter):
     # ---- lifecycle -----------------------------------------------------------
     def health(self) -> Health:
         try:
-            import fitz  # noqa: F401
+            import pymupdf as fitz  # noqa: F401
         except ImportError:
             return Health(
                 ready=False,
                 detail="PyMuPDF not installed",
                 missing_deps=["pymupdf (pip install 'openreading[pymupdf]')"],
             )
-        import fitz
+        import pymupdf as fitz
 
         return Health(ready=True, version=getattr(fitz, "__version__", None))
 
@@ -189,19 +190,20 @@ class PyMuPDFAdapter(BackendAdapter):
         credentials: it has nothing to infer FROM, but it does have something to measure
         (internal/design/liveness.md §2 M4)."""
         try:
-            import fitz
+            import pymupdf as fitz
         except ImportError as e:  # pragma: no cover - readiness already gates this branch
             return ProbeResult.unreachable(f"pymupdf is not importable here ({e})")
         return ProbeResult.live(
-            "responding — the library imports and runs in this process",
+            "responding, the library imports and runs in this process",
             version=getattr(fitz, "__version__", None),
         )
 
     # ---- execution (INLINE: submit does the work) ----------------------------
     def submit(self, req: OpenReadingRequest, ctx: RunContext) -> Job:
         self.assert_supports(req)  # raises UnsupportedFeatureError for extraction_schema
+        self._assert_readable_format(req)
         try:
-            import fitz
+            import pymupdf as fitz
         except ImportError as e:  # pragma: no cover - environment guard
             raise TerminalError("PyMuPDF not installed", backend_code="import_error") from e
 
@@ -231,6 +233,34 @@ class PyMuPDFAdapter(BackendAdapter):
         )
         return job
 
+    def _assert_readable_format(self, req: OpenReadingRequest) -> None:
+        """Refuse a file this backend does not read, by name, before PyMuPDF is asked to open it.
+
+        A .txt, a .docx and a truncated PDF all come back from PyMuPDF as `Failed to open stream`,
+        which names neither the problem nor the fix. The folder path already answers honestly, with
+        `skip_reason: unsupported_format`, so the single-document path answers the same way. The
+        format list is read from the descriptor rather than restated here, so the message cannot
+        drift from the catalog. A supported extension whose bytes are corrupt still falls through
+        to the generic PyMuPDF error below, because the extension is all this check can see.
+        """
+        # `filename` is what every caller above the adapter carries: the CLI and the Python API
+        # read a path into `bytes_base64` and keep the name here (`api._document_dict`), and only
+        # a hand-built request still holds `path`. Read both, so the check is not silently dead
+        # on the surface a newcomer actually types.
+        source = req.document.filename or req.document.path
+        if not source:
+            return
+        name = PurePath(source).name
+        ext = PurePath(name).suffix.lstrip(".").lower()
+        formats = self.descriptor.capabilities.input_formats
+        if not ext or ext in formats:
+            return
+        raise TerminalError(
+            f"pymupdf cannot read {name}. It reads {', '.join(formats)}, and this file is not one "
+            "of them.",
+            backend_code="unsupported_format",
+        )
+
     def _open(self, fitz, req: OpenReadingRequest):
         d = req.document
         if d.path:
@@ -254,6 +284,9 @@ class PyMuPDFAdapter(BackendAdapter):
                 # unbounded, the document's page count is not.
                 end = min(rng.end or rng.start, n)
                 idx += [p - 1 for p in range(rng.start, end + 1)]
+            # An entirely out-of-range selection would leave nothing to parse, so fall back to the
+            # whole document rather than returning an empty success the caller cannot distinguish
+            # from a blank PDF.
             if not idx:
                 idx = list(range(n))
             if req.pages.max_pages:

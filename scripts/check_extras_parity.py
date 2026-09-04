@@ -8,9 +8,9 @@ Nothing else keeps them in sync. `[dependency-groups] dev` already carries every
 dependency for testing, so a build agent that adds an adapter, writes its tests, and forgets or
 misspells the `pyproject.toml` extra sees a fully green `make verify` — the dev group already
 supplies what the tests import — while the *shipped* package is broken for a real end user.
-Eleven consecutive sprints of `internal/eng-council/reviews/sprint{15..25}-priya.md` hand-re-derived
-"fifteen adapters, fifteen extras, one documented exception, clean" from scratch because nothing
-mechanical produced that signal. This script is that mechanism.
+Before this script, nothing mechanical produced that signal. A reviewer re-derived the
+adapter count, the extra count, and the one documented exception by hand each time. This
+script is that mechanism.
 
 Three checks, all offline, stdlib-only:
 
@@ -39,8 +39,8 @@ from pathlib import Path
 
 # One explicit, named exception per historical naming mismatch between a registry slug and its
 # pyproject.toml extra name. Every exception this check tolerates must be visible here, in code —
-# no wildcard, no silent skip. Today: `aws-textract`'s extra is `textract` (see
-# the openreading.adapters runbook's own "Files to CREATE" note on why).
+# no wildcard, no silent skip. Today only `aws-textract` differs: its extra is named
+# `textract` for historical reasons, and this map is the authority for that exception.
 EXTRA_NAME_EXCEPTIONS: dict[str, str] = {
     "aws-textract": "textract",
 }
@@ -170,7 +170,7 @@ def format_errors(report: ParityReport) -> list[str]:
         expected = EXTRA_NAME_EXCEPTIONS.get(slug, slug)
         errors.append(
             f"registry slug {slug!r} has no matching pyproject.toml extra (expected extra "
-            f"{expected!r} in [project.optional-dependencies] — add it, or if this is a "
+            f"{expected!r} in [project.optional-dependencies]. Add it, or if this is a "
             f"deliberate naming mismatch, add slug {slug!r} to EXTRA_NAME_EXCEPTIONS)"
         )
     for extra in report.orphaned_extras:
@@ -182,7 +182,7 @@ def format_errors(report: ParityReport) -> list[str]:
     for name, extra in report.unmirrored:
         errors.append(
             f"package {name!r} (from extra {extra!r}) is missing from the "
-            f"{ALL_EXTRA_NAME!r} extra — add it there too"
+            f"{ALL_EXTRA_NAME!r} extra. Add it there too"
         )
     return errors
 
@@ -190,13 +190,13 @@ def format_errors(report: ParityReport) -> list[str]:
 def _print_report(report: ParityReport) -> None:
     if report.ok:
         print(
-            f"extras-parity: OK — {report.registry_slug_count} registry slugs, "
+            f"extras-parity: OK. {report.registry_slug_count} registry slugs, "
             f"{report.matching_extra_count} matching extras, {report.exception_count} "
             f"exception(s), {report.allowlisted_extra_count} allowlisted non-adapter extra(s)"
         )
         return
     errors = format_errors(report)
-    print(f"extras-parity: FAIL — {len(errors)} issue(s)", file=sys.stderr)
+    print(f"extras-parity: FAIL. {len(errors)} issue(s)", file=sys.stderr)
     for error in errors:
         print(f"  - {error}", file=sys.stderr)
 

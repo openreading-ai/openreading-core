@@ -1,5 +1,7 @@
-"""Public export for the Mistral OCR adapter."""
+"""Mistral OCR adapter (optional extra `mistral-ocr`; BYO API key; sync inline `POST /v1/ocr`)."""
 
-from openreading.adapters.mistral_ocr.adapter import MistralOCRAdapter
+from __future__ import annotations
 
-__all__ = ["MistralOCRAdapter"]
+from openreading.adapters.mistral_ocr.adapter import MistralOCRAdapter, MistralOCRClient
+
+__all__ = ["MistralOCRAdapter", "MistralOCRClient"]

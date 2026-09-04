@@ -62,6 +62,14 @@ def test_nondeterministic_subject_caps_content_findings_to_info():
     assert tdiv, "expected a text_divergence"
     assert all(f["severity"] == "info" for f in tdiv)  # capped by the non-determinism rule
     assert "anthropic-claude" in report["headline"]["nondeterministic_subjects"]
+    # The cap suffix is rendered into every human and JSON view of the report, so it carries no
+    # em dash.
+    assert all(
+        f["detail"].endswith(
+            " (info: involves a non-deterministic or generative subject, similarity only)"
+        )
+        for f in tdiv
+    )
 
 
 def test_deterministic_subjects_keep_warn_text_divergence():

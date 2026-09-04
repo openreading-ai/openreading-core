@@ -304,14 +304,14 @@ becomes an immediate, if terse, fix.
 
 `compare` — alone: run all, keep the objectively better by the engine's deterministic composite
 score, never an LLM judge in Plain. With `then`: a two-rung cascade with the gate *on the
-parallel step*, evaluated against the comparison winner. The engine (`openreading.strategies
-.engine._eval_cascade`) originally applied gates only to leaf steps (DECISIONS D-v3-7: "a
-composite step has no gate to fire"), while the schema already admitted `escalate_if` beside
-`parallel` — a live dead-config trap. Plain closed it for exactly that shape: a step gate on a
-`parallel` node is evaluated on the winner's response with leaf-step semantics (retain as
-best-so-far on fire, advance); nested-cascade / `use:` / route / decide steps stay gate-less
-(their own rules govern — distributing a parent gate onto a nested cascade made `normalize` not
-a fixed point). `compare` accepts 3+ items; `disagree` is then the worst pairwise disagreement.
+parallel step*, evaluated against the comparison winner. A step gate on a `parallel` node is
+evaluated on the winner's response, with leaf-step semantics. The gate retains that result as
+best-so-far when it fires, then advances to the next step
+(`openreading.strategies.engine._eval_cascade`). Without this rule an `escalate_if` written
+beside `parallel` would parse and then do nothing. Nested-cascade, `use:`, route and decide
+steps stay gate-less, because their own rules govern them. Distributing a parent gate onto a
+nested cascade would stop `normalize` being a fixed point (D-v3-7). `compare` accepts 3+ items;
+`disagree` is then the worst pairwise disagreement.
 If fewer than two non-shadow branches finish, `disagree` cannot bind (skipped, missing-signal
 law) and the quality criteria still gate the survivor. The design's "degraded compare is never
 silent" `compare_degraded` warning (internal/design/simple-strategies.md §6.3) is designed, not
@@ -326,9 +326,7 @@ finished non-shadow branches (worst pair for 3+), attached to the winner's `Sign
 the step gate sees it through the ordinary probe/`evaluate_gate` path, and recorded on the
 winning attempt unconditionally (`Attempt.disagreement`, calibration telemetry). Inlined rather
 than imported from the comparison package — the leaf-isolation invariant forbids `strategies/`
-importing `comparison/`. Its grammar landed before its computation; until then the predicate was
-an unavailable signal (skipped, never fired), so `compare` + `then` files silently strengthened
-from "escalate when the winner looks bad" to "… or when the branches disagree" once it shipped.
+importing `comparison/`.
 
 Time — `max_time` has one placement: `budget.max_duration` on the body root, one pool for the
 whole strategy (the duel and the `then:` rung share it), clamping under `limits:` as always
@@ -496,24 +494,16 @@ Design decisions, and the failure each avoids
 * Every Plain construct desugars to existing longhand — one engine, one validator, one trace,
   one replay path. The only engine changes Plain brought were the step gate on parallel steps
   and the `disagreement_over` signal, both available to advanced files too.
-* The schema was cut to `strategy-config.v0.2.json` rather than edited in place: v0.1 is a
-  byte-frozen released artifact (schema-evolution law — released files are edited by cutting a
-  new version). The change is additive, the config `version` const stays 1, and v0.2 validates
-  every v0.1 config.
+* The grammar lives in `strategy-config.v0.2.json`, a new file rather than an edit of v0.1. A
+  released schema is byte-frozen, so it is changed by cutting a new version. The change is
+  additive, the config `version` const stays 1, and v0.2 validates every v0.1 config.
 * Presets stay vendored in longhand; they carry `intent:`, which Plain cannot spell. The docs
   pair each with its Plain near-equivalent (`openreading.strategies.presets`).
-* Money walls were removed. Plain once had a seventh key, `max_cost` (`budget.max_cost_usd` on
-  the body root), plus a validate-time rule that a `race`/`compare` over more than one hosted
-  backend needed a spending wall, both backed by a plan-time cost estimator. Prices change too
-  often to estimate or enforce at plan time — every such figure was fabricated — so the engine
-  now only *reports* the real billed cost; `budget:` is `{max_duration, max_attempts}` and
-  `budget_exhausted` means the time deadline only. Three YAML examples in
-  internal/design/simple-strategies.md are therefore stale and are not reproduced here because
-  the v0.2 grammar rejects them: the five-strategies file whose `main:` and `contracts:` carry
-  `max_cost: 0.50` / `max_cost: 0.60`, the compiled `contracts` tree with
-  `budget: { max_cost_usd: 0.6 }` at the body root, and the preset-equivalence fragment with
-  `max_cost: 0.50` (and `max_cost: 2.00` for `max_accuracy`). Their `max_cost`-free forms are
-  the blocks above.
+* No dollar ceiling. Prices change too often for a plan-time estimate to be honest, so the
+  engine reports the real billed cost and never enforces a spending wall. `budget:` carries
+  `max_duration` and `max_attempts`, and `validate` refuses any file that declares
+  `max_attempts`, because no engine code reads it. `budget_exhausted` therefore always means
+  the time deadline.
 * No pre-parse scan router: the cheap first rung *is* the free scan detector. No auto-tiering by
   descriptor cost: ordering stays explicit.
 
@@ -663,7 +653,7 @@ def _desugar_try(
         if len(items) == 1:
             raise ConfigError(
                 f"strategies.{name}.try: escalate_when needs somewhere to escalate to, but 'try' "
-                f"has a single rung — add another backend, or drop escalate_when"
+                f"has a single rung. Add another backend, or drop escalate_when"
             )
         _reject_disagree(name, escalate_when)
         gate, predicates = _compile_gate(escalate_when)
@@ -681,8 +671,8 @@ def _desugar_try(
                 warnings.append(
                     (
                         f"steps[{idx}]",
-                        f"escalate_when does not apply to the strategy reference {item!r} — it "
-                        f"runs its own rules; gate a backend rung instead",
+                        f"escalate_when does not apply to the strategy reference {item!r}, "
+                        f"which runs its own rules. Gate a backend rung instead",
                     )
                 )
             else:
@@ -728,7 +718,7 @@ def _desugar_compare(
 
     if then in items:
         raise ConfigError(
-            f"strategies.{name}.then: {then!r} is also a compare rung — the escape hatch must be "
+            f"strategies.{name}.then: {then!r} is also a compare rung. The escape hatch must be "
             f"a different backend than the two being compared"
         )
     explicit = body.get("escalate_when")
@@ -758,8 +748,8 @@ def _resolve_item(
     if item == "auto":
         if not allow_auto:
             raise ConfigError(
-                f"strategies.{name}.{at}: 'auto' cannot race or be compared (two concurrent "
-                f"router picks have no defined order) — name the backends explicitly"
+                f"strategies.{name}.{at}: 'auto' cannot race or be compared, because two "
+                f"concurrent router picks have no defined order. Name the backends explicitly"
             )
         return {"backend": "auto"}
 
@@ -767,8 +757,8 @@ def _resolve_item(
     is_strategy = item in strategy_names or item in PRESET_NAMES
     if is_backend and is_strategy:
         raise ConfigError(
-            f"strategies.{name}.{at}: {item!r} is both a backend id and a strategy name — "
-            f"rename the strategy so the reference is unambiguous"
+            f"strategies.{name}.{at}: {item!r} is both a backend id and a strategy name. "
+            f"Rename the strategy so the reference is unambiguous"
         )
     if is_backend:
         return {"backend": item}
@@ -787,7 +777,7 @@ def _check_no_dup(name: str, key: str, items: list) -> None:
             continue  # auto never re-picks an attempted backend — try: [auto, auto] is legal
         if item in seen:
             raise ConfigError(
-                f"strategies.{name}.{key}: {item!r} appears twice — each rung must be distinct"
+                f"strategies.{name}.{key}: {item!r} appears twice, and each rung must be distinct"
             )
         seen.add(item)
 
@@ -806,8 +796,9 @@ def _attach_budget(out: dict, body: dict) -> None:
 def _reject_disagree(name: str, escalate_when: Any) -> None:
     if isinstance(escalate_when, dict) and "disagree" in escalate_when:
         raise ConfigError(
-            f"strategies.{name}.escalate_when: 'disagree' compares two backends' outputs and only "
-            f"works inside compare: — remove it, or switch this strategy to compare:"
+            f"strategies.{name}.escalate_when: 'disagree' compares two backends' outputs, so it "
+            f"only works inside compare: strategies. Remove it, or switch this strategy to "
+            f"compare:"
         )
 
 

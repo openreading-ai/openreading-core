@@ -75,9 +75,12 @@ the CLI / Python API, which read them through the same strategy loader and EnvCr
     entry position, never the value.
   OPENREADING_SERVER_PATH_ROOT — a directory `document.path` may resolve beneath, checked per
     request by `_gate_document_path`. Unset (the default) refuses every `document.path` at
-    every caller-body ingress (/v1/parse, /v1/route, /v1/jobs, /v1/batch): HTTP turns a local
-    field naming a file into a remote file-read primitive, so it stays off until an operator
-    opts in. When set, a path must resolve (symlinks followed first) to a regular file under this
+    every caller-body ingress (/v1/parse, /v1/route, /v1/jobs, /v1/batch, /v1/compare): HTTP
+    turns a local field naming a file into a remote file-read primitive, so it stays off until
+    an operator opts in. /v1/compare carries no `document.path` field, so the same rule reaches
+    it as a shape check instead: a string in `responses[]` would name a file on the server, so
+    that endpoint takes response envelopes only and refuses a string outright.
+    When set, a path must resolve (symlinks followed first) to a regular file under this
     directory; a link that escapes it is refused the same as a literal `..`. An accepted file is
     then READ AT THE GATE and the request carries its bytes onward — no backend ever re-opens the
     path, so the file cannot be swapped between the check and the read — which bounds it by the
@@ -118,8 +121,10 @@ the CLI / Python API, which read them through the same strategy loader and EnvCr
     Unset ⇒ no user-defined strategies: the presets (`openreading.strategies.presets`) still run
     configless through api.run_request; any other `strategy:<name>` → 400 unknown_strategy. The
     server never sniffs `./openreading.yaml` in its cwd (D-v3-5), so this is the only non-flag
-    way to load one; a broken file fails startup, not the first request. Also discovery step 2
-    for the CLI / Python API (`openreading.strategies.loader`).
+    way to load one. A file that fails the config schema fails startup. A malformed `policy:`
+    block is compiled later, so it surfaces as a 500 with `category: "error"` on the first
+    request that engages a strategy. Also discovery step 2 for the CLI / Python API
+    (`openreading.strategies.loader`).
   Backend credential vars (REDUCTO_API_KEY, the AWS_* chain, REDUCTO_WEBHOOK_SECRET, ...) —
     resolved per request through EnvCredentialBroker (`openreading.credentials`), never taken
     from a body. A missing key on a named backend ⇒ 424 naming the var; a missing
@@ -151,6 +156,11 @@ the CLI / Python API, which read them through the same strategy loader and EnvCr
     ⇒ 413 before the app reads any of the body; a chunked/undeclared-length body is only cut off
     mid-stream once the running total passes the cap, which degrades to whatever the app does with
     a disconnected receive rather than a clean 413 (best-effort — see `_BodyLimitMiddleware`).
+  OPENREADING_JOB_TTL_S, OPENREADING_MAX_ASYNC_JOBS, OPENREADING_MAX_JOBS_PER_PRINCIPAL,
+  OPENREADING_MAX_COMPARE_BYTES and OPENREADING_MAX_BODY_BYTES are parsed with `int()` at module
+  import, before `create_app` runs. A value that is not a decimal integer, the empty string
+  included, raises `ValueError` there. `openreading serve` prints that as a traceback, not as the
+  tagged `[serve]` line a `ServerConfigError` gets.
 """
 
 from __future__ import annotations
@@ -338,10 +348,10 @@ def _job_dict(rec: JobRecord) -> dict[str, Any]:
 _JOB_TTL_MS = int(os.environ.get("OPENREADING_JOB_TTL_S", "3600")) * 1000
 _MAX_ASYNC_JOBS = int(os.environ.get("OPENREADING_MAX_ASYNC_JOBS", "1000"))
 # M4: `_MAX_ASYNC_JOBS` alone is one counter shared by everyone, so whoever fills it first 429s
-# every other caller — cross-tenant denial of service on any deployment where more than one
-# principal has a key. This is each key's own allowance within that total. Only meaningful when
-# caller auth is on: with no keys configured every request is the same anonymous principal, and
-# metering that would just be `_MAX_ASYNC_JOBS` under another name.
+# every other caller. That is denial of service to every other key holder on a server where more
+# than one principal has a key. This is each key's own allowance within that total. Only
+# meaningful when caller auth is on: with no keys configured every request is the same anonymous
+# principal, and metering that would just be `_MAX_ASYNC_JOBS` under another name.
 _MAX_JOBS_PER_PRINCIPAL = int(os.environ.get("OPENREADING_MAX_JOBS_PER_PRINCIPAL", "100"))
 
 
@@ -617,7 +627,7 @@ def _load_api_key_config() -> ApiKeyConfig:
             key = part.strip()
             if not key:
                 raise ServerConfigError(
-                    f"OPENREADING_API_KEYS entry {i} is empty — check for a stray comma"
+                    f"OPENREADING_API_KEYS entry {i} is empty: check for a stray comma"
                 )
             keys.append(key)
     key_set = frozenset(keys)
@@ -627,7 +637,7 @@ def _load_api_key_config() -> ApiKeyConfig:
     if raw_scopes.strip():
         if not key_set:
             raise ServerConfigError(
-                "OPENREADING_API_KEY_SCOPES is set but OPENREADING_API_KEYS is empty — a scope "
+                "OPENREADING_API_KEY_SCOPES is set but OPENREADING_API_KEYS is empty. A scope "
                 "needs a key to scope"
             )
         seen: set[str] = set()
@@ -635,7 +645,7 @@ def _load_api_key_config() -> ApiKeyConfig:
             entry = entry.strip()
             if not entry:
                 raise ServerConfigError(
-                    f"OPENREADING_API_KEY_SCOPES entry {i} is empty — check for a stray comma"
+                    f"OPENREADING_API_KEY_SCOPES entry {i} is empty: check for a stray comma"
                 )
             if "=" not in entry:
                 raise ServerConfigError(
@@ -794,6 +804,7 @@ def _readiness_dict(r: BackendReadiness, liveness_probe: str = "none") -> dict[s
         "slug": r.slug,
         "type": r.type,
         "extra_installed": r.extra_installed,
+        "missing_deps": r.missing_deps,
         "creds_found": r.creds_found,
         "creds_missing": r.creds_missing,
         "ready": r.ready,
@@ -865,6 +876,17 @@ def _error_response(exc: Exception):
     return JSONResponse(status_code=status, content={"error": env})
 
 
+def _validation_message(e: Exception) -> str:
+    """The one-line reason a body was refused. `jsonschema`'s own `str()` appends the whole
+    vendored schema, so the commonest client mistake would otherwise answer with a 54 KB body
+    whose first line is the only part anyone reads."""
+    from jsonschema import ValidationError
+
+    if isinstance(e, ValidationError):
+        return f"{e.message} at {e.json_path}"
+    return str(e)
+
+
 # M2: every endpoint does `await request.json()` with no transport-level ceiling, so an
 # unauthenticated caller could hand the ASGI server an arbitrarily large body and have it fully
 # buffered into memory before any handler (let alone compliance/schema validation) ever runs.
@@ -876,7 +898,7 @@ _MAX_BODY_BYTES = int(os.environ.get("OPENREADING_MAX_BODY_BYTES", str(150 * 102
 class _BodyLimitMiddleware:
     """Pure ASGI (no BaseHTTPMiddleware): counts request-body bytes as they arrive and answers 413
     before the app ever buffers an oversized body. Content-Length is honored when present — the
-    robust leg, since it rejects before a single body byte is read. A chunked/undeclared-length
+    reliable leg, since it rejects before a single body byte is read. A chunked/undeclared-length
     body has no upfront count to check, so it is only cut off mid-stream once the running total
     passes the cap (`http.disconnect` in place of the next chunk) — best-effort: whatever the app
     does with a disconnected receive (typically its own JSON-decode failure) is acceptable, since
@@ -956,7 +978,7 @@ async def _sweep_retention_forever(interval: float) -> None:
 
     M7's remaining half. The reaper fired when a run armed and (since the first pass) once at
     startup, so a server that went idle held content past its retention ceiling until something
-    happened to wake it — indefinitely, on a deployment that simply gets no traffic for a while.
+    happened to wake it — indefinitely, on a deployment that gets no traffic for a while.
     Retention is a promise about elapsed time, so something has to watch the clock.
 
     Every exception is swallowed and the loop continues: a sweep that failed once — an
@@ -987,6 +1009,16 @@ async def _lifespan(app: FastAPI):
 
 
 def create_app(*, cors_origins: list[str] | None = None):
+    """Build the FastAPI app that `openreading serve` runs.
+
+    The deployment settings this module has not already read at import time are parsed here,
+    once, from the process environment. A malformed value raises `ServerConfigError` before the
+    app binds a socket, so a broken setting fails at startup rather than on a later request.
+    Pass `cors_origins` to allow those browser origins, or leave it None to keep CORS off. The
+    returned app owns the in-memory job store, the `auto` result cache and the retention sweeper
+    for as long as it lives. The full endpoint contract is the `openreading.server` package
+    docstring, and this module's docstring above lists the settings.
+    """
     app = FastAPI(title="OpenReading", version=__version__, lifespan=_lifespan)
     # Parsed here so a malformed value fails at app construction (AC-7's contract), even though
     # the sweeper it configures only starts once something actually serves the app.
@@ -1065,8 +1097,12 @@ def create_app(*, cors_origins: list[str] | None = None):
         )
 
     def _unknown_backend(e: Exception):
+        # `str()` of a KeyError is the repr of its argument, which would wrap the whole sentence
+        # in a second pair of quotes on the wire.
+        message = e.args[0] if e.args else str(e)
         return JSONResponse(
-            status_code=404, content={"error": {"category": "unknown_backend", "message": str(e)}}
+            status_code=404,
+            content={"error": {"category": "unknown_backend", "message": str(message)}},
         )
 
     def _not_found(category: str, message: str):
@@ -1159,8 +1195,8 @@ def create_app(*, cors_origins: list[str] | None = None):
         backend is down" to 5xx would conflate *openreading failed* with *openreading
         successfully determined the backend is down*; the second is a successful diagnostic and
         the report body IS its result. This is why liveness deliberately does not route through
-        `_error_response`. The only non-200s are upstream of any probe: 404 unknown backend, and
-        403 scope_denied.
+        `_error_response`. The only non-200s are upstream of any probe: 404 unknown backend,
+        403 scope_denied, and 400 for a non-numeric `timeout_s` in the body.
         """
         try:
             adapter = make_adapter(backend_id)
@@ -1204,7 +1240,7 @@ def create_app(*, cors_origins: list[str] | None = None):
             schemas.validate_request(body)
             req = OpenReadingRequest.model_validate(body)
         except Exception as e:  # noqa: BLE001 — any validation failure is a 400
-            return _bad_request(str(e))
+            return _bad_request(_validation_message(e))
         refusal, req = _gate_document_path(req)
         if refusal is not None:
             return _bad_request(refusal)
@@ -1251,7 +1287,7 @@ def create_app(*, cors_origins: list[str] | None = None):
         try:
             req = await _parse_request(request)
         except Exception as e:  # noqa: BLE001
-            return _bad_request(str(e))
+            return _bad_request(_validation_message(e))
         plan = Router(build_registry(), _server_router_config()).route(req)
         return {
             "chosen": plan.chosen.descriptor.id if plan.chosen else None,
@@ -1281,6 +1317,12 @@ def create_app(*, cors_origins: list[str] | None = None):
             return _bad_request(f"invalid JSON body: {e}")
         if not isinstance(body, dict) or not isinstance(body.get("responses"), list):
             return _bad_request('body must be {"responses": [...], "baseline"?, "truth"?}')
+        # Same rule as `_gate_document_path`: a body field naming a local file is a remote
+        # file-read primitive over HTTP, so this endpoint takes envelopes only. The CLI's
+        # `openreading compare a.json b.json` still takes paths, because there the caller and
+        # the process are the same trust domain.
+        if any(not isinstance(r, dict) for r in body["responses"]):
+            return _bad_request('"responses" over HTTP must be response envelopes, not file paths')
         # M2: reject BEFORE the comparison engine ever runs — its pairwise SequenceMatcher diff is
         # O(n^2) in len(responses), so an uncapped list is a CPU-amplification primitive reachable
         # by an unauthenticated caller, the same shape of risk /v1/batch's MAX_BATCH_DOCUMENTS
@@ -1313,6 +1355,7 @@ def create_app(*, cors_origins: list[str] | None = None):
         # aborting the batch, the same as the two except clauses this replaces used to.
         from openreading.batch import runner as batch_runner
         from openreading.batch.sources import ResolvedSource, format_of
+        from openreading.strategies.presets import PRESET_NAMES
         from openreading.types.batch import BatchRequestEcho, SourceRef
 
         try:
@@ -1338,12 +1381,17 @@ def create_app(*, cors_origins: list[str] | None = None):
         # and keeping only the slug would silently run a different operation than the caller asked
         # for, which is the failure this project refuses everywhere else.
         if not isinstance(backend, str):
-            named = (
-                backend.get("id") if isinstance(backend, dict) and backend.get("id") else "pymupdf"
+            named = backend.get("id") if isinstance(backend, dict) else None
+            # Only echo a slug the caller actually wrote. Naming a default here would tell
+            # someone who sent `{}` to run the whole batch on a backend they never asked for,
+            # which is the silent substitution this refusal exists to prevent.
+            hint = (
+                f'Send "backend": "{named}"'
+                if isinstance(named, str) and named
+                else 'Send "backend" as one backend id, for example "pymupdf"'
             )
             return _bad_request(
-                '"backend" on this endpoint is one string shared by every item, not /v1/parse\'s '
-                f'object — send "backend": "{named}"'
+                f'"backend" on this endpoint is one string shared by every item. {hint}.'
             )
         # BL-105: `shared` (merged into EVERY per-item request below, in run_one) is an ALLOWLIST
         # of the fields meant to apply batch-wide — not a blocklist of the three batch-envelope-
@@ -1384,7 +1432,7 @@ def create_app(*, cors_origins: list[str] | None = None):
                 # API), sitting one field below `jobs` — which this endpoint DOES accept — in the
                 # same request body.
                 message += (
-                    "; 'max_jobs' is not supported on this endpoint — see the openreading.server "
+                    "; 'max_jobs' is not supported on this endpoint. See the openreading.server "
                     "docstring's jobs-ceiling note"
                 )
             return _bad_request(message)
@@ -1399,9 +1447,25 @@ def create_app(*, cors_origins: list[str] | None = None):
                 return _unknown_backend(e)
             if scope is not None and backend not in scope:
                 return _scope_denied_response(str(backend))
-        try:
-            raw_jobs = int(body.get("jobs", 1))
-        except (TypeError, ValueError):
+        strat = strip_strategy_prefix(backend)
+        if strat is not None and strat != "none":
+            # BL-102's own rule, applied to the other request-shape mistake: a strategy id that
+            # names nothing is one problem with the body, not N identical item failures.
+            known = set(PRESET_NAMES)
+            if app.state.strategy_config is not None:
+                known |= set(app.state.strategy_config.strategies)
+            if strat not in known:
+                return _error_response(
+                    UnknownStrategyError(
+                        f"unknown strategy {strat!r}; defined: {', '.join(sorted(known))}",
+                        name=strat,
+                    )
+                )
+        raw_jobs = body.get("jobs", 1)
+        # int() would truncate 2.7 to 2 and parse "3" as 3, so the documented "non-integer jobs
+        # -> 400" contract only held for values int() itself refused. `bool` is an int subclass,
+        # hence the explicit exclusion.
+        if isinstance(raw_jobs, bool) or not isinstance(raw_jobs, int):
             return _bad_request('"jobs" must be an integer')
         try:
             # BL-84: floor clamps to 1, ceiling rejects — the shared helper (batch.runner
@@ -1411,8 +1475,14 @@ def create_app(*, cors_origins: list[str] | None = None):
             # check above (BL-102) rather than silently ignored, which is what this comment
             # incorrectly claimed before that fix landed.
             jobs = batch_runner.bound_jobs(raw_jobs)
-        except batch_runner.JobsLimitError as e:
-            return _bad_request(str(e))
+        except batch_runner.JobsLimitError:
+            # The shared helper's message names --max-jobs and max_jobs=, the CLI and Python
+            # overrides. Neither reaches this endpoint, where the body is the untrusted
+            # boundary, so the HTTP refusal states the limit and stops, exactly as the sibling
+            # max-documents refusal above does.
+            return _bad_request(
+                f"jobs={raw_jobs} is over the max-jobs limit ({batch_runner.MAX_BATCH_JOBS})"
+            )
 
         sources: list[ResolvedSource] = []
         docs_by_relpath: dict[str, Any] = {}
@@ -1448,7 +1518,7 @@ def create_app(*, cors_origins: list[str] | None = None):
                         raise ValueError(refusal)
                 except Exception:  # noqa: BLE001 — an unbuildable item is run_batch's own M6
                     # per-item-isolation concern (surfaces there as a `failed` item); it is not a
-                    # scope decision, so this pre-check simply defers to that existing path.
+                    # scope decision, so this pre-check defers to that existing path.
                     continue
                 denied = _out_of_scope_backend(item_req, scope, app.state.strategy_config)
                 if denied is not None:
@@ -1515,7 +1585,7 @@ def create_app(*, cors_origins: list[str] | None = None):
         try:
             req = await _parse_request(request)
         except Exception as e:  # noqa: BLE001
-            return _bad_request(str(e))
+            return _bad_request(_validation_message(e))
         backend = req.backend.id
 
         # `strategy:<name>` — wrap the WHOLE strategy walk as one synthetic job (integration.md
@@ -1562,7 +1632,7 @@ def create_app(*, cors_origins: list[str] | None = None):
             return _job_dict(rec)
 
         if backend == "auto" or strat == "none":  # strategy:none forces the legacy auto path
-            return _bad_request("async jobs require a named backend, not 'auto'")
+            return _bad_request("async jobs require a named backend, not 'auto' or 'strategy:none'")
         # BL-159 AC-3: `backend` is guaranteed a literal named id by this point (both `auto`-
         # shaped cases already returned above) — scope-gate it before prepare_named_backend
         # constructs an adapter or resolves a vendor credential.
@@ -1631,7 +1701,11 @@ def create_app(*, cors_origins: list[str] | None = None):
         _sweep_jobs(jobs, int(time.time() * 1000))
         rec = jobs.get(job_id)
         if rec is None:
-            return _not_found("unknown_job", job_id)
+            return _not_found(
+                "unknown_job",
+                f"no job with id {job_id!r}. The job store is in memory only, so a server "
+                "restart or a TTL expiry drops the record.",
+            )
         pending = rec.response is None and rec.error is None and not rec.job.is_terminal()
         # BL-83: rec.job is one mutable object and the drive below crosses into a real OS thread
         # via run_in_threadpool — two concurrent GETs for the same still-pending job_id must not
@@ -1711,7 +1785,11 @@ def create_app(*, cors_origins: list[str] | None = None):
         # unconditionally -- regardless of job state or age -- rather than waiting on the lazy
         # staleness check submit/GET use to bound unattended growth.
         if jobs.pop(job_id, None) is None:
-            return _not_found("unknown_job", job_id)
+            return _not_found(
+                "unknown_job",
+                f"no job with id {job_id!r}. The job store is in memory only, so a server "
+                "restart or a TTL expiry drops the record.",
+            )
         return Response(status_code=204)
 
     @app.post("/v1/webhooks/{backend_id}")
@@ -1737,6 +1815,11 @@ def create_app(*, cors_origins: list[str] | None = None):
             event = json.loads(raw)
         except ValueError:
             return _bad_request("invalid JSON body")
+        # A vendor event is an object. Anything else reaches the `event[...]` writes below as a
+        # TypeError, which escapes as the framework's plain-text 500 rather than the one error
+        # shape every other refusal on this API uses.
+        if not isinstance(event, dict):
+            return _bad_request("webhook body must be a JSON object")
         event["headers"] = headers
         # BL-82: thread the raw bytes through too, so a bound adapter's own resolve_webhook/
         # verify_webhook check (the dispatcher-level _verify_svix above is the primary gate; this is
@@ -1756,7 +1839,7 @@ def create_app(*, cors_origins: list[str] | None = None):
                 for r in jobs.values()
                 if r.backend == backend_id
                 and r.job.wait_mode is WaitMode.WEBHOOK
-                # BL-70: an id-less event (jid is None, e.g. a POST body that simply omits the id
+                # BL-70: an id-less event (jid is None, e.g. a POST body that omits the id
                 # field) must never match a job whose own backend_job_id/webhook_token are ALSO
                 # both None — submit() can leave both None when a vendor's otherwise-2xx create-
                 # task response omitted its id field. Without this guard, `None in (None, None)`
@@ -1767,13 +1850,24 @@ def create_app(*, cors_origins: list[str] | None = None):
             None,
         )
         if rec is None:
-            return _not_found("unknown_job", str(jid))
+            field = _WEBHOOK_EVENT_ID_FIELDS.get(backend_id, "job_id")
+            detail = (
+                f"the event carries no {field!r} field"
+                if jid is None
+                else f"no job with {field} {jid!r}"
+            )
+            return _not_found(
+                "unknown_job",
+                f"{detail}. A webhook resolves only a job this process submitted and is still "
+                "holding.",
+            )
         # M5: for a backend that declares no webhook_secret there is no signature to check, so the
         # per-job callback token this server appended to the URL it registered is the ONLY thing
         # separating a genuine completion from one anybody who learned the vendor's task id could
-        # forge — and on a shared deployment, forge INTO ANOTHER TENANT'S JOB. Checked after the
-        # lookup, not before, so an event naming no job at all is still the 404 it always was
-        # rather than leaking a different answer for ids that do and do not exist.
+        # forge. On a server with several keys configured, that forgery lands in a job a
+        # different key holder submitted. Checked after the lookup, not before, so an event
+        # naming no job at all is still the 404 it always was rather than leaking a different
+        # answer for ids that do and do not exist.
         if not secret and not _allow_unsigned_webhooks():
             presented = request.query_params.get(_CALLBACK_TOKEN_PARAM)
             if (
@@ -1838,7 +1932,7 @@ def _drive_job(adapter, job: Job, ctx: RunContext, deadline_ms: float | None = N
     start (below), rather than being handed a stored anchor (BL-77's `JobRecord.deadline_ms`) that
     a caller polling slower than DEFAULT_DEADLINE_MS could already have outrun before the call even
     began. The `deadline_ms` parameter itself is untouched — still honored exactly as before for
-    any direct caller (e.g. tests) — it is simply never non-None from get_job in practice anymore.
+    any direct caller (e.g. tests) — it is never non-None from get_job in practice anymore.
 
     `ctx` (Ledger T4a): threaded straight through to `run_to_completion` — see `get_job`'s own
     comment for why this is no longer merely a redaction nicety.

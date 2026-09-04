@@ -1,4 +1,4 @@
-"""Corpus compare (Manifest v0.6 §8): compare two or more batch-result runs document-by-document.
+"""Corpus compare: compare two or more batch-result runs document by document.
 
 Documents pair across runs by identity precedence relpath → filename → sha256; each paired document
 reuses the existing comparison-report v0.2 (build_report), unchanged; a document present in some
@@ -159,7 +159,7 @@ def _rollup_line(pairs: list[CorpusPair]) -> str:
 
 def render_corpus_table(pairs: list[CorpusPair], labels: list[str]) -> str:
     """One verdict line per document + the rollup, and a finding tally across paired docs."""
-    lines = [f"CORPUS COMPARE — {' vs '.join(labels)}", _rollup_line(pairs), ""]
+    lines = [f"CORPUS COMPARE: {' vs '.join(labels)}", _rollup_line(pairs), ""]
     for p in pairs:
         lines.append(f"  [{p.verdict:>10}] {_loc(p)}")
     tally = _finding_tally(pairs)
@@ -265,7 +265,7 @@ def render_corpus_diffs(pairs: list[CorpusPair], labels: list[str], *, limit: in
             table_rows.append((_VERDICT_MARK.get(p.verdict, "·"), _loc(p), p.verdict, None, {}))
 
     lines = [
-        f"CORPUS DIFFS — {' vs '.join(labels)}",
+        f"CORPUS DIFFS: {' vs '.join(labels)}",
         "the values each captured that the other missed · content channel · packaging-immune",
         _rollup_line(pairs),
         "",

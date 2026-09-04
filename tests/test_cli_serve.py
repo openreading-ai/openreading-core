@@ -4,7 +4,7 @@
 coverage anywhere in this repository. Every test here drives `cmd_serve` through `main([...])` and
 monkeypatches `uvicorn.run` (or `uvicorn` itself) so nothing ever actually binds a socket.
 
-Three cases, per the sprint-6 review 1:1's own correction to a naive two-test plan: (a) the
+Three cases: (a) the
 `except ImportError` branch, forced via `sys.modules["uvicorn"] = None` since a dev environment
 synced with `--all-extras` (this repo's own) has uvicorn importable and can never reach that branch
 any other way; (b) the vendor-key exposure warning's host-gated on/off behavior; (c) `uvicorn.run`
@@ -31,13 +31,20 @@ def test_serve_missing_server_extra_exits_3_not_1(monkeypatch, capsys):
 
     assert rc == 3
     err = capsys.readouterr().err
-    assert "serve needs the server extra: pip install 'openreading[server]'" in err
+    assert "serve needs the [server] extra" in err
 
 
 def test_serve_warns_only_when_host_is_not_loopback(monkeypatch, capsys):
     monkeypatch.setattr("uvicorn.Server.run", lambda self, sockets=None: None)
 
     rc = main(["serve"])  # default --host 127.0.0.1
+    assert rc == 0
+    assert "warning" not in capsys.readouterr().err
+
+    # `localhost` and `::1` reach the same loopback interface as 127.0.0.1. Warning that they
+    # expose the server, one line before announcing a loopback bind, teaches an operator to skip
+    # the warning that matters.
+    rc = main(["serve", "--host", "localhost", "--port", "0"])
     assert rc == 0
     assert "warning" not in capsys.readouterr().err
 
@@ -137,7 +144,7 @@ def test_serve_malformed_api_keys_reports_a_tagged_line_not_a_traceback(monkeypa
     assert rc == 3
     err = capsys.readouterr().err
     assert err.splitlines() == [
-        "[serve] OPENREADING_API_KEYS entry 2 is empty — check for a stray comma"
+        "[serve] OPENREADING_API_KEYS entry 2 is empty: check for a stray comma"
     ]
     assert "Traceback" not in err
 

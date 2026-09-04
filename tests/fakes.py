@@ -1,6 +1,12 @@
-"""Shared test fakes: minimal adapters exercising each wait mode + a descriptor factory.
+"""Shared test fakes: minimal backend adapters plus the factories that build their descriptors.
 
-Imported by tests as `tests.fakes` (requires pythonpath=["."] + tests/__init__.py)."""
+Reach for `InlineFake`, `PollFake`, `WebhookFake` or `NeverFinishesFake` to exercise one wait mode
+through the driver. Reach for `make_backend` when a router or compliance test needs a descriptor
+with particular compliance, capability, cost or priority values. Strategy-engine tests use
+`ScriptedBackend`, `PollFaultBackend` and `scripted_registry`. Compare tests use `make_envelope`.
+
+Tests import this module as `tests.fakes`, which works because pyproject sets `pythonpath = ["."]`
+and `tests/__init__.py` exists."""
 
 from __future__ import annotations
 
@@ -115,6 +121,7 @@ def make_envelope(
 
 
 def make_descriptor(backend_id: str, wait_modes: list[WaitMode]) -> AdapterDescriptor:
+    """A minimal hosted_api descriptor with the given wait modes and fixed values elsewhere."""
     return AdapterDescriptor(
         id=backend_id,
         type=BackendType.HOSTED_API,
@@ -130,7 +137,8 @@ def make_descriptor(backend_id: str, wait_modes: list[WaitMode]) -> AdapterDescr
 
 class ConfigurableBackend(BackendAdapter):
     """An INLINE adapter whose descriptor (compliance/capabilities/cost/priority) is fully
-    parameterized — used to reproduce the routing_and_compliance.md worked examples."""
+    parameterized — used to reproduce the `internal/design/routing_and_compliance.md` worked
+    examples."""
 
     def __init__(self, descriptor: AdapterDescriptor) -> None:
         self.descriptor = descriptor
@@ -176,6 +184,7 @@ def make_backend(
     page_ranges: bool = False,
     webhook: bool = False,
 ) -> ConfigurableBackend:
+    """A ConfigurableBackend whose descriptor carries the given compliance, capability and cost."""
     compliance_extra: dict = {}
     if max_retention_hours is not None:
         compliance_extra["max_retention_hours"] = max_retention_hours
@@ -238,6 +247,8 @@ class _NormalizeMixin:
 
 
 class InlineFake(_NormalizeMixin, BackendAdapter):
+    """Succeeds inside submit(), the shortest path through the driver."""
+
     def __init__(self) -> None:
         self.descriptor = make_descriptor("inline-fake", [WaitMode.INLINE])
 
@@ -299,8 +310,9 @@ class PollFaultBackend(_NormalizeMixin, BackendAdapter):
     """A POLL backend whose status call faults AFTER the job was accepted (harness H2 fault
     injection): the attempt fails while its backend job is still RUNNING — and still billing — at
     the vendor. Records every `cancel()` it is asked to perform, so the loser-cancellation path
-    (execution.md §3.3) can be asserted end-to-end. Descriptor shape matches the strategy-engine
-    fakes (`make_backend`), so it can stand in for a hosted branch in a `parallel` node."""
+    (`internal/design/execution.md` §3.3) can be asserted end-to-end. Descriptor shape matches
+    the strategy-engine fakes (`make_backend`), so it can stand in for a hosted branch in a
+    `parallel` node."""
 
     def __init__(
         self, backend_id: str, *, cost_low: float | None = 0.01, cancel_sleep_s: float = 0.0
@@ -310,13 +322,11 @@ class PollFaultBackend(_NormalizeMixin, BackendAdapter):
         )
         self.submitted: list[Job] = []
         self.cancelled: list[Job] = []
-        # BL-164: real vendor cancel() now issues a genuine blocking HTTP call for four adapters
-        # (was an instant in-memory no-op for every one) — a caller-set delay here lets a test
-        # simulate that round trip without a real network, to prove `engine.py` dispatches it
-        # off the event loop rather than blocking it. `cancel_started` records entry BEFORE the
-        # sleep — distinct from `cancelled` (appended only after it returns) — so a test bounding
-        # the engine's own wait by a deadline shorter than this sleep can still prove the attempt
-        # was genuinely dispatched, even though it deliberately doesn't wait for it to finish.
+        # BL-164: a real vendor cancel() is a blocking HTTP call. `cancel_sleep_s` simulates that
+        # round trip without a network, so a test can prove `engine.py` dispatches it off the
+        # event loop rather than blocking it. `cancel_started` records entry before the sleep and
+        # `cancelled` only after it returns, so a test whose deadline is shorter than the sleep
+        # can still prove the attempt was dispatched.
         self._cancel_sleep_s = cancel_sleep_s
         self.cancel_started: list[Job] = []
         # (entered, returned) monotonic bounds of each cancel(), so a test can prove CONCURRENT
@@ -345,6 +355,8 @@ class PollFaultBackend(_NormalizeMixin, BackendAdapter):
 
 
 class NeverFinishesFake(_NormalizeMixin, BackendAdapter):
+    """Stays RUNNING forever. Each poll pushes next_poll_at out by 1000 s, for deadline tests."""
+
     def __init__(self) -> None:
         self.descriptor = make_descriptor("never-fake", [WaitMode.POLL])
 
@@ -357,6 +369,8 @@ class NeverFinishesFake(_NormalizeMixin, BackendAdapter):
 
 
 class WebhookFake(_NormalizeMixin, BackendAdapter):
+    """Finishes only when resolve_webhook() sees its own token with status 'done'."""
+
     def __init__(self) -> None:
         self.descriptor = make_descriptor("webhook-fake", [WaitMode.WEBHOOK, WaitMode.POLL])
 
@@ -419,12 +433,11 @@ class ScriptedBackend(BackendAdapter):
                 }
             )
         self._error = error
-        # BL-99: a plain, non-AdapterError exception (KeyError/ValueError/...) out of normalize()
-        # is the one substitution BL-85's/BL-93's own tests never made — `error` above (raised from
-        # submit()) is always an AdapterError in every existing caller. Kept as a distinct knob
-        # rather than overloading `error` so a scenario needing BOTH a healthy submit() and a
-        # crashing normalize() (the only way to reach the five BL-99 call sites at all — a job must
-        # actually be accepted and driven to completion before normalize() ever runs) stays simple.
+        # BL-99: a plain, non-AdapterError exception (KeyError/ValueError/...) raised from
+        # normalize(). A distinct knob from `error`, which is raised from submit() and is always
+        # an AdapterError in every existing caller, including BL-85's and BL-93's tests. Reaching
+        # normalize() at all needs a healthy submit(), because the job must be accepted and
+        # driven to completion first.
         self._normalize_error = normalize_error
         self._text = text
         self._confidence = confidence

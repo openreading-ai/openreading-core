@@ -29,7 +29,7 @@ Families
   (``openreading.batch``, internal/design/batch-intake.md §5/§8).
 - leaderboard-report: N backends ranked on one ``evals.dataset`` corpus (``openreading.evals``).
 - liveness-report: one backend's liveness answer — ``openreading backends --check``,
-  ``POST /v1/backends/{id}/liveness``, the web UI's "Check now" (``openreading.liveness``,
+  ``POST /v1/backends/{id}/liveness`` (``openreading.liveness``,
   internal/design/liveness.md §5).
 - step / journal: the executor step contract and the per-line JSONL journal shape
   (internal/design/ledger.md §5.4).
@@ -116,8 +116,8 @@ where nesting began. Optional blocks: ``schema_version`` (const ``"0.2"``), ``ou
   or ``file_id`` document gets no default (bytes are not fetched at that stage, so nothing
   content-stable exists). That leaves URL submissions to azure-document-intelligence, chunkr,
   pulse and reducto without default retry protection, and means open-ocr's real
-  ``Idempotency-Key`` header never fires for a URL source — pass the key explicitly when retry
-  safety matters (tracked: internal/eng-council/FOUNDER-INBOX.md, 2026-08-22). Whether a key
+  ``Idempotency-Key`` header never fires for a URL source. Pass the key explicitly when retry
+  safety matters. This gap is open, tracked in internal/eng-council/FOUNDER-INBOX.md. Whether a key
   reaches the vendor at all is the descriptor's ``idempotency_supported`` (below).
 
 Response (``response.v0.3.json``)
@@ -175,22 +175,36 @@ backend cannot produce is ABSENT with a ``warnings[]`` entry — never fabricate
   ``infra_only`` with a null price rather than an invented one.
 - ``job``: the async handle (``id``, timestamps, ``poll_url``, provider console URL).
 - ``warnings[]``: ``{code, message, field}`` for anything requested but unavailable, degraded or
-  noteworthy. Codes are an OPEN set; known: ``confidence_unavailable``, ``unsupported_feature``,
-  ``fallback_used`` (the router's attempt trail), ``idempotent_replay``, ``baa_tier_confirmed``
-  (``require_baa`` satisfied only by the deployment's tier-gated confirmation),
-  ``page_attribution_unavailable``, ``<channel>_unavailable`` for ``markdown``, ``text``,
-  ``blocks``, ``block_bbox``, ``block_confidence``, ``table_cells`` and ``typed_fields`` (a
-  requested channel this backend could not produce for this document), ``typed_fields_malformed``
-  (the vendor's structured output was not a JSON object; the response is PARTIAL),
-  ``interaction_incomplete`` (Gemini reported a non-``completed`` interaction; output may be
-  truncated), ``quality_below_threshold`` (every rung gated, best result
-  retained), ``quality_escalated`` (a rung gated and a LATER rung answered, so the walk recovered;
-  its pair, ``quality_below_threshold``, says the walk did not), ``budget_exhausted`` (the time
-  budget, not a gate, ended a strategy walk — the two are separate codes because escalating is
-  right for the first and wrong for the second), coordinate-conversion notes. Those three are the
-  codes the agent triage playbook branches on to separate "escalate" from "consume", so they are
-  listed here rather than left to a reader's grep. This is what makes the never-fabricate rule
-  practical: absence is always accounted for.
+  noteworthy. The code set is OPEN, so a consumer tolerates a code it has never seen. Every code
+  a response can carry is the first argument of an ``add_warning(`` call in this tree, so the
+  shipped set stays greppable. As shipped, grouped by what each one tells you:
+
+  - a channel is missing: ``<channel>_unavailable`` for ``markdown``, ``text``, ``blocks``,
+    ``block_bbox``, ``block_confidence``, ``table_cells`` and ``typed_fields`` (this backend
+    could not produce it for this document), ``channel_unsupported``, ``tables_unsupported``
+    and ``typed_fields_unsupported`` (the backend has no such capability at all),
+    ``channel_unavailable_in_mode`` and ``channel_not_produced_by_operation`` (the capability
+    exists, the operation or mode this run chose does not carry it), ``typed_fields_empty``,
+    ``confidence_unavailable``, ``page_attribution_unavailable``, ``cost_unavailable``.
+  - the output is degraded: ``typed_fields_malformed`` (the vendor's structured output was not
+    a JSON object, so the response is PARTIAL), ``typed_fields_unverified``,
+    ``output_truncated``, ``interaction_incomplete`` (the vendor stopped before finishing),
+    ``bbox_space_approximate``.
+  - the run took a detour: ``fallback_used`` (the router's attempt trail),
+    ``idempotent_replay``, ``quality_below_threshold`` (every rung gated, best result
+    retained), ``quality_escalated`` (a rung gated and a later rung answered, so the walk
+    recovered), ``budget_exhausted`` (the time budget, not a gate, ended a strategy walk).
+    Those last three are separate codes because escalating is right for a gate and wrong for
+    an exhausted budget. An agent triage playbook branches on them to separate "escalate"
+    from "consume".
+  - the deployment or the vendor said so: ``baa_tier_confirmed`` (``require_baa`` satisfied
+    only by the deployment's tier-gated confirmation), ``backend_warning`` (the vendor's own
+    warning text, passed through).
+
+  ``unsupported_feature`` is NOT a warning code. It is an ``on_error`` map key, an exception
+  category and an HTTP ``error.category``, each documented elsewhere in this file. Grouping the
+  codes this way is what makes the never-fabricate rule practical, because absence is always
+  accounted for.
 - ``backend_raw`` (present by default via ``outputs.include_backend_raw``): the untouched native
   payload — ``payload`` (the raw value: hosted-API JSON verbatim or the serialized native object
   for libraries; a reference handle instead when too large to inline, paired with ``encoding:
@@ -207,36 +221,26 @@ backend cannot produce is ABSENT with a ``warnings[]`` entry — never fabricate
 Nothing the backend produced is ever destroyed: normalized view + raw view + per-box native
 geometry give full lineage for every response.
 
-Channel invariants (C1-C11; schema ``$defs`` descriptions name them; hard guarantees since the
-Canon milestone — the "0.5.0" row of the manifest below, a milestone label: the shipped package
-version is still ``0.3.0``; each covers EVERY field of its channel's type — ``document``,
-``pages[]``, ``blocks[]`` and ``chunks[]`` alike):
+Channel invariants: what a channel is allowed to hold
+-----------------------------------------------------
+Eleven invariants, C1 to C11, say what each channel of a response may hold, and the schema's
+``$defs`` descriptions name them by id. ``openreading.derive`` carries the normative text, so
+this file names the ids and points there rather than keeping a second copy that can drift.
+Read them with ``uv run python -m pydoc openreading.derive``.
 
-- C1 ``text.plain``: plain UTF-8, no HTML/markdown/LaTeX or adapter-invented notation
-  (checkbox state renders as the words checked/unchecked).
-- C2 ``text.complete``: everything returned as content appears in ``text`` — table rows as
-  lines with tab-joined cells, captions included; pages join with a blank line. No adapter
-  grades ``text`` X.
-- C3 ``markdown.gfm``: parses as GFM; tables are pipe tables whenever a cell grid exists, raw
-  HTML only as fallback; literal content is escaped so it cannot be re-read as markup; headings
-  only from native structure signals, never invented.
-- C4/C5: an X channel is never populated; an explicitly requested X channel warns.
-- C6 ``channels.deliver-or-warn``: a requested N or D channel is populated, or a warning names it.
-- C7 ``confidence.unit``: every numeric confidence (Block, TableCell, Page, doc_type, Citation)
-  is a float in [0,1]; 0-100 sources are divided; word-level confidences aggregate by MIN (mean
-  hides one garbage word); document-level signals surface as ``document.confidence``, not on
-  blocks.
-- C8 ``bbox.canonical``: as above.
-- C9 ``page.provenance``: page numbers index the source document; page-unattributable derived
-  blocks live in one synthetic ``Page(page_number=1)`` plus ``page_attribution_unavailable``, so
-  "one synthetic container" is never mistaken for "a one-page document".
-- C10 ``status.honest``: provider truncation/partial signals (``max_tokens``, ``length``, partial
-  job states) become ``partial`` or a warning — never a bare ``succeeded``.
-- C11 ``text-blocks.coherent``: when both are populated, ``document.text`` and the concatenated
-  block spine clear a loose token-similarity threshold (warning-grade only).
-- Tables: one ``Table``/``TableCell`` model is the only structured representation (HTML/pipe are
-  projections); grid positions are true positions under merged cells; ``is_header`` comes from
-  provider signals, never "row 0".
+- C1 ``text.plain``, C2 ``text.complete``, C3 ``markdown.gfm``, C4 and C5 (an impossible
+  channel is never populated, and an explicit request for one warns), C6
+  ``channels.deliver-or-warn``, C7 ``confidence.unit``, C8 ``bbox.canonical``, C9
+  ``page.provenance``, C10 ``status.honest``, C11 ``text-blocks.coherent``.
+- C12 is the one invariant about this package rather than about a channel. It requires version
+  identity per family, so a family's filename version, its ``$id`` version and its in-band
+  const agree. The manifest below is where that is enforced.
+
+Each invariant covers every field of its channel's type, so C1 binds ``document.text``,
+``pages[].text``, ``blocks[].text`` and ``chunks[].text`` alike. The table contract that used to
+be restated here lives with the rest, in ``openreading.derive``. The invariants became hard
+guarantees at the Canon milestone, the ``0.5.0`` row of the manifest below. ``0.5.0`` there is a
+milestone label rather than a package version. The shipped package version is ``0.3.0``.
 
 Adapter descriptor (``adapter-descriptor.v0.7.json``)
 -----------------------------------------------------
@@ -471,7 +475,8 @@ Schema version history (oldest first)
 - Ledger T1 — step v0.1 (``StepRequest``/``StepResult``, the contract every executor
   implements) and journal v0.1 (the per-line shape of a run's JSONL journal): two new families.
 - Ledger T4a — adapter-descriptor v0.7 (additive over v0.6): optional ``protocol_version``
-  integer; the pydantic model requires it so the registry can refuse pre-T4a adapters.
+  integer; the pydantic model requires it so the registry can refuse an adapter still on the
+  older contract.
 - Security review (M12) — request v0.2 (Changed, a named strengthening, not merely additive):
   ``additionalProperties: false`` now closes every nested object node, not only the top level
   (document, backend, backend.runtime, outputs, outputs.chunking, extraction_schema, features,
@@ -519,7 +524,7 @@ DESCRIPTOR_SCHEMA_FILE = "adapter-descriptor.v0.7.json"
 STRATEGY_CONFIG_SCHEMA_FILE = "strategy-config.v0.2.json"
 # v0.4 (Compare): the read-only cross-backend comparison report (the openreading.comparison
 # docstring).
-# v0.5 (Canon tranche 2): the `structure` finding code + content-first `headline`; finding-
+# v0.5 (Canon): the `structure` finding code + content-first `headline`; finding-
 # semantics change, so a MINOR bump with the change named in the CHANGELOG (§8/§9).
 COMPARISON_REPORT_SCHEMA_FILE = "comparison-report.v0.2.json"
 # v0.6 (Manifest): the batch-run envelope + the corpus (batch-vs-batch) comparison report — two new
@@ -549,46 +554,57 @@ def _load(name: str) -> dict[str, Any]:
 
 
 def request_schema() -> dict[str, Any]:
+    """The vendored ``REQUEST_SCHEMA_FILE`` file as a dict, loaded once and cached."""
     return _load(REQUEST_SCHEMA_FILE)
 
 
 def response_schema() -> dict[str, Any]:
+    """The vendored ``RESPONSE_SCHEMA_FILE`` file as a dict, loaded once and cached."""
     return _load(RESPONSE_SCHEMA_FILE)
 
 
 def descriptor_schema() -> dict[str, Any]:
+    """The vendored ``DESCRIPTOR_SCHEMA_FILE`` file as a dict, loaded once and cached."""
     return _load(DESCRIPTOR_SCHEMA_FILE)
 
 
 def strategy_config_schema() -> dict[str, Any]:
+    """The vendored ``STRATEGY_CONFIG_SCHEMA_FILE`` file as a dict, loaded once and cached."""
     return _load(STRATEGY_CONFIG_SCHEMA_FILE)
 
 
 def comparison_report_schema() -> dict[str, Any]:
+    """The vendored ``COMPARISON_REPORT_SCHEMA_FILE`` file as a dict, loaded once and cached."""
     return _load(COMPARISON_REPORT_SCHEMA_FILE)
 
 
 def batch_result_schema() -> dict[str, Any]:
+    """The vendored ``BATCH_RESULT_SCHEMA_FILE`` file as a dict, loaded once and cached."""
     return _load(BATCH_RESULT_SCHEMA_FILE)
 
 
 def corpus_report_schema() -> dict[str, Any]:
+    """The vendored ``CORPUS_REPORT_SCHEMA_FILE`` file as a dict, loaded once and cached."""
     return _load(CORPUS_REPORT_SCHEMA_FILE)
 
 
 def leaderboard_report_schema() -> dict[str, Any]:
+    """The vendored ``LEADERBOARD_REPORT_SCHEMA_FILE`` file as a dict, loaded once and cached."""
     return _load(LEADERBOARD_REPORT_SCHEMA_FILE)
 
 
 def liveness_report_schema() -> dict[str, Any]:
+    """The vendored ``LIVENESS_REPORT_SCHEMA_FILE`` file as a dict, loaded once and cached."""
     return _load(LIVENESS_REPORT_SCHEMA_FILE)
 
 
 def step_schema() -> dict[str, Any]:
+    """The vendored ``STEP_SCHEMA_FILE`` file as a dict, loaded once and cached."""
     return _load(STEP_SCHEMA_FILE)
 
 
 def journal_schema() -> dict[str, Any]:
+    """The vendored ``JOURNAL_SCHEMA_FILE`` file as a dict, loaded once and cached."""
     return _load(JOURNAL_SCHEMA_FILE)
 
 
@@ -649,55 +665,68 @@ def _validator(schema: dict[str, Any]):
 
 
 def validate_request(instance: dict[str, Any]) -> None:
+    """Raise ``jsonschema.ValidationError`` unless ``instance`` is a valid request."""
     _validator(request_schema()).validate(instance)
 
 
 def validate_response(instance: dict[str, Any]) -> None:
+    """Raise ``jsonschema.ValidationError`` unless ``instance`` is a valid response."""
     _validator(response_schema()).validate(instance)
 
 
 def validate_descriptor(instance: dict[str, Any]) -> None:
+    """Raise ``jsonschema.ValidationError`` unless ``instance`` is a valid adapter descriptor."""
     _validator(descriptor_schema()).validate(instance)
 
 
 def validate_strategy_config(instance: dict[str, Any]) -> None:
+    """Raise ``jsonschema.ValidationError`` unless ``instance`` is a valid strategy config."""
     _validator(strategy_config_schema()).validate(instance)
 
 
 def validate_comparison_report(instance: dict[str, Any]) -> None:
+    """Raise ``jsonschema.ValidationError`` unless ``instance`` is a valid comparison report."""
     _validator(comparison_report_schema()).validate(instance)
 
 
 def validate_batch_result(instance: dict[str, Any]) -> None:
+    """Raise ``jsonschema.ValidationError`` unless ``instance`` is a valid batch result."""
     _validator(batch_result_schema()).validate(instance)
 
 
 def validate_corpus_report(instance: dict[str, Any]) -> None:
+    """Raise ``jsonschema.ValidationError`` unless ``instance`` is a valid corpus report."""
     _validator(corpus_report_schema()).validate(instance)
 
 
 def validate_leaderboard_report(instance: dict[str, Any]) -> None:
+    """Raise ``jsonschema.ValidationError`` unless ``instance`` is a valid leaderboard report."""
     _validator(leaderboard_report_schema()).validate(instance)
 
 
 def validate_liveness_report(instance: dict[str, Any]) -> None:
+    """Raise ``jsonschema.ValidationError`` unless ``instance`` is a valid liveness report."""
     _validator(liveness_report_schema()).validate(instance)
 
 
 def validate_step(instance: dict[str, Any]) -> None:
+    """Raise ``jsonschema.ValidationError`` unless ``instance`` is a valid step."""
     _validator(step_schema()).validate(instance)
 
 
 def validate_journal_record(instance: dict[str, Any]) -> None:
+    """Raise ``jsonschema.ValidationError`` unless ``instance`` is a valid journal record."""
     _validator(journal_schema()).validate(instance)
 
 
 def _cli_validate() -> int:
-    """Check both schemas are valid, then validate every stored normalized fixture.
+    """Validate every vendored schema, then validate any stored normalized fixture.
 
-    Fixtures live at tests/fixtures/<slug>/normalized/*.json (created per-adapter from
-    Phase 1). With none present yet, this validates only the schemas — enough to keep
-    `make verify` honest before adapters exist.
+    Each vendored ``*.json`` file must itself be a valid 2020-12 JSON Schema. Any file at
+    ``tests/fixtures/<slug>/normalized/*.json`` must then validate against the response schema.
+    No adapter ships fixtures in that layout today, so the second line reports ``0 checked``.
+    The raw fixtures at ``tests/fixtures/<slug>/*.json`` are vendor payloads rather than
+    response envelopes, so this sweep deliberately leaves them alone.
     """
     # 1. schemas are themselves valid JSON Schema
     _validator(request_schema())
@@ -735,6 +764,9 @@ def _cli_validate() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Entry point for ``python -m openreading.schemas validate``. Exit 0 when every schema and
+    fixture validates, 1 when a fixture fails, 2 on a usage error.
+    """
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] == "validate":
         return _cli_validate()

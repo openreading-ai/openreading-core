@@ -194,7 +194,11 @@ def test_cli_strategy_plan_unreadable_policy_exits_3_without_a_traceback(_clean_
         )
         assert rc == 3
         err = capsys.readouterr().err
-        assert err.startswith("[strategy plan] cannot read policy")
+        # A file that will not open and a file whose bytes are not JSON say which one failed.
+        if pol is malformed:
+            assert err.startswith(f"[strategy plan] policy {malformed} is not valid JSON")
+        else:
+            assert err.startswith("[strategy plan] cannot read policy")
         assert len(err.splitlines()) == 1
 
 

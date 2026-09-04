@@ -1,4 +1,4 @@
-"""EnvCredentialBroker + build_run_context + .env loader (GOAL2 milestone 6.2). All offline: the
+"""EnvCredentialBroker + build_run_context + .env loader. All offline: the
 broker is fed an explicit environ dict, so no test touches the real process env or the network.
 Covers precedence, the credentials_ref `env:` scheme, config resolution, and secret redaction."""
 
@@ -96,7 +96,7 @@ def test_credentials_ref_alias_not_on_allow_list_is_refused():
 
 
 def test_credentials_ref_refusal_does_not_disclose_the_allow_list():
-    # BL-162 review (bruce, Medium): this message reaches an unauthenticated caller verbatim
+    # BL-162: this message reaches an unauthenticated caller verbatim
     # (server auth is off by default) — naming the operator's configured aliases here would hand
     # out internal vault/prefix naming for free, the same class of unauthenticated exposure BL-162
     # exists to close. Only the CALLER'S OWN submitted alias (already known to them) may appear.
@@ -340,7 +340,7 @@ _URL_SOURCED_NO_DEFAULT_KEY_ADAPTERS = (
 
 
 def test_no_default_idempotency_key_for_url_sourced_document_across_named_adapters():
-    # BL-166 round 2 (following a High finding + FOUNDER-INBOX 2026-08-22): pins, for every
+    # BL-166: pins, for every
     # adapter the disclosure names by name, both halves of the interaction together — it still
     # accepts a URL AND a URL-sourced request to it still gets no default key — so a future
     # change to document_identity, or to any of these adapters' accepts_url flag, can't silently
@@ -520,7 +520,7 @@ def test_execute_plan_auth_rejected_hint_is_not_further_mangled():
 
     execute_plan(plan, _req("auto"), broker=broker)
 
-    assert exc.message == "key was found but rejected by bad — check CANARY_HINT_KEY"
+    assert exc.message == "key was found but rejected by bad: check CANARY_HINT_KEY"
     assert canary not in exc.message
 
 

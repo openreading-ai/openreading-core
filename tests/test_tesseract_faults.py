@@ -79,6 +79,20 @@ class _BoomRunner(_OneWordRunner):
         raise RuntimeError("tesseract exited with status 1")
 
 
+class _NoBinaryRunner(_OneWordRunner):
+    """Stands in for pytesseract's own `TesseractNotFoundError`, which the adapter matches by
+    class name so this module imports without pytesseract."""
+
+    def image_to_data(self, image, lang, dpi, timeout):
+        class TesseractNotFoundError(RuntimeError):
+            pass
+
+        raise TesseractNotFoundError(
+            "tesseract is not installed or it's not in your PATH. See README file for more "
+            "information."
+        )
+
+
 class _BoomVersionRunner(_OneWordRunner):
     def version(self):
         raise RuntimeError("no binary to ask")
@@ -165,6 +179,20 @@ def test_ocr_subprocess_failure_is_terminal():
         adapter.submit(_req(), RunContext())
     assert "tesseract failed" in str(exc.value)
     assert exc.value.backend_code == "RuntimeError"
+
+
+def test_missing_binary_names_the_install_command_not_pytesseract_readme():
+    # pytesseract's own sentence ends "See README file for more information", which reads as
+    # THIS project's README, where no install instructions live. The adapter must answer with
+    # the same install line `openreading backends` prints in its DEPS column.
+    adapter = TesseractAdapter(runner=_NoBinaryRunner())
+    with pytest.raises(TerminalError) as exc:
+        adapter.submit(_req(), RunContext())
+    message = str(exc.value)
+    assert "brew install tesseract" in message
+    assert "sudo apt install tesseract-ocr" in message
+    assert "See README file" not in message
+    assert exc.value.backend_code == "tesseract_binary_missing"
 
 
 # ---- page selection --------------------------------------------------------------------------

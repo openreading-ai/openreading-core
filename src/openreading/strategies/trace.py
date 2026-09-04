@@ -1,9 +1,18 @@
-"""The execution trace: attempt records + the `orchestration` block (execution.md §7,
-integration.md §4).
+"""The execution trace: the attempt records and the `orchestration` block a strategy run
+produces.
 
-The block is returned ALONGSIDE the response in v0.3 M1; embedding it into `response.orchestration`
-(with the additive response-schema bump) lands with the surface wiring in 11.6 (D-v3-5). Warnings
-go straight onto `response.warnings` now — that channel already exists in the v0.1 schema.
+Every strategy-engaged response carries this block as `response.orchestration`, an additive
+field since `response.v0.2.json` (D-v3-5). `Trace` accumulates one `Attempt` per backend call,
+one `GateRecord` per evaluated predicate, the compile-time drops and the decision records, and
+then renders the block. The schema types that field as an open object, so the two guarantees
+below are held in code rather than by the schema.
+
+`CATEGORIES` is the closed attempt-category vocabulary. `Attempt.category` is one of its
+members or the string `error(<class>)` for a rung that failed. `orchestration.outcome` is
+`ok` or `degraded` and nothing else. Warnings a walk raises land on `response.warnings`.
+
+`openreading explain` prints this block for humans and `openreading replay --trace` reads it
+back. `openreading.strategies.engine` says when each category is emitted.
 """
 
 from __future__ import annotations
@@ -11,12 +20,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-# execution.md §7 — the closed attempt-category vocabulary.
+# The closed attempt-category vocabulary.
 CATEGORIES = frozenset(
     {
         "succeeded",
         "skipped(missing_credentials)",
         "skipped(circuit_open)",
+        "skipped(cancelled)",
         "deadline_pruned",
         "quality_escalated",
         "review_escalated",
@@ -136,13 +146,14 @@ class Trace:
     config_hash: str
     attempts: list[Attempt] = field(default_factory=list)
     dropped: list[DropRecord] = field(default_factory=list)
-    decisions: list[dict[str, Any]] = field(default_factory=list)  # M4
-    pages: list[dict[str, Any]] = field(default_factory=list)  # M5 (page-granularity provenance)
+    decisions: list[dict[str, Any]] = field(default_factory=list)  # one per decision point (M4)
+    pages: list[dict[str, Any]] = field(default_factory=list)  # per-page provenance (M5)
     merge: list[dict[str, Any]] = field(
         default_factory=list
-    )  # M5 (pick:merge per-field provenance)
-    webhook_dropped: list[dict[str, Any]] = field(default_factory=list)  # T8 late-delivery drops
-    _dp_seq: int = 0  # walk-global decision-point counter → deterministic decision_id (M4)
+    )  # per-field provenance of a `pick: merge` node (M5)
+    # webhook losers whose late delivery is acknowledged and dropped
+    webhook_dropped: list[dict[str, Any]] = field(default_factory=list)  # T8
+    _dp_seq: int = 0  # walk-global counter behind each deterministic decision_id (M4)
 
     def record(self, attempt: Attempt) -> None:
         self.attempts.append(attempt)

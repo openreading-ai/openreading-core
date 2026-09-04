@@ -202,11 +202,11 @@ def test_already_typed_errors_pass_through_unchanged(err):
 
 
 def test_get_client_raises_missing_credentials_with_no_region(monkeypatch, tmp_path):
-    """QA closing pass (ui-app): `boto3.client("textract")` needs a region one way or another; when
+    """`boto3.client("textract")` needs a region one way or another. When
     boto3 itself can't resolve one anywhere (no AWS_REGION/AWS_DEFAULT_REGION, no ~/.aws/config
     default, no ambient IMDS role) it previously escaped `submit()` as a raw, uncaught
     `NoRegionError` ("You must specify a region.") — an unnamed "Backend error" instead of the
-    named MissingCredentialsError panel every correctly-required adapter gets (Ive's/Karri's QA:
+    named MissingCredentialsError panel every correctly-required adapter gets (reported as:
     "aws-textract renders a bare Backend error with 'You must specify a region.'"). `_get_client`
     must now convert boto3's own genuine "nothing resolved" signal into that same named error —
     credentials_spec/config_spec stay honestly optional (a real ambient boto3 chain, e.g. an IAM
@@ -231,6 +231,12 @@ def test_get_client_raises_missing_credentials_with_no_region(monkeypatch, tmp_p
         AWSTextractAdapter()._get_client(RunContext())
     assert exc.value.missing == ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION"]
     assert "region" in str(exc.value).lower()
+    # The wording is the one every other correctly-required adapter prints, so a newcomer
+    # comparing two keyless backends on one screen reads the same sentence twice.
+    assert str(exc.value).startswith(
+        "missing required credentials/config: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION"
+    )
+    assert "Sign up / configure: https://aws.amazon.com/textract/" in str(exc.value)
 
 
 # ---- the callers that reach _map_error ----------------------------------------------------------

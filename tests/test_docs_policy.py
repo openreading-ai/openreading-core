@@ -7,10 +7,10 @@ belongs in a module docstring next to the code it describes, or in the private
 markdown file that contradicts the code looks authoritative and is wrong, and nothing forces
 anyone to notice; a docstring that contradicts the module below it is caught in review.
 
-Two more drift traps close here: every relative link in the root files must resolve (a README
-that points at a file that moved is the "shredded docs" failure the rule exists to prevent), and
-the README's coverage badge must state the Makefile's enforced floor, so the badge can never
-claim a number the gate does not guarantee.
+Two more drift traps close here: every relative link in every tracked markdown file must resolve
+(a README that points at a file that moved is the "shredded docs" failure the rule exists to
+prevent), and the README's coverage badge must state the Makefile's enforced floor, so the badge
+can never claim a number the gate does not guarantee.
 """
 
 from __future__ import annotations
@@ -75,10 +75,10 @@ def test_no_docs_directory_is_tracked():
 
 # Relative link targets only — external URLs, mailto:, and in-page anchors are not checked.
 _LINK = re.compile(r"\]\((?!https?://|mailto:|#)([^)\s]+)\)")
-# Root docs plus the PR template; links resolve relative to the file's own directory and against
-# the git index, not the filesystem — a link into gitignored docs/ or an untracked local file
-# would otherwise pass here and be dead in every clone and in CI.
-_LINKED_DOCS = sorted(ALLOWED_ROOT_MD) + [".github/pull_request_template.md"]
+# Every tracked markdown file. Links resolve relative to the file's own directory and against the
+# git index, not the filesystem: a link into gitignored docs/ or an untracked local file would
+# otherwise pass here and be dead in every clone and in CI.
+_LINKED_DOCS = _tracked("*.md")
 
 
 @pytest.mark.parametrize("rel", _LINKED_DOCS)

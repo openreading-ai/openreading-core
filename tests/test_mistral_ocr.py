@@ -242,6 +242,18 @@ def test_missing_credentials_names_required_environment_variable() -> None:
     assert exc.value.missing == ["MISTRAL_API_KEY"]
 
 
+def test_package_re_exports_the_adapter_and_the_client_protocol() -> None:
+    # The openreading.adapters runbook, §2 "Files to CREATE", requires every adapter package to
+    # re-export both its Adapter and its client Protocol. An integrator who follows that documented
+    # path must not have to reach into the private `.adapter` module for one backend out of fifteen.
+    import openreading.adapters.mistral_ocr as pkg
+    from openreading.adapters.mistral_ocr.adapter import MistralOCRClient
+
+    assert pkg.__all__ == ["MistralOCRAdapter", "MistralOCRClient"]
+    assert pkg.MistralOCRAdapter is MistralOCRAdapter
+    assert pkg.MistralOCRClient is MistralOCRClient
+
+
 @pytest.mark.live
 def test_live_mistral_ocr() -> None:  # pragma: no cover
     from tests.live_helpers import run_live, sample_pdf_request, skip_unless_creds

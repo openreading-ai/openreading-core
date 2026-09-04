@@ -11,8 +11,16 @@ collapse onto, so the three surfaces cannot drift.
     env = openreading.run_batch(["invoices/"], backend="pymupdf", jobs=4)
     doc = openreading.resume("7dbf6b71-adb5-4e90-9188-a184fdba9d05")   # a run id is a UUIDv4
 
+A bare `spec §N`, `plan §N`, `Open Questions §N` or `§N` below names a section of a design record
+in the private company repository, under `internal/design/`. See AGENTS.md, "The company repo".
+The shipped behaviour is what this module states, and the citation is maintainer provenance only.
+
 Exports and return shapes
 -------------------------
+An envelope is the one JSON object a call returns. It carries the parsed `document` alongside the
+run's own record of it: `status`, `backend`, `usage`, `warnings`, and the `schema_version` that
+names the schema it validates against.
+
 - `run(source, backend="auto", *, strategy, config, operation, policy, env_file, mime_type,
   broker, transport, keep_candidates, deadline_ms, on_run_armed, **request_overrides) -> dict`
   — a `response.v0.3` envelope. `**request_overrides` are top-level request fields
@@ -81,7 +89,7 @@ This is validation of SHAPE only — no key means anything new, and no policy th
 before is enforced differently now. It exists because the alternative is silent: the split into
 `compliance` / `routing` / `RouterConfig` used to happen before anything validated the dict, so
 an unrecognised key (`require_baaa`, `hipaa`, `gdpr`) was dropped without a word and the
-constraint the operator wrote simply did not exist — every backend eligible, `dropped` empty,
+constraint the operator wrote did not exist — every backend eligible, `dropped` empty,
 exit 0. A compliance gate that can be turned off by a typo is not a gate.
 
 Exceptions
@@ -157,33 +165,35 @@ Environment variables read by this module
   Back up `*.jsonl` and `blobs/`, never `keys/` alongside them: erasure works by destroying the
   per-run key, and holds only to the degree no other copy survives.
 - `OPENREADING_LEDGER_RETENTION_HOURS` — float hours a run's payloads live before the reaper
-  crypto-shreds the key. Default `ledger.retention.DEFAULT_RETENTION_HOURS` (24.0, a
-  placeholder pending a founder decision). Read once at arm time and stamped as an absolute
-  epoch; it is only the STARTING ceiling — `InlineExecutor` tightens it per step from each
-  DISPATCHED backend's own `max_retention_hours` and never widens it (a merely-eligible backend
-  that never dispatches has zero effect; earlier it could collapse the whole run's ceiling to its
-  own strict limit). A ZDR backend on the path suppresses blobs entirely. Raise it BEFORE the
-  run: after the key is reaped, replay reports `payload_expired` and nothing brings the content
-  back. A fresh run also sweeps the whole ledger root at arm time, so stale runs are collected by
-  ordinary use.
+  crypto-shreds the key. Default `ledger.retention.DEFAULT_RETENTION_HOURS` (24.0, a provisional
+  default rather than a policy recommendation). Read once at arm time and stamped as an absolute
+  epoch. A value `float()` cannot parse fails the run at arm time, at exit 1, with a `ValueError`
+  that does not name this variable. It is only the STARTING ceiling — `InlineExecutor` tightens it
+  per step from each DISPATCHED backend's own `max_retention_hours` and never widens it (a
+  merely-eligible backend that never dispatches has zero effect; earlier it could collapse the
+  whole run's ceiling to its own strict limit). A ZDR backend on the path suppresses blobs
+  entirely. Raise it BEFORE the run: after the key is reaped, replay reports `payload_expired` and
+  nothing brings the content back. A fresh run also sweeps the whole ledger root at arm time, so
+  stale runs are collected by ordinary use.
 - `OPENREADING_ALLOW_PRIVATE_URLS` — read by `_download` (`materialize_document`'s own URL
   fetch). Unset (default): before any request leaves this process, `_assert_public_http_url`
   refuses a non-http(s) scheme and a host that resolves to a loopback/private/link-local/reserved
   address (cloud metadata endpoints included) — `unsupported_input` / `url_not_public`
-  respectively. Set (any non-empty value): skips that whole check, scheme included, for a
-  deployment whose document store is deliberately intranet-only; the operator is trusted to have
-  already constrained which URLs can reach `run()`/`route()` in that case. The connection is then
-  PINNED to the address that check vetted (original host carried in `Host` and SNI), so a DNS
-  answer that changes between the check and the connect — rebinding — cannot redirect it, and a
-  redirect is refused rather than followed for the same reason.
+  respectively. Set to ANY non-empty value, `0` and `false` included, it skips that whole check,
+  scheme included, for a deployment whose document store is deliberately intranet-only. Comment
+  the variable out or unset it to keep the check. No value of the variable turns the skip off. The
+  operator is trusted to have already constrained which URLs can reach `run()`/`route()` in that
+  case. The connection is then PINNED to the address that check vetted (original host carried in
+  `Host` and SNI), so a DNS answer that changes between the check and the connect — rebinding —
+  cannot redirect it, and a redirect is refused rather than followed for the same reason.
 - `env_file=` -> `credentials.load_dotenv`: loads `KEY=VALUE` lines WITHOUT overriding an
   already-set process variable (an exported shell var always beats the file); a missing file is
   a no-op. Loaded ONLY when the argument is given (`if env_file:` in `run()` / `run_batch()`):
   with `env_file=None` — the default — this module reads no file at all, and only the exported
-  environment applies. The `./.env` default belongs to the CLI (`--env-file`) and the company web UI,
-  which call `load_dotenv` themselves; a library call never picks up a cwd file implicitly, so
-  importing openreading from an unrelated project cannot silently adopt that project's keys.
-  There is no key argument anywhere — credentials never travel on the command line or in a call.
+  environment applies. The `./.env` default belongs to the CLI (`--env-file`), which calls
+  `load_dotenv` itself. A library call never picks up a cwd file implicitly, so importing
+  openreading from an unrelated project cannot silently adopt that project's keys. There is no key
+  argument anywhere — credentials never travel on the command line or in a call.
 - Read indirectly: backend credentials via `EnvCredentialBroker` (`OPENREADING_<SLUG>_<KEY>`
   beats the service-native name; `OPENREADING_CREDENTIALS_REF_ALIASES` allow-lists
   `credentials_ref: "env:<alias>"`, unset = no alias accepted — see `openreading.credentials`);
@@ -311,7 +321,7 @@ _MIME_BY_EXT = {
 # dropped by the loader (or the reverse): before this, `_apply_policy` filtered the caller's dict
 # down to its own copy of the compliance names one line BEFORE `Compliance(extra="forbid")` could
 # see it, so a misspelled or invented key was discarded in silence and the constraint the operator
-# wrote simply did not exist. `tests/test_policy_validation.py` pins the derivation.
+# wrote did not exist. `tests/test_policy_validation.py` pins the derivation.
 COMPLIANCE_POLICY_KEYS = tuple(Compliance.model_fields)  # -> request.compliance
 # A deliberate SUBSET of Routing: `fallback` is a request field (chain order), not a constraint.
 ROUTING_POLICY_KEYS = ("doc_type_hint", "optimize_for")  # -> request.routing
@@ -404,18 +414,12 @@ def _document_dict(source: str | bytes, mime_type: str | None) -> dict[str, Any]
         return {"url": s, "mime_type": mime_type}
     p = Path(s)
     if not p.exists():
-        # BL-133: every direct Python-API caller (route()/build_request()/run()/run_batch()) gets
-        # this guard for free — previously `read_bytes()` let the stdlib FileNotFoundError
-        # propagate unguarded, which the CLI's own callers had no consistent handling for either.
-        # BL-141: constructed via the stdlib's own errno-style OSError.__init__(errno, strerror,
-        # filename) rather than one pre-formatted string, so `.strerror` is populated the same way
-        # a real FileNotFoundError's is — letting cli/app.py's _describe_read_error helper treat
-        # this uniformly with a genuine OSError instead of needing a special case for it.
-        # BL-143: `errno.ENOENT`, not `None` — a real errno so `str(e)` renders "[Errno 2] ..." the
-        # same way a genuine FileNotFoundError does, instead of the literal "[Errno None] ..." that
-        # BL-141's placeholder `None` produced at cmd_parse/_cmd_parse_batch's two direct-`str(e)`
-        # sites (the ones BL-141 deliberately left outside its own eight `_describe_read_error`
-        # target sites, since `.strerror` alone never surfaced the errno anyway).
+        # A missing path is refused here so that every Python entry point shares one guard:
+        # route(), build_request(), run() and run_batch() (BL-133). It is built with the stdlib's
+        # errno-style OSError signature (errno, strerror, filename) so `.strerror` is populated and
+        # `str(e)` renders "[Errno 2] ..." exactly as a real FileNotFoundError does (BL-141,
+        # BL-143). `cli/app.py`'s `_describe_read_error` relies on that, and so do the two sites in
+        # cmd_parse and _cmd_parse_batch that format the exception with a bare `str(e)`.
         raise SourceNotFoundError(errno.ENOENT, "no such file or directory", s)
     mime = mime_type or _MIME_BY_EXT.get(p.suffix.lower(), "application/pdf")
     return {
@@ -440,8 +444,11 @@ def _apply_policy(body: dict[str, Any], policy: dict | None) -> None:
 
 
 def router_config(policy: dict | None) -> RouterConfig:
-    # The other half of the policy read (D7/D7a's three deployment keys). It validates too: a
-    # `route`-shaped call reaches this with a policy that never passed through build_request.
+    """The three deployment-level policy keys as a `RouterConfig` (D7/D7a).
+
+    It validates the whole policy first, because a `route()`-shaped call reaches this with a
+    policy that never passed through `build_request`.
+    """
     policy = validate_policy(policy) or {}
     return RouterConfig(
         allow_unverified_compliance=bool(policy.get("allow_unverified_compliance", False)),
@@ -459,14 +466,17 @@ def build_request(
     policy: dict | None = None,
     **overrides: Any,
 ) -> OpenReadingRequest:
-    # BL-105: document/backend are derived from source=/backend=, the named parameters above —
-    # never from the passthrough overrides bag. Before this guard, the override loop below (an
-    # ordinary `body[k] = v` merge) let a caller-supplied document=/backend= override — e.g. a
-    # stray kwarg forwarded through run()'s or run_batch()'s own **overrides passthrough — silently
-    # win over the request's real document, with no error of any kind: the Python-API-level twin of
-    # the /v1/batch server-side bug this same item fixes (server/app.py's `shared` merge). Reject
-    # explicitly, naming the field(s), rather than silently drop them, so a caller who made this
-    # mistake sees it immediately instead of a request that quietly ran against the wrong document.
+    """Build the `OpenReadingRequest` that the CLI and the server hand to `run_request`.
+
+    `document` and `backend` are derived from `source=` and `backend=` alone. Passing either one
+    through `**overrides` raises `ValueError` (BL-105). A named backend's `type` is filled in from
+    its descriptor, and a `strategy:<name>` id is never looked up in the registry (T1). `policy`
+    is validated whole before it is split into `compliance` and `routing`.
+    """
+    # The failure this refuses: an overrides bag carrying `document=` or `backend=` won over the
+    # request's real document with no error of any kind, the Python-API twin of the /v1/batch
+    # `shared` merge bug (BL-105). Reject by name rather than drop, so a caller who forwarded a
+    # stray kwarg through run()'s or run_batch()'s passthrough sees the mistake immediately.
     reserved = sorted(set(overrides) & {"document", "backend"})
     if reserved:
         raise ValueError(
@@ -662,26 +672,26 @@ def _arm_ledger_unguarded(
 
     Also runs the at-run-start reaper sweep and stamps this run's own retention ceiling (Open
     Questions §9 item 2's recommendation (a); plan §7). `OPENREADING_LEDGER_RETENTION_HOURS`
-    overrides the T1 placeholder default — see FOUNDER-INBOX.md for why the real default is an
-    open founder decision, not settled here.
+    overrides the T1 provisional default. The choice of a real default is tracked in
+    `internal/eng-council/FOUNDER-INBOX.md` and is not settled here.
 
-    Ledger T3 round-2 (Findings 8 and 6): a FRESH run's stamp is the operator
-    default ALONE — nothing has dispatched yet, so nothing narrows it. Earlier, this stamped
-    `compute_retention_ceiling_hours` over `eligible` (the request's WHOLE registry-wide
-    compliance/capability survivor set, `Router.route`'s own stage-1/2 output — correct and
-    appropriately broad for the `Sanitizer` arming below, where over-inclusion is harmless, but not
-    for this) — so a backend merely eligible for the document type, never named by the compiled
-    strategy nor dispatched, could collapse the ceiling (and force `zdr`) to its own strict limit
-    for a run that never went near it. `InlineExecutor` now tightens (never widens) this stamp
-    itself, per step, from each backend's own descriptor, ONLY as it actually dispatches
-    (`ledger/retention.py`'s `tighten_retention`, called from `ledger/inline.py`'s live "ok"
-    branch) — a backend that stays merely eligible has zero effect on the stamp. The same rescoping
-    applies to ZDR blob suppression (`InlineExecutor._is_zdr_backend`, a per-step registry lookup
-    replacing the old whole-run `zdr=` boolean this function used to compute and pass in).
+    Ledger T3: a FRESH run's stamp is the operator default ALONE — nothing has dispatched yet, so
+    nothing narrows it. Earlier, this stamped `compute_retention_ceiling_hours` over `eligible`
+    (the request's WHOLE registry-wide compliance/capability survivor set, `Router.route`'s own
+    stage-1/2 output — correct and appropriately broad for the `Sanitizer` arming below, where
+    over-inclusion is harmless, but not for this) — so a backend merely eligible for the document
+    type, never named by the compiled strategy nor dispatched, could collapse the ceiling (and
+    force `zdr`) to its own strict limit for a run that never went near it. `InlineExecutor` now
+    tightens (never widens) this stamp itself, per step, from each backend's own descriptor, ONLY
+    as it actually dispatches (`ledger/retention.py`'s `tighten_retention`, called from
+    `ledger/inline.py`'s live "ok" branch) — a backend that stays merely eligible has zero effect
+    on the stamp. The same rescoping applies to ZDR blob suppression
+    (`InlineExecutor._is_zdr_backend`, a per-step registry lookup replacing the old whole-run
+    `zdr=` boolean this function used to compute and pass in).
 
     The `Sanitizer` backstop (§9.3) is still armed with every ELIGIBLE descriptor's
     actually-resolved secret values (unchanged, unaffected by the above) — a static, no-value
-    `Sanitizer()` never has anything to scrub against (Phase C round-1, High).
+    `Sanitizer()` never has anything to scrub against.
 
     Ledger T3 (plan §4.2/§4.4): a FRESH run (`resume=False`, the default — every pre-existing
     caller) writes the run's header once, at this first arm, and does NOT pass `pinned_eligible=`
@@ -690,8 +700,8 @@ def _arm_ledger_unguarded(
     <RUN_ID>`'s own call) instead reads that header, compares it against a freshly-recomputed one
     from the LIVE `openreading.yaml`/registry, raises `HeaderMismatch` on any hard-field
     disagreement (AC-4) — before touching the journal further — and, on a match, arms the resumed
-    `InlineExecutor` WITH `pinned_eligible=` sourced from the header (round-1 F6: the one
-    production line item that actually gives AC-14's gate teeth)."""
+    `InlineExecutor` WITH `pinned_eligible=` sourced from the header, which is what gives AC-14's
+    gate teeth."""
     root = os.environ.get("OPENREADING_LEDGER")
     if not root:
         return None
@@ -759,12 +769,12 @@ def _arm_ledger_unguarded(
                 run_id, digest, raw, req.document.mime_type or "application/octet-stream"
             )
         elif req.document.url is not None:
-            # Finding 3 (Phase C round-1): `document.url` is a secret-class field (§9.3 —
-            # "routinely a presigned URL, forwarded verbatim," unconditionally, not by size) that
-            # must never land in the plaintext `slim_request` sidecar (`slim_request_dict` already
-            # strips it). Routed through the SAME per-run encrypted blob store a `bytes_base64`
-            # document's own bytes already use, so it earns the identical shred/erasure guarantee
-            # instead of persisting forever in a file `reap()` never touches.
+            # `document.url` is a secret-class field (§9.3, "routinely a presigned URL, forwarded
+            # verbatim," unconditionally, not by size) that must never land in the plaintext
+            # `slim_request` sidecar (`slim_request_dict` already strips it). Routed through the
+            # SAME per-run encrypted blob store a `bytes_base64` document's own bytes already use,
+            # so it earns the identical shred/erasure guarantee instead of persisting forever in a
+            # file `reap()` never touches.
             raw = req.document.url.encode("utf-8")
             digest = "sha256:" + hashlib.sha256(raw).hexdigest()
             document_ref = blobs.put(run_id, digest, raw, DOCUMENT_URL_MEDIA_TYPE)
@@ -904,10 +914,10 @@ def _run_strategy_request(
         strategy_name=name,
     )
     if executor is not None and on_run_armed is not None:
-        # Ledger T3 (plan §4.4, round-2 F8's own "Narrowest fix"): fired once, immediately after
-        # arming succeeds, so a caller (the CLI's `cmd_parse`) can capture the run id into a local
-        # variable BEFORE the walk proceeds — the only way its own `except KeyboardInterrupt:`
-        # handler can name a real, resumable run id if the walk is interrupted mid-flight.
+        # Ledger T3 (plan §4.4): fired once, immediately after arming succeeds, so a caller (the
+        # CLI's `cmd_parse`) can capture the run id into a local variable BEFORE the walk
+        # proceeds — the only way its own `except KeyboardInterrupt:` handler can name a real,
+        # resumable run id if the walk is interrupted mid-flight.
         on_run_armed(run_id)
     result = run_strategy(
         compiled,
@@ -1167,25 +1177,27 @@ def run(
     on_run_armed: Callable[[str], None] | None = None,
     **request_overrides: Any,
 ) -> dict[str, Any]:
-    """Run a document (path / URL / bytes) through one backend (named), the compliance-first
-        router (`backend="auto"`), or a strategy (`strategy="<name>"` — sugar for
-        `backend="strategy:<name>"`). `config` points at an openreading.yaml (else `./openreading
-    .yaml` is discovered). Raises TerminalError / UnknownStrategyError / PlanExhaustedError /
-        RetryableError — this is a thin wrapper over `run_request` (via `build_request`) and propagates
-        whatever it raises, RetryableError included (see `run_request`'s own docstring).
+    """Run one document through a named backend, the compliance-first router (`backend="auto"`),
+    or a strategy, and return a `response.v0.3` envelope. `strategy="<name>"` is sugar for
+    `backend="strategy:<name>"`. `source` is a path, an http(s) URL, or raw bytes. `config` points
+    at an openreading.yaml, and without it `./openreading.yaml` is discovered.
 
-        `deadline_ms` (BL-169): the caller's own absolute time budget for a DIRECTLY-NAMED backend
-        only — forwarded to `run_request`'s named-backend branch (`prepare_named_backend`, BL-153's own
-        plumbing). Omitted (the default), a named backend keeps resolving to
-        `credentials.DEFAULT_DEADLINE_MS` (2 minutes) as before — too short for some hosted async
-        backends' ordinary workload (`the openreading.cli docstring`'s `--deadline` flag is now the CLI surface for
-        this). Has no effect on `backend="auto"` or `strategy="..."` dispatch, which manage their own
-        per-node time budget instead.
+    This is a thin wrapper over `run_request` (via `build_request`) and propagates whatever that
+    raises, `RetryableError` included. Every exception type this call can raise, and what each one
+    means, is in the "Exceptions" section of this module's own docstring.
 
-        `on_run_armed` (Ledger T3, plan §4.4): invoked once, with the run id, immediately after the
-        ledger successfully arms — only on a strategy-dispatch path (the only one that arms one at
-        all). Mirrors `run_batch`'s own `on_progress`/`on_preflight` optional-hook shape; a plain
-        named-backend or `auto` run never touches the ledger, so this never fires for either."""
+    `deadline_ms` (BL-169) is the caller's absolute time budget for a DIRECTLY-NAMED backend only,
+    forwarded to `run_request`'s named-backend branch (`prepare_named_backend`, BL-153's own
+    plumbing). Omitted (the default), a named backend resolves to `credentials.DEFAULT_DEADLINE_MS`
+    (2 minutes), which is too short for some hosted async backends' ordinary workload. The CLI
+    spelling of the same knob is `parse --deadline`, documented in `openreading.cli`. It has no
+    effect on `backend="auto"` or `strategy="..."` dispatch, which manage their own per-node budget.
+
+    `on_run_armed` (Ledger T3, plan §4.4) is invoked once, with the run id, immediately after the
+    ledger arms. Only a strategy-dispatch path arms one, so a plain named-backend or `auto` run
+    never fires it. It mirrors the optional-hook shape of `run_batch`'s own `on_progress` and
+    `on_preflight`.
+    """
     if env_file:
         load_dotenv(env_file)
     if strategy is not None:
@@ -1224,11 +1236,11 @@ def _request_from_header(header: RunHeader, blobs: LocalFsBlobStore) -> OpenRead
     `slim_request` + `document` (see `ledger/header.py`'s module docstring for what's deliberately
     NOT recoverable this way — `document.password`/`async.webhook_url`, never persisted).
 
-    `header.document` holds EITHER a `bytes_base64` document's own bytes OR (Finding 3, Phase C
-    round-1) a URL-sourced document's `document.url` string — both routed through the same
-    encrypted blob store rather than the plaintext `slim_request` echo. `header.document_is_url`
-    tells the two apart (Phase C round-2 Finding 7 — NOT `media_type`, which for the bytes
-    case is a caller-supplied, unvalidated `mime_type` that could collide with a sentinel value)."""
+    `header.document` holds EITHER a `bytes_base64` document's own bytes OR a URL-sourced
+    document's `document.url` string. Both are routed through the same encrypted blob store rather
+    than the plaintext `slim_request` echo. `header.document_is_url` tells the two apart (NOT
+    `media_type`, which for the bytes case is a caller-supplied, unvalidated `mime_type` that could
+    collide with a sentinel value)."""
     body: dict[str, Any] = dict(header.slim_request)
     doc = dict(body.get("document") or {})
     if header.document is not None:
@@ -1270,7 +1282,7 @@ def resume_run(run_id: str) -> dict[str, Any]:
     matches the run's original header (AC-4) — the CLI maps each to its own printed refusal."""
     root = os.environ.get("OPENREADING_LEDGER")
     if not root:
-        raise LookupError("OPENREADING_LEDGER is not set — there is no run to resume from")
+        raise LookupError("OPENREADING_LEDGER is not set, so there is no run to resume from")
     ledger_root = Path(root)
     header = read_header(ledger_root, run_id)
     if header is None:

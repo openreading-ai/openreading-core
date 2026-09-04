@@ -72,12 +72,19 @@ def _format_token(mime: str) -> str:
 
 @dataclass
 class ScoredBackend:
+    """One stage-2 survivor and its stage-3 score. Sorted descending, these produce the chain
+    order."""
+
     adapter: BackendAdapter
     score: float
 
 
 @dataclass
 class RoutePlan:
+    """What the router decided: the `chosen` backend, the ordered `fallbacks` behind it, one
+    `DropReason` per excluded backend, and the operator confirmations the eligible set rests
+    on. `chain` is the order `executor.execute_plan` walks."""
+
     chosen: BackendAdapter | None
     fallbacks: list[BackendAdapter] = field(default_factory=list)
     dropped: dict[str, DropReason] = field(default_factory=dict)
@@ -136,6 +143,9 @@ class RoutePlan:
 
 
 class Router:
+    """The 3-stage router. `route()` turns a request into a `RoutePlan` using nothing but the
+    registry's descriptors, and `check_eligible()` applies stage 1 to one named backend."""
+
     def __init__(self, registry: Registry, config: RouterConfig | None = None) -> None:
         self.registry = registry
         self.config = config or RouterConfig()
@@ -189,6 +199,9 @@ class Router:
 
     # ---- orchestration -------------------------------------------------------
     def route(self, req: OpenReadingRequest) -> RoutePlan:
+        """Classify every registered backend through stages 1 and 2, score the survivors in
+        stage 3, honor `routing.fallback` within those survivors, and return the plan. With no
+        survivors the plan is `chosen=None` with `terminal_reason="no_compliant_backend"`."""
         dropped: dict[str, DropReason] = {}
         survivors: list[BackendAdapter] = []
         notes: dict[str, str] = {}

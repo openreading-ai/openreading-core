@@ -11,7 +11,7 @@ Credentials never travel on the CLI: they are read from the environment by the b
 (OPENREADING_<SLUG>_<KEY> or the service-native var, e.g. REDUCTO_API_KEY). A `.env` in the
 working directory is loaded automatically (never overriding an already-set var).
 
-The user-facing reference (every subcommand, flags, exit codes 0-6) is the `openreading.cli`
+The user-facing reference (every subcommand, flags, exit codes 0-6 and 143) is the `openreading.cli`
 package docstring; this module holds the `cmd_*` handlers, `build_parser`, and `main`.
 
 Environment this module reads itself
@@ -61,13 +61,20 @@ from openreading.batch.sources import (
     DEFAULT_MAX_ITEMS,
     SourceLimitError,
     SourceNotFoundError,
+    is_url,
     looks_batch,
+    normalize_input_format,
 )
 from openreading.credentials import EnvCredentialBroker, load_dotenv
 from openreading.ledger.header import HeaderMismatch
 from openreading.ledger.ports import PayloadExpired
 from openreading.liveness import check_liveness, probe_kind
-from openreading.readiness import auth_rejected_backends, auth_rejected_hint, backend_readiness
+from openreading.readiness import (
+    auth_rejected_backends,
+    auth_rejected_hint,
+    backend_readiness,
+    missing_reason,
+)
 from openreading.router.executor import execute_plan
 from openreading.router.router import Router
 from openreading.strategies import (
@@ -112,7 +119,8 @@ def _print_exhausted(tag: str, e: PlanExhaustedError, trail_summary: str) -> Non
 
 
 class _PolicyError(Exception):
-    """A `--policy` file that can't be read, parsed, or validated as a policy."""
+    """A file a command was told to read that could not be opened, does not hold JSON, or (for
+    `--policy`) is not valid as a policy."""
 
 
 def _describe_read_error(e: OSError | json.JSONDecodeError) -> str:
@@ -137,6 +145,26 @@ def _describe_read_error(e: OSError | json.JSONDecodeError) -> str:
     return str(e)
 
 
+def _read_json_or_fail(path: str, noun: str = "") -> Any:
+    """Read and parse a JSON file, or raise with a message that says which of the two failed. A
+    file the process cannot open and a file whose bytes are not JSON are different problems for
+    the reader, and one wording for both sends them to check permissions on a file that reads
+    fine.
+
+    `noun` names the kind of file when the caller's flag has a word for it ("policy"), so a
+    command that reads both a document and a policy still says which of the two it means.
+    """
+    what = f"{noun} {path}" if noun else path
+    try:
+        return json.loads(Path(path).read_text())
+    except OSError as e:
+        raise _PolicyError(f"cannot read {what}: {_describe_read_error(e)}") from e
+    except json.JSONDecodeError as e:
+        raise _PolicyError(
+            f"{what} is not valid JSON: {e.msg} at line {e.lineno} column {e.colno}"
+        ) from e
+
+
 def _load_policy(path: str | None) -> dict[str, Any] | None:
     """Read and validate a `--policy` JSON file. Raises like `load_config` does for `--config` so
     each command reports it under its own tag — a bad policy path is a user error, not a crash.
@@ -144,17 +172,19 @@ def _load_policy(path: str | None) -> dict[str, Any] | None:
     Validation is `api.validate_policy`, the same call `route()`/`run()` make, so a policy the
     library refuses is never accepted here. It is done at LOAD time rather than left to the first
     reader because every `--policy` subcommand shares this function, and a policy that is wrong is
-    wrong before the document is even opened. `cannot read` covers the file; `invalid policy`
-    covers its content; both are the same soft-failure bucket (exit 3) for the caller.
+    wrong before the document is even opened. `cannot read` covers a file that will not open,
+    `is not valid JSON` covers bytes that will not parse, and `invalid policy` covers content that
+    parses and is not a policy. All three are the same soft-failure bucket (exit 3) for the caller.
     """
     # `is None`, not falsy: only an absent flag means "no policy". An explicit `--policy ""` has to
     # fail loudly rather than silently drop the compliance constraints the caller meant to apply.
     if path is None:
         return None
-    try:
-        raw = json.loads(Path(path).read_text())
-    except (OSError, json.JSONDecodeError) as e:
-        raise _PolicyError(f"cannot read policy {path}: {_describe_read_error(e)}") from e
+    # `Path("")` resolves to the working directory, so without this the empty value is reported as
+    # a directory that cannot be read, describing neither the flag nor the mistake.
+    if path == "":
+        raise _PolicyError("--policy needs a file path, and an empty value was given")
+    raw = _read_json_or_fail(path, "policy")
     # A file holding `null` parses fine, and `validate_policy(None)` means "no policy" — correct
     # for the Python default, wrong for a flag the caller typed on purpose. Rejected here, where
     # the difference between "argument omitted" and "file says null" is still visible.
@@ -167,6 +197,8 @@ def _load_policy(path: str | None) -> dict[str, Any] | None:
 
 
 def cmd_parse(args) -> int:
+    """`openreading parse`: one document, or a batch when the sources look like one
+    (`looks_batch`). Exit codes are in the `openreading.cli` docstring."""
     # exactly one of --backend / --strategy / --no-strategy
     chosen = [x for x in (args.backend, args.strategy, "none" if args.no_strategy else None) if x]
     if len(chosen) != 1:
@@ -180,10 +212,27 @@ def cmd_parse(args) -> int:
         # belt to argparse's `choices` braces: the slug must also resolve in the catalog, so a
         # divergence surfaces as exit 2 here rather than a traceback deeper in the run.
         try:
-            make_adapter(args.backend)
+            adapter = make_adapter(args.backend)
         except KeyError as e:
             print(f"[parse] {e}", file=sys.stderr)
             return 2
+        # A single document in a format the named backend does not read is refused here, in the
+        # word the batch path already uses for it (`skip_reason: unsupported_format`). Dispatching
+        # anyway hands the reader the parsing library's own stream error, which names neither the
+        # format nor the fix. Guarded on a known extension and a descriptor that declares formats,
+        # so an extensionless file and a silent descriptor dispatch exactly as before.
+        if not looks_batch(args.files) and not is_url(args.files[0]):
+            fmt = normalize_input_format(Path(args.files[0]).suffix.lstrip("."))
+            supported = {
+                normalize_input_format(f) for f in adapter.descriptor.capabilities.input_formats
+            }
+            if fmt and supported and fmt not in supported:
+                print(
+                    f"[{args.backend}] unsupported_format: {args.backend} does not read "
+                    f".{fmt}. It reads {', '.join(sorted(supported))}.",
+                    file=sys.stderr,
+                )
+                return 3
 
     overrides: dict[str, Any] = {}
     if args.pages:
@@ -267,8 +316,9 @@ def cmd_parse(args) -> int:
         # Without this clause, SourceNotFoundError (an OSError subclass) still fell to the generic
         # except Exception below rather than exit 2 (the openreading.cli docstring's own
         # documented code for `parse`: an unresolvable source), landing at the wrong-but-clean
-        # exit 1 instead.
-        print(f"[{label}] {e}", file=sys.stderr)
+        # exit 1 instead. The path and the reason are printed apart, because `str(e)` on an
+        # OSError leads with an "[Errno 2]" the reader who mistyped a filename cannot use.
+        print(f"[{label}] cannot read {args.files[0]}: {_describe_read_error(e)}", file=sys.stderr)
         return 2
     except api.PolicyError as e:
         # A `--policy` file is already refused by _load_policy before we get here; this is the
@@ -303,6 +353,16 @@ def _usd(v: float) -> str:
     once rounding to the cent would print `$0.00` for a real (if small) bill — the preflight's
     whole job is to be a number the reader can multiply, and zero multiplies to zero."""
     return f"${v:,.2f}" if v >= 0.01 else f"${v:.4f}"
+
+
+def _page_number(raw: str) -> int:
+    """argparse type for --pages. A page number below 1 is a typo on a 1-based flag, and letting
+    it reach the request model turns it into a pydantic dump and exit 1, where every other bad
+    flag value on this CLI is one line and exit 2."""
+    value = int(raw)
+    if value < 1:
+        raise argparse.ArgumentTypeError("page numbers are 1-based")
+    return value
 
 
 def _cmd_parse_batch(args, overrides: dict, label: str) -> int:
@@ -367,7 +427,7 @@ def _cmd_parse_batch(args, overrides: dict, label: str) -> int:
         )  # one endpoint published, or two, or none
         basis = f"~{rate} per page-equiv" if ends else rate
         print(
-            f"[preflight] {n} items → hosted backend {backend}: {basis}, not per item",
+            f"[preflight] {n} items on hosted backend {backend}: {basis}, not per item",
             file=sys.stderr,
         )
         if ends:
@@ -407,15 +467,21 @@ def _cmd_parse_batch(args, overrides: dict, label: str) -> int:
         # for this process; otherwise today's behavior (a bare KeyboardInterrupt) is unchanged.
         if os.environ.get("OPENREADING_LEDGER"):
             print(
-                "[batch] interrupted; per-item runs under $OPENREADING_LEDGER may be "
-                "individually resumable (openreading resume <RUN_ID>) — batch-level resume "
-                "is not yet supported",
+                "[batch] interrupted. Per-item runs under $OPENREADING_LEDGER may be "
+                "individually resumable with openreading resume <RUN_ID>. Batch-level resume "
+                "is not supported.",
                 file=sys.stderr,
             )
             return 6
         raise
-    except (SourceLimitError, SourceNotFoundError, JobsLimitError) as e:
+    except (SourceLimitError, JobsLimitError) as e:
         print(f"[batch] {e}", file=sys.stderr)
+        return 2
+    except SourceNotFoundError as e:
+        # Split out of the tuple above so the errno never reaches the terminal: BL-143 gives this
+        # exception a real errno for any caller that prints `str(e)`, and CPython renders that as
+        # a leading "[Errno 2]" the reader who mistyped a glob cannot use.
+        print(f"[batch] {_describe_read_error(e)}: {e.filename!r}", file=sys.stderr)
         return 2
     except _CLEAN_EXIT3_ERRORS as e:
         # missing_credentials msg names vars + signup; a RetryableError reaching here (a
@@ -497,6 +563,8 @@ def cmd_resume(args) -> int:
 
 
 def cmd_route(args) -> int:
+    """`openreading route`: print the compliance-first plan as JSON, and with `--run` execute the
+    whole chain. The plan is still printed when the chain is exhausted."""
     try:
         policy = _load_policy(args.policy)
     except _PolicyError as e:
@@ -527,7 +595,7 @@ def cmd_route(args) -> int:
         except PlanExhaustedError as e:
             trail = "; ".join(f"{t['backend']}:{t['category']}({t['code']})" for t in e.trail)
             _print_exhausted(
-                "route --run", e, f"plan exhausted — {trail or 'no eligible backend ran'}"
+                "route --run", e, f"plan exhausted: {trail or 'no eligible backend ran'}"
             )
             print(json.dumps(out, indent=2))  # the plan is still the answer to `route`
             return 3
@@ -536,11 +604,15 @@ def cmd_route(args) -> int:
 
 
 def cmd_serve(args) -> int:
+    """`openreading serve`: build the app, claim the listening socket, then hand the bound socket
+    to uvicorn. Why the bind comes first is in the comment below."""
     try:
         import uvicorn
     except ImportError:
         print(
-            "[serve] serve needs the server extra: pip install 'openreading[server]'",
+            "[serve] serve needs the [server] extra. Run uv sync --all-extras --dev "
+            "in your clone (make sync does the same), or pip install -e '.[server]' "
+            "in your virtualenv.",
             file=sys.stderr,
         )
         return 3
@@ -559,10 +631,12 @@ def cmd_serve(args) -> int:
         # a bearer token leaks.
         print(f"[serve] {e}", file=sys.stderr)
         return 3
-    if args.host != "127.0.0.1":
+    # localhost and ::1 are loopback too. Warning about exposure while binding the loopback
+    # interface teaches an operator to skip the one warning that matters.
+    if args.host not in {"127.0.0.1", "localhost", "::1"}:
         print(
-            f"[serve] warning: binding {args.host} exposes the server — anyone who can reach it "
-            "spends your vendor keys. Put it behind your own auth/proxy.",
+            f"[serve] warning: binding {args.host} exposes the server. Anyone who can reach it "
+            "spends your vendor keys. Put it behind your own auth or proxy.",
             file=sys.stderr,
         )
     # Claim the listening socket HERE and hand uvicorn the bound socket, rather than a host/port
@@ -587,8 +661,8 @@ def cmd_serve(args) -> int:
     except OSError as e:
         sock.close()
         print(
-            f"[serve] cannot bind {args.host}:{args.port}: {e.strerror or e} — free it or pass a "
-            "different --port",
+            f"[serve] cannot bind {args.host}:{args.port}: {e.strerror or e}. Free it or pass a "
+            "different --port.",
             file=sys.stderr,
         )
         return 3
@@ -600,7 +674,7 @@ def cmd_serve(args) -> int:
     # and a gate that greps one is a gate that can be fooled.
     bound_host, bound_port = sock.getsockname()[:2]
     print(
-        f"[serve] listening on http://{bound_host}:{bound_port} — readiness: GET /healthz",
+        f"[serve] listening on http://{bound_host}:{bound_port}. Readiness: GET /healthz",
         file=sys.stderr,
     )
     try:
@@ -630,7 +704,7 @@ def cmd_backends(args) -> int:
     if not requested:
         print(f"{'BACKEND':<30} {'TYPE':<18} {'CONFIGURED':<11} MISSING")
         for r in rows:
-            miss = r.missing_deps or r.required_missing
+            miss = missing_reason(r)
             print(
                 f"{r.slug:<30} {r.type:<18} {('yes' if r.ready else 'no'):<11} "
                 f"{', '.join(miss) or '-'}"
@@ -666,13 +740,16 @@ def _check_targets(raw: str | None, adapters: dict) -> list[str] | None:
     wanted = [s.strip() for s in raw.split(",") if s.strip()]
     unknown = [s for s in wanted if s not in adapters]
     if unknown:
-        print(
-            f"[backends] unknown backend(s): {', '.join(unknown)}; known: "
-            f"{', '.join(sorted(adapters))}",
-            file=sys.stderr,
-        )
+        print(_unknown_backends_line("backends", unknown, adapters), file=sys.stderr)
         return None
     return list(dict.fromkeys(wanted))
+
+
+def _unknown_backends_line(tag: str, unknown: list[str], known) -> str:
+    """One wording for an unknown backend id, wherever it is typed. Three call sites each
+    rendering their own is how two of them ended up withholding the list the reader needs to fix
+    the typo."""
+    return f"[{tag}] unknown backend(s): {', '.join(unknown)}; known: {', '.join(sorted(known))}"
 
 
 def _yaml_dump(obj: Any) -> str:
@@ -700,7 +777,13 @@ def cmd_strategy_show(args) -> int:
         return 0
     body = _strategy_body_as_written(args.name, loaded)
     if body is None:
-        print(f"[strategy show] unknown strategy {args.name!r}", file=sys.stderr)
+        # The same set `api.run` names when `--strategy` misses, in the same words: the command
+        # whose job is browsing strategy names is the last one that should withhold them.
+        known = (set(config.strategies) if config else set()) | set(PRESET_NAMES)
+        print(
+            f"[strategy show] unknown strategy {args.name!r}; defined: {', '.join(sorted(known))}",
+            file=sys.stderr,
+        )
         return 3
     print(_yaml_dump({args.name: body}), end="")
     return 0
@@ -877,9 +960,9 @@ def cmd_strategy_plan(args) -> int:
 def cmd_explain(args) -> int:
     """Render a response's orchestration block, or a comparison report, as a human story."""
     try:
-        doc = json.loads(Path(args.response).read_text())
-    except (OSError, json.JSONDecodeError) as e:
-        print(f"[explain] cannot read {args.response}: {_describe_read_error(e)}", file=sys.stderr)
+        doc = _read_json_or_fail(args.response)
+    except _PolicyError as e:
+        print(f"[explain] {e}", file=sys.stderr)
         return 3
     if "subjects" in doc and "fields" in doc and "findings" in doc:  # a comparison report
         from openreading.comparison.render import render_table
@@ -948,9 +1031,9 @@ def cmd_replay(args) -> int:
     from openreading.strategies import compile_strategy, run_strategy
 
     try:
-        trace_doc = json.loads(Path(args.trace).read_text())
-    except (OSError, json.JSONDecodeError) as e:
-        print(f"[replay] cannot read {args.trace}: {_describe_read_error(e)}", file=sys.stderr)
+        trace_doc = _read_json_or_fail(args.trace)
+    except _PolicyError as e:
+        print(f"[replay] {e}", file=sys.stderr)
         return 3
     orch = trace_doc.get("orchestration") or trace_doc  # a full response OR a bare orchestration
     decisions = orch.get("decisions", [])
@@ -992,8 +1075,8 @@ def cmd_replay(args) -> int:
         if trace_config_hash is not None and trace_config_hash != compiled.config_hash:
             print(
                 f"[replay] trace config_hash {trace_config_hash!r} does not match the freshly "
-                f"compiled config_hash {compiled.config_hash!r} — refusing to replay a trace "
-                f"recorded under a different configuration or compliance posture",
+                f"compiled config_hash {compiled.config_hash!r}. Refusing to replay a trace "
+                f"recorded under a different configuration or compliance posture.",
                 file=sys.stderr,
             )
             return 3
@@ -1087,14 +1170,14 @@ def cmd_calibrate(args) -> int:
     # that measured nothing, easy to mistake for "measured and found wanting."
     if report.n_scored == 0:
         print(
-            f"[calibrate] 0 of {report.n_docs} cases were scored — none named a dimension "
+            f"[calibrate] 0 of {report.n_docs} cases were scored. None named a dimension "
             "scorers.score() recognizes, so scorer_agreement is not measured at any threshold "
             "(only escalation_rate/cost_per_doc are real signal here)",
             file=sys.stderr,
         )
     elif report.n_scored < report.n_docs:
         print(
-            f"[calibrate] only {report.n_scored} of {report.n_docs} cases were scored — the rest "
+            f"[calibrate] only {report.n_scored} of {report.n_docs} cases were scored. The rest "
             "named no recognized `expected` dimension, so scorer_agreement reflects the scored "
             "subset only",
             file=sys.stderr,
@@ -1190,10 +1273,14 @@ def cmd_leaderboard(args) -> int:
         ids = [b.strip() for b in (args.backends or "").split(",") if b.strip()]
         unknown = [b for b in ids if b not in BUILTIN_ADAPTERS]
         if unknown:
-            print(f"[leaderboard] unknown backend(s): {', '.join(unknown)}", file=sys.stderr)
+            print(_unknown_backends_line("leaderboard", unknown, BUILTIN_ADAPTERS), file=sys.stderr)
             return 2
     if len(ids) < 2:
-        print(f"[leaderboard] need at least two backends to rank (got {len(ids)})", file=sys.stderr)
+        print(
+            f"[leaderboard] need at least two backends to rank (got {len(ids)}). "
+            "Pass --backends a,b or --all-ready.",
+            file=sys.stderr,
+        )
         return 2
 
     try:
@@ -1275,18 +1362,15 @@ def cmd_compare(args) -> int:
 
     if args.from_response:
         try:
-            doc = json.loads(Path(args.from_response).read_text())
-        except (OSError, json.JSONDecodeError) as e:
-            print(
-                f"[compare] cannot read {args.from_response}: {_describe_read_error(e)}",
-                file=sys.stderr,
-            )
+            doc = _read_json_or_fail(args.from_response)
+        except _PolicyError as e:
+            print(f"[compare] {e}", file=sys.stderr)
             return 5
         cands = (doc.get("orchestration") or {}).get("candidates") or []
         if not cands:
             print(
-                "[compare] --from: this response kept no candidates — re-run "
-                "`parse --strategy <name> --keep-candidates`",
+                "[compare] --from: this response kept no candidates. Re-run "
+                "`parse --strategy <name> --keep-candidates`.",
                 file=sys.stderr,
             )
             return 5
@@ -1296,6 +1380,14 @@ def cmd_compare(args) -> int:
     elif args.backends or args.all_ready:
         if len(args.inputs) != 1:
             print("[compare] fan-out compares ONE document across backends", file=sys.stderr)
+            return 2
+        # --all-ready silently wins over --backends, so the typed list is thrown away whole, an
+        # unknown id in it included. Refusing is the only way the reader learns that.
+        if args.backends and args.all_ready:
+            print(
+                "[compare] --backends and --all-ready are alternatives. Pass one.",
+                file=sys.stderr,
+            )
             return 2
         doc = args.inputs[0]
         if args.all_ready:
@@ -1312,11 +1404,13 @@ def cmd_compare(args) -> int:
             ids = [b.strip() for b in args.backends.split(",") if b.strip()]
             unknown = [b for b in ids if b not in BUILTIN_ADAPTERS]
             if unknown:
-                print(f"[compare] unknown backend(s): {', '.join(unknown)}", file=sys.stderr)
+                print(_unknown_backends_line("compare", unknown, BUILTIN_ADAPTERS), file=sys.stderr)
                 return 2
         if len(ids) < 2:
             print(
-                f"[compare] need at least two backends to compare (got {len(ids)})", file=sys.stderr
+                f"[compare] need at least two backends to compare (got {len(ids)}). "
+                "Pass --backends a,b or --all-ready.",
+                file=sys.stderr,
             )
             return 2
         save = Path(args.save_dir) if args.save_dir else None
@@ -1350,13 +1444,18 @@ def cmd_compare(args) -> int:
                 (save / f"{bid}.json").write_text(json.dumps(r, indent=2))
     else:
         if len(args.inputs) < 2:
-            print("[compare] needs ≥2 response files, or one doc + --backends", file=sys.stderr)
+            print(
+                "[compare] needs at least two subjects: two or more response JSON files, one "
+                "document with --backends or --all-ready, or --from a run saved with "
+                "--keep-candidates",
+                file=sys.stderr,
+            )
             return 2
         for p in args.inputs:
             try:
-                responses.append(json.loads(Path(p).read_text()))
-            except (OSError, json.JSONDecodeError) as e:
-                print(f"[compare] cannot read {p}: {_describe_read_error(e)}", file=sys.stderr)
+                responses.append(_read_json_or_fail(p))
+            except _PolicyError as e:
+                print(f"[compare] {e}", file=sys.stderr)
                 return 5
             sources.append("file")
 
@@ -1373,6 +1472,16 @@ def cmd_compare(args) -> int:
         if args.format == "diff":
             print(
                 "[compare] --format diff is 2-way text only; use diffs/table/json for corpus",
+                file=sys.stderr,
+            )
+            return 2
+        # Corpus mode returns before any of these three is read, so accepting them silently would
+        # report a scored run that never scored anything, including a --truth path that does not
+        # exist, and exit 0.
+        if args.baseline or args.truth or args.show_agreements:
+            print(
+                "[compare] --baseline, --truth and --show-agreements apply to "
+                "single-response subjects. A corpus compare accepts none of them.",
                 file=sys.stderr,
             )
             return 2
@@ -1435,7 +1544,13 @@ def cmd_compare(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="openreading", description="Unified document-processing CLI.")
+    """The argparse tree for every subcommand. `--version` is declared before the required
+    subcommand so it answers without one."""
+    p = argparse.ArgumentParser(
+        prog="openreading",
+        description="OpenReading: one JSON shape from every document parser, so switching or "
+        "comparing parsers never changes your code.",
+    )
     # Declared before the required subcommand so `openreading --version` answers instead of failing
     # the "command is required" check: step zero of every incident is "what is deployed?", and the
     # version was otherwise reachable only from pyproject.toml, `openreading.__version__`, or
@@ -1456,22 +1571,32 @@ def build_parser() -> argparse.ArgumentParser:
         "parse",
         parents=[common],
         help="parse a document (or a whole directory/glob) with a backend",
+        description="Read one document, or a folder or glob of them, with one backend or one "
+        "strategy, and print JSON on stdout.",
     )
     parse.add_argument(
         "files",
         nargs="+",
         metavar="FILE",
-        help="path, http(s):// URL, directory, or glob. A directory / glob / >=2 args triggers "
-        "batch mode (one batch-result JSON over many documents); a single file/URL stays single.",
+        help="path, http(s):// URL, directory, or glob. A directory, a glob, or two or more "
+        "arguments turns on batch mode, which prints one batch-result JSON over many "
+        "documents. A single file or URL prints one response.",
     )
     parse.add_argument(
         "--backend",
         default=None,
         choices=sorted(BUILTIN_ADAPTERS),
-        help="run one named backend (mutually exclusive with --strategy)",
+        # The choices still gate the value and still print in full on an invalid one; the metavar
+        # only keeps fifteen slugs out of the usage line, where they buried the English.
+        metavar="SLUG",
+        help="run one named backend, exactly one of --backend, --strategy or --no-strategy "
+        "(`openreading backends` lists the ids)",
     )
     parse.add_argument(
-        "--strategy", default=None, help="run a named strategy from openreading.yaml"
+        "--strategy",
+        default=None,
+        help="run a strategy from openreading.yaml, or a built-in preset "
+        "(`openreading strategy list` prints both)",
     )
     parse.add_argument(
         "--no-strategy",
@@ -1482,7 +1607,9 @@ def build_parser() -> argparse.ArgumentParser:
     parse.add_argument(
         "--operation", default=None, help="backend sub-operation (e.g. AnalyzeLending)"
     )
-    parse.add_argument("--pages", type=int, nargs="*", default=None, help="1-based page numbers")
+    parse.add_argument(
+        "--pages", type=_page_number, nargs="*", default=None, help="1-based page numbers"
+    )
     parse.add_argument(
         "--extract",
         nargs="?",
@@ -1522,14 +1649,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         dest="deadline_s",
-        help="absolute time budget override, in seconds. For a single document with "
-        "--backend NAME it overrides the generic 120s default for that one directly-named "
-        "backend, so raise it for a long-running hosted async job (e.g. a large Textract "
-        "document). For a batch dispatched natively (currently anthropic-claude; see "
-        "`pydoc openreading.batch`) it overrides an adapter-appropriate default instead "
-        "(e.g. 1h for anthropic-claude's documented 'most <1h'). It has no effect on `auto` "
-        "or `--strategy` dispatch, which manage their own time budget. A non-positive value "
-        "(0 or negative) means fail fast: don't wait at all",
+        help="absolute time budget override, in seconds. It applies to a single document "
+        "run with --backend NAME, and to a batch a backend runs natively. It has no "
+        "effect on `auto` or `--strategy` dispatch, which manage their own time budget. "
+        "A value of 0 or less means fail fast, so nothing waits. See `uv run python -m "
+        "pydoc openreading.cli` for the per-dispatch defaults.",
     )
     parse.add_argument(
         "--save-dir",
@@ -1543,43 +1667,61 @@ def build_parser() -> argparse.ArgumentParser:
         "resume",
         parents=[common],
         help="resume an interrupted/failed run from its ledger journal "
-        "(see `pydoc openreading.ledger`)",
+        "(see `uv run python -m pydoc openreading.ledger`)",
+        description="Continue an interrupted run from its ledger journal, skipping the steps "
+        "that already finished.",
     )
     resume.add_argument(
         "run_id",
         metavar="RUN_ID",
-        help="the run id to resume — printed by `parse` on interrupt, or read from a "
+        help="the run id to resume. `parse` prints it on interrupt, or read it from a "
         "run's own header under $OPENREADING_LEDGER. No other flags: every option comes "
         "from the ledger.",
     )
     resume.set_defaults(func=cmd_resume)
 
     route = sub.add_parser(
-        "route", parents=[common], help="show the compliance-first routing plan for a document"
+        "route",
+        parents=[common],
+        help="show the compliance-first routing plan for a document",
+        description="Show which backends your compliance policy allows for a document, and why "
+        "the rest were dropped, before anything runs.",
     )
     route.add_argument("file", help="path or http(s):// URL")
-    route.add_argument("--policy", required=True, help="policy.json with compliance constraints")
     route.add_argument(
-        "--run", action="store_true", help="also execute the chosen backend if it is ready"
+        "--policy",
+        required=True,
+        help="path to a policy.json of compliance constraints. The same keys go under "
+        "`compliance` in an HTTP request body and under `policy=` in openreading.run.",
+    )
+    route.add_argument(
+        "--run",
+        action="store_true",
+        help="also execute the plan: the chosen backend first, then each fallback in turn",
     )
     route.set_defaults(func=cmd_route)
 
     backends = sub.add_parser(
-        "backends", parents=[common], help="list backends and whether they are configured to run"
+        "backends",
+        parents=[common],
+        help="list backends and whether they are configured to run",
+        description="List every backend and whether this machine is configured to run it, "
+        "naming the variables or extras still missing.",
     )
     backends.add_argument(
         "--check",
         default=None,
         metavar="SLUG[,SLUG...]|all",
-        help="also PROBE these backends for real liveness (network I/O; never implicit). "
-        "'all' probes every backend that declares a probe.",
+        help="also probe these backends for real liveness. This makes network calls and "
+        "is never implicit. 'all' probes every backend that declares a probe.",
     )
     backends.add_argument(
         "--timeout",
         type=float,
         default=None,
         metavar="SECONDS",
-        help="per-probe timeout for --check (default 5s, clamped to [0.1, 30])",
+        help="per-probe timeout for --check. The default is the adapter's declared "
+        "liveness.timeout_s, else 5s. Any value is clamped to [0.1, 30].",
     )
     backends.set_defaults(func=cmd_backends)
 
@@ -1589,7 +1731,11 @@ def build_parser() -> argparse.ArgumentParser:
     serve_epilog = (
         "Authentication is OFF by default. With no OPENREADING_API_KEYS set, anyone who can\n"
         "reach this server spends your vendor credits, which is why the default bind is\n"
-        "127.0.0.1 and any other --host warns.\n"
+        "127.0.0.1 and a --host outside loopback warns.\n"
+        "\n"
+        "A request may not name a local file by path unless OPENREADING_SERVER_PATH_ROOT\n"
+        "is set to a directory. With it set, document.path may resolve beneath that\n"
+        "directory and nowhere else. Without it, send bytes_base64 or url.\n"
         "\n"
         "Set OPENREADING_API_KEYS to a comma-separated list of bearer tokens to turn auth on.\n"
         "Every endpoint but GET /healthz and POST /v1/webhooks/{backend_id} then requires an\n"
@@ -1601,12 +1747,16 @@ def build_parser() -> argparse.ArgumentParser:
         "every backend. Both variables are environment only and are read once at startup, so\n"
         "rotating a token means restarting the server.\n"
         "\n"
-        "Full guide: the openreading.server docstring"
+        "Full guide: uv run python -m pydoc openreading.server"
     )
     serve = sub.add_parser(
         "serve",
         parents=[common],
         help="run the HTTP API (needs [server] extra)",
+        description=(
+            "Run the HTTP API on your own machine, so a client in another language gets\n"
+            "the same shapes the CLI prints."
+        ),
         epilog=serve_epilog,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -1617,22 +1767,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     serve.set_defaults(func=cmd_serve)
 
-    # `openreading strategy <show|list|normalize|validate|plan>` — inspect the openreading.yaml
-    # orchestration config. `explain` renders a run's trace; `replay` re-runs it (14.3);
-    # `calibrate` lands in 15.2.
+    # `openreading strategy <show|list|normalize|validate|plan>` inspects the openreading.yaml
+    # orchestration config. The verbs that work on a run instead sit at the top level: `explain`
+    # renders a trace, `replay` re-runs it from the logged decisions, `calibrate` proposes
+    # gate thresholds.
     strategy_desc = (
-        "Inspect and understand your openreading.yaml strategies — recipes for which backends\n"
-        'run, in what order or together, and when to move on. Written in "Plain": six keys.\n'
+        "Inspect and understand your openreading.yaml strategies. A strategy is a recipe\n"
+        "for which backends run, in what order or together, and when to move on. Written\n"
+        'in "Plain": six keys.\n'
         "\n"
         "  try: [a, b, c]      run in order; move on if a step fails or the result looks bad\n"
         "  race: [a, b]        run at once; first success wins, the rest are cancelled\n"
         "  compare: [a, b]     run at once; keep the objectively better result\n"
-        "  then: x             where compare sends the doc when it can't trust the winner\n"
-        "  escalate_when: ...  when to move on — any of four judgment words below\n"
+        "  then: x             where compare sends the document when it cannot trust the winner\n"
+        "  escalate_when: ...  when to move on, using any of the four judgment words below\n"
         '  max_time: "2m"      give up after this long\n'
         "\n"
-        "escalate_when takes any of:  looks_bad · low_confidence · missing: [field, ...] · disagree\n"
-        "  (disagree is compare-only).  auto = the best remaining backend — usable as a try rung\n"
+        "escalate_when takes any of:  looks_bad, low_confidence, missing: [field, ...], disagree\n"
+        "  (disagree is compare-only).  auto = the best remaining backend, usable as a try rung\n"
         "  or a then: target."
     )
     strategy_epilog = (
@@ -1653,7 +1805,7 @@ def build_parser() -> argparse.ArgumentParser:
         "      then: reducto\n"
         "\n"
         "Commands find ./openreading.yaml automatically; use --config PATH to point elsewhere.\n"
-        "Full guide: the openreading.strategies.plain docstring"
+        "Full guide: uv run python -m pydoc openreading.strategies.plain"
     )
     strategy = sub.add_parser(
         "strategy",
@@ -1681,7 +1833,11 @@ def build_parser() -> argparse.ArgumentParser:
         "validate", help="check + explain every strategy in plain English"
     )
     st_val.add_argument("--config", default=None, help="path to an openreading.yaml")
-    st_val.add_argument("--policy", default=None, help="policy.json — flag steps unreachable in it")
+    st_val.add_argument(
+        "--policy",
+        default=None,
+        help="path to a policy.json. Steps it makes unreachable are flagged.",
+    )
     st_val.set_defaults(func=cmd_strategy_validate)
 
     st_norm = strat_sub.add_parser("normalize", help="print the config's strategies as longhand")
@@ -1692,19 +1848,23 @@ def build_parser() -> argparse.ArgumentParser:
     st_plan.add_argument("file", help="path or http(s):// URL")
     st_plan.add_argument("--strategy", required=True, help="strategy or preset name")
     st_plan.add_argument("--config", default=None, help="path to an openreading.yaml")
-    st_plan.add_argument("--policy", default=None, help="policy.json compliance context")
+    st_plan.add_argument(
+        "--policy", default=None, help="path to a policy.json of compliance constraints"
+    )
     st_plan.set_defaults(func=cmd_strategy_plan)
 
     compare = sub.add_parser(
         "compare",
         parents=[common],
         help="compare backends' outputs and show the delta (fields/text/blocks)",
+        description="Show where two or more backends disagree on the same document, field by "
+        "field and line by line.",
     )
     compare.add_argument(
         "inputs",
         nargs="*",
         default=[],
-        help="≥2 response JSON files, or one document with --backends (omit with --from)",
+        help="two or more response JSON files, or one document with --backends (omit with --from)",
     )
     compare.add_argument(
         "--from",
@@ -1720,13 +1880,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--all-ready", action="store_true", help="fan out over every ready backend"
     )
     compare.add_argument(
-        "--save-dir", default=None, help="write each fan-out response envelope into this dir"
+        "--save-dir", default=None, help="write each fan-out response into this directory"
     )
     compare.add_argument(
         "--format",
         choices=["json", "table", "diff", "diffs", "md"],
         default="json",
-        help="json | table | md | diff (2-way git-style text diff) | diffs (N-way content deltas + payload diff). default: json",
+        help="json | table | diff (2-way git-style text diff) | diffs (N-way content deltas "
+        "plus payload diff) | md. default: json",
     )
     compare.add_argument(
         "--show-agreements",
@@ -1751,18 +1912,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="absolute time budget override, in seconds, applied to every fanned-out backend. "
         "Raise it for a long-running hosted async job. Default, when omitted, is "
         "the generic 120s single-document deadline. A non-positive value (0 or negative) means "
-        "fail fast: don't wait at all",
+        "fail fast: do not wait at all",
     )
     compare.set_defaults(func=cmd_compare)
 
     explain = sub.add_parser(
-        "explain", parents=[common], help="render a response's orchestration block or a comparison"
+        "explain",
+        parents=[common],
+        help="render a response's orchestration block or a comparison",
+        description="Print what a saved strategy run did, gate by gate, or render a saved "
+        "comparison report.",
     )
     explain.add_argument("response", help="path to a saved response or comparison-report JSON")
     explain.set_defaults(func=cmd_explain)
 
     replay = sub.add_parser(
-        "replay", parents=[common], help="re-run a strategy taking a trace's logged decisions"
+        "replay",
+        parents=[common],
+        help="re-run a strategy taking a trace's logged decisions",
+        description="Re-run a strategy taking each decision from a saved trace instead of "
+        "deciding again.",
     )
     replay.add_argument("file", help="path or http(s):// URL of the document")
     replay.add_argument(
@@ -1770,13 +1939,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     replay.add_argument("--strategy", default=None, help="strategy name (default: from the trace)")
     replay.add_argument("--config", default=None, help="path to an openreading.yaml")
-    replay.add_argument("--policy", default=None, help="policy.json compliance context")
+    replay.add_argument(
+        "--policy", default=None, help="path to a policy.json of compliance constraints"
+    )
     replay.set_defaults(func=cmd_replay)
 
     calibrate = sub.add_parser(
         "calibrate",
         parents=[common],
         help="derive gate thresholds from a sample of documents, labels optional",
+        description="Derive gate thresholds from a sample of your own documents and print them "
+        "as a recommendation.",
     )
     calibrate.add_argument(
         "dataset",
@@ -1785,7 +1958,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     calibrate.add_argument("--strategy", required=True, help="the strategy to tune")
     calibrate.add_argument("--config", default=None, help="path to an openreading.yaml")
-    calibrate.add_argument("--policy", default=None, help="policy.json compliance context")
+    calibrate.add_argument(
+        "--policy", default=None, help="path to a policy.json of compliance constraints"
+    )
     calibrate.add_argument(
         "--target-escalation",
         type=float,
@@ -1800,7 +1975,9 @@ def build_parser() -> argparse.ArgumentParser:
     leaderboard = sub.add_parser(
         "leaderboard",
         parents=[common],
-        help="rank registered backends on one dataset — measured, not vendor-claimed",
+        help="rank registered backends on one dataset, measured rather than vendor-claimed",
+        description="Rank backends on one dataset by measured score, and print the cost that "
+        "produced each score.",
     )
     leaderboard.add_argument(
         "dataset", help="a dataset dir of */case.json documents (evals.dataset shape)"
@@ -1811,7 +1988,9 @@ def build_parser() -> argparse.ArgumentParser:
     leaderboard.add_argument(
         "--all-ready", action="store_true", help="rank every backend the environment is ready for"
     )
-    leaderboard.add_argument("--policy", default=None, help="policy.json compliance context")
+    leaderboard.add_argument(
+        "--policy", default=None, help="path to a policy.json of compliance constraints"
+    )
     leaderboard.add_argument(
         "--format",
         choices=["table", "json"],
@@ -2043,8 +2222,8 @@ def _terminate_as_interrupt(*, enabled: bool = True):
         # would report 130 (SIGINT) for a signal the caller did not send, over a traceback that
         # costs a responder their first minute. One line, and the conventional 128 + SIGTERM.
         print(
-            "[openreading] terminated by SIGTERM; no run journal was armed, so nothing is"
-            " resumable — set OPENREADING_LEDGER to a directory to make the next one resumable",
+            "[openreading] terminated by SIGTERM. No run journal was armed, so nothing is"
+            " resumable. Set OPENREADING_LEDGER to a directory to make the next one resumable.",
             file=sys.stderr,
         )
         raise SystemExit(143) from None
@@ -2058,6 +2237,9 @@ def _terminate_as_interrupt(*, enabled: bool = True):
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Parse argv, load ./.env or --env-file, dispatch the handler, and return its exit code.
+    SIGTERM arrives as KeyboardInterrupt for every command but `serve`, which hands its own
+    signals to uvicorn."""
     args = build_parser().parse_args(argv)
     load_dotenv(getattr(args, "env_file", None))  # ./.env or --env-file; never overrides set env
     with _terminate_as_interrupt(enabled=args.func is not cmd_serve):

@@ -1,12 +1,13 @@
-"""H7 / §15 T7 — the end-to-end offline strategy smoke (joins `make verify`).
+"""The end-to-end offline strategy smoke that `make verify` runs (harness H7, §15 T7).
 
 Generate the scanned fixture (image-only, no text) and run it through TWO spellings of the same
 cascade: the advanced `local_ocr` (`steps: [pymupdf, tesseract]`, `escalate_if: default`) and its
 Plain equivalent (`try: [pymupdf, tesseract]`, `escalate_when: looks_bad`). The scanned PDF trips
 the local parse's quality gate in both, so each must produce a schema-valid orchestration-carrying
 response with a fired first-rung gate — and the two must agree on the attempt/category/chosen
-trail. The gate *predicates* legitimately differ (the Plain looks_bad uses §5's result-aware scan
-pair and omits the bundle's `confidence_below`); the *behavior* must not.
+trail. The gate *predicates* legitimately differ, because the Plain `looks_bad` uses the
+result-aware scan pair from internal/design/simple-strategies.md §5 and omits the bundle's
+`confidence_below`. The *behavior* must not differ.
 
 - if the system `tesseract` binary is present, rung 2 OCRs the scan → a real, live, local
   escalation (zero fixtures, zero network);
@@ -68,7 +69,7 @@ def main() -> int:
 
     escalated = adv_outcome == "ok" and adv_chosen == "tesseract"
     print(
-        f"strategy-smoke: OK — advanced & Plain agree: pymupdf gated → chosen={adv_chosen} "
+        f"strategy-smoke: OK. Advanced and Plain agree: pymupdf gated, chosen={adv_chosen} "
         f"outcome={adv_outcome} ({'tesseract escalation' if escalated else 'keep-best degraded'})"
     )
     print(json.dumps({"trail": adv_trail, "advanced_fired": adv_fired, "plain_fired": pln_fired}))

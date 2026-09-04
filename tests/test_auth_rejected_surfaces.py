@@ -1,8 +1,8 @@
 """BL-6 — the `auth_rejected` hint fires on EVERY surface, not just `parse --backend X`.
 
-the openreading.credentials docstring promises that a key which is present but rejected by the provider always
-produces *"key was found but rejected — check `<VAR>`"*. The derivation lives once, in
-`readiness.auth_rejected_hint`, and `readiness.auth_hinted` stamps it onto the failure at the
+The `openreading.credentials` docstring promises that a key which is present but rejected by the
+provider always produces *"key was found but rejected: check `<VAR>`"*. The derivation lives
+once, in `readiness.auth_rejected_hint`. `readiness.auth_hinted` stamps it onto the failure at the
 execution boundary, so single parse, batch parse, `route --run`, `replay`, `calibrate` and the HTTP
 API all say the same thing.
 
@@ -133,7 +133,7 @@ def test_route_run_exhaustion_prints_trail_hint_and_still_emits_the_plan(
     captured = capsys.readouterr()
 
     # the formatted failure trail, then the actionable hint for the rejected backend
-    assert "plan exhausted — reducto:TerminalError(auth_rejected)" in captured.err
+    assert "plan exhausted: reducto:TerminalError(auth_rejected)" in captured.err
     _assert_actionable(captured.err)
 
     # the plan itself is still the answer to `route` — exhaustion does not suppress it

@@ -1,6 +1,8 @@
-"""The adapter conformance kit — one reusable suite EVERY adapter must pass (GOAL "The
-harness"). Adding adapter N+1 means: implement + fixtures + `check_adapter_conformance`
-green. No adapter merges without it. Downstream adapter authors import this too.
+"""The adapter conformance kit: one reusable suite every adapter must pass.
+
+Adding adapter N+1 means writing the adapter, its fixtures, and a green
+`check_adapter_conformance`. No adapter merges without it. Downstream adapter authors import
+this suite too, so what it accepts is a published contract.
 
 It drives an adapter over sample requests (submit → driver → normalize) and asserts the
 guardrails hold: the descriptor validates, every normalized response validates against the
@@ -9,16 +11,20 @@ with bbox_native, declared-impossible (X) channels are absent AND warned (never 
 error taxonomy is respected, report_cost answers without raising and with a pass-through billing
 target, and a deterministic adapter is idempotent on resubmit.
 
-**Rollout (DESIGN §7).** The kit no longer stops at the first failure: `check_adapter_conformance`
-returns a `ConformanceReport` with `.violations` (raise-worthy) and `.advisories`. A per-run
-`strict_checks: set[str]` promotes the advisory-by-default invariants (C1 no-markup-in-text,
-C6 deliver-or-warn) to violations for adapters that have been remediated; C7/C3 are strict from
-Phase A; C11 (text/blocks coherence) is permanently advisory. `raise_on_violation=True` (default)
-keeps the historical "raise on any real violation" behaviour for the existing call sites.
+**Reporting.** The kit records every failed check instead of stopping at the first.
+`check_adapter_conformance` returns a `ConformanceReport` whose `.violations` raise and whose
+`.advisories` do not, and `raise_on_violation=False` returns that report without raising.
+Which bucket a check lands in is fixed per check id. Schema, identity, static, driver, cost,
+determinism, C3, C4, C5, C7, C8 and R1 to R3 always raise. C1 (no markup in the text channel)
+and C6 (a requested channel is delivered or named in a warning) raise by default, and a
+caller demotes them for one run with `strict_checks=frozenset()`, which is what a downstream
+adapter mid-remediation does. C11 (text and blocks coherence) only ever advises, because
+header filtering is legitimate divergence.
 
-**Ledger T4a — R1/R2/R3 (AC-5/AC-6/AC-7).** Pass `adapter_factory` (a zero-arg callable returning a
-FRESH adapter instance sharing no Python-level state with `adapter` — typically a fresh injected fake
-client each call, never a shared one) to turn on three additional checks, per `ConformanceCase`:
+**Fresh-instance checks R1, R2 and R3 (AC-5, AC-6, AC-7).** Pass `adapter_factory` (a zero-arg
+callable returning a FRESH adapter instance sharing no Python-level state with `adapter` —
+typically a fresh injected fake client each call, never a shared one) to turn on three
+additional checks, per `ConformanceCase`:
 R2 (no instance caching) right after `submit()`, R1 (fresh-instance resume) by round-tripping the
 just-submitted `Job` through `to_dict`/`json.dumps`/`json.loads`/`from_dict` and driving THAT to
 completion on a brand-new `adapter_factory()` instance, and R3 (JSON-serializable at every stage)
@@ -98,8 +104,6 @@ _ALWAYS_STRICT = frozenset(
 )
 # Permanently advisory — legitimate divergence (e.g. header filtering) is tolerated.
 _PERMANENTLY_ADVISORY = frozenset({"C11"})
-# C1 (no-markup-in-text) and C6 (deliver-or-warn) are advisory by default and promoted to
-# violations per adapter via `strict_checks` as each is remediated in Phase B.
 
 
 def _is_violation(check_id: str, strict_checks: set[str]) -> bool:
@@ -389,7 +393,7 @@ def _check_text_blocks_coherence(resp: dict[str, Any], rec: Recorder, case: str)
 
 
 def _check_credential_spec(desc: AdapterDescriptor, rec: Recorder) -> None:
-    """v0.2: a backend that needs anything from the environment to run — a key, or a self-hosted
+    """A backend that needs anything from the environment to run — a key, or a self-hosted
     endpoint/container URL — must DECLARE it, so the env broker and readiness UI can resolve it
     without hard-coding per-adapter keys. Every spec field must name at least one env var; hosted
     APIs must carry a signup_url; and credentials_spec carries ONLY secrets — endpoints, regions,
@@ -412,7 +416,7 @@ def _check_credential_spec(desc: AdapterDescriptor, rec: Recorder) -> None:
             "static",
             "<spec>",
             "backend needs env credentials/config but declares neither "
-            "credentials_spec nor config_spec (v0.2)",
+            "credentials_spec nor config_spec",
         )
     specs: list[CredentialField | ConfigField] = [*desc.credentials_spec, *desc.config_spec]
     for spec in specs:
@@ -421,7 +425,7 @@ def _check_credential_spec(desc: AdapterDescriptor, rec: Recorder) -> None:
         if not spec.env:
             rec("static", "<spec>", f"spec field {spec.key!r} names no env var")
     if desc.type.value == "hosted_api" and not desc.signup_url:
-        rec("static", "<spec>", "hosted_api must declare a signup_url (v0.2)")
+        rec("static", "<spec>", "hosted_api must declare a signup_url")
 
 
 def _check_cost(adapter: Any, job: Job, rec: Recorder, case: str) -> None:
@@ -450,8 +454,8 @@ def _check_identity(
 
 
 def _check_capabilities_type(adapter: Any, rec: Recorder) -> None:
-    """`capabilities()` is one of the required 8 methods (adapter_interface.md §2) — callers that
-    introspect a backend's live capability view depend on the declared return type being a dict."""
+    """`capabilities()` is one of the eight required adapter methods. Callers that introspect a
+    backend's live capability view depend on the declared return type being a dict."""
     if not isinstance(adapter.capabilities(), dict):
         rec("static", "<static>", "capabilities() must return a dict")
 
@@ -474,7 +478,7 @@ def _check_job_backend_id(job: Job, desc: AdapterDescriptor, rec: Recorder, case
 def _check_wait_mode(job: Job, desc: AdapterDescriptor, rec: Recorder, case: str) -> None:
     """The Job `submit()` returns must carry a wait_mode the descriptor actually declares in
     `wait_modes` — the driver (`await_result`) branches on `job.wait_mode` to decide whether to
-    await a webhook, poll, or treat the job as already terminal (adapter_interface.md §3)."""
+    await a webhook, poll, or treat the job as already terminal."""
     if job.wait_mode not in desc.wait_modes:
         rec("static", case, f"job.wait_mode={job.wait_mode} not in descriptor.wait_modes")
 
@@ -556,7 +560,7 @@ def _check_fresh_instance_resume(
 # --- the kit ---------------------------------------------------------------------------
 
 
-# Phase C default: the kit flipped to all-strict. C1 (no-markup-in-text) and C6 (deliver-or-warn)
+# The kit is all-strict by default. C1 (no-markup-in-text) and C6 (deliver-or-warn)
 # are strict by default now that every built-in adapter is remediated; C7/C3 were always strict;
 # C11 stays permanently advisory. Pass strict_checks=frozenset() to opt an (e.g. downstream,
 # not-yet-remediated) adapter back to advisory for C1/C6.
@@ -573,10 +577,10 @@ def check_adapter_conformance(
 ) -> ConformanceReport:
     """Run the conformance suite and return a ConformanceReport.
 
-    `strict_checks` promotes advisory-by-default invariants (C1, C6) to violations for this run.
-    With `raise_on_violation=True` (default) the kit raises ConformanceError if any violation is
-    recorded — preserving the historical fail-on-violation behaviour for existing call sites while
-    exposing the advisory surface via the returned report.
+    `strict_checks` is the set of check ids that raise on top of the always-strict set, and it
+    defaults to C1 and C6. Pass `frozenset()` to demote those two to advisories for this run.
+    With `raise_on_violation=True`, the default, the kit raises ConformanceError when any
+    violation is recorded, and the returned report still carries the advisories either way.
 
     `adapter_factory` (Ledger T4a): a zero-arg callable returning a FRESH adapter instance sharing
     no Python-level state with `adapter` (typically the same adapter class constructed with its own

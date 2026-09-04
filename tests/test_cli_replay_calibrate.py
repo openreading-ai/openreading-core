@@ -430,31 +430,37 @@ def test_calibrate_malformed_config_exits_3(tmp_path, capsys):
 
 
 def _unreadable_policies(tmp_path):
+    """One policy that will not open and one whose bytes are not JSON, each paired with what the
+    message must open with. The two are different problems for the reader, so one wording for both
+    would send them to check permissions on a file that reads fine."""
     malformed = tmp_path / "bad.json"
     malformed.write_text("{not json")
-    return (tmp_path / "missing.json", malformed)
+    return (
+        (tmp_path / "missing.json", "cannot read policy"),
+        (malformed, f"policy {malformed} is not valid JSON"),
+    )
 
 
 def test_replay_unreadable_policy_exits_3_without_a_traceback(sample_pdf, tmp_path, capsys):
     cfg = _write_config(tmp_path, _CONFIG)
     trace = tmp_path / "t.json"
     trace.write_text(json.dumps({"orchestration": {"strategy": "local_only", "decisions": []}}))
-    for pol in _unreadable_policies(tmp_path):
+    for pol, opening in _unreadable_policies(tmp_path):
         args = ["replay", sample_pdf, "--trace", str(trace), "--config", cfg, "--policy", str(pol)]
         rc = main(args)
         assert rc == 3
         err = capsys.readouterr().err
-        assert err.startswith("[replay] cannot read policy")
+        assert err.startswith(f"[replay] {opening}")
         assert len(err.splitlines()) == 1
 
 
 def test_calibrate_unreadable_policy_exits_3_without_a_traceback(tmp_path, capsys):
     cfg = _write_config(tmp_path, _CONFIG)
     ds = _dataset(tmp_path, 1)
-    for pol in _unreadable_policies(tmp_path):
+    for pol, opening in _unreadable_policies(tmp_path):
         args = ["calibrate", ds, "--strategy", "local_only", "--config", cfg, "--policy", str(pol)]
         rc = main(args)
         assert rc == 3
         err = capsys.readouterr().err
-        assert err.startswith("[calibrate] cannot read policy")
+        assert err.startswith(f"[calibrate] {opening}")
         assert len(err.splitlines()) == 1

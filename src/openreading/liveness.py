@@ -12,7 +12,8 @@ resolve. It is offline by construction, which is why `make verify` can call it �
 set proves a URL was typed into `.env`, not that anything listens on it. Point `DOCLING_SERVE_URL`
 at a closed port and every surface used to show a green "Ready". The acceptance check is that exact
 scenario: with `DOCLING_SERVE_URL` on a closed port, `POST /v1/backends/docling/liveness` must now
-report `unreachable` (200, `measured: true`), and the Backends page must say the same.
+report `unreachable` (200, `measured: true`), and `openreading backends --check docling` must say
+the same.
 
 The fix composes readiness without changing it: an optional adapter probe (the measurement only),
 a static descriptor declaration (can this be tested, and does testing it leave my network or cost
@@ -49,7 +50,7 @@ have to remember them (D-v7-2):
 
 1. **A known negative beats everything.** `not_configured` is exactly `backend_readiness().ready`
    being False — deliberately the SAME judgement, computed by the same function, so "configured"
-   can never mean one thing on the Backends page and another here (`readiness.missing_reason`'s
+   can never mean one thing in `openreading backends` and another here (`readiness.missing_reason`'s
    docstring records what happened the last time one fact grew two vocabularies). It is never
    softened into an optimistic assumption, and it short-circuits the probe, so we never spend a
    network call proving that a backend with no API key cannot authenticate.
@@ -140,9 +141,9 @@ three built-in probes that can observe a rejected credential (docling and qwen-v
 anthropic-claude in its own adapter) all return `ProbeResult.unauthorized()` with no detail, so
 they all get the hint; the two `local` probes (pymupdf, tesseract) have no credential to reject
 and only ever report `live` or `unreachable`. A third-party probe's own detail wins (and is still
-redacted). No report carries an endpoint
-URL (a URL can embed `user:token@host`). Reports name the env VAR, never the value — the posture
-`openreading.credentials` and the Backends page hold.
+redacted). No report carries an endpoint URL (a URL can embed `user:token@host`). Reports name the
+env VAR and never the value, which is the posture `openreading.credentials` and the
+`openreading backends` table hold.
 
 Never billed — which backends get a probe (D-v7-4)
 --------------------------------------------------
@@ -167,12 +168,11 @@ Implemented (5):
 
 Deliberately unsupported (10): aws-textract, azure-document-intelligence, google-document-ai,
 google-gemini, mistral-ocr, chunkr, pulse, nuextract, open-ocr, reducto. No free liveness call is
-verifiable from a primary
-source (a guessed URL would be a fabricated descriptor value — the failure the honesty ladders
-exist to prevent), and the build forbids the real vendor call that would verify one, so a probe
-that cannot be run cannot be honestly graded. Adding one later is contained and additive: a
-descriptor `liveness` block, one method, one offline fault test, one live test (recipe in
-`the openreading.adapters docstring (src/openreading/adapters/__init__.py)`).
+verifiable from a primary source (a guessed URL would be a fabricated descriptor value, the failure
+the honesty ladders exist to prevent), and the offline gate (`make verify`) forbids the real vendor
+call that would verify one, so a probe that cannot be run cannot be honestly graded. Adding one
+later is contained and additive: a descriptor `liveness` block, one method, one offline fault test,
+one live test. The recipe is in the `openreading.adapters` docstring.
 
 The report — `liveness-report.v0.1.json`
 ----------------------------------------
@@ -254,13 +254,13 @@ Offline-gate safety
 `make verify` must never make a network call: nothing reachable from the offline gate calls
 `probe_liveness()` on a real adapter. Held by:
 
-- No production call site runs offline — the HTTP endpoint, the CLI verb and the web-UI action
-  are the three callers of `check_liveness`, and none is exercised by the gate.
+- No production call site runs offline. The HTTP endpoint and the CLI verb are the two callers of
+  `check_liveness` in this package, and the offline gate exercises neither.
 - The one render path that COULD have probed structurally cannot: the ladder is split into
-  `infer_liveness()` (network-free; returns None when only a call could answer) and
-  `check_liveness()` (that plus the measurement). The web UI's `/backends` page calls
-  `infer_liveness` on load; only the explicit POST reaches `check_liveness`. "A page load never
-  probes" is a property of the call graph, not a promise.
+  `infer_liveness()` (network-free, returns None when only a call could answer) and
+  `check_liveness()` (that plus the measurement). A page that lists backends calls
+  `infer_liveness` on render, and only an explicit user action reaches `check_liveness`. "A page
+  load never probes" is a property of the call graph, not a promise.
 - Offline tests use fakes and respx: the whole ladder against fake adapters (every state incl.
   `not_supported`; the short-circuit; redaction of a secret planted in a detail AND in a version;
   timeout clamping reaching the adapter; schema round-trip + golden; descriptor v0.5 validity and
@@ -275,11 +275,10 @@ Offline-gate safety
   proven as well as `probe_http` itself. The two `local` probes are exercised through injected
   runners, never by asserting a binary exists.
   Each ladder row has one test proving it reachable and one proving it is not confused with its
-  neighbour. The three surfaces are covered offline too: server tests pin the endpoint shapes, 404
+  neighbour. Both surfaces are covered offline too: server tests pin the endpoint shapes, 404
   for an unknown slug, 403 scope-denied-before-any-credential and the `timeout_s` validation; CLI
   tests pin "bare `backends` never probes", `--check` probing only the named slugs and `--check
-  all` reaching only backends that declare a probe; UI tests pin the opt-in control, the per-row
-  live region and "an inferred state never wears a measured tick".
+  all` reaching only backends that declare a probe.
 - Real probes (docling, qwen-vl, anthropic-claude) are `@pytest.mark.live`, gated by
   `skip_unless_creds`, so `make verify-live` skips cleanly without keys. A probe test never goes
   in the offline suite.
@@ -291,16 +290,10 @@ Surfaces
 - CLI: `openreading backends --check SLUG[,SLUG...]` — a flag on the existing verb, not a second
   surface. Bare `openreading backends` never probes. `--check all` is explicit typed consent to
   probe every backend that declares a probe.
-- Web UI: `/backends` gets an opt-in per-row "Check now" (POST, htmx-swapped) — never on load,
-  never automatic, never polled; rows declaring no probe render the inferred state instead of a
-  button that would do nothing. The liveness cell is its OWN live region per row and the POST
-  returns only that row's partial, so a check on one row never re-renders the other twelve (a slow
-  vendor probe on one row cannot blank the table). Labels: `Ready` -> `Configured`, `Needs
-  credentials` -> `Not
-  configured`; a check moves through not configured -> configured -> responding, plus unreachable
-  / unauthorized with the detail. The measured/inferred distinction is carried by badge value and
-  label text, never by a third semaphore colour (the badge macro's two-colour rule; no new
-  tokens); an inferred state never wears a measured tick.
+- HTTP: `POST /v1/backends/{backend_id}/liveness`, one backend per call, described above.
+- Any UI built on this package: probe only when the reader asks for it, never on page load. Render
+  a row from `infer_liveness` and reach `check_liveness` only from that explicit action. Mark an
+  inferred state differently from a measured one, so one tick never means both.
 
 Decisions (internal/decisions/DECISIONS.md)
 -------------------------------------------
@@ -438,9 +431,9 @@ def infer_liveness(adapter, *, broker: EnvCredentialBroker | None = None) -> Liv
     `not_supported`), or None when the backend declares a probe and only a real call can answer.
 
     This exists as its own function so "a page load never probes" is structurally true rather than
-    a promise in a comment: the web UI's `/backends` handler calls THIS on render, and can only
-    reach a probe through the explicit, user-initiated POST. `check_liveness` is exactly this plus
-    the measurement.
+    a promise in a comment: a page that lists backends calls THIS on render, and can only reach a
+    probe through an explicit, user-initiated action. `check_liveness` is exactly this plus the
+    measurement.
     """
     from openreading.adapters.base import LivenessProbeAdapter
 
@@ -457,7 +450,7 @@ def infer_liveness(adapter, *, broker: EnvCredentialBroker | None = None) -> Liv
     if not readiness.ready:
         missing = missing_reason(readiness)
         detail = (
-            f"not configured — set {', '.join(missing)}"
+            f"not configured: set {', '.join(missing)}"
             if missing
             else "not configured on this machine"
         )
@@ -476,8 +469,8 @@ def check_liveness(
     broker: EnvCredentialBroker | None = None,
     timeout_s: float | None = None,
 ) -> LivenessReport:
-    """One backend's liveness answer — the single entry point every surface (HTTP, CLI, web UI)
-    calls, so the ladder is applied identically everywhere.
+    """One backend's liveness answer, the single entry point every surface (the HTTP endpoint, the
+    CLI verb, any UI built on this package) calls, so the ladder is applied identically everywhere.
 
     MAY perform network I/O when the backend declares a probe. Never call this from a code path
     `make verify` reaches.
@@ -546,7 +539,7 @@ def _inferred(descriptor: AdapterDescriptor, secrets: set[str]) -> LivenessRepor
             descriptor,
             LivenessStatus.NOT_SUPPORTED,
             detail=(
-                "cannot be tested — this backend implements no liveness probe and declares no "
+                "cannot be tested: this backend implements no liveness probe and declares no "
                 "credentials or configuration to infer from"
             ),
             secrets=secrets,
@@ -557,7 +550,7 @@ def _inferred(descriptor: AdapterDescriptor, secrets: set[str]) -> LivenessRepor
         # Kept short deliberately: this sentence renders inside a table cell, and a longer one
         # widened the column into its neighbour. The badge already says "configured · not
         # verifiable"; this adds the WHY and the fact that nothing was called.
-        detail="no free liveness check — inferred from your environment, not measured",
+        detail="no free liveness check: inferred from your environment, not measured",
         secrets=secrets,
     )
 

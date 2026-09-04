@@ -24,16 +24,16 @@ Environment:
   cwd probe where allowed, else no config and no strategy layer. Set non-empty but not a file:
   `ConfigError`.
 
-Parsing (`parse_config_raw`): `yaml.safe_load` ONLY (D-v3-1) — a config file may never construct
-arbitrary Python objects (a `!!python/object/apply` tag raises `ConfigError`); `pyyaml` (MIT,
-zero-copyleft, the first core dependency added since v0.2) is imported lazily so the no-config
-path never pays the import. The raw mapping is then validated against the vendored
-`strategy-config` JSON Schema (`openreading.schemas`, the strict grammar authority — it also
-rejects retry knobs, which the strategy layer must never grow), desugared from the Plain dialect
-to the canonical five-node longhand (`openreading.strategies.plain`) so everything downstream
-sees one tree, and built into a `StrategyConfig` (`openreading.strategies.model`). Errors locate
-by node path (`strategies.cheap.steps[0].escalate_if`), not line number: `safe_load` discards
-source marks, and a mark-preserving loader was judged not worth it (D-v3-8).
+Parsing (`parse_config_raw`) uses `yaml.safe_load` only (D-v3-1), so a config file can never
+construct arbitrary Python objects, and a `!!python/object/apply` tag raises `ConfigError`.
+`pyyaml` (MIT) is imported lazily, so the no-config path never pays for the import.
+The raw mapping is then validated against the vendored `strategy-config` JSON Schema
+(`openreading.schemas`, the strict grammar authority — it also rejects retry knobs, which the
+strategy layer must never grow), desugared from the Plain dialect to the canonical five-node
+longhand (`openreading.strategies.plain`) so everything downstream sees one tree, and built into
+a `StrategyConfig` (`openreading.strategies.model`). Errors locate by node path
+(`strategies.cheap.steps[0].escalate_if`), not line number: `safe_load` discards source marks,
+and a mark-preserving loader was judged not worth it (D-v3-8).
 
 `LoadedConfig` carries provenance: `path`, `source_hash` (sha256 of the file TEXT — distinct
 from the compliance-aware normalized-tree `config_hash` the engine stamps on
@@ -52,9 +52,9 @@ and returns the literal `'none'`. An unknown name on the wire is `UnknownStrateg
 (`backend_code: unknown_strategy`), raised by `api._run_strategy_request` against the loaded
 strategies ∪ built-in presets, which the surfaces map to HTTP 400 (a malformed ask against this
 deployment's config, not a missing resource) and CLI exit 2 (the same caller-error class as an
-unknown `--backend`). `resolve_strategy` here raises `ConfigError` for an unknown name but has
-no caller in `src/` — it is a library helper, and its `ConfigError` is never mapped to
-`unknown_strategy` by any surface. The CLI's `--strategy` (on `parse` only) is a separate flag
+unknown `--backend`). `resolve_strategy` is the library helper that maps a name to its raw node
+body, for callers embedding this package. The surfaces do not use it, so its `ConfigError` never
+becomes the wire's `unknown_strategy`. The CLI's `--strategy` (on `parse` only) is a separate flag
 rather than an overload of `--backend` because `--backend` is an argparse `choices=` list that
 would reject the prefix at parse time.
 
@@ -64,6 +64,7 @@ Execution semantics of a loaded tree live in `openreading.strategies.engine`.
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -130,10 +131,15 @@ def parse_config_raw(text: str, *, source: str = "<string>") -> tuple[StrategyCo
 
     from openreading.strategies.plain import desugar_config  # lazy: avoids loader<->plain cycle
 
+    # A named stream, not the bare string: PyYAML's Reader labels a `str` input
+    # `<unicode string>`, so a syntax error's own location contradicted the filename this
+    # message already printed.
+    stream = io.StringIO(text)
+    stream.name = source
     try:
-        raw = yaml.safe_load(text)
+        raw = yaml.safe_load(stream)
     except yaml.YAMLError as exc:  # malformed YAML
-        raise ConfigError(f"{source}: invalid YAML — {exc}") from exc
+        raise ConfigError(f"{source}: invalid YAML. {exc}") from exc
     if raw is None:
         raise ConfigError(f"{source}: empty config file")
     if not isinstance(raw, dict):
@@ -183,9 +189,9 @@ def strip_strategy_prefix(backend_id: str) -> str | None:
 
 
 def resolve_strategy(config: StrategyConfig, name: str) -> RawNode:
-    """Look up a named strategy; raises ConfigError when the name is absent. Library helper with
-    no caller in src/ — the wire's `unknown_strategy` (400 / exit 2) comes from
-    `api.UnknownStrategyError`, not from this error."""
+    """Look up a named strategy, raising `ConfigError` when the name is absent. A library
+    helper for callers embedding this package. The wire's `unknown_strategy` (HTTP 400, CLI
+    exit 2) comes from `api.UnknownStrategyError` instead."""
     if name not in config.strategies:
         known = ", ".join(config.strategy_names()) or "(none)"
         raise ConfigError(f"unknown strategy {name!r}; defined strategies: {known}")

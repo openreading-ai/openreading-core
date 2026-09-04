@@ -78,17 +78,17 @@ _ALWAYS_AVAILABLE = {
 # that declares one now fails to validate, and the message names the ceiling that does hold.
 _UNENFORCED = {
     "max_attempts": (
-        "budget.max_attempts is not enforced — no engine code reads it, so this caps nothing and"
+        "budget.max_attempts is not enforced. No engine code reads it, so this caps nothing and"
         " the run makes as many attempts as the tree allows. Remove it; bound the run with"
         " budget.max_duration or limits.max_duration_per_doc, which are enforced"
     ),
     "circuit_breaker": (
-        "defaults.advanced.circuit_breaker is not enforced — no engine code reads it, so no"
+        "defaults.advanced.circuit_breaker is not enforced. No engine code reads it, so no"
         " backend is ever benched after repeated failures and skipped(circuit_open) is never"
         " emitted. Remove it; there is no per-backend breaker in this version"
     ),
     "attempt_timeout": (
-        "defaults.advanced.attempt_timeout is not enforced — no engine code reads it, so an"
+        "defaults.advanced.attempt_timeout is not enforced. No engine code reads it, so an"
         " attempt is bounded only by the enclosing deadline. Remove it; bound the run with"
         " budget.max_duration or limits.max_duration_per_doc, which are enforced"
     ),
@@ -259,8 +259,9 @@ def _scan_secrets(obj: Any, path: str, ctx: _Ctx) -> None:
             if isinstance(k, str) and _SECRET_KEY_RE.search(k):
                 ctx.err(
                     f"{path}.{k}" if path else k,
-                    f"key {k!r} looks like a secret; strategy configs never carry credentials — "
-                    "backends resolve keys from the environment (see the openreading.credentials docstring)",
+                    f"key {k!r} looks like a secret. Strategy configs never carry credentials. "
+                    "Backends resolve keys from the environment (see the openreading.credentials"
+                    " docstring)",
                 )
             _scan_secrets(v, f"{path}.{k}" if path else str(k), ctx)
     elif isinstance(obj, list):
@@ -392,7 +393,7 @@ def _walk(
         if has_disagree and not is_best_parallel:
             ctx.err(
                 f"{path}.{gk}",
-                "disagreement_over compares parallel branches — it only works on a `pick: best`"
+                "disagreement_over compares parallel branches, so it only works on a `pick: best`"
                 " parallel step",
             )
 
@@ -442,16 +443,16 @@ def _check_leaf(node: dict[str, Any], path: str, ctx: _Ctx, eff_deadline_ms: Any
     if t_ms is not None and eff_deadline_ms is not None and t_ms > eff_deadline_ms:
         ctx.warn(
             f"{path}.timeout",
-            f"per-attempt timeout {node['timeout']} exceeds the effective "
-            "deadline — it will be clamped",
+            f"per-attempt timeout {node['timeout']} exceeds the effective deadline and will be "
+            "clamped",
         )
     # steps unreachable under the file's own policy (or --policy)
     drop = ctx.policy_drop(desc)
     if drop is not None:
         ctx.warn(
             f"{path}.backend",
-            f"{slug!r} is filtered out by the policy ({drop}); this step "
-            "can never run in that compliance context — remove it or relax the policy",
+            f"{slug!r} is filtered out by the policy ({drop}). This step can never run in that "
+            "compliance context. Remove it or relax the policy",
         )
     # step-position gate bindability + `missing:` on a backend that cannot produce typed fields
     for gate_key in ("escalate_if", "review_if"):
@@ -467,7 +468,7 @@ def _check_leaf(node: dict[str, Any], path: str, ctx: _Ctx, eff_deadline_ms: Any
                 ctx.warn(
                     f"{path}.{gate_key}",
                     f"{word}: {slug!r} cannot produce typed fields, so this criterion fires on "
-                    "every document — this rung will always escalate",
+                    "every document. This rung will always escalate",
                 )
     if "review_if" in node and not ctx.decider_configured:
         ctx.warn(
@@ -560,16 +561,16 @@ def _check_gate_bindable(gate: dict[str, Any], desc, slug: str, path: str, ctx: 
             words = ", ".join(sorted({ADVANCED_TO_PLAIN.get(k, k) for k in keys}))
             ctx.err(
                 path,
-                f"the {words} check can never fire on {slug!r} — it reports no confidence; add a "
-                "criterion that works everywhere, e.g. `looks_bad: true`",
+                f"the {words} check can never fire on {slug!r}, which reports no confidence. Add "
+                "a criterion that works everywhere, e.g. `looks_bad: true`",
             )
             return
         named = ", ".join(keys)
         if all(not _predicate_binds(k, v, desc) for k, v in _gate_predicate_keys(gate)):
             ctx.err(
                 path,
-                f"gate can never fire on {slug!r}: none of its predicates ({named}) bind — "
-                f"{slug} emits no confidence. Add an always-available signal such as "
+                f"gate can never fire on {slug!r}: none of its predicates ({named}) bind, "
+                f"because {slug} emits no confidence. Add an always-available signal such as "
                 "chars_per_page_below or garbled, or set on_missing: escalate",
             )
         else:
@@ -593,15 +594,15 @@ def _check_gate_bindable(gate: dict[str, Any], desc, slug: str, path: str, ctx: 
             word = ADVANCED_TO_PLAIN.get(key, key)
             ctx.warn(
                 leaf_path,
-                f"the {word} check can never fire on {slug!r} — it reports no confidence — and the "
-                "rest of the gate carries it, so this word does nothing here; drop it or move it "
+                f"the {word} check can never fire on {slug!r}, which reports no confidence. The "
+                "rest of the gate carries it, so this word does nothing here. Drop it or move it "
                 "to a rung whose backend reports confidence",
             )
         else:
             ctx.warn(
                 leaf_path,
-                f"{key} can never fire on {slug!r} — it emits no confidence — but the gate still "
-                "fires on its other predicates, so this one is dead weight: remove it, set "
+                f"{key} can never fire on {slug!r}, which emits no confidence. The gate still "
+                "fires on its other predicates, so this one is dead weight. Remove it, set "
                 "on_missing: escalate, or move it to a rung whose backend reports confidence",
             )
 
@@ -621,7 +622,7 @@ def _check_cascade(node: dict[str, Any], path: str, ctx: _Ctx, child_kw: dict) -
                 ctx.warn(
                     spath,
                     f"granularity: page but backend {step['backend']!r} lacks native page-range "
-                    "selection — this rung runs document granularity (re-parses the whole doc)",
+                    "selection. This rung runs document granularity and re-parses the whole doc",
                 )
         # a raced final rung whose branches carry their own gates: those branch gates won't run
         if i == last and step.get("pick") == "fastest":
@@ -645,8 +646,8 @@ def _check_parallel(node: dict[str, Any], path: str, ctx: _Ctx, child_kw: dict) 
             if overlap:
                 ctx.err(
                     f"{path}.parallel",
-                    f"branches {a} and {b} can both dispatch "
-                    f"{sorted(overlap)}; duplicate concurrent dispatch is a no-op — remove one",
+                    f"branches {a} and {b} can both dispatch {sorted(overlap)}. Duplicate "
+                    "concurrent dispatch is a no-op, so remove one",
                 )
 
     # judged with >3 candidates: the pairwise sweep is 2·(n−1) LLM calls — slow, not cheap
@@ -656,8 +657,8 @@ def _check_parallel(node: dict[str, Any], path: str, ctx: _Ctx, child_kw: dict) 
     ):
         ctx.warn(
             f"{path}",
-            "judged comparison over >3 candidates makes many pairwise LLM calls (single-"
-            "elimination) — it will be slow; consider fewer branches",
+            "judged comparison over >3 candidates makes many pairwise LLM calls "
+            "(single-elimination). It will be slow, so consider fewer branches",
         )
 
     for i, br in enumerate(branches):

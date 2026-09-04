@@ -5,13 +5,15 @@ Tesseract is the LOCAL EXCEPTION that genuinely has confidence: image_to_data re
 conf 0-100, so block_confidence is NATIVE (not the "deterministic parser has no confidence" case).
 It has no table/layout model, so those channels are X and warned when requested.
 
-Sandbox posture (SubprocessAdapter): the subprocess runs with a wall-clock timeout; a hardened
-multi-tenant deployment should additionally run it under an OS sandbox (rlimits: RLIMIT_CPU/AS,
-no network namespace, seccomp) — the runner is an injectable port so that hardened runner can be
-swapped in. Untrusted input is treated as untrusted: rasterization + OCR only, never shell-eval.
+Sandbox posture (SubprocessAdapter): the subprocess runs with a wall-clock timeout. An operator
+who accepts documents from people they do not trust should also run it under an OS sandbox
+(rlimits: RLIMIT_CPU/AS, no network namespace, seccomp). The runner is an injectable port, so
+that hardened runner can be swapped in. Untrusted input is treated as untrusted: rasterization
+and OCR only, never shell-eval.
 
 Geometry: coordinates are pixels at the rasterization DPI, top-left (internal/research/openreading/_data/live_runs.md verified: title
-word left=152px @150dpi ≈ 72pt). We convert with to_canonical(unit=pixel, dpi, page px dims).
+word left=152px @150dpi ≈ 72pt). The adapter converts them with to_canonical(unit=pixel, dpi,
+page px dims).
 """
 
 from __future__ import annotations
@@ -233,7 +235,7 @@ class TesseractAdapter(BackendAdapter):
             return ProbeResult.unreachable(
                 f"the tesseract binary did not answer ({type(e).__name__}: {e})"
             )
-        return ProbeResult.live("responding — the tesseract binary runs here", version=version)
+        return ProbeResult.live("responding, the tesseract binary runs here", version=version)
 
     # ---- execution -----------------------------------------------------------
     def submit(self, req: OpenReadingRequest, ctx: RunContext) -> Job:
@@ -264,6 +266,17 @@ class TesseractAdapter(BackendAdapter):
             try:
                 tsv = self._runner.image_to_data(rp.image, lang, rp.dpi, timeout)
             except Exception as e:  # noqa: BLE001
+                # pytesseract's own not-found text ends "See README file for more information",
+                # which a reader takes to mean THIS project's README, where the remedy is not.
+                # Carry the same install line `openreading backends` already prints instead.
+                # Match on the class name so this module stays importable without pytesseract.
+                if type(e).__name__ == "TesseractNotFoundError":
+                    raise TerminalError(
+                        "the tesseract binary is not on PATH. Install it with "
+                        "'brew install tesseract' on macOS or 'sudo apt install tesseract-ocr' "
+                        "on Debian or Ubuntu, then check with 'openreading backends'.",
+                        backend_code="tesseract_binary_missing",
+                    ) from e
                 raise TerminalError(f"tesseract failed: {e}", backend_code=type(e).__name__) from e
             page_results.append(
                 {

@@ -194,6 +194,18 @@ def test_cli_routes_batch_vs_batch_to_corpus_table(tmp_path, capsys):
     assert "divergent" in out and "equivalent" in out and "unpaired" in out
 
 
+def test_corpus_headers_separate_the_labels_with_a_colon(tmp_path, capsys):
+    # Three guides paste these two header lines verbatim, so they are prose a reader meets and
+    # they carry no em dash.
+    from openreading.cli.app import main
+
+    fa, fb = _write_runs(tmp_path)
+    assert main(["compare", str(fa), str(fb), "--format", "table"]) == 0
+    assert capsys.readouterr().out.splitlines()[0] == "CORPUS COMPARE: runA vs runB"
+    assert main(["compare", str(fa), str(fb), "--format", "diffs"]) == 0
+    assert capsys.readouterr().out.splitlines()[0] == "CORPUS DIFFS: runA vs runB"
+
+
 def test_cli_corpus_json_is_schema_valid(tmp_path, capsys):
     import json
 
@@ -205,6 +217,21 @@ def test_cli_corpus_json_is_schema_valid(tmp_path, capsys):
     assert rc == 0
     schemas.validate_corpus_report(corpus)
     assert corpus["rollup"]["documents"] == 3
+
+
+@pytest.mark.parametrize(
+    "flag", [["--baseline", "runA"], ["--truth", "nosuch.json"], ["--show-agreements"]]
+)
+def test_cli_corpus_refuses_the_flags_it_cannot_honour(flag, tmp_path, capsys):
+    # Corpus mode returns before any of the three is read. Accepting them silently reported a
+    # scored run that scored nothing, a --truth path that does not exist included, and exited 0.
+    from openreading.cli.app import main
+
+    fa, fb = _write_runs(tmp_path)
+    rc = main(["compare", str(fa), str(fb), "--format", "table", *flag])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "A corpus compare accepts none of them." in err
 
 
 def test_cli_mixing_batch_and_response_is_a_usage_error(tmp_path, capsys):

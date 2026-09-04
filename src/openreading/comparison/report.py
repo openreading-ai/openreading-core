@@ -1,7 +1,8 @@
-"""Report assembly (DESIGN §7). Compose the per-dimension sections into one versioned, schema-valid
-report. Deterministic: fixed subject order, findings sorted by a fixed key, every report validated
-against comparison-report.v0.2.json before it is returned. v0.2 (Canon tranche 2) adds the
-content-first `headline`, the `structure` finding code, and the non-determinism rule (§9).
+"""Report assembly. Compose the per-dimension sections into one versioned, schema-valid report.
+Deterministic: fixed subject order, findings sorted by a fixed key, every report validated against
+comparison-report.v0.2.json before it is returned. v0.2 adds the content-first `headline`, the
+`structure` finding code, and the non-determinism rule. The `openreading.comparison` docstring's
+"The report" section states what each of those means.
 """
 
 from __future__ import annotations
@@ -22,11 +23,11 @@ _COST_OUTLIER_FACTOR = 3.0  # a subject costing ≥ this × the mean of the othe
 
 _SEVERITY_RANK = {"major": 0, "warn": 1, "info": 2}
 
-# §9 tranche 2 — non-determinism rule. The response carries NO determinism signal, and
-# output_paradigm is not a reliable proxy (nuextract is typed_fields/markdown; open-ocr is
-# token_stream), so this is a documented constant matching §9's explicitly named generative
-# backends, keyed on backend.id. A content finding that involves one of these subjects caps at
-# informational — run-to-run drift is indistinguishable from a real difference.
+# The non-determinism rule. The response carries NO determinism signal, and output_paradigm is
+# not a reliable proxy (nuextract is typed_fields/markdown, open-ocr is token_stream), so this is
+# a documented constant keyed on backend.id. A content finding that involves one of these
+# subjects caps at informational, because run-to-run drift is indistinguishable from a real
+# difference.
 _NON_DETERMINISTIC = frozenset({"anthropic-claude", "google-gemini", "qwen-vl", "nuextract"})
 # Codes that assert CONTENT equivalence (as opposed to structure/packaging/cost).
 _CONTENT_CODES = frozenset(
@@ -49,7 +50,7 @@ def _cap_nondeterministic(findings: list[dict[str, Any]], nd_labels: list[str]) 
         ):
             f["severity"] = "info"
             f["detail"] += (
-                " (info: involves a non-deterministic/generative subject — similarity only)"
+                " (info: involves a non-deterministic or generative subject, similarity only)"
             )
 
 
@@ -67,9 +68,9 @@ def _headline(
     nd_labels: list[str],
     alignment: dict[str, Any],
 ) -> dict[str, Any]:
-    """Content-first headline (§9 tranche 2): equivalence on the guaranteed channels, computed from
-    the content findings. C1/C2 removed OpenReading-introduced text divergence, so a remaining
-    difference is attributable to the engines."""
+    """Content-first headline: equivalence on the guaranteed channels, computed from the content
+    findings. C1/C2 removed OpenReading-introduced text divergence, so a remaining difference is
+    attributable to the engines."""
     codes = {f["code"] for f in findings}
     channels: dict[str, Any] = {
         "text": {
@@ -204,7 +205,7 @@ def build_report(
         *_cost_findings(subjects),
     ]
     nd_labels = _nondeterministic_labels(subjects)
-    _cap_nondeterministic(raw_findings, nd_labels)  # §9 non-determinism rule
+    _cap_nondeterministic(raw_findings, nd_labels)  # the non-determinism rule
     findings = _sort_findings(raw_findings)
 
     warnings: list[dict[str, Any]] = [
@@ -226,7 +227,7 @@ def build_report(
         "mode": "pairwise" if len(subjects) == 2 else "nway",
         "subjects": [subject_dict(s) for s in subjects],
         "alignment": alignment,
-        "headline": _headline(  # §9 tranche 2 content-first summary
+        "headline": _headline(  # content-first summary
             subjects, findings, nd_labels, alignment
         ),
         "fields": fields_sec,

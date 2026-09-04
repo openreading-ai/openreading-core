@@ -1,4 +1,4 @@
-"""Subject ingestion (DESIGN §3). Turn N inputs — response dicts or paths to response JSON — into
+"""Subject ingestion. Turn N inputs — response dicts or paths to response JSON — into
 labeled `Subject`s, validated against the response schema. Pure: no execution, no network."""
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from openreading.schemas import validate_response
 
 class CompareInputError(ValueError):
     """An input was not a schema-valid response, or fewer than two subjects were supplied. The CLI
-    maps this to exit code 5 (DESIGN §8)."""
+    maps this to exit code 5."""
 
 
 @dataclass
@@ -68,9 +68,13 @@ def _label_for(resp: dict[str, Any], item: Any) -> str:
 
 
 def load_subjects(inputs: Iterable[Any], *, sources: list[str] | None = None) -> list[Subject]:
-    """Validate and label N inputs into Subjects. `sources` (optional, from the CLI which knows the
-    acquisition mode) stamps each subject's provenance; defaults to 'file'. Labels are the backend
-    id, disambiguated with #2/#3… on collision in input order."""
+    """Validate and label N inputs into Subjects.
+
+    `sources` is optional and comes from the CLI, which knows how each subject was acquired. It
+    stamps each subject's provenance and defaults to 'file'. A subject's label is its backend
+    id. A colliding id becomes `<id> (<backend.version>)` when that label is still free, and
+    `<id>#N` by input order otherwise. The Subjects section of `openreading.comparison` says why.
+    """
     items = list(inputs)
     if len(items) < 2:
         raise CompareInputError("compare needs at least two subjects")
@@ -83,8 +87,10 @@ def load_subjects(inputs: Iterable[Any], *, sources: list[str] | None = None) ->
         try:
             validate_response(resp)
         except Exception as exc:  # noqa: BLE001 — normalize every schema failure to one input error
+            detail = getattr(exc, "message", None) or str(exc)
+            where = "/".join(str(p) for p in getattr(exc, "absolute_path", ())) or "$"
             raise CompareInputError(
-                f"input #{i + 1} is not a schema-valid response: {exc}"
+                f"input #{i + 1} is not a schema-valid response: {detail} (at {where})"
             ) from exc
         base = _label_for(resp, item)
         seen[base] = seen.get(base, 0) + 1

@@ -1,11 +1,13 @@
-"""BackendAdapter — the one interface that wraps all four backend types (adapter_interface.md
-§2). The router calls only these eight methods + reads the static AdapterDescriptor; it never
-branches on backend type. INLINE backends complete inside submit(); POLL/WEBHOOK backends
-return a RUNNING Job the driver advances.
+"""BackendAdapter — the one interface that wraps all four backend types. The router calls only
+these eight methods + reads the static AdapterDescriptor; it never branches on backend type.
+INLINE backends complete inside submit(); POLL/WEBHOOK backends return a RUNNING Job the driver
+advances.
 
 `BackendAdapter` is the ABC real adapters subclass (it supplies INLINE-friendly defaults for
 poll/resolve_webhook/cancel so an in-process library only implements submit/normalize/etc.).
 `AdapterProtocol` is the structural type the router/conformance-kit use.
+Reading order in this file: `AdapterProtocol` first, then the two optional Protocols, then
+`BackendAdapter`, the class you subclass.
 
 Two OPTIONAL capabilities sit beside the required 8, each as its own `@runtime_checkable`
 Protocol that the platform feature-detects and gates on a descriptor declaration — never as extra
@@ -39,6 +41,10 @@ def _cap_supported(value: object) -> bool:
 
 @runtime_checkable
 class AdapterProtocol(Protocol):
+    """The structural type the router and the conformance kit check with `isinstance`: the eight
+    required methods plus a static `descriptor`. Subclass `BackendAdapter` below to inherit the
+    INLINE-friendly defaults, or satisfy this Protocol directly to be accepted."""
+
     descriptor: AdapterDescriptor
 
     def capabilities(self) -> dict: ...
@@ -114,21 +120,25 @@ class BackendAdapter(ABC):
     `poll`/`resolve_webhook`.
 
     It also supplies an honest default for the optional 9th method (`probe_liveness`), so every
-    existing adapter — the 15 built-ins and any third-party subclass — keeps working untouched and
-    simply reports "no probe"."""
+    existing adapter, the fifteen built-ins and any third-party subclass, keeps working untouched
+    and reports "no probe"."""
 
     descriptor: AdapterDescriptor
 
     # ---- static declaration --------------------------------------------------
     def capabilities(self) -> dict:
-        """Runtime capability view; defaults to the static descriptor (may probe-refine)."""
+        """The static descriptor's capabilities as a JSON-ready dict. No built-in adapter
+        overrides this."""
         return self.descriptor.capabilities.model_dump(mode="json")
 
     # ---- lifecycle -----------------------------------------------------------
     @abstractmethod
     def health(self) -> Health:
-        """Cheap readiness probe. Hosted: creds + reachability. Library: import + version +
-        system-dep presence. Container/model: /health + warm/cold + VRAM free."""
+        """Report whether this adapter's Python dependencies import here, and for a subprocess
+        adapter whether its binary is on PATH. The check never opens a network connection and
+        never reads a credential, so `make verify` can call it on every adapter. It cannot tell
+        you whether the backend is answering, which is the separate question `probe_liveness`
+        below measures."""
         ...
 
     def probe_liveness(self, ctx: RunContext, *, timeout_s: float) -> ProbeResult:
@@ -187,7 +197,8 @@ class BackendAdapter(ABC):
     ) -> NormalizedResponse:
         """Map job.raw → NormalizedResponse. Fill only what the backend produced; record every
         requested-but-unavailable channel as a response.warnings[] entry; never fabricate
-        bbox/confidence. Attach backend_raw per the §5 serialization policy.
+        bbox/confidence. Attach backend_raw per the encoding rules on
+        `openreading.types.runtime.RawResult`.
 
         `ctx` (Ledger T4b): added for signature uniformity with submit/poll/resolve_webhook/cancel
         — every adapter method that touches the walk now receives one. No current implementation

@@ -231,7 +231,15 @@ def test_route_unreadable_policy_exits_3_without_a_traceback(sample_pdf, tmp_pat
             rc = main(["route", sample_pdf, "--policy", str(policy)])
             assert rc == 3
             err = capsys.readouterr().err
-            assert err.startswith("[route] cannot read policy")
+            # A file that will not open and a file whose bytes are not JSON are different
+            # problems, and each says which one it is rather than sending the reader to check
+            # permissions on a file that reads fine.
+            expected = (
+                f"[route] policy {malformed} is not valid JSON"
+                if policy is malformed
+                else "[route] cannot read policy"
+            )
+            assert err.startswith(expected)
             assert len(err.splitlines()) == 1
             # BL-141: the path (a missing-file FileNotFoundError, a JSONDecodeError, and now a
             # PermissionError alike) is named exactly once — not once in the "cannot read policy
@@ -257,6 +265,36 @@ def test_backends_command_reports_ready_and_missing(capsys, monkeypatch):
     assert "yes" in rows["pymupdf"]  # local, always ready
     assert "no" in rows["azure-document-intelligence"]
     assert "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT" in rows["azure-document-intelligence"]
+
+
+def test_backends_command_never_leaves_a_not_ready_row_blank(capsys, monkeypatch):
+    # The MISSING column is what a newcomer provisions from, and the first command the README
+    # tells them to run. A backend whose credentials are all declared optional has an empty
+    # `required_missing`, so the older `missing_deps or required_missing` printed "-" beside "no"
+    # and named nothing to fix. `readiness.missing_reason` is the one record every readiness
+    # surface answers from.
+    for var in (
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_MODEL",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_REGION",
+        "OPENREADING_TEXTRACT_S3_BUCKET",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    rc = main(["backends"])
+    assert rc == 0
+    rows = {
+        line.split()[0]: line
+        for line in capsys.readouterr().out.splitlines()
+        if line and not line.startswith("BACKEND")
+    }
+    for slug in rows:
+        if rows[slug].split()[2] == "no":
+            assert not rows[slug].rstrip().endswith("-"), slug
+    assert "ANTHROPIC_API_KEY" in rows["anthropic-claude"]
+    assert "OPENREADING_TEXTRACT_S3_BUCKET" in rows["aws-textract"]
 
 
 def test_auth_rejected_message_names_env_and_never_echoes_key():
@@ -594,17 +632,16 @@ def test_parse_missing_document_exits_2_without_a_traceback(tmp_path, capsys):
     assert err.startswith("[pymupdf]")
     assert "Traceback" not in err
     assert len(err.splitlines()) == 1
-    # cmd_parse already let SourceNotFoundError's own string carry the path (no separate prefix) —
-    # BL-141's errno-style reconstruction of SourceNotFoundError must not regress that single
-    # mention into two.
+    # cmd_parse prints the path itself, in its own `cannot read {path}:` prefix, and
+    # `_describe_read_error` keeps the exception's own message from repeating it.
     assert err.count(str(missing)) == 1
     # BL-143: BL-141 constructed SourceNotFoundError with a placeholder `errno=None`, and cmd_parse
-    # interpolates str(e) directly (it's one of the two sites BL-141 deliberately left outside its
-    # own `_describe_read_error` helper) — CPython's OSError.__str__ rendered that as a literal
-    # "[Errno None] ..." prefix. A real errno.ENOENT must make this indistinguishable from a genuine
-    # OS-raised FileNotFoundError.
+    # interpolated str(e) directly — CPython's OSError.__str__ rendered that as a literal
+    # "[Errno None] ..." prefix. A real errno.ENOENT fixed the None, and printing the reason
+    # through `_describe_read_error` keeps the errno itself out of a reader's terminal.
     assert "None" not in err
-    assert err == f"[pymupdf] [Errno 2] no such file or directory: '{missing}'\n"
+    assert "Errno" not in err
+    assert err == f"[pymupdf] cannot read {missing}: no such file or directory\n"
 
 
 def test_parse_batch_glob_no_matches_exits_2_without_a_traceback(tmp_path, capsys):
@@ -621,9 +658,11 @@ def test_parse_batch_glob_no_matches_exits_2_without_a_traceback(tmp_path, capsy
     assert len(err.splitlines()) == 1
     assert err.count(pattern) == 1
     # BL-143: same errno=None regression as cmd_parse's single-document branch above, but through
-    # _cmd_parse_batch's own (SourceLimitError, SourceNotFoundError, JobsLimitError) except clause.
+    # _cmd_parse_batch's own SourceNotFoundError except clause, which prints the reason and the
+    # pattern rather than str(e), so the errno never reaches the terminal.
     assert "None" not in err
-    assert err == f"[batch] [Errno 2] glob matched no files: '{pattern}'\n"
+    assert "Errno" not in err
+    assert err == f"[batch] glob matched no files: '{pattern}'\n"
 
 
 def test_parse_batch_missing_positional_path_exits_2_without_a_traceback(
@@ -642,9 +681,55 @@ def test_parse_batch_missing_positional_path_exits_2_without_a_traceback(
     assert len(err.splitlines()) == 1
     assert err.count(str(missing)) == 1
     # BL-143: same errno=None regression as cmd_parse's single-document branch above, but through
-    # _cmd_parse_batch's own (SourceLimitError, SourceNotFoundError, JobsLimitError) except clause.
+    # _cmd_parse_batch's own SourceNotFoundError except clause, which prints the reason and the
+    # path rather than str(e), so the errno never reaches the terminal.
     assert "None" not in err
-    assert err == f"[batch] [Errno 2] no such file or directory: '{missing}'\n"
+    assert "Errno" not in err
+    assert err == f"[batch] no such file or directory: '{missing}'\n"
+
+
+def test_parse_rejects_a_page_number_below_one_as_a_usage_error(sample_pdf, capsys):
+    # --pages calls itself 1-based, and 0 used to reach the request model, where it became six
+    # lines of pydantic output and exit 1. Every other bad flag value here is one line and exit 2.
+    with pytest.raises(SystemExit) as exc:
+        main(["parse", sample_pdf, "--backend", "pymupdf", "--pages", "0"])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "argument --pages: page numbers are 1-based" in err
+    assert "pydantic" not in err
+
+
+def test_parse_names_the_format_a_named_backend_cannot_read(tmp_path, capsys):
+    # The batch path reports this same file as skip_reason "unsupported_format". The
+    # single-document path used to hand the reader libmupdf's own "Failed to open stream", which
+    # names neither the format nor the fix.
+    notes = tmp_path / "notes.txt"
+    notes.write_text("hello world\n")
+    rc = main(["parse", str(notes), "--backend", "pymupdf"])
+    assert rc == 3
+    err = capsys.readouterr().err
+    assert err.startswith("[pymupdf] unsupported_format:")
+    assert ".txt" in err and "pdf" in err
+    assert "Failed to open stream" not in err
+
+
+def test_parse_still_dispatches_a_file_with_no_extension(sample_pdf, tmp_path, capsys):
+    # The format guard above must not refuse what it cannot classify: an extensionless file has no
+    # format token, so it dispatches exactly as it did before the guard existed.
+    unnamed = tmp_path / "nameless"
+    unnamed.write_bytes((tmp_path / "sample.pdf").read_bytes())
+    assert main(["parse", str(unnamed), "--backend", "pymupdf"]) == 0
+    schemas.validate_response(json.loads(capsys.readouterr().out))
+
+
+def test_route_rejects_an_empty_policy_path_by_naming_the_flag(sample_pdf, capsys):
+    # `Path("")` is the working directory, so an empty value used to be reported as "cannot read
+    # policy : Is a directory", which describes neither the flag nor the mistake.
+    rc = main(["route", sample_pdf, "--policy", ""])
+    assert rc == 3
+    assert capsys.readouterr().err == (
+        "[route] --policy needs a file path, and an empty value was given\n"
+    )
 
 
 def test_route_missing_document_exits_3_without_a_traceback(tmp_path, capsys):
@@ -680,7 +765,11 @@ def test_replay_unreadable_trace_exits_3_without_a_traceback(sample_pdf, tmp_pat
         rc = main(["replay", sample_pdf, "--trace", str(trace)])
         assert rc == 3
         err = capsys.readouterr().err
-        assert err.startswith("[replay] cannot read")
+        # A file that will not open and a file whose bytes are not JSON say which one failed.
+        if trace is malformed:
+            assert err.startswith(f"[replay] {malformed} is not valid JSON")
+        else:
+            assert err.startswith("[replay] cannot read")
         assert "Traceback" not in err
         assert len(err.splitlines()) == 1
         assert err.count(str(trace)) == 1
@@ -708,7 +797,11 @@ def test_explain_unreadable_response_exits_3_without_a_traceback(tmp_path, capsy
         rc = main(["explain", str(response)])
         assert rc == 3
         err = capsys.readouterr().err
-        assert err.startswith("[explain] cannot read")
+        # A file that will not open and a file whose bytes are not JSON say which one failed.
+        if response is malformed:
+            assert err.startswith(f"[explain] {malformed} is not valid JSON")
+        else:
+            assert err.startswith("[explain] cannot read")
         assert "Traceback" not in err
         assert len(err.splitlines()) == 1
         assert err.count(str(response)) == 1
@@ -725,7 +818,11 @@ def test_compare_from_unreadable_response_exits_5_without_duplicate_path(tmp_pat
         rc = main(["compare", "--from", str(response)])
         assert rc == 5
         err = capsys.readouterr().err
-        assert err.startswith("[compare] cannot read")
+        # A file that will not open and a file whose bytes are not JSON say which one failed.
+        if response is malformed:
+            assert err.startswith(f"[compare] {malformed} is not valid JSON")
+        else:
+            assert err.startswith("[compare] cannot read")
         assert "Traceback" not in err
         assert len(err.splitlines()) == 1
         assert err.count(str(response)) == 1
@@ -742,7 +839,11 @@ def test_compare_fanout_unreadable_input_exits_5_without_duplicate_path(tmp_path
         rc = main(["compare", str(response), str(other)])
         assert rc == 5
         err = capsys.readouterr().err
-        assert err.startswith("[compare] cannot read")
+        # A file that will not open and a file whose bytes are not JSON say which one failed.
+        if response is malformed:
+            assert err.startswith(f"[compare] {malformed} is not valid JSON")
+        else:
+            assert err.startswith("[compare] cannot read")
         assert "Traceback" not in err
         assert len(err.splitlines()) == 1
         assert err.count(str(response)) == 1
