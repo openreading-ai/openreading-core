@@ -75,9 +75,24 @@ completed: backend:tesseract as openreading_backend_tesseract_c7f0d4e500 in benc
 comparison: benchmark-results/openreading-leaderboard.html
 ```
 
-**You should see** the estimate before either backend runs, and the documents named rather than
-counted. Open the comparison file for the publisher's own side-by-side. The rule pass rates behind
-it, from `benchmark-results/<pipeline>/text_content/_evaluation_report.json`:
+**You should see** the estimate before either backend runs, then the ranked comparison when it
+finishes:
+
+```text
+target / category                   score   parsed  errors  metric
+backend:pymupdf                     0.291      2/2       0
+  table                             0.000                   grits_trm_composite
+  text_content                      0.874                   rule_pass_rate (80/95 rules)
+  text_formatting                   0.000                   rule_pass_rate (0/11 rules)
+backend:tesseract                   0.228      2/2       0
+  table                             0.000                   grits_trm_composite
+  text_content                      0.684                   rule_pass_rate (62/95 rules)
+  text_formatting                   0.000                   rule_pass_rate (0/11 rules)
+```
+
+`openreading benchmark report` prints that again from a finished run without re-running it, and
+`--format json` gives a script the same numbers. Every one of them is read back from the
+publisher's own report rather than computed here. The per-category detail:
 
 | backend | text_content | rules passed |
 |---|---|---|

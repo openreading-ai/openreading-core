@@ -386,3 +386,89 @@ def test_an_unpriced_target_refuses_without_yes(
     err = capsys.readouterr().err
     assert "pass --yes" in err
     assert "stopped before spending" in err
+
+
+def test_run_prints_the_comparison_and_writes_a_manifest(
+    monkeypatch, tmp_path, capsys, prepared_corpus
+) -> None:
+    """The answer belongs in the terminal, not only in an HTML file someone has to open."""
+    out = tmp_path / "out"
+    monkeypatch.setattr(
+        "openreading.evals.official.prepare_official_benchmark",
+        lambda *args, **kwargs: prepared_corpus,
+    )
+
+    def fake_run(benchmark_id, target, **kwargs):
+        pipeline = f"pipe_{target.name}"
+        directory = Path(kwargs["output_dir"]) / pipeline / "text"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory.parent / "_metadata.json").write_text(
+            json.dumps({"summary": {"total": 2, "successful": 2, "failed": 0}})
+        )
+        (directory / "_evaluation_report.json").write_text(
+            json.dumps(
+                {
+                    "total_examples": 2,
+                    "aggregate_metrics": {
+                        "avg_rule_pass_rate": 0.9 if target.name == "pymupdf" else 0.4
+                    },
+                }
+            )
+        )
+        return OfficialRun(benchmark_id, target, pipeline, Path(kwargs["output_dir"]), 0)
+
+    monkeypatch.setattr("openreading.evals.official.run_official_benchmark", fake_run)
+    monkeypatch.setattr(
+        "openreading.evals.official.build_official_comparison",
+        lambda benchmark_id, runs, output_dir: OfficialComparison(
+            benchmark_id, (), Path(output_dir) / "leaderboard.html", 0
+        ),
+    )
+
+    rc = main(
+        [
+            "benchmark",
+            "run",
+            "parsebench",
+            "--target",
+            "backend:pymupdf",
+            "--target",
+            "backend:tesseract",
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--output-dir",
+            str(out),
+        ]
+    )
+
+    assert rc == 0
+    printed = capsys.readouterr().out
+    assert "backend:pymupdf" in printed and "0.900" in printed
+    # Better target first, by the publisher's own number.
+    assert printed.index("backend:pymupdf") < printed.index("backend:tesseract")
+    manifest = json.loads((out / "openreading-run.json").read_text())
+    assert {t["reference"] for t in manifest["targets"]} == {
+        "backend:pymupdf",
+        "backend:tesseract",
+    }
+
+
+def test_report_reads_a_finished_run_without_rerunning_it(tmp_path, capsys) -> None:
+    directory = tmp_path / "pipe" / "text"
+    directory.mkdir(parents=True)
+    (directory.parent / "_metadata.json").write_text(
+        json.dumps({"summary": {"total": 1, "successful": 1, "failed": 0}})
+    )
+    (directory / "_evaluation_report.json").write_text(
+        json.dumps({"total_examples": 1, "aggregate_metrics": {"avg_rule_pass_rate": 0.75}})
+    )
+
+    assert main(["benchmark", "report", "--output-dir", str(tmp_path), "--format", "json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["targets"][0]["overall"] == 0.75
+
+
+def test_report_on_an_empty_directory_exits_2(tmp_path, capsys) -> None:
+    assert main(["benchmark", "report", "--output-dir", str(tmp_path)]) == 2
+    assert "no publisher run" in capsys.readouterr().err

@@ -325,8 +325,8 @@ router's scoring or any adapter's `integration_priority`. Exits: 0; 2 <2 backend
 `--backends` id; 3 unreadable policy, an unresolvable/empty dataset directory, or a cannot-run
 fault.
 
-benchmark <list|show|prepare|estimate|run>
--------------------------------------------
+benchmark <list|show|prepare|estimate|run|report>
+--------------------------------------------------
 A benchmark profile connects one public dataset and official scorer to OpenReading. A target is
 one backend or strategy evaluated on that dataset. Discovery is offline and requires no optional
 package.
@@ -351,6 +351,12 @@ harness skip valid results.
 
 How much a run costs, and how to spend less
 ...........................................
+`run` prints the comparison when it finishes, ranked by the publisher's own numbers, and writes
+`openreading-run.json` beside the artifacts so a later reader can tell which pipeline was which
+target. `report` prints that same table again from a finished run without re-running anything,
+with `--format json` for a script. Neither computes a score: both read the publisher's
+`_evaluation_report.json` back, so the terminal and the publisher's dashboard cannot disagree.
+
 `run` touches **two documents** unless you say otherwise, because it spends your money on someone
 else's API. `--limit N` runs N, `--limit 0` runs the whole prepared corpus, and `--doc NAME`
 (repeatable) runs documents you name by id (`table/doc1`) or file stem. A limited run is written

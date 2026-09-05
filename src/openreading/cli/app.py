@@ -1538,6 +1538,7 @@ def cmd_benchmark_run(args) -> int:
         prepare_official_benchmark,
         run_official_benchmark,
     )
+    from openreading.evals.report import ReportError
 
     descriptor = _benchmark_descriptor(args)
     if descriptor is None or not _check_benchmark_terms(args, descriptor):
@@ -1574,6 +1575,9 @@ def cmd_benchmark_run(args) -> int:
         run_dir = _benchmark_subset(args, descriptor, data_dir, targets)
         if run_dir is None:
             return 2
+        from openreading.evals.report import read_run, render, write_manifest
+        from openreading.evals.subset import plan_subset
+
         failed = False
         runs = []
         for target in targets:
@@ -1599,6 +1603,17 @@ def cmd_benchmark_run(args) -> int:
                     f"[benchmark] {target.reference} failed with exit code {result.exit_code}",
                     file=sys.stderr,
                 )
+        # The publisher's metadata never records which OpenReading target made which pipeline,
+        # so write that mapping beside its artifacts before anything tries to read them back.
+        write_manifest(
+            Path(args.output_dir),
+            benchmark_id=descriptor.id,
+            preset=args.preset,
+            documents=tuple(
+                doc.doc_id for doc in plan_subset(run_dir, limit=0, names=()).documents
+            ),
+            targets=tuple((run.target.reference, run.pipeline_name) for run in runs),
+        )
         if len([run for run in runs if run.exit_code == 0]) >= 2:
             comparison = build_official_comparison(
                 descriptor.id, runs, output_dir=Path(args.output_dir)
@@ -1611,6 +1626,13 @@ def cmd_benchmark_run(args) -> int:
                     f"[benchmark] official comparison failed with exit code {comparison.exit_code}",
                     file=sys.stderr,
                 )
+        # The whole reason the run was started. Printed here so the answer is in the terminal
+        # rather than only in an HTML file the reader has to go open.
+        try:
+            print()
+            print(render(read_run(Path(args.output_dir))))
+        except ReportError as exc:  # a publisher that wrote nothing readable
+            print(f"[benchmark] {exc}", file=sys.stderr)
         return 1 if failed else 0
     except (BenchmarkDependencyError, BenchmarkProfileError, ValueError) as exc:
         print(f"[benchmark] {exc}", file=sys.stderr)
@@ -1618,6 +1640,22 @@ def cmd_benchmark_run(args) -> int:
     except _CLEAN_EXIT3_ERRORS as exc:
         print(f"[benchmark] {exc}", file=sys.stderr)
         return 3
+
+
+def cmd_benchmark_report(args) -> int:
+    """Read a finished run's publisher artifacts and print the comparison."""
+    from openreading.evals.report import ReportError, read_run, render, to_json
+
+    try:
+        reports = read_run(Path(args.output_dir))
+    except ReportError as exc:
+        print(f"[benchmark] {exc}", file=sys.stderr)
+        return 2
+    if args.format == "json":
+        print(json.dumps(to_json(reports), indent=2))
+    else:
+        print(render(reports))
+    return 0
 
 
 def cmd_strategy_normalize(args) -> int:
@@ -2352,6 +2390,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_benchmark_selection(benchmark_estimate, targets=True)
     benchmark_estimate.set_defaults(func=cmd_benchmark_estimate)
+
+    benchmark_report = benchmark_sub.add_parser(
+        "report", help="print the comparison from a finished run, without re-running it"
+    )
+    benchmark_report.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("benchmark-results"),
+        help="publisher artifact root to read (default ./benchmark-results)",
+    )
+    benchmark_report.add_argument(
+        "--format", choices=["text", "json"], default="text", help="table (default) or JSON"
+    )
+    benchmark_report.set_defaults(func=cmd_benchmark_report)
 
     benchmark_run = benchmark_sub.add_parser(
         "run", help="prepare, run OpenReading targets, and invoke the official scorer"
