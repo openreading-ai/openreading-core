@@ -2,37 +2,51 @@
 
 <sub>[Docs home](../README.md) · [← The channel contract](../derive/README.md) · [JSON Schemas →](../schemas/README.md)</sub>
 
-> **In one sentence.** Run an official public benchmark first, then use labeled documents from
-> your traffic to decide whether its result transfers to your workload.
+> **In one sentence.** Rank backends against a public benchmark somebody else wrote, or against
+> documents you labeled yourself, and read the ranking in your terminal.
 
 ## What this gives you
 
-Two vendors both claim the best accuracy on your kind of document, and their numbers come from their
-own benchmarks. A backend is one parser, such as the local `pymupdf` library or a hosted API. You
-need a score measured on your documents, against your own expected values, that you can rerun
-whenever a backend changes.
+Two vendors both claim the best accuracy on your kind of document, and both numbers come from the
+vendor's own benchmark. This package answers that question twice, from two directions. **The two
+commands are not interchangeable, and picking the wrong one is the usual way to get lost here.**
 
-`openreading.evals` is the benchmark harness, and it ships three scorers, a runner, and a
-leaderboard. A response is the one JSON envelope every backend returns. Each scorer grades a
-response against the text, tables, or fields you expected. The runner drives any backend over a
-dataset directory, and the leaderboard ranks two or more backends on one dataset. For example,
-`openreading leaderboard src/openreading/evals/sample --backends pymupdf,tesseract` prints one
-ranked row per backend with its mean score.
+| | `openreading benchmark` | `openreading leaderboard` |
+|---|---|---|
+| The documents | a publisher's public corpus | yours |
+| The expected answers | the publisher's, shipped with the corpus | you write one `case.json` per document |
+| Who grades it | the publisher's own scoring code | `openreading.evals.scorers`, in this repo |
+| Work before the first run | install one extra | label every document by hand |
+| What it settles | which backend is better on documents anyone can check | whether that holds on your traffic |
 
-Every score is measured on your documents and never quoted from a vendor, and labeled datasets never
-land in this repo. The repo ships one synthetic case so the harness proves itself offline, and the
-walkthrough starts there with no key.
+**Start with `benchmark`.** It needs no labeling, and its number came from a scorer you did not
+write, so nobody has to take your word for it. Move to `leaderboard` once you need to know whether
+a public result transfers to the documents you actually process. That is the one question a public
+corpus cannot answer, because it is not your mail.
 
-What the score measures is narrower than the word accuracy suggests. Most of these scorers ask
-whether the content you expected is present. They do not ask whether the backend added anything
-you did not expect. Step 1 shows which dimension does what, and how to cover the gap.
+Three terms the rest of this page uses. A backend is one parser, such as the local `pymupdf`
+library or a hosted API. A target is one backend or one strategy that a benchmark evaluates. A
+response is the one JSON envelope every backend returns.
 
-## Start with a public benchmark
+Labeled datasets never land in this repo. The repo ships one synthetic case so the labeled path
+proves itself offline, and both walkthroughs below run with no key and no bill.
 
-A benchmark profile connects a publisher's dataset and scorer to OpenReading. A target is one
-backend or strategy you evaluate. The publisher still owns case loading, normalization, metrics,
-and detailed reports. OpenReading supplies the target and keeps the complete normalized response
-inside each raw benchmark artifact.
+One limit belongs up here rather than in a footnote. The scorers in this repo mostly ask whether
+the content you expected is present. They do not ask whether the backend added anything you did
+not expect, so a response with an invented total still scores 1.0. A public benchmark's scorer
+does ask, which is a second reason to start there. Path two's walkthrough step 1 proves the gap on
+the shipped sample and names the three dimensions that cover it.
+
+## Path one: a public benchmark (`openreading benchmark`)
+
+**Nothing in this section uses documents of yours.** The corpus, the expected answers and the
+scoring code all belong to the publisher. You supply the backends and read the ranking.
+
+A benchmark profile connects a publisher's dataset and scorer to OpenReading. The publisher still
+owns case loading, normalization, metrics, and detailed reports. OpenReading supplies the target,
+keeps the complete normalized response inside each raw artifact, and reads the publisher's own
+numbers back into a table. It never computes a score of its own here, so the terminal and the
+publisher's dashboard cannot disagree.
 
 Use Python 3.12 or newer for the two runnable profiles. Install only the profile you need.
 
@@ -90,17 +104,12 @@ backend:tesseract                   0.228      2/2       0
   text_formatting                   0.000                   rule_pass_rate (0/11 rules)
 ```
 
-`openreading benchmark report` prints that again from a finished run without re-running it, and
-`--format json` gives a script the same numbers. Every one of them is read back from the
-publisher's own report rather than computed here. The per-category detail:
+**That ordering is the whole point.** Born-digital extraction beats OCR on a born-digital page,
+80 rules to 62, and the number saying so came from the publisher's scorer rather than from this
+repo. Swap `backend:tesseract` for a hosted backend and the same table is your vendor bake-off.
 
-| backend | text_content | rules passed |
-|---|---|---|
-| pymupdf | 0.874 | 80 of 95 |
-| tesseract | 0.684 | 62 of 95 |
-
-That ordering is the point. Born-digital text extraction beats OCR on a born-digital page, and the
-number saying so came from the publisher's scorer rather than from this repo.
+`openreading benchmark report` prints that table again from a finished run without re-running
+anything, and `--format json` hands a script the same numbers.
 
 Two zeros in the same run are worth reading correctly. `text_formatting` scores 0.000 for both,
 because those rules assert bold, italic, superscript and strikeout, and neither backend emits rich
@@ -192,7 +201,13 @@ batch isolation. Those are engine invariants. The offline suite tests them with 
 Use the private-dataset workflow below to test whether public quality results transfer to your own
 documents.
 
-## Mental model
+## Path two: documents you labeled (`openreading leaderboard`)
+
+Everything from here to the end of the recipes is the second path. It scores **your** documents
+with the scorers in this repo, and it is the only way to learn whether a public result transfers
+to your traffic. It costs labeling work, which is why it comes second.
+
+### Mental model
 
 A dataset is a directory of case directories, and each case directory holds a `case.json` with the
 input plus `expected`. A policy is a short list of requirements a backend must meet, and the
@@ -203,16 +218,16 @@ repeats that for every backend and ranks them by mean score. `calibrate` and `co
 the same three scorers rather than carrying their own. Nothing feeds back into routing, and the
 number is evidence for you to read.
 
-## Walkthrough
+### Walkthrough
 
 Build the root README's sample document first, because later steps score against it. No key is
-needed anywhere on this page.
+needed anywhere on this page, and no step bills anything.
 
 ```bash
 uv run python -c 'from openreading.testing.sample_pdf import build_sample_pdf; open("sample.pdf","wb").write(build_sample_pdf())'
 ```
 
-### 1. Rank two backends on the bundled case
+#### 1. Rank two backends on the bundled case
 
 ```bash
 uv run openreading leaderboard src/openreading/evals/sample --backends pymupdf,tesseract
@@ -298,7 +313,7 @@ tie, breaking the tie alphabetically, and it names one on a case every backend s
 human `per-case result` block distinguishes those, so tally wins from it and never from
 `cases[].winner`.
 
-### 2. Read the bundled case
+#### 2. Read the bundled case
 
 Source: `src/openreading/evals/sample/loan_page1/case.json`, whitespace compacted.
 ```json
@@ -314,7 +329,7 @@ Source: `src/openreading/evals/sample/loan_page1/case.json`, whitespace compacte
 cases use `"input": {"path": "input.pdf"}` next to the file. `expected` may name `text`,
 `text_contains`, `markdown`, `typed_fields`, and `tables`, and only what it names is scored.
 
-### 3. Write your own dataset
+#### 3. Write your own dataset
 
 Three cases rather than one, because a one-case dataset can show you neither a tie nor a shared
 failure. You will meet both on real documents.
@@ -364,7 +379,7 @@ The `mean` and the `dimensions` on one row do not average to each other, and the
 `mean` is the average of that backend's three per-case overalls. Each dimension is averaged over
 only the cases that named it, so `table_cell_accuracy=1.00` for pymupdf is one case out of three.
 
-### 4. Run a vendor bake-off, in order
+#### 4. Run a vendor bake-off, in order
 
 The steps above each answer one question. This is the order to run them in when the job is picking
 a backend for real documents and defending the choice afterwards. Every example on this page runs
@@ -412,7 +427,7 @@ sample size you should copy.
 8. **Ship, and keep the dataset.** Rerun the leaderboard when a backend releases a new version.
    That rerun is the whole reason to have written the labels down.
 
-## Recipes
+### Recipes
 
 **Rank under a compliance policy.**
 ```bash
@@ -506,7 +521,13 @@ print(run_dataset(make_adapter("tesseract"), "mydata").summary())   # backend=te
   rather than one document's opinion is your job, and step 4 is the order to do it in.
 - Most dimensions measure presence, not absence. `text_contains` and the table scorer count what
   you asked for and cannot see what the backend added. A leaderboard alone will therefore miss a
-  backend that invents content. Step 1 names the three dimensions that will catch one.
+  backend that invents content, which a public benchmark's own scorer does catch. Path two's
+  walkthrough step 1 names the three dimensions that will catch one here.
+- A public benchmark result is read back, never recomputed. `benchmark run` and `benchmark report`
+  print the publisher's own numbers out of its own report files, so the terminal table and the
+  publisher's dashboard cannot disagree about a document. The one thing added is the join from a
+  pipeline name to the target that produced it, which the publisher does not record. See
+  `openreading.evals.report`.
 - A public benchmark run is small until you say otherwise. `benchmark run` touches two documents
   by default and prices the rest in pages before it spends, because the failure it avoids is a
   command typed once that bills a full corpus across several hosted backends. See
@@ -530,8 +551,9 @@ print(run_dataset(make_adapter("tesseract"), "mydata").summary())   # backend=te
 - `uv run openreading benchmark run --help` for every flag that changes what a public run
   touches or costs, and `uv run openreading leaderboard --help` and
   `uv run openreading calibrate --help` for the labeled-dataset path.
-- `uv run python -m pydoc openreading.evals.subset` for how a corpus is cut down, and
-  `uv run python -m pydoc openreading.evals.preflight` for how the run is priced.
+- `uv run python -m pydoc openreading.evals.subset` for how a corpus is cut down,
+  `uv run python -m pydoc openreading.evals.preflight` for how the run is priced, and
+  `uv run python -m pydoc openreading.evals.report` for how a finished run is read back.
 - `src/openreading/schemas/leaderboard-report.v0.1.json` is described in
   [JSON Schemas](../schemas/README.md), and `scripts/leaderboard_smoke.py` is the `make verify`
   smoke.
