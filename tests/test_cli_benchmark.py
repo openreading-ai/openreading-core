@@ -2,11 +2,33 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+
+import pytest
 
 from openreading.cli import main
 from openreading.evals.official import OfficialComparison, OfficialRun
 from openreading.evals.targets import BenchmarkTarget
+from openreading.testing.sample_pdf import build_sample_pdf
+
+
+@pytest.fixture
+def prepared_corpus(tmp_path) -> Path:
+    """A ParseBench-shaped corpus, so `run` has real documents to size and price."""
+    root = tmp_path / "cache" / "parsebench" / "smoke"
+    pdf = build_sample_pdf()
+    for category in ("chart", "table"):
+        rows = []
+        for index in range(2):
+            relative = f"pdfs/{category}/doc{index}.pdf"
+            (root / relative).parent.mkdir(parents=True, exist_ok=True)
+            (root / relative).write_bytes(pdf)
+            rows.append(
+                json.dumps({"pdf": relative, "category": category, "type": "present", "rule": {}})
+            )
+        (root / f"{category}.jsonl").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    return root
 
 
 def test_benchmark_list_is_offline_and_shows_lanes(capsys, monkeypatch) -> None:
@@ -67,12 +89,13 @@ def test_benchmark_prepare_applies_terms_gate_before_download(
     assert "--allow-research-only" in capsys.readouterr().err
 
 
-def test_benchmark_run_prepares_then_runs_each_target(monkeypatch, tmp_path, capsys) -> None:
-    data_dir = tmp_path / "cache" / "parsebench" / "smoke"
+def test_benchmark_run_prepares_then_runs_each_target(
+    monkeypatch, tmp_path, capsys, prepared_corpus
+) -> None:
     calls = []
     monkeypatch.setattr(
         "openreading.evals.official.prepare_official_benchmark",
-        lambda *args, **kwargs: data_dir,
+        lambda *args, **kwargs: prepared_corpus,
     )
 
     def fake_run(benchmark_id, target, **kwargs):
@@ -109,6 +132,9 @@ def test_benchmark_run_prepares_then_runs_each_target(monkeypatch, tmp_path, cap
             str(tmp_path / "out"),
             "--jobs",
             "2",
+            "--limit",
+            "0",
+            "--yes",
         ]
     )
 
@@ -117,7 +143,7 @@ def test_benchmark_run_prepares_then_runs_each_target(monkeypatch, tmp_path, cap
         BenchmarkTarget.parse("backend:pymupdf"),
         BenchmarkTarget.parse("strategy:main"),
     ]
-    assert all(call[2]["data_dir"] == data_dir for call in calls)
+    assert all(call[2]["data_dir"] == prepared_corpus for call in calls)
     assert all(call[2]["jobs"] == 2 for call in calls)
     out = capsys.readouterr().out
     assert "estimate:" in out and "2 target(s)" in out
@@ -148,8 +174,10 @@ def test_benchmark_estimate_makes_no_backend_calls(capsys) -> None:
     )
     out = capsys.readouterr().out
     assert "documents: 370" in out
-    assert "pages: 4869" in out
-    assert "target calls: 370" in out
+    # Pages, not documents. Every hosted backend bills per page, and ExtractBench is 370
+    # documents but 4,869 pages, so a document count understates the bill about thirteen times.
+    assert "pages (the billing unit): 4869" in out
+    assert "backend:nuextract: not priced" in out
 
 
 def test_benchmark_estimate_refuses_a_cataloged_profile(capsys) -> None:
@@ -172,10 +200,12 @@ def test_benchmark_run_rejects_bad_jobs_before_downloading(monkeypatch, capsys) 
     assert "--jobs must be at least 1" in capsys.readouterr().err
 
 
-def test_benchmark_run_drops_a_repeated_target(monkeypatch, tmp_path, capsys) -> None:
+def test_benchmark_run_drops_a_repeated_target(
+    monkeypatch, tmp_path, capsys, prepared_corpus
+) -> None:
     monkeypatch.setattr(
         "openreading.evals.official.prepare_official_benchmark",
-        lambda *args, **kwargs: tmp_path / "data",
+        lambda *args, **kwargs: prepared_corpus,
     )
     seen = []
 
@@ -204,3 +234,155 @@ def test_benchmark_run_drops_a_repeated_target(monkeypatch, tmp_path, capsys) ->
     assert seen == [BenchmarkTarget.parse("backend:pymupdf")]
     err = capsys.readouterr().err
     assert "ignoring repeated target backend:pymupdf" in err
+
+
+def _stub_run(monkeypatch, seen: list, corpus) -> None:
+    monkeypatch.setattr(
+        "openreading.evals.official.prepare_official_benchmark",
+        lambda *args, **kwargs: corpus,
+    )
+
+    def fake_run(benchmark_id, target, **kwargs):
+        seen.append((target, Path(kwargs["data_dir"])))
+        return OfficialRun(benchmark_id, target, "pipe", Path(kwargs["output_dir"]), 0)
+
+    monkeypatch.setattr("openreading.evals.official.run_official_benchmark", fake_run)
+
+
+def test_benchmark_run_defaults_to_two_documents(
+    monkeypatch, tmp_path, capsys, prepared_corpus
+) -> None:
+    seen: list = []
+    _stub_run(monkeypatch, seen, prepared_corpus)
+
+    rc = main(
+        [
+            "benchmark",
+            "run",
+            "parsebench",
+            "--target",
+            "backend:pymupdf",
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--output-dir",
+            str(tmp_path / "out"),
+        ]
+    )
+
+    assert rc == 0
+    # A subset directory, not the prepared corpus: the run touched 2 of the 4 prepared documents.
+    corpus_used = seen[0][1]
+    assert corpus_used != prepared_corpus
+    assert sorted(p.name for p in corpus_used.glob("*.jsonl")) == ["chart.jsonl", "table.jsonl"]
+    assert len(list(corpus_used.rglob("*.pdf"))) == 2
+    out = capsys.readouterr().out
+    assert "2 document(s) of 4 prepared (2 not run)" in out
+    assert "document: chart/doc0" in out and "document: table/doc0" in out
+
+
+def test_limit_zero_runs_the_prepared_corpus_in_place(
+    monkeypatch, tmp_path, prepared_corpus
+) -> None:
+    seen: list = []
+    _stub_run(monkeypatch, seen, prepared_corpus)
+
+    rc = main(
+        [
+            "benchmark",
+            "run",
+            "parsebench",
+            "--target",
+            "backend:pymupdf",
+            "--limit",
+            "0",
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--output-dir",
+            str(tmp_path / "out"),
+        ]
+    )
+
+    # Copying gigabytes to change nothing is its own surprise, so a complete run uses the cache.
+    assert rc == 0
+    assert seen[0][1] == prepared_corpus
+
+
+def test_doc_selects_one_named_document(monkeypatch, tmp_path, capsys, prepared_corpus) -> None:
+    seen: list = []
+    _stub_run(monkeypatch, seen, prepared_corpus)
+
+    rc = main(
+        [
+            "benchmark",
+            "run",
+            "parsebench",
+            "--target",
+            "backend:pymupdf",
+            "--doc",
+            "table/doc1",
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--output-dir",
+            str(tmp_path / "out"),
+        ]
+    )
+
+    assert rc == 0
+    assert len(list(seen[0][1].rglob("*.pdf"))) == 1
+    assert "document: table/doc1" in capsys.readouterr().out
+
+
+def test_an_unknown_doc_name_stops_before_running(
+    monkeypatch, tmp_path, capsys, prepared_corpus
+) -> None:
+    seen: list = []
+    _stub_run(monkeypatch, seen, prepared_corpus)
+
+    rc = main(
+        [
+            "benchmark",
+            "run",
+            "parsebench",
+            "--target",
+            "backend:pymupdf",
+            "--doc",
+            "nope",
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--output-dir",
+            str(tmp_path / "out"),
+        ]
+    )
+
+    assert rc == 2
+    assert seen == []
+    assert "no benchmark document named" in capsys.readouterr().err
+
+
+def test_an_unpriced_target_refuses_without_yes(
+    monkeypatch, tmp_path, capsys, prepared_corpus
+) -> None:
+    seen: list = []
+    _stub_run(monkeypatch, seen, prepared_corpus)
+
+    # pytest gives the process no terminal, which is the CI shape: refuse and name the flag
+    # rather than hang on stdin. A strategy target is unpriced because escalation depth is unknown.
+    rc = main(
+        [
+            "benchmark",
+            "run",
+            "parsebench",
+            "--target",
+            "strategy:main",
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--output-dir",
+            str(tmp_path / "out"),
+        ]
+    )
+
+    assert rc == 2
+    assert seen == []
+    err = capsys.readouterr().err
+    assert "pass --yes" in err
+    assert "stopped before spending" in err

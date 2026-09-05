@@ -218,6 +218,9 @@ fill the descriptor honestly.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 
@@ -235,3 +238,59 @@ def pytest_configure(config: pytest.Config) -> None:
         from openreading.credentials import load_dotenv
 
         load_dotenv(".env")
+
+
+# --- publisher benchmark corpora ---------------------------------------------------------------
+# Both benchmark test modules build these, so they live here rather than in one of them. The
+# shapes are the publishers' own, taken from `parse_bench.test_cases.loader`: ParseBench reads a
+# JSONL corpus whose `pdf` key is a path relative to the corpus root, and ExtractBench reads a
+# sidecar corpus of `<group>/<stem>.pdf` beside `<stem>.test.json`. Building them offline keeps
+# the benchmark tests out of the live lane, where a HuggingFace download does not belong.
+
+
+def jsonl_corpus(root: Path, *, per_category: int = 3) -> Path:
+    """A ParseBench-shaped corpus: rules in {category}.jsonl, PDFs at a root-relative path."""
+    from openreading.testing.sample_pdf import build_sample_pdf
+
+    pdf = build_sample_pdf()
+    expected = {}
+    for category in ("chart", "layout", "table", "text_content"):
+        rows = []
+        for index in range(per_category):
+            relative = f"pdfs/{category}/doc{index}.pdf"
+            (root / relative).parent.mkdir(parents=True, exist_ok=True)
+            (root / relative).write_bytes(pdf)
+            expected[relative] = f"# {category} {index}"
+            # Two rules per document, so grouping by (category, pdf) is exercised: a document
+            # asserted twice is still one inference and must be counted once.
+            for rule in ("present", "table"):
+                rows.append(
+                    json.dumps(
+                        {
+                            "pdf": relative,
+                            "page": 1,
+                            "category": category,
+                            "id": f"{category}-{index}-{rule}",
+                            "type": rule,
+                            "rule": {},
+                        }
+                    )
+                )
+        (root / f"{category}.jsonl").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    (root / "expected_markdown.json").write_text(json.dumps(expected), encoding="utf-8")
+    return root
+
+
+def sidecar_corpus(root: Path, *, per_group: int = 2) -> Path:
+    """An ExtractBench-shaped corpus: <group>/<stem>.pdf beside <stem>.test.json."""
+    from openreading.testing.sample_pdf import build_sample_pdf
+
+    pdf = build_sample_pdf()
+    for group in ("short", "medium", "long"):
+        (root / group).mkdir(parents=True, exist_ok=True)
+        for index in range(per_group):
+            (root / group / f"doc{index}.pdf").write_bytes(pdf)
+            (root / group / f"doc{index}.test.json").write_text(
+                json.dumps({"data_schema": {"type": "object"}}), encoding="utf-8"
+            )
+    return root

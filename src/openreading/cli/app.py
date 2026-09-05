@@ -109,6 +109,13 @@ from openreading.types.liveness import ProbeKind
 # run_to_completion.
 _CLEAN_EXIT3_ERRORS = (TerminalError, ComplianceRefused, RetryableError, UnsupportedFeatureError)
 
+# `benchmark run` defaults small because it spends the reader's money on someone else's API. Two
+# documents is enough to see every target produce output and a score, and cheap enough that
+# getting the command wrong costs cents. Scaling up is `--limit N`, and `--limit 0` is the whole
+# prepared corpus. The default is deliberately not the publisher's smoke set, which is already
+# tens of documents across every category.
+DEFAULT_BENCHMARK_LIMIT = 2
+
 
 def _print_exhausted(tag: str, e: PlanExhaustedError, trail_summary: str) -> None:
     """Report an exhausted chain/walk on stderr: the one-line trail, then — for every backend that
@@ -1398,20 +1405,44 @@ def _benchmark_targets(args):
     return targets
 
 
-def _render_benchmark_estimate(descriptor, preset: str, target_count: int) -> str:
-    """Render counts known before any backend call, without inventing smoke scale."""
-    lines = [f"estimate: {descriptor.id} {preset}, {target_count} target(s)"]
-    if preset == "full":
-        documents = descriptor.estimated_documents
-        pages = descriptor.estimated_pages
-        lines.append(f"documents: {documents if documents is not None else 'publisher-defined'}")
-        lines.append(f"pages: {pages if pages is not None else 'publisher-defined'}")
-        calls = documents * target_count if documents is not None else None
-        lines.append(f"target calls: {calls if calls is not None else 'publisher-defined'}")
-    else:
-        lines.append("documents: publisher smoke subset")
-        lines.append("pages: determined after preparation")
-        lines.append("target calls: determined after preparation")
+def _render_benchmark_estimate(descriptor, preset: str, targets) -> str:
+    """Price the whole published corpus, in pages, before anything is downloaded.
+
+    Pages, not documents, because every hosted backend charges per page and the two differ by a
+    lot. This is the ceiling: `run` defaults to a handful of documents and prints the real count.
+    """
+    from openreading.evals.preflight import _backend_target_cost
+
+    lines = [f"estimate: {descriptor.id} {preset}, {len(targets)} target(s)"]
+    if preset != "full":
+        lines.append("documents: publisher smoke subset, counted after preparation")
+        lines.append("`benchmark run` prints the real page count and cost before it spends")
+        return "\n".join(lines)
+
+    documents = descriptor.estimated_documents
+    pages = descriptor.estimated_pages
+    lines.append(f"documents: {documents if documents is not None else 'publisher-defined'}")
+    lines.append(f"pages (the billing unit): {pages if pages is not None else 'publisher-defined'}")
+    if pages is None:
+        return "\n".join(lines)
+    low = high = 0.0
+    for target in targets:
+        if target.kind == "strategy":
+            lines.append(
+                f"  {target.reference}: not priced (a strategy escalates, so one document is one "
+                "or more billed calls)"
+            )
+            continue
+        cost = _backend_target_cost(target.reference, target.name, pages)
+        if cost.priced:
+            low += cost.low_usd or 0.0
+            high += cost.high_usd or 0.0
+            lines.append(f"  {target.reference}: ${cost.low_usd:.2f} to ${cost.high_usd:.2f}")
+        else:
+            lines.append(f"  {target.reference}: not priced ({cost.note})")
+    if targets:
+        lines.append(f"  total (priced targets): ${low:.2f} to ${high:.2f}")
+    lines.append("  a range from each backend's declared per-page rates, not a quote")
     return "\n".join(lines)
 
 
@@ -1432,7 +1463,7 @@ def cmd_benchmark_estimate(args) -> int:
     targets = _benchmark_targets(args)
     if targets is None:
         return 2
-    print(_render_benchmark_estimate(descriptor, args.preset, len(targets)))
+    print(_render_benchmark_estimate(descriptor, args.preset, targets))
     return 0
 
 
@@ -1459,6 +1490,43 @@ def cmd_benchmark_prepare(args) -> int:
         return 2
     print(f"prepared: {path}")
     return 0
+
+
+def _benchmark_subset(args, descriptor, data_dir: Path, targets) -> Path | None:
+    """Cut the prepared corpus down to what this run touches, price it, and ask before spending.
+
+    Returns the corpus directory to hand the publisher, or None when the reader declined or the
+    selection could not be resolved. A run covering the whole prepared corpus uses it in place,
+    because copying gigabytes to change nothing is its own kind of surprise.
+    """
+    import hashlib
+
+    from openreading.evals.preflight import confirm, estimate_cost
+    from openreading.evals.subset import CorpusError, materialize_subset, plan_subset
+
+    try:
+        plan = plan_subset(data_dir, limit=args.limit, names=tuple(args.doc or ()))
+    except (CorpusError, ValueError) as exc:
+        print(f"[benchmark] {exc}", file=sys.stderr)
+        return None
+
+    estimate = estimate_cost(plan, targets)
+    print(estimate.render())
+    for document in plan.documents:
+        print(f"  document: {document.doc_id}")
+    if not confirm(estimate, assume_yes=args.yes):
+        print("[benchmark] stopped before spending", file=sys.stderr)
+        return None
+
+    if plan.is_complete:
+        return data_dir
+    # Keyed on the chosen documents, so the same --limit reuses one directory and the publisher's
+    # own resume sees the corpus it saw last time.
+    signature = hashlib.sha256(
+        "\n".join(document.doc_id for document in plan.documents).encode()
+    ).hexdigest()[:10]
+    destination = Path(args.cache_dir) / descriptor.id / "subsets" / signature
+    return materialize_subset(plan, destination)
 
 
 def cmd_benchmark_run(args) -> int:
@@ -1493,7 +1561,6 @@ def cmd_benchmark_run(args) -> int:
     except _PolicyError as exc:
         print(f"[benchmark] {exc}", file=sys.stderr)
         return 2
-    print(_render_benchmark_estimate(descriptor, args.preset, len(targets)))
     try:
         data_dir = prepare_official_benchmark(
             descriptor.id,
@@ -1501,13 +1568,19 @@ def cmd_benchmark_run(args) -> int:
             preset=args.preset,
             force=False,
         )
+        # The corpus is on disk now, so size and price the run from the documents it will really
+        # touch rather than from the publisher's headline totals. Downloading is free; the calls
+        # after this point are not.
+        run_dir = _benchmark_subset(args, descriptor, data_dir, targets)
+        if run_dir is None:
+            return 2
         failed = False
         runs = []
         for target in targets:
             result = run_official_benchmark(
                 descriptor.id,
                 target,
-                data_dir=data_dir,
+                data_dir=run_dir,
                 output_dir=Path(args.output_dir),
                 preset=args.preset,
                 config=args.config,
@@ -2284,6 +2357,26 @@ def build_parser() -> argparse.ArgumentParser:
         "run", help="prepare, run OpenReading targets, and invoke the official scorer"
     )
     add_benchmark_selection(benchmark_run, targets=True)
+    benchmark_run.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_BENCHMARK_LIMIT,
+        help=(
+            f"documents to run, spread across the corpus's categories "
+            f"(default {DEFAULT_BENCHMARK_LIMIT}; 0 runs every prepared document)"
+        ),
+    )
+    benchmark_run.add_argument(
+        "--doc",
+        action="append",
+        default=[],
+        help="run one named document instead of --limit, by id or file stem. Repeat for several.",
+    )
+    benchmark_run.add_argument(
+        "--yes",
+        action="store_true",
+        help="skip the spending confirmation. Required when no terminal is attached.",
+    )
     benchmark_run.add_argument("--config", default=None, help="strategy openreading.yaml path")
     benchmark_run.add_argument(
         "--policy", default=None, help="policy.json applied to every OpenReading request"

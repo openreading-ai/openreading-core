@@ -14,10 +14,18 @@ dataset (``openreading.evals.leaderboard``). ``openreading.evals.benchmarks`` pr
 offline discovery and terms lanes for public corpora. ``openreading.evals.official``
 registers targets inside ParseBench and ExtractBench. Those publishers retain ownership
 of case loading, metric code, aggregation, and detailed reports.
+``openreading.evals.subset`` cuts a prepared corpus down to a few documents in the publisher's
+own on-disk format, and ``openreading.evals.preflight`` prices that selection in pages and asks
+before it spends. A public run therefore starts at two documents, not at a corpus.
 
 The public bridge downloads nothing until ``benchmark prepare`` or ``benchmark run``.
 Its default cache stays outside the repository. Research-only and unverified terms use
 different acknowledgement flags, so one flag cannot authorize the other accidentally.
+
+Known gaps: scoring your OWN documents for content a backend invented is not built. Most
+dimensions here measure presence, and the publisher rule vocabulary that does measure absence
+reaches only the publisher's corpus. ``design/benchmark-rule-vocabulary.md`` proposes both the
+coupled and the native answer, and is not started.
 
 One synthetic sample ships at ``src/openreading/evals/sample/loan_page1/case.json``. Labeled
 data over real documents never lands in this repository, and

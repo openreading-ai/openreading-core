@@ -335,7 +335,8 @@ package.
     openreading benchmark show parsebench
     openreading benchmark prepare parsebench --preset smoke
     openreading benchmark estimate parsebench --preset full --target backend:pymupdf
-    openreading benchmark run parsebench --target backend:pymupdf --target strategy:max_accuracy
+    openreading benchmark run parsebench --target backend:pymupdf          # 2 documents
+    openreading benchmark run parsebench --target backend:pymupdf --limit 0 --yes   # all of them
 
 `list` displays runnable and cataloged profiles with separate dataset-terms lanes. `show` prints
 publisher sources, data and code licenses, published scale, metric dimensions, and the install
@@ -344,10 +345,32 @@ extra. Runnable profiles are ParseBench and ExtractBench. Their official package
 
 `prepare` uses the publisher's downloader and writes beneath `~/.cache/openreading/benchmarks` by
 default. `run` prepares the same cache, executes every repeated `--target`, and writes publisher
-artifacts beneath `./benchmark-results`. The smoke preset is default. `--preset full` is always
-explicit because a hosted target can create material charges. `--jobs` controls document
-concurrency. `--force` replaces complete publisher artifacts, while an ordinary rerun resumes by
-letting the official harness skip valid results.
+artifacts beneath `./benchmark-results`. `--jobs` controls document concurrency. `--force`
+replaces complete publisher artifacts, while an ordinary rerun resumes by letting the official
+harness skip valid results.
+
+How much a run costs, and how to spend less
+...........................................
+`run` touches **two documents** unless you say otherwise, because it spends your money on someone
+else's API. `--limit N` runs N, `--limit 0` runs the whole prepared corpus, and `--doc NAME`
+(repeatable) runs documents you name by id (`table/doc1`) or file stem. A limited run is written
+out as a corpus in the publisher's own format, so every metric and report behaves exactly as it
+does over the full set. A run that covers everything uses the prepared cache in place.
+
+Documents under `--limit` are chosen round-robin across the corpus's categories, so two documents
+span two categories rather than two charts. The order is stable, so the same `--limit` picks the
+same documents and a rerun resumes instead of re-billing.
+
+Before a target runs, `run` prints the documents it chose, their PAGE count, and a dollar range
+per target. Pages, because every hosted backend bills per page and the publishers count in
+documents: ExtractBench is 370 documents and 4,869 pages. A range, because a descriptor carries a
+low and a high rate and both are shown. Two things stay deliberately unpriced rather than guessed
+low: a `strategy:` target, which escalates and so bills one or more calls per document, and a
+token-billed backend that publishes no per-page rate.
+
+Anything unpriced, or above one dollar at the high end, asks before it spends. `--yes` answers in
+advance. With no terminal attached the question is not asked and the run refuses, naming `--yes`,
+because a CI job hung on stdin is worse than one that stops.
 
 Every document calls `openreading.run`, including a `strategy:NAME` target selected with
 `--config`. `--policy` therefore keeps its normal compliance behavior. The raw publisher artifact
@@ -368,8 +391,9 @@ failed case in the publisher's report, never as exit 3. Read the report to find 
 documents fell over and why. Exit 3 is left for a fault raised outside that per-document
 boundary. Exits: 0 complete; 1 publisher inference, scoring, or comparison failure, including
 documents the publisher recorded as failed; 2 invalid profile, target, preset, `--jobs`, terms
-acknowledgement, optional package, or preparation; 3 an OpenReading cannot-run fault raised
-before or around the publisher run.
+acknowledgement, optional package, preparation, an unknown `--doc`, or a run stopped at the
+spending confirmation; 3 an OpenReading cannot-run fault raised before or around the publisher
+run.
 
 strategy <verb> / explain / replay / calibrate
 ----------------------------------------------

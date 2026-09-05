@@ -14,6 +14,7 @@ key. The publisher side skips when the optional package is absent, which is ever
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -301,3 +302,73 @@ def test_extractbench_provider_normalizes_a_projection(sample_pdf: Path) -> None
 
     assert result.output.extracted_data == {"total": 19.5}
     assert result.raw_output["openreading_response"] is response
+
+
+def test_publisher_loader_reads_a_subset_this_repo_produced(tmp_path) -> None:
+    """The other half of the small-run promise: the publisher must read what `--limit` writes.
+
+    `test_benchmark_subset` proves the subset has the shape the publisher's format documents.
+    This proves the publisher's own loader agrees, which is the assertion that would catch a
+    corpus written in a shape only this repo believes in.
+    """
+    loader = pytest.importorskip("parse_bench.test_cases.loader")
+
+    from openreading.evals.subset import materialize_subset, plan_subset
+    from tests.conftest import jsonl_corpus
+
+    plan = plan_subset(jsonl_corpus(tmp_path / "full"), limit=2)
+    subset = materialize_subset(plan, tmp_path / "subset")
+
+    cases = loader.load_test_cases(subset)
+
+    assert [case.test_id for case in cases] == ["chart/doc0", "layout/doc0"]
+    # Every rule asserted against a chosen document survives, so a limited run scores the same
+    # way a full one does over those documents.
+    assert all(len(case.test_rules) == 2 for case in cases)
+    assert all(case.file_path.is_file() for case in cases)
+    assert [case.expected_markdown for case in cases] == ["# chart 0", "# layout 0"]
+
+
+def test_the_whole_bridge_runs_offline_over_a_limited_corpus(tmp_path) -> None:
+    """Inference, scoring and reports, driven by the publisher's own runner. No key, no network.
+
+    This is the test that would have caught the shipped feature not working at all. Everything
+    else here checks one seam; this drives the real `BenchCLI.run` over a corpus `--limit`
+    produced, with a local backend, and asserts the publisher wrote the artifacts a reader is
+    told to go read.
+    """
+    pytest.importorskip("parse_bench")
+    from parse_bench.cli import BenchCLI
+
+    from openreading.evals import parsebench
+    from openreading.evals.subset import materialize_subset, plan_subset
+    from tests.conftest import jsonl_corpus
+
+    target = BenchmarkTarget.parse("backend:pymupdf")
+    try:
+        pipeline_name = parsebench._register(target, config=None, policy=None)
+    except parsebench.BenchmarkDependencyError as exc:
+        pytest.skip(str(exc))
+
+    subset = materialize_subset(
+        plan_subset(jsonl_corpus(tmp_path / "full"), limit=2), tmp_path / "subset"
+    )
+    output = tmp_path / "out"
+
+    code = BenchCLI().run(
+        pipeline=pipeline_name,
+        input_dir=subset,
+        output_dir=output,
+        max_concurrent=1,
+        force=True,
+        open_report=False,
+        test=False,
+    )
+
+    assert code == 0
+    summary = json.loads((output / pipeline_name / "_summary.json").read_text())
+    # Two documents in, two inferred, none failed. A backend that never ran would show here as a
+    # failure count rather than as a quietly empty report.
+    assert (summary["total"], summary["successful"], summary["failed"]) == (2, 2, 0)
+    raw = sorted(p.name for p in (output / pipeline_name).rglob("*.raw.json"))
+    assert raw == ["doc0.raw.json", "doc0.raw.json"]

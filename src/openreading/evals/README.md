@@ -40,21 +40,38 @@ Use Python 3.12 or newer for the two runnable profiles. Install only the profile
 pip install 'openreading[parsebench]'
 openreading benchmark list
 openreading benchmark show parsebench
-openreading benchmark estimate parsebench --preset full --target backend:pymupdf
-openreading benchmark run parsebench --preset smoke \
-  --target backend:pymupdf --target strategy:max_accuracy
+openreading benchmark run parsebench --target backend:pymupdf --target strategy:max_accuracy
 ```
 
-The smoke preset is the default. ParseBench selects three files per category. ExtractBench selects
-six documents. Request `--preset full` only after `estimate`, especially for hosted targets.
-Publisher results and the cross-target official leaderboard land in `./benchmark-results` by
-default. Data lands under `~/.cache/openreading/benchmarks`, never in this repository.
+**That last command touches two documents, not the corpus.** `run` defaults to two because it
+spends your money on someone else's API, and two is enough to watch every target produce output
+and a score. Scale up deliberately with `--limit N`, or `--limit 0` for the whole prepared corpus.
+Run documents you name with `--doc table/doc1`, repeatable.
+
+The two documents are drawn round-robin across the corpus's categories, so a small run spans a
+chart and a table rather than two charts. The choice is stable, so a rerun picks the same
+documents and the publisher resumes instead of re-billing.
+
+Before anything runs you get the documents it chose, their **page** count, and a dollar range per
+target. Pages, because every hosted backend bills per page while the publishers count documents:
+ExtractBench is 370 documents and 4,869 pages, so a document count understates a bill about
+thirteen times. Anything unpriced, or over a dollar, asks first. `--yes` answers in advance, and
+is required when no terminal is attached.
+
+A `strategy:` target is deliberately never priced. A strategy escalates, so one document is one or
+more billed calls across backends at different rates, and nothing here knows how many rungs fire.
+
+The smoke preset is the default and controls which corpus is downloaded. ParseBench selects three
+files per category, ExtractBench six documents, and `--limit` then caps what actually runs out of
+whichever preset you prepared. Publisher results and the cross-target official leaderboard land in
+`./benchmark-results` by default. Data lands under `~/.cache/openreading/benchmarks`, never in
+this repository.
 
 `backend:NAME` and `strategy:NAME` are explicit because both identifiers share one namespace in
 other commands. A strategy uses the same `openreading.yaml` you run in production.
 
 ```bash
-openreading benchmark run extractbench --preset smoke \
+openreading benchmark run extractbench --limit 2 \
   --target backend:nuextract --target strategy:fields --config openreading.yaml
 ```
 
@@ -422,6 +439,10 @@ print(run_dataset(make_adapter("tesseract"), "mydata").summary())   # backend=te
 - Most dimensions measure presence, not absence. `text_contains` and the table scorer count what
   you asked for and cannot see what the backend added. A leaderboard alone will therefore miss a
   backend that invents content. Step 1 names the three dimensions that will catch one.
+- A public benchmark run is small until you say otherwise. `benchmark run` touches two documents
+  by default and prices the rest in pages before it spends, because the failure it avoids is a
+  command typed once that bills a full corpus across several hosted backends. See
+  `openreading.evals.subset` and `openreading.evals.preflight`.
 - Ties break on backend id, so a rerun is byte-identical and rank order never depends on the order
   you typed. Scores never feed the router, so a benchmark never quietly becomes routing policy. See
   `openreading.evals.leaderboard`.
@@ -450,6 +471,10 @@ print(run_dataset(make_adapter("tesseract"), "mydata").summary())   # backend=te
   (`openreading.evals.leaderboard` docstring).
 - A labeled corpus, which never lands here by rule (`tests/test_evals_benchmark_only.py`) and is
   not a gap to file.
+- Scoring your own documents for invented content. The five dimensions here mostly measure
+  presence, and ParseBench's rule vocabulary reaches only ParseBench's own corpus. Proposed in
+  [design/benchmark-rule-vocabulary.md](../../../design/benchmark-rule-vocabulary.md), which also
+  prices the cheaper alternative of writing two such scorers natively.
 
 ## See also
 
