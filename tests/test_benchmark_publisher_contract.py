@@ -372,3 +372,35 @@ def test_the_whole_bridge_runs_offline_over_a_limited_corpus(tmp_path) -> None:
     assert (summary["total"], summary["successful"], summary["failed"]) == (2, 2, 0)
     raw = sorted(p.name for p in (output / pipeline_name).rglob("*.raw.json"))
     assert raw == ["doc0.raw.json", "doc0.raw.json"]
+
+
+def test_parse_target_asks_for_the_table_shape_the_scorer_reads(monkeypatch) -> None:
+    """ParseBench extracts tables from `<table>` markup only, never from GFM pipe tables.
+
+    Verified against the installed publisher: `extract_normalized_tables` returns nothing when
+    the Markdown holds no `<table>`, so a backend on the default `tables: "markdown"` scores zero
+    on every table metric while having produced a correct table.
+    """
+    from openreading import api
+
+    captured: dict[str, object] = {}
+
+    def capture(source, **kwargs):
+        captured["request"] = api.build_request(source, kwargs.pop("backend", "auto"), **kwargs)
+        return {"status": {"state": "succeeded"}, "document": {}}
+
+    monkeypatch.setattr("openreading.api.run", capture)
+    execute_target(b"%PDF-1.4", BenchmarkTarget.parse("backend:pymupdf"), product="parse")
+
+    assert captured["request"].outputs.tables == "html"
+
+
+def test_the_publisher_really_does_ignore_pipe_tables() -> None:
+    """The premise of the test above, asserted against the publisher rather than assumed."""
+    extraction = pytest.importorskip("parse_bench.evaluation.metrics.parse.table_extraction")
+
+    pipe = "| Region | Units |\n| --- | --- |\n| North | 120 |"
+    html = "<table><tr><th>Region</th></tr><tr><td>North</td></tr></table>"
+
+    assert extraction.extract_normalized_tables(pipe, side="actual")[0] == []
+    assert len(extraction.extract_normalized_tables(html, side="actual")[0]) == 1

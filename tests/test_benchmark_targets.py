@@ -51,6 +51,8 @@ def test_execute_target_uses_public_api_for_backend(monkeypatch) -> None:
                 "backend": "pymupdf",
                 "config": None,
                 "policy": {"require_local": True},
+                # ParseBench reads tables out of `<table>` markup and ignores GFM pipe tables.
+                "outputs": {"tables": "html"},
             },
         )
     ]

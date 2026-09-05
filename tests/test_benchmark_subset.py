@@ -283,3 +283,28 @@ def test_a_terminal_answer_decides(tmp_path, monkeypatch, answer: str, proceeds:
     monkeypatch.setattr("sys.stdin", _Tty(answer))
 
     assert confirm(estimate, assume_yes=False, stream=io.StringIO()) is proceeds
+
+
+def test_pages_are_counted_once_per_file_not_once_per_category(tmp_path) -> None:
+    """ParseBench shares inference between text_content and text_formatting.
+
+    The same PDF is two documents in the corpus and one billed call at the vendor, so counting it
+    twice would overstate the bill. Verified against the real smoke corpus, where three text PDFs
+    appear under both categories.
+    """
+    root = _jsonl_corpus(tmp_path, per_category=1)
+    shared = json.dumps(
+        {
+            "pdf": "pdfs/chart/doc0.pdf",  # the chart document, asserted again under another name
+            "category": "text_formatting",
+            "type": "present",
+            "rule": {},
+        }
+    )
+    (root / "text_formatting.jsonl").write_text(shared + "\n", encoding="utf-8")
+
+    plan = plan_subset(root, limit=0)
+    pages, _ = count_pages(plan)
+
+    assert len(plan.documents) == 5  # four categories plus the aliased one
+    assert pages == 4 * 2  # four distinct files, two pages each; the alias adds nothing

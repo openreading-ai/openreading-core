@@ -136,6 +136,14 @@ def execute_target(
         kwargs["backend"] = target.name
     else:
         kwargs["strategy"] = target.name
+    if product == "parse":
+        # ParseBench grades tables by pulling `<table>` out of the Markdown
+        # (`parse_bench.evaluation.metrics.parse.table_extraction.extract_html_tables`). A GFM pipe
+        # table is invisible to it, so a backend left on the default `tables: "markdown"` scores
+        # zero on GriTS, TEDS and record match while having produced a perfectly good table. Ask
+        # for the shape the scorer reads. A backend that cannot render table HTML is unaffected
+        # and says so in `warnings[]`.
+        kwargs["outputs"] = {"tables": "html"}
     if product == "extract":
         if extraction_schema is None:
             raise ValueError("an ExtractBench case requires its extraction schema")

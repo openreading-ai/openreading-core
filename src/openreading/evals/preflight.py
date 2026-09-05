@@ -120,8 +120,15 @@ def count_pages(plan: SubsetPlan) -> tuple[int, int]:
 
     pages = 0
     unknown = 0
+    # One FILE is one billed call, even when two categories assert against it. ParseBench shares
+    # inference between `text_content` and `text_formatting`, so the same PDF appears as two
+    # documents and is parsed once. Counting it twice would overstate the bill.
+    seen: set[Path] = set()
     for document in plan.documents:
         path = Path(document.path)
+        if path in seen:
+            continue
+        seen.add(path)
         if not path.is_file():
             unknown += 1
             continue
