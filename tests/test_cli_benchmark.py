@@ -170,3 +170,37 @@ def test_benchmark_run_rejects_bad_jobs_before_downloading(monkeypatch, capsys) 
 
     assert rc == 2
     assert "--jobs must be at least 1" in capsys.readouterr().err
+
+
+def test_benchmark_run_drops_a_repeated_target(monkeypatch, tmp_path, capsys) -> None:
+    monkeypatch.setattr(
+        "openreading.evals.official.prepare_official_benchmark",
+        lambda *args, **kwargs: tmp_path / "data",
+    )
+    seen = []
+
+    def fake_run(benchmark_id, target, **kwargs):
+        seen.append(target)
+        return OfficialRun(benchmark_id, target, "pipe", Path(kwargs["output_dir"]), 0)
+
+    monkeypatch.setattr("openreading.evals.official.run_official_benchmark", fake_run)
+
+    rc = main(
+        [
+            "benchmark",
+            "run",
+            "parsebench",
+            "--target",
+            "backend:pymupdf",
+            "--target",
+            "backend:pymupdf",
+            "--output-dir",
+            str(tmp_path / "out"),
+        ]
+    )
+
+    # One run, and therefore no two-target leaderboard showing one pipeline against itself.
+    assert rc == 0
+    assert seen == [BenchmarkTarget.parse("backend:pymupdf")]
+    err = capsys.readouterr().err
+    assert "ignoring repeated target backend:pymupdf" in err

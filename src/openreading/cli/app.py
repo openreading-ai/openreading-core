@@ -1374,16 +1374,27 @@ def cmd_benchmark_show(args) -> int:
 
 
 def _benchmark_targets(args):
-    """Parse repeated target flags into the collision-free target contract."""
+    """Parse repeated target flags into the collision-free target contract.
+
+    A target repeated verbatim is dropped, in first-seen order, and said out loud. One target's
+    publisher pipeline name is derived from the target plus its configuration, so a duplicate is
+    not a second measurement: it reruns one pipeline into one directory and then renders that
+    pipeline twice in the cross-target leaderboard, side by side, as though two things had been
+    compared. Two rows that are the same run is the one thing a bake-off must never show.
+    """
     from openreading.evals.targets import BenchmarkTarget
 
     targets = []
     for value in args.target or []:
         try:
-            targets.append(BenchmarkTarget.parse(value))
+            target = BenchmarkTarget.parse(value)
         except ValueError as exc:
             print(f"[benchmark] {exc}", file=sys.stderr)
             return None
+        if target in targets:
+            print(f"[benchmark] ignoring repeated target {target.reference}", file=sys.stderr)
+            continue
+        targets.append(target)
     return targets
 
 
