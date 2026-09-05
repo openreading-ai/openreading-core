@@ -36,12 +36,65 @@ inside each raw benchmark artifact.
 
 Use Python 3.12 or newer for the two runnable profiles. Install only the profile you need.
 
+### The five verbs, and which ones spend
+
+| Command | What it does | Costs |
+|---|---|---|
+| `benchmark list` | every profile, its status and its terms lane | nothing, offline |
+| `benchmark show NAME` | sources, both licenses, published scale, install extra | nothing, offline |
+| `benchmark estimate NAME --preset full --target …` | prices the whole published corpus, in pages | nothing, offline |
+| `benchmark prepare NAME` | downloads the corpus to `~/.cache/openreading/benchmarks` | bandwidth and disk |
+| `benchmark run NAME --target …` | **the only verb that calls a backend** | two documents unless `--limit` says otherwise |
+
+`run` flags worth knowing before the first one: `--limit N` (default 2, `0` for everything),
+`--doc NAME` for documents you name, `--yes` to skip the spending confirmation, `--output-dir`
+(default `./benchmark-results`), and `--jobs` for concurrency.
+
+### Try it for nothing, in three commands
+
+`pymupdf` and `tesseract` are local libraries, so this whole walkthrough bills zero. Run it before
+you point the same commands at a hosted backend.
+
 ```bash
 pip install 'openreading[parsebench]'
-openreading benchmark list
-openreading benchmark show parsebench
-openreading benchmark run parsebench --target backend:pymupdf --target strategy:max_accuracy
+openreading benchmark prepare parsebench --preset smoke
+openreading benchmark run parsebench --target backend:pymupdf --target backend:tesseract \
+  --doc text_content/text_simple__results --doc table/222876fb_page22
 ```
+```text
+estimate: 2 document(s) of 15 prepared (13 not run), 2 page(s), 2 target(s)
+  backend:pymupdf: $0.00 to $0.00
+  backend:tesseract: $0.00 to $0.00
+  total (priced targets): $0.00 to $0.00
+  a range from each backend's declared per-page rates, not a quote
+  document: text_content/text_simple__results
+  document: table/222876fb_page22
+…
+completed: backend:pymupdf as openreading_backend_pymupdf_4d8801dee2 in benchmark-results
+completed: backend:tesseract as openreading_backend_tesseract_c7f0d4e500 in benchmark-results
+comparison: benchmark-results/openreading-leaderboard.html
+```
+
+**You should see** the estimate before either backend runs, and the documents named rather than
+counted. Open the comparison file for the publisher's own side-by-side. The rule pass rates behind
+it, from `benchmark-results/<pipeline>/text_content/_evaluation_report.json`:
+
+| backend | text_content | rules passed |
+|---|---|---|
+| pymupdf | 0.874 | 80 of 95 |
+| tesseract | 0.684 | 62 of 95 |
+
+That ordering is the point. Born-digital text extraction beats OCR on a born-digital page, and the
+number saying so came from the publisher's scorer rather than from this repo.
+
+Two zeros in the same run are worth reading correctly. `text_formatting` scores 0.000 for both,
+because those rules assert bold, italic, superscript and strikeout, and neither backend emits rich
+text. A backend is not broken for scoring zero on a channel it never claimed.
+
+Drop the two `--doc` flags and `run` picks two documents itself, one per category in id order.
+Today that lands on `chart` and `layout`, which are the two categories a plain text extractor is
+worst at, so both backends score 0.000 and the run looks broken when it is not. Name documents
+until you know a corpus.
 
 **That last command touches two documents, not the corpus.** `run` defaults to two because it
 spends your money on someone else's API, and two is enough to watch every target produce output
@@ -459,7 +512,11 @@ print(run_dataset(make_adapter("tesseract"), "mydata").summary())   # backend=te
 - `uv run python -m pydoc openreading.evals.scorers` describes the three scorers and the five
   dimensions.
 - `uv run python -m pydoc openreading.evals.leaderboard` states what the leaderboard never does.
-- `uv run openreading leaderboard --help` and `uv run openreading calibrate --help`.
+- `uv run openreading benchmark run --help` for every flag that changes what a public run
+  touches or costs, and `uv run openreading leaderboard --help` and
+  `uv run openreading calibrate --help` for the labeled-dataset path.
+- `uv run python -m pydoc openreading.evals.subset` for how a corpus is cut down, and
+  `uv run python -m pydoc openreading.evals.preflight` for how the run is priced.
 - `src/openreading/schemas/leaderboard-report.v0.1.json` is described in
   [JSON Schemas](../schemas/README.md), and `scripts/leaderboard_smoke.py` is the `make verify`
   smoke.
