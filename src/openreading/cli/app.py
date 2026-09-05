@@ -1683,8 +1683,8 @@ def cmd_rules(args) -> int:
         print("\nnothing written. Re-run with --write to apply.", file=sys.stderr)
     else:
         print(
-            f"\nwrote rules into {written} case(s). Add `absent` rules by hand: nothing in a "
-            "case says what must NOT appear.",
+            f"\nwrote rules into {written} case(s). Add `text_absent` strings to a case to "
+            "generate the `absent` rules that catch invented content.",
             file=sys.stderr,
         )
     return 0

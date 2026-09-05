@@ -44,8 +44,8 @@ def test_write_applies_them_and_says_what_it_cannot_generate(tmp_path, capsys) -
 
     expected = json.loads((dataset / "invoice" / "case.json").read_text())["expected"]
     assert expected["rules"] == [{"type": "present", "id": "contains_0", "text": "Total due"}]
-    # `absent` is the reason to use rules at all, and no label implies one.
-    assert "must NOT appear" in capsys.readouterr().err
+    # `absent` is the reason to use rules at all, so the hint names the key that generates one.
+    assert "text_absent" in capsys.readouterr().err
 
 
 def test_existing_rules_are_not_clobbered_without_force(tmp_path, capsys) -> None:
