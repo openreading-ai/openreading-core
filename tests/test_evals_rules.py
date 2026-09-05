@@ -343,3 +343,46 @@ def test_the_alarm_is_restored_after_scoring_off_thread() -> None:
     worker.join()
 
     assert signal.SIGALRM is before
+
+
+# --- text_absent, the plain-strings spelling ---------------------------------------------------
+
+
+@engine
+def test_text_absent_catches_invention_with_no_publisher_json(parsed) -> None:
+    """The highest-value assertion must not require learning another company's schema."""
+    doctored = copy.deepcopy(parsed)
+    doctored["document"]["markdown"] += "\nTotal due: 9999999.00\n"
+
+    clean = score(parsed, {"text_absent": ["Total due: 9999999.00"]})["dimensions"]
+    caught = score(doctored, {"text_absent": ["Total due: 9999999.00"]})["dimensions"]
+
+    assert clean["rule_pass_rate"] == 1.0
+    assert caught["rule_pass_rate"] == 0.0
+
+
+@engine
+def test_text_absent_scores_without_running_the_rules_command(parsed) -> None:
+    """A key that only worked after a separate command would be a silent no-op."""
+    assert "rule_pass_rate" in score(parsed, {"text_absent": ["nowhere"]})["dimensions"]
+
+
+@engine
+def test_text_absent_and_rules_share_one_dimension(parsed) -> None:
+    """Two absence verdicts that could disagree would be worse than one dependency."""
+    result = score(
+        parsed,
+        {
+            "text_absent": ["definitely nowhere"],
+            "rules": [{"type": "present", "id": "nope", "text": "also nowhere"}],
+        },
+    )
+
+    # One implied rule passes, one declared rule fails: one dimension over both.
+    assert result["dimensions"] == {"rule_pass_rate": 0.5}
+
+
+def test_suggest_generates_absent_rules_from_text_absent() -> None:
+    assert suggest_rules({"text_absent": ["Total due: 9999999.00"]}) == [
+        {"type": "absent", "id": "absent_0", "text": "Total due: 9999999.00"}
+    ]

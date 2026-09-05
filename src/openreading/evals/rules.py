@@ -181,11 +181,10 @@ def failed_rules(detail: dict[str, Any]) -> list[str]:
 def suggest_rules(expected: dict[str, Any]) -> list[dict[str, Any]]:
     """Turn the expectations a case already carries into publisher rules, verbatim.
 
-    Nobody should hand-author another company's JSON to get started. A case that already names
-    `text_contains` and `tables` carries enough to generate the presence and structure rules
-    mechanically, and the result is a starting point to edit rather than an answer: the rule that
-    matters most, `absent`, cannot be generated at all, because nothing in a case says what must
-    NOT be there. That one is yours to write.
+    Nobody should hand-author another company's JSON. A case that names `text_contains` and
+    `tables` carries enough to generate the presence and structure rules mechanically, and
+    `text_absent` is a plain list of strings that must not appear, which is how a case says the
+    one thing no other label can imply.
 
     Deliberately conservative. Only assertions the case already makes are emitted, so generating
     rules can never make a backend look better than the labels justify:
@@ -194,12 +193,17 @@ def suggest_rules(expected: dict[str, Any]) -> list[dict[str, Any]]:
       Matching folds case and whitespace but not punctuation, so a string is never "tidied".
     - each table cell becomes a `table` rule carrying its right neighbour and its column heading,
       which is what makes the rule structural rather than a second presence check.
+    - `text_absent[i]` becomes an `absent` rule. This is the assertion worth having most, and the
+      only one no other label can imply, which is why the key exists at all.
     - `text`, `markdown` and `typed_fields` produce nothing. A whole-document string is a
       similarity measure, not an assertion, and forcing it into `present` would demand a
       character-exact reproduction that no backend passes.
     """
 
     rules: list[dict[str, Any]] = []
+    for index, needle in enumerate(expected.get("text_absent") or []):
+        if isinstance(needle, str) and needle.strip():
+            rules.append({"type": "absent", "id": f"absent_{index}", "text": needle})
     for index, needle in enumerate(expected.get("text_contains") or []):
         if isinstance(needle, str) and needle.strip():
             rules.append({"type": "present", "id": f"contains_{index}", "text": needle})

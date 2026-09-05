@@ -440,11 +440,16 @@ A rule is one named assertion, written in ParseBench's own vocabulary and scored
 own engine. You are not adopting their corpus, only their grader, and only for the cases where you
 ask for it.
 
+**Start with `text_absent`.** It is a plain list of strings that must not appear, it needs no
+publisher JSON, and it is the assertion that catches invented content. Everything else on this
+page is refinement.
+
 ```json
 { "name": "invoice",
   "input": {"path": "input.pdf"},
   "expected": {
     "text_contains": ["OpenReading Test Document"],
+    "text_absent": ["Total due: 9999999.00"],
     "rules": [
       {"type": "present", "id": "has_title", "text": "OpenReading Test Document"},
       {"type": "absent",  "id": "no_invented_total", "text": "Total due: 9999999.00"},
@@ -686,6 +691,13 @@ print(run_dataset(make_adapter("tesseract"), "mydata").summary())   # backend=te
   (`openreading.evals.leaderboard` docstring).
 - A labeled corpus, which never lands here by rule (`tests/test_evals_benchmark_only.py`) and is
   not a gap to file.
+- Detecting content you did NOT predict. `text_absent` and an `absent` rule catch a string you
+  named; nothing yet catches arbitrary invention, which needs the publisher's bag rules and an
+  explicit claim that a labeled `text` is the whole document. Increment 2 of
+  [the product spec](../../../product/specs/hallucination-detection.product-spec.md).
+- Publisher-comparable numbers over your own corpus, which is increment 3 of the same spec and
+  may never be worth building. Its open question is whether anyone needs comparability rather
+  than absence detection.
 
 ## See also
 

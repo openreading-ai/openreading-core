@@ -7,8 +7,12 @@
       "backend": {"operation": "..."},                    // optional per-case backend overrides
       "compliance": {"require_local": true},              // optional per-case compliance (BL-112)
       "expected": { "text_contains": [...], "tables": [[...]], "typed_fields": {...},
-                    "rules": [{"type": "absent", "text": "..."}] }
+                    "text_absent": ["..."], "rules": [{"type": "absent", "text": "..."}] }
     }
+
+`expected.text_absent` lists strings that must NOT appear. It is the plain spelling of the one
+assertion no other label can imply, and it is scored by the same engine `rules` uses rather than
+by a native substring check, so there is one absence verdict rather than two that could disagree.
 
 `expected.rules` are ParseBench's own rule objects, scored by ParseBench's own engine
 (`openreading.evals.rules`). They are the only expectation here that can fail because a backend

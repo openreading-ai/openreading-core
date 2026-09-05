@@ -159,14 +159,22 @@ def score(resp: dict, expected: dict) -> dict[str, Any]:
         dims["markdown_similarity"] = text_similarity(response_markdown(resp), expected["markdown"])
     if "typed_fields" in expected:
         dims["field_prf"] = field_prf(response_typed_fields(resp), expected["typed_fields"])
-    if "rules" in expected:
+    if "rules" in expected or "text_absent" in expected:
         # The publisher's engine scores its own rules, against the markdown channel it grades
         # everywhere else. Reached here, through the same `score` every other dimension goes
         # through, so the one-scoring-path law holds: there is no second runner and no second
         # entry point, only one more dimension gated on one more key.
-        from openreading.evals.rules import score_rules
+        #
+        # `text_absent` is the plain-strings spelling of the same thing, scored by the SAME
+        # engine rather than by a native "is this substring missing" check. Two absence verdicts
+        # that could disagree would be worse than the small dependency, and a user who wrote
+        # `text_absent` and got silence because they had not run `openreading rules` would be
+        # worse still.
+        from openreading.evals.rules import score_rules, suggest_rules
 
-        detail = score_rules(response_markdown(resp), expected["rules"])
+        declared = list(expected.get("rules") or [])
+        implied = suggest_rules({"text_absent": expected.get("text_absent") or []})
+        detail = score_rules(response_markdown(resp), implied + declared)
         dims["rule_pass_rate"] = detail["pass_rate"]
     if "tables" in expected:
         got_tables = response_tables(resp)

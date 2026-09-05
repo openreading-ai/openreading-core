@@ -29,6 +29,8 @@ them.
 - `openreading benchmark` discovers public corpora and runs backends or strategies through the
   official ParseBench and ExtractBench scorers. Static catalog entries keep source and dataset
   terms visible for additional research corpora without downloading or claiming support.
+- A case's `expected` may declare `text_absent`, a plain list of strings that must not appear.
+  It is the assertion that catches invented content and needs no publisher JSON.
 - A case's `expected` may declare `rules`, which are ParseBench's own rule objects scored by
   ParseBench's own engine over your document. They are the only dimension that fails when a
   backend INVENTS content rather than merely missing it, which the other four cannot see. Rules
