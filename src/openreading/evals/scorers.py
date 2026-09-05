@@ -4,10 +4,24 @@ Few backends publish an independent benchmark, and the ones that do measure docu
 not yours. Quality routing can only use numbers you measured yourself, on the documents you
 actually process.
 
-Three scorers over the normalized response, so any backend is scored on the same axes:
+Four scorers over the normalized response, so any backend is scored on the same axes:
 - text_similarity: difflib ratio on normalized text/markdown, plus a contains-fraction check.
 - field_prf: precision / recall / F1 over typed_fields (the extraction axis).
 - table_grid: cell-grid accuracy (exact + whitespace/case-tolerant).
+- rule_pass_rate: a publisher's own rule engine over `expected.rules`
+  (`openreading.evals.rules`), which is the only dimension here that can see content the backend
+  INVENTED rather than merely missed.
+
+Absence is why the fourth exists. The first three ask whether what you expected is present, so a
+response with an invented total, a fabricated table row and four hundred junk words still scores
+1.0 on them. `expected.rules` carries assertions like `absent` and `unexpected_word` that fail on
+exactly that.
+
+`overall` is the unweighted mean of the dimensions a case actually names, rules included. That is
+a deliberate answer to a question the design record left open, and the honest reading of it: a
+rule pass rate is a fraction of assertions satisfied, on the same [0,1] scale as the others, so a
+case that declares both kinds of expectation gets one mean over both. It is a reading aid, not a
+number to defend on its own, which is why every dimension is also reported separately.
 """
 
 from __future__ import annotations
@@ -145,6 +159,15 @@ def score(resp: dict, expected: dict) -> dict[str, Any]:
         dims["markdown_similarity"] = text_similarity(response_markdown(resp), expected["markdown"])
     if "typed_fields" in expected:
         dims["field_prf"] = field_prf(response_typed_fields(resp), expected["typed_fields"])
+    if "rules" in expected:
+        # The publisher's engine scores its own rules, against the markdown channel it grades
+        # everywhere else. Reached here, through the same `score` every other dimension goes
+        # through, so the one-scoring-path law holds: there is no second runner and no second
+        # entry point, only one more dimension gated on one more key.
+        from openreading.evals.rules import score_rules
+
+        detail = score_rules(response_markdown(resp), expected["rules"])
+        dims["rule_pass_rate"] = detail["pass_rate"]
     if "tables" in expected:
         got_tables = response_tables(resp)
         exp_tables = expected["tables"]

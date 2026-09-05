@@ -325,6 +325,26 @@ router's scoring or any adapter's `integration_priority`. Exits: 0; 2 <2 backend
 `--backends` id; 3 unreadable policy, an unresolvable/empty dataset directory, or a cannot-run
 fault.
 
+rules <dataset>
+---------------
+Turn the expectations a dataset's cases already carry into ParseBench rule objects, so nobody
+hand-authors another company's JSON to get started.
+
+    openreading rules mydata            # print what it would add
+    openreading rules mydata --write    # edit the case.json files in place
+
+`text_contains` becomes a `present` rule per string, passed through untouched. Each table cell
+becomes a `table` rule carrying its right neighbour and its column heading, which is what makes it
+structural rather than a second presence check. `text`, `markdown` and `typed_fields` generate
+nothing: a whole-document string is a similarity measure, and forcing it into a rule would demand
+a character-exact reproduction no backend passes.
+
+Printing is the default because this rewrites files a person hand-labeled. A case that already has
+`rules` is skipped unless `--force`. The rule worth having most, `absent`, cannot be generated at
+all, because nothing in a case says what must NOT appear; the command says so when it finishes.
+Scoring the result needs the `parsebench` extra (`openreading.evals.rules`). Exits: 0; 3 a dataset
+directory with no `<case>/case.json`, or a `case.json` that will not parse.
+
 benchmark <list|show|prepare|estimate|run|report>
 --------------------------------------------------
 A benchmark profile connects one public dataset and official scorer to OpenReading. A target is
@@ -508,6 +528,7 @@ Exit codes
      plan-exhausted `route --run`, `serve` without its extra or with a malformed
      `OPENREADING_API_KEYS` / `OPENREADING_API_KEY_SCOPES` (one `[serve] ...` line naming the
      bad entry's position, never its value), an unresolvable/empty `leaderboard` dataset, a
+     a `rules` dataset with no `<case>/case.json` or an unparseable `case.json`,
      `resume` refusal / unknown run / expired payloads, an `OPENREADING_LEDGER` pointing at a
      path this process cannot journal to (`ledger_unavailable`; an armed ledger is a hard
      dependency, so the run fails rather than parsing unjournalled), an unknown `backends --check`

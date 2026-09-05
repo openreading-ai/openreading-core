@@ -1642,6 +1642,54 @@ def cmd_benchmark_run(args) -> int:
         return 3
 
 
+def cmd_rules(args) -> int:
+    """Generate publisher rules from the expectations a dataset's cases already carry."""
+    from openreading.evals.rules import suggest_rules
+
+    # Read the case files directly rather than through `load_dataset`, which resolves documents
+    # and builds a request per case. Generating rules needs neither a backend nor the PDF bytes.
+    sources = sorted(Path(args.dataset).glob("*/case.json"))
+    if not sources:
+        print(f"[rules] no <case>/case.json under {args.dataset}", file=sys.stderr)
+        return 3
+    written = 0
+    for source in sources:
+        try:
+            payload = json.loads(source.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"[rules] {source}: {exc}", file=sys.stderr)
+            return 3
+        name = payload.get("name") or source.parent.name
+        expected = payload.get("expected") or {}
+        if "rules" in expected and not args.force:
+            print(f"[rules] {name}: already has rules, skipped (--force to replace)")
+            continue
+        suggested = suggest_rules(expected)
+        if not suggested:
+            known = ", ".join(sorted(expected)) or "an empty expected"
+            print(f"[rules] {name}: nothing to generate from {known}")
+            continue
+        if not args.write:
+            print(f"{name}: {len(suggested)} rule(s) would be added")
+            print(json.dumps(suggested, indent=2))
+            continue
+        expected["rules"] = suggested
+        payload["expected"] = expected
+        source.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        written += 1
+        print(f"{name}: wrote {len(suggested)} rule(s)")
+    if not args.write:
+        # Printing by default, because this rewrites files a person hand-labeled.
+        print("\nnothing written. Re-run with --write to apply.", file=sys.stderr)
+    else:
+        print(
+            f"\nwrote rules into {written} case(s). Add `absent` rules by hand: nothing in a "
+            "case says what must NOT appear.",
+            file=sys.stderr,
+        )
+    return 0
+
+
 def cmd_benchmark_report(args) -> int:
     """Read a finished run's publisher artifacts and print the comparison."""
     from openreading.evals.report import ReportError, read_run, render, to_json
@@ -2455,6 +2503,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="rerun cases with existing publisher artifacts"
     )
     benchmark_run.set_defaults(func=cmd_benchmark_run)
+
+    rules = sub.add_parser(
+        "rules",
+        parents=[common],
+        help="generate publisher rules from a dataset's existing expectations",
+        description="Turn the `text_contains` and `tables` a case already carries into "
+        "ParseBench rule objects, so nobody hand-authors another company's JSON. Prints by "
+        "default; --write edits the case.json files in place.",
+    )
+    rules.add_argument("dataset", help="dataset directory of <case>/case.json files")
+    rules.add_argument(
+        "--write", action="store_true", help="edit the case.json files instead of printing"
+    )
+    rules.add_argument(
+        "--force", action="store_true", help="replace an existing `rules` key rather than skipping"
+    )
+    rules.set_defaults(func=cmd_rules)
 
     leaderboard = sub.add_parser(
         "leaderboard",

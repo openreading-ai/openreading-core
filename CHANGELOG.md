@@ -29,6 +29,11 @@ them.
 - `openreading benchmark` discovers public corpora and runs backends or strategies through the
   official ParseBench and ExtractBench scorers. Static catalog entries keep source and dataset
   terms visible for additional research corpora without downloading or claiming support.
+- A case's `expected` may declare `rules`, which are ParseBench's own rule objects scored by
+  ParseBench's own engine over your document. They are the only dimension that fails when a
+  backend INVENTS content rather than merely missing it, which the other four cannot see. Rules
+  are a dimension inside the existing scorer, so `leaderboard` and `calibrate` reach them through
+  the one `run_case` they already use. Needs `openreading[parsebench]`.
 - `benchmark run` runs two documents by default, `--limit N` or `--doc NAME` chooses others, and
   `--limit 0` runs the whole prepared corpus. It prints the chosen documents, their page count and
   a per-target dollar range before anything bills, and asks first when a run is unpriced or over a
