@@ -393,16 +393,24 @@ Nothing below exists in the package today. Each line names where the gap is reco
 
 - `openreading mcp`, a native tool surface for agents, does not exist. Integrate through the CLI,
   Python dicts, or HTTP. The gap is recorded in the `openreading` package docstring (Known gaps)
-  and `AGENTS.md` (Also here when built).
+  and `AGENTS.md` (Also here when built), and designed in
+  [design/agentic.md](../../design/agentic.md) with
+  [its product spec](../../product/specs/agentic.product-spec.md).
 - `triage`, a verb that would apply the playbook above for you, does not exist. `uv run
   openreading --help` lists no such verb. The gap is recorded in `AGENTS.md` (Also here when
-  built).
+  built) and designed alongside the tool surface in
+  [design/agentic.md](../../design/agentic.md).
 - The decider wire executor, the real LLM call behind `DeciderPort`, does not exist. Today every
   enabled decision point takes the engine default. The decision records
   `downgraded: unavailable` when `OPENREADING_LLM_DECIDER` is set and `downgraded: env_disabled`
-  when it is not. The gap is recorded in `openreading.strategies.decider` (Status).
+  when it is not. The gap is recorded in `openreading.strategies.decider` (Status), and designed
+  in [design/decider-executor.md](../../design/decider-executor.md) with
+  [its product spec](../../product/specs/decider.product-spec.md).
 - Neither the intent schema with its routing mechanics nor the translation stage with its profile
-  grammar is built. The gap is recorded in `AGENTS.md` (Also here when built).
+  grammar is built. The gap is recorded in `AGENTS.md` (Also here when built). Intent is designed
+  in [design/intent.md](../../design/intent.md) with
+  [its product spec](../../product/specs/intent.product-spec.md). The translation stage has no
+  design record anywhere, in this repo or the private one.
 - There is no closed registry for `warnings[].code`. The list in the `openreading.schemas`
   docstring is a list to read rather than an enum to validate against. There is no schema
   validation of the `orchestration` block's inner shape either, which is why the register above

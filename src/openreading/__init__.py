@@ -503,8 +503,12 @@ state: rails, trace and replay ship and are tested; the executor is a `DeciderPo
 implement (`openreading.strategies.decider`), and no wire adapter ships, so out of the box every
 decision point takes the engine default.
 
-Known gaps: no MCP surface (integrate via CLI/JSON, Python dicts, or HTTP); no shipped
-`DeciderPort` executor; `warnings[]` has no closed registry (the `openreading.schemas` docstring
+Known gaps: no MCP surface (integrate via CLI/JSON, Python dicts, or HTTP; design records:
+`design/agentic.md`, `product/specs/agentic.product-spec.md`); no shipped `DeciderPort` executor
+(design records: `design/decider-executor.md`, `product/specs/decider.product-spec.md`); no
+intent schema or its routing mechanics (design records: `design/intent.md`,
+`product/specs/intent.product-spec.md`); no translation stage or profile grammar, which has no
+design record anywhere; `warnings[]` has no closed registry (the `openreading.schemas` docstring
 lists today's known codes, which is a list to read rather than an enum to validate against); the
 `orchestration` block's inner shape is not itself schema-validated, so every closed set inside it
 is a code-level guarantee only; `status.error` is never populated on a single-document response;
