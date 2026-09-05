@@ -102,8 +102,19 @@ serve-smoke:
 # unpublished local package. `--no-emit-project` keeps that self-reference out of the exported
 # list, so `--strict` fires only on a real third-party finding. An advisory with no released fix
 # gets an explicit `--ignore-vuln <ID>` in a commit whose body says why, never a silent skip.
+# A direct reference (`name @ git+https://...`) is dropped before the audit runs, and the dropped
+# lines are printed so the exclusion is visible in the CI log rather than silent. pip-audit
+# resolves advisories by (name, version) against PyPI, and a VCS pin has no released version to
+# match, so `--strict` fails the build on it: "Can't verify hashes ... we don't have a way to hash
+# version control repositories". Excluding it removes nothing the audit could have checked. The
+# blind spot is exactly the one package, never its dependency tree: `uv export` resolves that tree
+# to ordinary pins, so extract-bench's own autoevals, scipy and dateutil are still audited.
+# `openreading[extractbench]` is the only such reference today and cannot ship to PyPI either
+# (see pyproject.toml), so both problems end the day it points at a released wheel.
 audit:
-	uv export --format requirements.txt --all-extras --no-emit-project > "$${TMPDIR:-/tmp}/audit-requirements.txt"
+	uv export --format requirements.txt --all-extras --no-emit-project > "$${TMPDIR:-/tmp}/audit-export.txt"
+	@grep '@ git+' "$${TMPDIR:-/tmp}/audit-export.txt" | sed 's/^/audit: excluded, not auditable by version: /' || true
+	grep -v '@ git+' "$${TMPDIR:-/tmp}/audit-export.txt" > "$${TMPDIR:-/tmp}/audit-requirements.txt"
 	uv run --with pip-audit pip-audit --strict -r "$${TMPDIR:-/tmp}/audit-requirements.txt"
 
 # Live lane: this runs only the tests marked `@pytest.mark.live`, and nothing else. Each one skips
