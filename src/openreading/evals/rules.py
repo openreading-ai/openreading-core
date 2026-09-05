@@ -55,8 +55,10 @@ reporting that it could not run, which reads as a broken backend:
   produces a wrong bag and therefore a meaningless verdict. Build it with
   ``WordBagRule._extract_normalized_words_static``.
 
-Known gap: ``tables_num_rows`` did not pass in testing against either table shape at any row
-count. Treat it as unproven rather than as a measurement.
+Do not use ``tables_num_rows``. Its rule class reads ``actual_num_rows`` off its own rule data and
+reports "Row count not populated" when it is absent, and nothing in ParseBench 1.0.2 ever writes
+that field. It is read in four places and assigned nowhere, so the rule cannot pass for anyone
+unless the dataset author supplies the answer by hand. ``tables_num_cols`` has the same shape.
 """
 
 from __future__ import annotations

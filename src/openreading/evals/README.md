@@ -539,8 +539,9 @@ from parse_bench.evaluation.metrics.parse.rules_bag import WordBagRule
 bag = dict(WordBagRule._extract_normalized_words_static(expected_text, include_table_cells=True))
 ```
 
-One known gap: `tables_num_rows` did not pass in testing against either table shape, with any row
-count. Treat it as unproven rather than as a measurement.
+One rule to avoid: `tables_num_rows` cannot pass. It reads an `actual_num_rows` field that nothing
+in ParseBench 1.0.2 ever writes, so it reports "Row count not populated" whatever your table looks
+like. `tables_num_cols` is built the same way. Use the `table` rule for structure instead.
 
 Two behaviours worth knowing before you rely on this. A case that declares `rules` without the
 extra installed raises and names the install command, rather than scoring zero, because a silent

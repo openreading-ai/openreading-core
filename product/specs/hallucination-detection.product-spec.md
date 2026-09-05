@@ -79,8 +79,11 @@ hand-authors another company's JSON to begin.
   makes every unlabeled sentence read as invention and defames a correct backend.
 
 **Increment 3, not built.**
-- Publisher-comparable numbers on a private corpus, meaning the same report shape `benchmark run`
-  produces, over documents you own.
+- The publisher's NON-RULE metrics over your documents: TEDS and GriTS for table structure,
+  content faithfulness, semantic formatting. These need a reference markdown per document, which
+  is what `expected.markdown` already is.
+- Originally scoped as "publisher-comparable numbers on a private corpus". That framing was wrong
+  and is recorded here so it is not revived. See Decisions.
 
 **Out of scope, deliberately.**
 - A curated library of rules for a document type. That gets better with private corpora and
@@ -168,14 +171,35 @@ fails loudly naming the install command.
   inferred exhaustiveness from a labeled `text`, which defames a correct backend. Kept as
   increment 3.
 
+## Decisions
+
+These were open questions. Each was answerable, and an open question nobody is assigned to close
+becomes a decision made by default later.
+
+1. **Comparability is not the goal; the extra metrics are.** A number over your private corpus is
+   comparable to nothing, because nobody else can see the corpus. What increment 3 would actually
+   buy is TEDS, GriTS and content faithfulness over documents you own, which needs
+   `expected.markdown` as the reference. Scoped accordingly above. Build it when somebody asks for
+   table-structure scoring on their own files, not before.
+
+2. **Do not change what `expected.text` means. Add a separate claim.** Increment 2 needs the user
+   to assert that a labeled text is the WHOLE document. Inferring that from the presence of `text`
+   would retroactively redefine every label already written under the old meaning, and an abridged
+   one would then read as a hallucination accusation against a correct backend. The claim gets its
+   own opt-in key, because the point is that the user states it deliberately. Cost is one key; the
+   alternative silently changes the meaning of existing private datasets.
+
+3. **`tables_num_rows` is unusable and must not be offered.** Its rule class reads
+   `actual_num_rows` off its own rule data and reports "Row count not populated" when absent.
+   Nothing in the publisher package ever WRITES that field: read in four places, assigned nowhere.
+   The rule therefore cannot pass for anyone, on any table shape, including the publisher's own
+   corpus, unless a dataset author supplies the answer by hand. `tables_num_cols` is built the
+   same way. Verified against ParseBench 1.0.2.
+
 ## Open Questions
 
-1. Does anyone need publisher-COMPARABLE numbers on their own corpus (increment 3), or is absence
-   detection the whole need? The answer decides whether increment 3 is ever built.
-2. Should `expected.text` gain an explicit exhaustiveness claim, which is the gate increment 2
-   requires? It changes what a long-standing key means.
-3. `tables_num_rows` did not pass in testing against either table shape at any row count. Is it
-   broken upstream, or misused here?
+None outstanding. What remains is whether anyone asks for increments 2 and 3, not what they
+should be.
 
 ## Related Artifacts
 
