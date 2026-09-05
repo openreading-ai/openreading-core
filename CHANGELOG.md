@@ -24,6 +24,16 @@ private and is not published. The web UI and the `webui` extra are not part of t
 Research, design records and labeled data stay private as well, so nothing in this file links to
 them.
 
+### Added
+
+- `openreading benchmark` discovers public corpora and runs backends or strategies through the
+  official ParseBench and ExtractBench scorers. Static catalog entries keep source and dataset
+  terms visible for additional research corpora without downloading or claiming support.
+- `benchmark run` runs two documents by default, `--limit N` or `--doc NAME` chooses others, and
+  `--limit 0` runs the whole prepared corpus. It prints the chosen documents, their page count and
+  a per-target dollar range before anything bills, and asks first when a run is unpriced or over a
+  dollar. `--yes` answers in advance and is required with no terminal attached.
+
 ### Changed
 
 **The project is `openreading`, was `openmanifold`.** The vendors this repository integrates all

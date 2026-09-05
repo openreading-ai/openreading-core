@@ -51,6 +51,7 @@ scratch/
 /*.txt
 /*.log
 /.openreading/
+/benchmark-results/
 
 # Your own test corpus, and every batch or compare output it produces (samples/.runs/*.json).
 # Put the documents you want to try under samples/, then run scripts/batch_demo.sh.

@@ -51,7 +51,9 @@ EXTRA_NAME_EXCEPTIONS: dict[str, str] = {
 # EXTRA_NAME_EXCEPTIONS values) must name a real registry slug.
 # `server` is deliberately never folded into `all` (`all` is the adapter-runtime-deps union;
 # pulling in fastapi/uvicorn there would misrepresent what "all" means).
-NON_ADAPTER_EXTRAS: frozenset[str] = frozenset({"http", "server", "all"})
+NON_ADAPTER_EXTRAS: frozenset[str] = frozenset(
+    {"http", "server", "parsebench", "extractbench", "all"}
+)
 
 ALL_EXTRA_NAME = "all"
 

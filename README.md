@@ -52,8 +52,8 @@ a value. You can ask for four things.
   `divergent`, and a list of findings naming each difference, for example a table one backend lost.
   Compare picks no winner unless you name one output as the baseline. When you want a ranking,
   `leaderboard` ranks backends against documents you labeled, which means a small `case.json` of
-  expected values beside each one ([Evals](src/openreading/evals/README.md), OpenReading's benchmark
-  harness).
+  expected values beside each one. `benchmark run` also measures backends and strategies with
+  publisher-owned public scorers ([Evals](src/openreading/evals/README.md)).
 - **[route](src/openreading/router/README.md)**: some documents may only go to vendors that meet
   a policy. A policy is a short JSON file that lists what a backend must guarantee before it may
   run. The router applies it and drops every failing backend before anything runs.
@@ -407,7 +407,7 @@ command.
 | how to run a folder of documents and read one result | [Batch runs](src/openreading/batch/README.md) |
 | how to resume an interrupted run, replay one offline, or erase what it recorded | [The run ledger](src/openreading/ledger/README.md) |
 | how to put the same engine behind an HTTP API on your own machine | [The HTTP server](src/openreading/server/README.md) |
-| how to score and rank backends on documents you labeled | [Evals](src/openreading/evals/README.md) |
+| how to run public benchmarks or rank backends on documents you labeled | [Evals](src/openreading/evals/README.md) |
 | every command, its flags, and the exit code your script branches on | [The command line](src/openreading/cli/README.md) |
 | why a response leaves a field out instead of inventing it | [The channel contract](src/openreading/derive/README.md) |
 | the Python API, every reference section, and how to add a backend | `uv run python -m pydoc openreading`, then the same command with `.<module>` appended. For a new backend, `uv run python -m pydoc openreading.adapters`, then `scripts/new_adapter.py` |

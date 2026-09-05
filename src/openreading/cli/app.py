@@ -6,6 +6,7 @@ and prints the one response schema.
     openreading route   <file> --policy phi.json --run  # compliance-first plan (+ execute chain)
     openreading backends                                # which backends are configured, and why not
     openreading backends --check docling                # ...and is it actually answering? (probes)
+    openreading benchmark list                          # public corpora and their terms lanes
 
 Credentials never travel on the CLI: they are read from the environment by the broker
 (OPENREADING_<SLUG>_<KEY> or the service-native var, e.g. REDUCTO_API_KEY). A `.env` in the
@@ -107,6 +108,13 @@ from openreading.types.liveness import ProbeKind
 # tuple — the identical gap, one call site later, for a native-batch backend's submit_many/
 # run_to_completion.
 _CLEAN_EXIT3_ERRORS = (TerminalError, ComplianceRefused, RetryableError, UnsupportedFeatureError)
+
+# `benchmark run` defaults small because it spends the reader's money on someone else's API. Two
+# documents is enough to see every target produce output and a score, and cheap enough that
+# getting the command wrong costs cents. Scaling up is `--limit N`, and `--limit 0` is the whole
+# prepared corpus. The default is deliberately not the publisher's smoke set, which is already
+# tens of documents across every category.
+DEFAULT_BENCHMARK_LIMIT = 2
 
 
 def _print_exhausted(tag: str, e: PlanExhaustedError, trail_summary: str) -> None:
@@ -1306,6 +1314,350 @@ def cmd_leaderboard(args) -> int:
     return 0
 
 
+def _benchmark_descriptor(args):
+    """Resolve one public benchmark and print lookup failures consistently."""
+    from openreading.evals.benchmarks import get_benchmark
+
+    try:
+        return get_benchmark(args.benchmark)
+    except KeyError as exc:
+        print(f"[benchmark] {exc.args[0]}", file=sys.stderr)
+        return None
+
+
+def _check_benchmark_terms(args, descriptor) -> bool:
+    """Apply the profile's lane gate before any optional import or download."""
+    from openreading.evals.benchmarks import BenchmarkTermsError, require_benchmark_terms
+
+    try:
+        require_benchmark_terms(
+            descriptor,
+            allow_research_only=args.allow_research_only,
+            allow_unverified_terms=args.allow_unverified_terms,
+        )
+    except BenchmarkTermsError as exc:
+        print(f"[benchmark] {exc}", file=sys.stderr)
+        return False
+    return True
+
+
+def cmd_benchmark_list(args) -> int:
+    """List static public benchmark facts without importing an optional package."""
+    from openreading.evals.benchmarks import list_benchmarks
+
+    print(f"{'id':<20} {'status':<10} {'terms':<15} dimensions")
+    for descriptor in list_benchmarks():
+        print(
+            f"{descriptor.id:<20} {descriptor.status:<10} "
+            f"{descriptor.license_lane:<15} {', '.join(descriptor.dimensions)}"
+        )
+    return 0
+
+
+def cmd_benchmark_show(args) -> int:
+    """Show publisher links, separate terms, scale, and installation needs."""
+    descriptor = _benchmark_descriptor(args)
+    if descriptor is None:
+        return 2
+    print(f"{descriptor.title} ({descriptor.id})")
+    print(f"status: {descriptor.status}")
+    print(f"terms lane: {descriptor.license_lane}")
+    print(f"source: {descriptor.source_url}")
+    print(f"data license: {descriptor.data_license}")
+    print(f"data terms: {descriptor.data_license_url}")
+    print(f"code license: {descriptor.code_license}")
+    print(f"code terms: {descriptor.code_license_url}")
+    print(f"scorer revision: {descriptor.default_revision}")
+    print(f"dimensions: {', '.join(descriptor.dimensions)}")
+    if descriptor.estimated_documents is not None:
+        print(f"published scale: {descriptor.estimated_documents} documents")
+    if descriptor.estimated_pages is not None:
+        print(f"published pages: {descriptor.estimated_pages}")
+    if descriptor.package and descriptor.install_extra:
+        print(f"package: {descriptor.package}")
+        print(f"install: pip install 'openreading[{descriptor.install_extra}]'")
+        print(f"presets: {', '.join(descriptor.presets)}")
+    return 0
+
+
+def _benchmark_targets(args):
+    """Parse repeated target flags into the collision-free target contract.
+
+    A target repeated verbatim is dropped, in first-seen order, and said out loud. One target's
+    publisher pipeline name is derived from the target plus its configuration, so a duplicate is
+    not a second measurement: it reruns one pipeline into one directory and then renders that
+    pipeline twice in the cross-target leaderboard, side by side, as though two things had been
+    compared. Two rows that are the same run is the one thing a bake-off must never show.
+    """
+    from openreading.evals.targets import BenchmarkTarget
+
+    targets = []
+    for value in args.target or []:
+        try:
+            target = BenchmarkTarget.parse(value)
+        except ValueError as exc:
+            print(f"[benchmark] {exc}", file=sys.stderr)
+            return None
+        if target in targets:
+            print(f"[benchmark] ignoring repeated target {target.reference}", file=sys.stderr)
+            continue
+        targets.append(target)
+    return targets
+
+
+def _render_benchmark_estimate(descriptor, preset: str, targets) -> str:
+    """Price the whole published corpus, in pages, before anything is downloaded.
+
+    Pages, not documents, because every hosted backend charges per page and the two differ by a
+    lot. This is the ceiling: `run` defaults to a handful of documents and prints the real count.
+    """
+    from openreading.evals.preflight import _backend_target_cost
+
+    lines = [f"estimate: {descriptor.id} {preset}, {len(targets)} target(s)"]
+    if preset != "full":
+        lines.append("documents: publisher smoke subset, counted after preparation")
+        lines.append("`benchmark run` prints the real page count and cost before it spends")
+        return "\n".join(lines)
+
+    documents = descriptor.estimated_documents
+    pages = descriptor.estimated_pages
+    lines.append(f"documents: {documents if documents is not None else 'publisher-defined'}")
+    lines.append(f"pages (the billing unit): {pages if pages is not None else 'publisher-defined'}")
+    if pages is None:
+        return "\n".join(lines)
+    low = high = 0.0
+    for target in targets:
+        if target.kind == "strategy":
+            lines.append(
+                f"  {target.reference}: not priced (a strategy escalates, so one document is one "
+                "or more billed calls)"
+            )
+            continue
+        cost = _backend_target_cost(target.reference, target.name, pages)
+        if cost.priced:
+            low += cost.low_usd or 0.0
+            high += cost.high_usd or 0.0
+            lines.append(f"  {target.reference}: ${cost.low_usd:.2f} to ${cost.high_usd:.2f}")
+        else:
+            lines.append(f"  {target.reference}: not priced ({cost.note})")
+    if targets:
+        lines.append(f"  total (priced targets): ${low:.2f} to ${high:.2f}")
+    lines.append("  a range from each backend's declared per-page rates, not a quote")
+    return "\n".join(lines)
+
+
+def cmd_benchmark_estimate(args) -> int:
+    """Print publisher scale and target-call counts without running a backend."""
+    descriptor = _benchmark_descriptor(args)
+    if descriptor is None:
+        return 2
+    # A cataloged profile has published scale and no way to spend it. Printing "target calls:
+    # 1000000" for one reads as a run you could start, and the next command is the one that says
+    # no. Refuse here, where the numbers would otherwise be the only answer.
+    if descriptor.status != "runnable":
+        print(
+            f"[benchmark] {descriptor.id} is cataloged for discovery but has no runnable profile",
+            file=sys.stderr,
+        )
+        return 2
+    targets = _benchmark_targets(args)
+    if targets is None:
+        return 2
+    print(_render_benchmark_estimate(descriptor, args.preset, targets))
+    return 0
+
+
+def cmd_benchmark_prepare(args) -> int:
+    """Prepare a publisher dataset after its terms gate passes."""
+    from openreading.evals.official import (
+        BenchmarkDependencyError,
+        BenchmarkProfileError,
+        prepare_official_benchmark,
+    )
+
+    descriptor = _benchmark_descriptor(args)
+    if descriptor is None or not _check_benchmark_terms(args, descriptor):
+        return 2
+    try:
+        path = prepare_official_benchmark(
+            descriptor.id,
+            cache_dir=Path(args.cache_dir),
+            preset=args.preset,
+            force=args.force,
+        )
+    except (BenchmarkDependencyError, BenchmarkProfileError, ValueError) as exc:
+        print(f"[benchmark] {exc}", file=sys.stderr)
+        return 2
+    print(f"prepared: {path}")
+    return 0
+
+
+def _benchmark_subset(args, descriptor, data_dir: Path, targets) -> Path | None:
+    """Cut the prepared corpus down to what this run touches, price it, and ask before spending.
+
+    Returns the corpus directory to hand the publisher, or None when the reader declined or the
+    selection could not be resolved. A run covering the whole prepared corpus uses it in place,
+    because copying gigabytes to change nothing is its own kind of surprise.
+    """
+    import hashlib
+
+    from openreading.evals.preflight import confirm, estimate_cost
+    from openreading.evals.subset import CorpusError, materialize_subset, plan_subset
+
+    try:
+        plan = plan_subset(data_dir, limit=args.limit, names=tuple(args.doc or ()))
+    except (CorpusError, ValueError) as exc:
+        print(f"[benchmark] {exc}", file=sys.stderr)
+        return None
+
+    estimate = estimate_cost(plan, targets)
+    print(estimate.render())
+    for document in plan.documents:
+        print(f"  document: {document.doc_id}")
+    if not confirm(estimate, assume_yes=args.yes):
+        print("[benchmark] stopped before spending", file=sys.stderr)
+        return None
+
+    if plan.is_complete:
+        return data_dir
+    # Keyed on the chosen documents, so the same --limit reuses one directory and the publisher's
+    # own resume sees the corpus it saw last time.
+    signature = hashlib.sha256(
+        "\n".join(document.doc_id for document in plan.documents).encode()
+    ).hexdigest()[:10]
+    destination = Path(args.cache_dir) / descriptor.id / "subsets" / signature
+    return materialize_subset(plan, destination)
+
+
+def cmd_benchmark_run(args) -> int:
+    """Prepare once, then run each backend or strategy through the official scorer."""
+    from openreading.evals.official import (
+        BenchmarkDependencyError,
+        BenchmarkProfileError,
+        build_official_comparison,
+        prepare_official_benchmark,
+        run_official_benchmark,
+    )
+    from openreading.evals.report import ReportError
+
+    descriptor = _benchmark_descriptor(args)
+    if descriptor is None or not _check_benchmark_terms(args, descriptor):
+        return 2
+    targets = _benchmark_targets(args)
+    if targets is None:
+        return 2
+    if not targets:
+        print(
+            "[benchmark] run needs at least one --target backend:NAME or strategy:NAME",
+            file=sys.stderr,
+        )
+        return 2
+    # Checked before preparation, not inside the dispatcher. The publisher downloader runs first
+    # and a full ParseBench set is gigabytes, so a rejected --jobs used to cost that download.
+    if args.jobs < 1:
+        print("[benchmark] --jobs must be at least 1", file=sys.stderr)
+        return 2
+    try:
+        policy = _load_policy(args.policy)
+    except _PolicyError as exc:
+        print(f"[benchmark] {exc}", file=sys.stderr)
+        return 2
+    try:
+        data_dir = prepare_official_benchmark(
+            descriptor.id,
+            cache_dir=Path(args.cache_dir),
+            preset=args.preset,
+            force=False,
+        )
+        # The corpus is on disk now, so size and price the run from the documents it will really
+        # touch rather than from the publisher's headline totals. Downloading is free; the calls
+        # after this point are not.
+        run_dir = _benchmark_subset(args, descriptor, data_dir, targets)
+        if run_dir is None:
+            return 2
+        from openreading.evals.report import read_run, render, write_manifest
+        from openreading.evals.subset import plan_subset
+
+        failed = False
+        runs = []
+        for target in targets:
+            result = run_official_benchmark(
+                descriptor.id,
+                target,
+                data_dir=run_dir,
+                output_dir=Path(args.output_dir),
+                preset=args.preset,
+                config=args.config,
+                policy=policy,
+                jobs=args.jobs,
+                force=args.force,
+            )
+            runs.append(result)
+            if result.exit_code == 0:
+                print(
+                    f"completed: {target.reference} as {result.pipeline_name} in {result.output_dir}"
+                )
+            else:
+                failed = True
+                print(
+                    f"[benchmark] {target.reference} failed with exit code {result.exit_code}",
+                    file=sys.stderr,
+                )
+        # The publisher's metadata never records which OpenReading target made which pipeline,
+        # so write that mapping beside its artifacts before anything tries to read them back.
+        write_manifest(
+            Path(args.output_dir),
+            benchmark_id=descriptor.id,
+            preset=args.preset,
+            documents=tuple(
+                doc.doc_id for doc in plan_subset(run_dir, limit=0, names=()).documents
+            ),
+            targets=tuple((run.target.reference, run.pipeline_name) for run in runs),
+        )
+        if len([run for run in runs if run.exit_code == 0]) >= 2:
+            comparison = build_official_comparison(
+                descriptor.id, runs, output_dir=Path(args.output_dir)
+            )
+            if comparison.exit_code == 0:
+                print(f"comparison: {comparison.artifact}")
+            else:
+                failed = True
+                print(
+                    f"[benchmark] official comparison failed with exit code {comparison.exit_code}",
+                    file=sys.stderr,
+                )
+        # The whole reason the run was started. Printed here so the answer is in the terminal
+        # rather than only in an HTML file the reader has to go open.
+        try:
+            print()
+            print(render(read_run(Path(args.output_dir))))
+        except ReportError as exc:  # a publisher that wrote nothing readable
+            print(f"[benchmark] {exc}", file=sys.stderr)
+        return 1 if failed else 0
+    except (BenchmarkDependencyError, BenchmarkProfileError, ValueError) as exc:
+        print(f"[benchmark] {exc}", file=sys.stderr)
+        return 2
+    except _CLEAN_EXIT3_ERRORS as exc:
+        print(f"[benchmark] {exc}", file=sys.stderr)
+        return 3
+
+
+def cmd_benchmark_report(args) -> int:
+    """Read a finished run's publisher artifacts and print the comparison."""
+    from openreading.evals.report import ReportError, read_run, render, to_json
+
+    try:
+        reports = read_run(Path(args.output_dir))
+    except ReportError as exc:
+        print(f"[benchmark] {exc}", file=sys.stderr)
+        return 2
+    if args.format == "json":
+        print(json.dumps(to_json(reports), indent=2))
+    else:
+        print(render(reports))
+    return 0
+
+
 def cmd_strategy_normalize(args) -> int:
     """Print the whole config's strategies in canonical longhand YAML (the `docker compose
     config` analog). Requires a config file."""
@@ -1971,6 +2323,138 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-cost-per-doc", type=float, default=None, help="budget ceiling per doc (e.g. 0.05)"
     )
     calibrate.set_defaults(func=cmd_calibrate)
+
+    benchmark = sub.add_parser(
+        "benchmark",
+        parents=[common],
+        help="discover and run publisher-owned public document benchmarks",
+        description="Discover public document corpora or run an OpenReading backend or strategy "
+        "through a supported publisher's official scorer.",
+    )
+    benchmark_sub = benchmark.add_subparsers(dest="benchmark_command", required=True)
+
+    benchmark_list = benchmark_sub.add_parser(
+        "list", help="list supported and cataloged public benchmarks without network access"
+    )
+    benchmark_list.set_defaults(func=cmd_benchmark_list)
+
+    benchmark_show = benchmark_sub.add_parser(
+        "show", help="show source links, terms, scale, dimensions, and installation needs"
+    )
+    benchmark_show.add_argument("benchmark", help="benchmark identifier from `benchmark list`")
+    benchmark_show.set_defaults(func=cmd_benchmark_show)
+
+    def add_benchmark_selection(parser, *, targets: bool = False) -> None:
+        parser.add_argument("benchmark", help="benchmark identifier from `benchmark list`")
+        parser.add_argument(
+            "--preset",
+            choices=["smoke", "full"],
+            default="smoke",
+            help="publisher smoke subset (default) or the full dataset",
+        )
+        if targets:
+            parser.add_argument(
+                "--target",
+                action="append",
+                default=[],
+                help="backend:NAME or strategy:NAME. Repeat to evaluate several targets.",
+            )
+        parser.add_argument(
+            "--allow-research-only",
+            action="store_true",
+            help="acknowledge the publisher's stated research-only dataset terms",
+        )
+        parser.add_argument(
+            "--allow-unverified-terms",
+            action="store_true",
+            help="acknowledge that dataset or source terms remain unverified",
+        )
+
+    benchmark_prepare = benchmark_sub.add_parser(
+        "prepare", help="download a runnable dataset through its publisher package"
+    )
+    add_benchmark_selection(benchmark_prepare)
+    benchmark_prepare.add_argument(
+        "--cache-dir",
+        type=Path,
+        default=Path.home() / ".cache" / "openreading" / "benchmarks",
+        help="dataset cache root (default ~/.cache/openreading/benchmarks)",
+    )
+    benchmark_prepare.add_argument(
+        "--force", action="store_true", help="ask the publisher downloader to replace its cache"
+    )
+    benchmark_prepare.set_defaults(func=cmd_benchmark_prepare)
+
+    benchmark_estimate = benchmark_sub.add_parser(
+        "estimate", help="show published scale and target-call counts without inference"
+    )
+    add_benchmark_selection(benchmark_estimate, targets=True)
+    benchmark_estimate.set_defaults(func=cmd_benchmark_estimate)
+
+    benchmark_report = benchmark_sub.add_parser(
+        "report", help="print the comparison from a finished run, without re-running it"
+    )
+    benchmark_report.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("benchmark-results"),
+        help="publisher artifact root to read (default ./benchmark-results)",
+    )
+    benchmark_report.add_argument(
+        "--format", choices=["text", "json"], default="text", help="table (default) or JSON"
+    )
+    benchmark_report.set_defaults(func=cmd_benchmark_report)
+
+    benchmark_run = benchmark_sub.add_parser(
+        "run", help="prepare, run OpenReading targets, and invoke the official scorer"
+    )
+    add_benchmark_selection(benchmark_run, targets=True)
+    benchmark_run.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_BENCHMARK_LIMIT,
+        help=(
+            f"documents to run, spread across the corpus's categories "
+            f"(default {DEFAULT_BENCHMARK_LIMIT}; 0 runs every prepared document)"
+        ),
+    )
+    benchmark_run.add_argument(
+        "--doc",
+        action="append",
+        default=[],
+        help="run one named document instead of --limit, by id or file stem. Repeat for several.",
+    )
+    benchmark_run.add_argument(
+        "--yes",
+        action="store_true",
+        help="skip the spending confirmation. Required when no terminal is attached.",
+    )
+    benchmark_run.add_argument("--config", default=None, help="strategy openreading.yaml path")
+    benchmark_run.add_argument(
+        "--policy", default=None, help="policy.json applied to every OpenReading request"
+    )
+    benchmark_run.add_argument(
+        "--cache-dir",
+        type=Path,
+        default=Path.home() / ".cache" / "openreading" / "benchmarks",
+        help="dataset cache root (default ~/.cache/openreading/benchmarks)",
+    )
+    benchmark_run.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("benchmark-results"),
+        help="publisher artifact root (default ./benchmark-results)",
+    )
+    benchmark_run.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help="maximum documents processed concurrently (default 1)",
+    )
+    benchmark_run.add_argument(
+        "--force", action="store_true", help="rerun cases with existing publisher artifacts"
+    )
+    benchmark_run.set_defaults(func=cmd_benchmark_run)
 
     leaderboard = sub.add_parser(
         "leaderboard",

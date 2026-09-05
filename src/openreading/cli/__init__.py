@@ -325,6 +325,82 @@ router's scoring or any adapter's `integration_priority`. Exits: 0; 2 <2 backend
 `--backends` id; 3 unreadable policy, an unresolvable/empty dataset directory, or a cannot-run
 fault.
 
+benchmark <list|show|prepare|estimate|run|report>
+--------------------------------------------------
+A benchmark profile connects one public dataset and official scorer to OpenReading. A target is
+one backend or strategy evaluated on that dataset. Discovery is offline and requires no optional
+package.
+
+    openreading benchmark list
+    openreading benchmark show parsebench
+    openreading benchmark prepare parsebench --preset smoke
+    openreading benchmark estimate parsebench --preset full --target backend:pymupdf
+    openreading benchmark run parsebench --target backend:pymupdf          # 2 documents
+    openreading benchmark run parsebench --target backend:pymupdf --limit 0 --yes   # all of them
+
+`list` displays runnable and cataloged profiles with separate dataset-terms lanes. `show` prints
+publisher sources, data and code licenses, published scale, metric dimensions, and the install
+extra. Runnable profiles are ParseBench and ExtractBench. Their official packages require Python
+3.12 or newer and stay outside the base installation.
+
+`prepare` uses the publisher's downloader and writes beneath `~/.cache/openreading/benchmarks` by
+default. `run` prepares the same cache, executes every repeated `--target`, and writes publisher
+artifacts beneath `./benchmark-results`. `--jobs` controls document concurrency. `--force`
+replaces complete publisher artifacts, while an ordinary rerun resumes by letting the official
+harness skip valid results.
+
+How much a run costs, and how to spend less
+...........................................
+`run` prints the comparison when it finishes, ranked by the publisher's own numbers, and writes
+`openreading-run.json` beside the artifacts so a later reader can tell which pipeline was which
+target. `report` prints that same table again from a finished run without re-running anything,
+with `--format json` for a script. Neither computes a score: both read the publisher's
+`_evaluation_report.json` back, so the terminal and the publisher's dashboard cannot disagree.
+
+`run` touches **two documents** unless you say otherwise, because it spends your money on someone
+else's API. `--limit N` runs N, `--limit 0` runs the whole prepared corpus, and `--doc NAME`
+(repeatable) runs documents you name by id (`table/doc1`) or file stem. A limited run is written
+out as a corpus in the publisher's own format, so every metric and report behaves exactly as it
+does over the full set. A run that covers everything uses the prepared cache in place.
+
+Documents under `--limit` are chosen round-robin across the corpus's categories, so two documents
+span two categories rather than two charts. The order is stable, so the same `--limit` picks the
+same documents and a rerun resumes instead of re-billing.
+
+Before a target runs, `run` prints the documents it chose, their PAGE count, and a dollar range
+per target. Pages, because every hosted backend bills per page and the publishers count in
+documents: ExtractBench is 370 documents and 4,869 pages. A range, because a descriptor carries a
+low and a high rate and both are shown. Two things stay deliberately unpriced rather than guessed
+low: a `strategy:` target, which escalates and so bills one or more calls per document, and a
+token-billed backend that publishes no per-page rate.
+
+Anything unpriced, or above one dollar at the high end, asks before it spends. `--yes` answers in
+advance. With no terminal attached the question is not asked and the run refuses, naming `--yes`,
+because a CI job hung on stdin is worse than one that stops.
+
+Every document calls `openreading.run`, including a `strategy:NAME` target selected with
+`--config`. `--policy` therefore keeps its normal compliance behavior. The raw publisher artifact
+retains the complete OpenReading response. The official normalized artifact receives Markdown and
+layout for ParseBench, or typed values and citations for ExtractBench. Two or more successful
+targets also produce the publisher's cross-pipeline leaderboard.
+
+A commercial lane needs no CLI acknowledgement. Research-only terms require
+`--allow-research-only`. Missing, mixed, or source-specific terms require the separate
+`--allow-unverified-terms` flag. Neither flag makes a cataloged profile runnable or claims a use is
+lawful. `estimate` refuses a cataloged profile too, because its published scale would otherwise
+read as a run you could start.
+
+A per-document fault is the publisher's to record, not this command's to raise. The official
+harness catches whatever one document's provider call throws, marks that case failed, and keeps
+going, so a `ComplianceRefused` or a missing key on document 40 of 300 surfaces as exit 1 with a
+failed case in the publisher's report, never as exit 3. Read the report to find out which
+documents fell over and why. Exit 3 is left for a fault raised outside that per-document
+boundary. Exits: 0 complete; 1 publisher inference, scoring, or comparison failure, including
+documents the publisher recorded as failed; 2 invalid profile, target, preset, `--jobs`, terms
+acknowledgement, optional package, preparation, an unknown `--doc`, or a run stopped at the
+spending confirmation; 3 an OpenReading cannot-run fault raised before or around the publisher
+run.
+
 strategy <verb> / explain / replay / calibrate
 ----------------------------------------------
 Inspect and drive `openreading.yaml` strategies. `openreading.strategies` maps the package and
@@ -419,13 +495,16 @@ Exit codes
   2  usage: unknown `--backend` (argparse) or `--strategy` on a single document; `parse` with an
      unresolvable source, more files than `--max-items`, or more `--jobs` than `--max-jobs`;
      `compare` misuse (<2 subjects, unknown fan-out backend, `--format diff` with != 2 subjects,
-     mixed subject kinds); `leaderboard` misuse (<2 backends, unknown id); `replay` with no
-     strategy name anywhere.
+     mixed subject kinds); `leaderboard` misuse (<2 backends, unknown id); `benchmark` profile
+     (unknown, or cataloged where a runnable one is required), target, preset, `--jobs`, terms,
+     package, or preparation errors; `replay` with no strategy name anywhere.
   3  cannot run: missing credentials (names the exact vars + signup URL), `auth_rejected`,
      `unsupported_feature`, an unreadable `--config` / `--policy` / document / `--trace` /
      `explain` argument, a `--policy` file that is not a valid policy object (an unknown key, a
      non-object top level, or a value of the wrong type), a `ComplianceRefused` refusal (from
-     `parse`, `strategy plan`, `replay`, `calibrate`, `compare`, `leaderboard`), a
+     `parse`, `strategy plan`, `replay`, `calibrate`, `compare`, `leaderboard`; under `benchmark`
+     only when it is raised outside the publisher's own per-document boundary, which otherwise
+     records the refusal as a failed case at exit 1), a
      plan-exhausted `route --run`, `serve` without its extra or with a malformed
      `OPENREADING_API_KEYS` / `OPENREADING_API_KEY_SCOPES` (one `[serve] ...` line naming the
      bad entry's position, never its value), an unresolvable/empty `leaderboard` dataset, a

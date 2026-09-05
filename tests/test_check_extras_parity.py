@@ -42,7 +42,9 @@ def test_real_repo_state_is_clean_and_reports_counts():
     assert report.registry_slug_count == 15
     assert report.matching_extra_count == 15
     assert report.exception_count == 1
-    assert report.allowlisted_extra_count == 3  # http, server, all (the web UI left with its extra)
+    # Benchmark integrations are utility extras, like HTTP and server support. They do not map to
+    # adapter slugs, so the parity allowlist accounts for both runnable public profiles.
+    assert report.allowlisted_extra_count == 5
 
 
 def test_main_against_real_repo_exits_zero(capsys: pytest.CaptureFixture[str]):
