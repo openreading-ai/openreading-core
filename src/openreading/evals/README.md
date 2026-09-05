@@ -504,8 +504,38 @@ Three rule types cover most of what a person wants to assert, all verified again
 | `{"type": "table", "cell": "North", "right": "120", "top_heading": "Region"}` | a cell, its neighbour and its column heading |
 
 Matching folds case and collapses whitespace. It does not strip punctuation, so a trailing period
-your document lacks fails the rule. The publisher's full vocabulary is 78 types: run
-`uv run python -m pydoc parse_bench.test_cases.parse_rule_schemas` once the extra is installed.
+your document lacks fails the rule.
+
+**Those three are what the generator writes, not what the scorer accepts.** Anything you put in
+`rules` goes to the publisher's engine untouched, so the whole 78-type vocabulary is available by
+hand. Run `uv run python -m pydoc parse_bench.test_cases.parse_rule_schemas` once the extra is
+installed. Verified working on ordinary markdown: `order` (this text before that one), `is_bold`,
+`is_italic`, `is_title`, `is_not_bold` and `missing_specific_word`, alongside the three above.
+
+Two families need more than markdown, and a rule that cannot see what it needs fails rather than
+saying so, which reads as a broken backend:
+
+| Family | Needs | What happens without it |
+|---|---|---|
+| `table_adjacent_up/down/left/right`, and the other cell-relationship rules | an HTML `<table>` in the markdown | always fails, even when the table is correct |
+| `unexpected_word`, `missing_word`, `too_many_word_occurence` and the sentence equivalents | a `bag_of_word` built with the publisher's own tokenizer | the bag is wrong, so the verdict is noise |
+
+The first one bites in practice. `pymupdf` writes GFM pipe tables, so cell-relationship rules can
+never pass against it, while the plain `table` rule works on both shapes. Ask a backend for HTML
+tables (`outputs.tables = "html"`) before relying on the relationship rules, and prefer `table`
+when you do not know what your backend emits.
+
+For the bag rules, build the bag with the publisher's own function rather than splitting on
+spaces, because its tokenizer lowercases, strips markdown, drops one-character tokens and folds
+accents:
+
+```python
+from parse_bench.evaluation.metrics.parse.rules_bag import WordBagRule
+bag = dict(WordBagRule._extract_normalized_words_static(expected_text, include_table_cells=True))
+```
+
+One known gap: `tables_num_rows` did not pass in testing against either table shape, with any row
+count. Treat it as unproven rather than as a measurement.
 
 Two behaviours worth knowing before you rely on this. A case that declares `rules` without the
 extra installed raises and names the install command, rather than scoring zero, because a silent

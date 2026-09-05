@@ -37,8 +37,26 @@ Rule shapes verified against ParseBench 1.0.2, scoring pymupdf's real output:
      "top_heading": "Region"}                                     and by column heading
 
 Matching is case-insensitive and collapses whitespace, and it does NOT strip punctuation, so a
-trailing period the document lacks fails the rule. The publisher's full vocabulary is 78 types;
-``uv run python -m pydoc parse_bench.test_cases.parse_rule_schemas`` lists them once installed.
+trailing period the document lacks fails the rule. The publisher's full vocabulary is 78 types and
+all of them reach the engine untouched; ``uv run python -m pydoc
+parse_bench.test_cases.parse_rule_schemas`` lists them once installed. Verified working on
+ordinary markdown alongside the three above: ``order``, ``is_bold``, ``is_italic``, ``is_title``,
+``is_not_bold``, ``missing_specific_word``.
+
+Two families need more than markdown, and a rule that cannot see what it needs FAILS rather than
+reporting that it could not run, which reads as a broken backend:
+
+- The cell-relationship rules (``table_adjacent_up`` and friends) need an HTML ``<table>``. A
+  backend writing GFM pipe tables, ``pymupdf`` among them, can never pass one. The plain ``table``
+  rule works on both shapes, so prefer it unless you know the backend emits HTML.
+- The bag rules (``unexpected_word``, ``missing_word``, ``too_many_word_occurence`` and the
+  sentence equivalents) need a ``bag_of_word`` built by the publisher's own tokenizer, which
+  lowercases, strips markdown, drops one-character tokens and folds accents. Splitting on spaces
+  produces a wrong bag and therefore a meaningless verdict. Build it with
+  ``WordBagRule._extract_normalized_words_static``.
+
+Known gap: ``tables_num_rows`` did not pass in testing against either table shape at any row
+count. Treat it as unproven rather than as a measurement.
 """
 
 from __future__ import annotations
