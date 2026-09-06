@@ -160,7 +160,8 @@ src/openreading/
   ledger/      execution journal, replay, resume
   evals/       benchmark harness (scorers, runner, leaderboard)
   testing/     conformance kit, sample PDF, fixture scrubber   (docstring: what adapter authors get)
-  cli/         `openreading …`                                 (docstring: subcommands, exit codes)
+  cli/         `openreading …` + `openreading help`, which serves  (docstring: subcommands,
+               that docstring back as the CLI's own manual          exit codes, the manual)
   server/      `openreading serve`                             (docstring: endpoints, status codes)
   api.py          `run` / `route` / `compare` / `resume`       (docstring: exports and return shapes)
   credentials.py  BYO-key broker                               (docstring: precedence, per-backend vars)
@@ -172,7 +173,14 @@ examples/      two synthetic bank statements the READMEs parse (README.md: what 
 ```
 
 To read a package's documentation, run `uv run python -m pydoc openreading.cli`, or open the file.
-The CLI documents itself with `openreading --help`.
+
+The CLI documents itself three ways, and they are one source. `openreading <cmd> --help` is the
+flag page, and its epilog carries examples, the command that consumes its output, the exit codes
+it can return, and a pointer onward. `openreading help [TOPIC]` prints one chapter of the manual,
+and every chapter is a section of the `openreading.cli` docstring, located by its heading and
+printed verbatim. `pydoc` prints that whole docstring in source order. Editing that docstring
+therefore edits user-facing help, which is why `tests/test_cli_help.py` holds it to 79 columns and
+one slug per heading. A new verb owes a docstring section, a `TOPICS` row and an epilog.
 
 ## The company repo
 

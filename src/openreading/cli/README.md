@@ -5,6 +5,10 @@
 > **In one sentence.** `openreading` prints one JSON envelope on stdout, keeps everything else on
 > stderr, and exits with a code your script can branch on.
 
+This page is the walkthrough. For a flag or a rule while you work, the CLI answers for itself:
+`openreading help` lists the manual's chapters, `openreading help <topic>` prints one, and
+`openreading <cmd> --help` gives one command's examples and exit codes.
+
 ## What this gives you
 
 You want to call the parser from a shell script or a CI job and trust what comes back. The worry is

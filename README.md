@@ -188,6 +188,27 @@ uv run python -c 'from openreading.testing.sample_pdf import build_sample_pdf; o
 ls -l sample.pdf     # 8688 bytes: a title, two paragraphs, a 3×4 table, two columns, a tiny image
 ```
 
+## The CLI explains itself
+
+You do not have to come back here for a flag. The command line carries its own manual, and every
+page of it is generated from the same reference the maintainers read, so it cannot drift from
+what the code does.
+
+```bash
+uv run openreading help              # the topic index, grouped by what you want to do
+uv run openreading help batch        # one chapter: folders, globs, many files at once
+uv run openreading help chaining     # which command's output feeds which command
+uv run openreading parse --help      # one command: examples, flags, exit codes
+```
+
+`openreading help` lists twenty-two chapters. Start with `quickstart`, then `batch` if you have
+a folder of documents, then `exit-codes` before you put any of it in CI. A chapter answers to the
+name you would reach for, so `help folder` and `help glob` both open the batch chapter.
+
+Every `<command> --help` ends with the same four things: examples you can paste, the command that
+consumes this one's output, the exit codes this command can actually return, and the chapter that
+goes deeper.
+
 ## Compare, route, strategy
 
 **Compare.** Compare shows where two backends disagree on a document and names each difference.

@@ -98,6 +98,15 @@ set of backends a compliance policy admits. Unverified compliance fails closed.
 **Comment the why, not the what.** Keep the rationale comments you find, and update one when
 your change makes it wrong.
 
+**The CLI docstring is user-facing help.** `openreading help [TOPIC]` prints chapters of the
+`openreading.cli` package docstring verbatim, so a sentence you write there is a sentence a user
+reads at their prompt. That buys one source of truth and costs three rules, all enforced by
+`tests/test_cli_help.py`: keep every line at 79 columns or fewer, because the renderer never
+reflows; give each section exactly one topic slug in `openreading.cli.help`; and name no
+`internal/` path, because a reader cannot open one. A new subcommand owes a docstring section, a
+`TOPICS` row, and an `epilog` carrying examples, the command that consumes its output, its exit
+codes, and a pointer onward.
+
 **Adding a backend.** `scripts/new_adapter.py` scaffolds the files, and the adapter runbook is
 the docstring of `openreading.adapters` (`src/openreading/adapters/__init__.py`).
 
