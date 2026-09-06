@@ -314,7 +314,12 @@ The deployment's compliance policy is the `policy:` block of the `openreading.ya
 strategy (`openreading.config`). The three attestation keys in it come from that file and never
 from a request body (DECISIONS D7: the operator attests an account-level fact, not a per-document
 one, and the wire schema is `extra=forbid`). A request body may still carry `compliance` and
-`routing`, and those union with the file, most-restrictive-wins.
+`routing`, and those INTERSECT with the file: neither source can weaken the other. Booleans OR.
+`max_retention` keeps the lower ceiling, so a body asking for `48h` under a file requiring `zero`
+is held to `zero`. `data_region` has no ordering and a body cannot name two regions at once, so a
+body asking for `us` under a file requiring `eu` is a 403 `compliance_refused` carrying
+`backend_code: "region_conflict"` rather than one side winning. `optimize_for` is the exception the
+body takes outright, because it orders the survivors and never changes the set.
 """
 
 from __future__ import annotations

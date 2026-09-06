@@ -1221,7 +1221,14 @@ def create_app(*, cors_origins: list[str] | None = None):
             return _bad_request(refusal)
         # The operator's `policy:` block unions into the request before anything routes it, so a
         # request naming a backend is gated by the same constraints a strategy run is (law P4).
-        req, router_config = config.apply(req, app.state.policy, app.state.router_config)
+        # The fold can REFUSE, not only return: a body naming a region the file forbids has no
+        # intersection with it. That is a compliance outcome and takes the 403 every other
+        # compliance refusal takes, so it is caught here rather than escaping the handler's own
+        # try/except below as a bare 500 with no body.
+        try:
+            req, router_config = config.apply(req, app.state.policy, app.state.router_config)
+        except _ADAPTER_ERRORS as e:
+            return _error_response(e)
         # BL-159 AC-3: scope-gate BEFORE run_request ever constructs an adapter or resolves a
         # vendor credential — for both a directly-named backend outside the key's allow-list and
         # an "auto" request the router would otherwise have picked one for.
@@ -1258,7 +1265,10 @@ def create_app(*, cors_origins: list[str] | None = None):
             req = await _parse_request(request)
         except Exception as e:  # noqa: BLE001
             return _bad_request(_validation_message(e))
-        req, router_config = config.apply(req, app.state.policy, app.state.router_config)
+        try:
+            req, router_config = config.apply(req, app.state.policy, app.state.router_config)
+        except _ADAPTER_ERRORS as e:  # a body/file compliance conflict — 403, never a 500
+            return _error_response(e)
         plan = Router(build_registry(), router_config).route(req)
         return {
             "chosen": plan.chosen.descriptor.id if plan.chosen else None,
@@ -1518,6 +1528,7 @@ def create_app(*, cors_origins: list[str] | None = None):
             refusal, req = _gate_document_path(req)
             if refusal is not None:
                 raise ValueError(refusal)
+            # A refusal here is this ITEM's outcome, isolated like any other bad item (M6).
             req, item_router_config = config.apply(req, app.state.policy, app.state.router_config)
             return api.run_request(
                 req,
@@ -1561,7 +1572,10 @@ def create_app(*, cors_origins: list[str] | None = None):
             req = await _parse_request(request)
         except Exception as e:  # noqa: BLE001
             return _bad_request(_validation_message(e))
-        req, router_config = config.apply(req, app.state.policy, app.state.router_config)
+        try:
+            req, router_config = config.apply(req, app.state.policy, app.state.router_config)
+        except _ADAPTER_ERRORS as e:  # a body/file compliance conflict — 403, never a 500
+            return _error_response(e)
         backend = req.backend.id
 
         # `strategy:<name>` — wrap the WHOLE strategy walk as one synthetic job (integration.md

@@ -492,6 +492,11 @@ different run:
              (sha256 3f9a... -> c21b...)
     [resume] a resumed run replays recorded decisions; start a new run instead
 
+The `policy:` block counts as part of that config. Editing it, in either
+direction, refuses the resume. Removing a constraint used to resume quietly and
+keep enforcing the removed one, because the ledger stores the request after the
+block was folded into it, so the block itself is now part of `config_hash`.
+
 Also exit 3: an unknown `RUN_ID`, `OPENREADING_LEDGER` unset, or a run whose
 payloads the retention reaper has already crypto-shredded (`PayloadExpired`).
 Python: `openreading.resume(id)`.
@@ -527,7 +532,20 @@ you mean` for a near miss), and a value of the wrong type is refused too, so a
 malformed block is exit 3 before a backend is contacted, because a compliance
 constraint that can be turned off by a typo is not a constraint. A policy never
 names a backend: it names a requirement, and each backend's descriptor either
-meets it or does not. Output is `{chosen, fallbacks, dropped: {id: {stage,
+meets it or does not.
+
+When a caller ALSO sends constraints -- an HTTP request body's `compliance`, or
+a `compliance=` override from Python -- the two sources intersect and neither
+weakens the other. Booleans OR. `max_retention` keeps the LOWER ceiling, so a
+request asking for `48h` under a file requiring `zero` still gets `zero`.
+`data_region` has no ordering and a request cannot name two at once, so a file
+requiring `eu` against a request asking for `us` refuses with `region_conflict`
+rather than one of them winning. `optimize_for` is the one key the request
+takes outright, because it orders the survivors and never changes the set. No
+flag in this CLI sends compliance, so this governs `serve` and Python callers
+rather than anything typed here.
+
+Output is `{chosen, fallbacks, dropped: {id: {stage,
 code, reason}}, terminal_reason}` plus, with `--run`, a `result`. `--run` never
 widens the plan; a fallback actually used is recorded in the result's
 `warnings[]`. Exits: 0; 4 no compliant backend (the empty plan is still printed
@@ -708,6 +726,11 @@ per-dimension breakdown, per-case result table, error tally, and each backend's
 cost basis alongside its score (never a rank without the price that produced
 it).
 
+`--config` gates the ranking. The file's `policy:` block is applied to every
+case before the backend is called, so a backend the policy refuses is scored as
+a compliance error rather than ranked. Ranking a backend your own policy will
+not let you run is a number nobody can act on.
+
     openreading leaderboard datasets/paystubs/ \
       --backends aws-textract,google-document-ai
     openreading leaderboard src/openreading/evals/sample \
@@ -738,8 +761,8 @@ crash. Every backend makes a REAL call per case: `--all-ready` over a large
 dataset is N x M billable calls, not N + M. The numbers are evidence a human
 reads and are never fed back into the router's scoring or any adapter's
 `integration_priority`. Exits: 0; 2 <2 backends or an unknown `--backends` id;
-3 unreadable policy, an unresolvable/empty dataset directory, or a cannot-run
-fault.
+3 an openreading.yaml that will not load, an unresolvable/empty dataset
+directory, or a cannot-run fault.
 
 rules <dataset>
 ---------------

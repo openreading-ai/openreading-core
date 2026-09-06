@@ -3758,3 +3758,27 @@ def test_caller_auth_scope_is_enforced_when_defaults_strategy_makes_auto_a_walk(
     assert not (r.status_code == 200 and r.json()["backend"]["id"] == "pymupdf")
     assert r.status_code == 403
     assert r.json()["error"]["category"] == "scope_denied"
+
+
+def test_a_region_conflict_is_a_403_and_not_an_unhandled_500(tmp_path, monkeypatch):
+    """`config.apply` can now REFUSE, where before it only ever returned. It runs before the
+    handler's own try/except, so its refusal escaped as a bare 500 with no body: the caller was
+    told the server broke when the server had in fact enforced the operator's policy."""
+    from openreading.types.errors import ComplianceRefused  # noqa: F401  (documents the type)
+
+    server = _policy_server(tmp_path, monkeypatch, {"data_region": "eu"})
+    body = _pdf_body("pymupdf")
+    body["compliance"] = {"data_region": "us"}
+    r = server.post("/v1/parse", json=body)
+    assert r.status_code == 403
+    err = r.json()["error"]
+    assert err["category"] == "compliance_refused"
+    assert err["backend_code"] == "region_conflict"
+    assert "eu" in err["message"] and "us" in err["message"]
+
+
+def test_a_region_conflict_on_the_route_endpoint_is_also_a_403(tmp_path, monkeypatch):
+    server = _policy_server(tmp_path, monkeypatch, {"data_region": "eu"})
+    body = _pdf_body("auto")
+    body["compliance"] = {"data_region": "us"}
+    assert server.post("/v1/route", json=body).status_code == 403
