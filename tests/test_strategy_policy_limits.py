@@ -3,6 +3,9 @@
 The file `policy:` block unions into the request's effective compliance (most-restrictive-wins,
 constraints only add), feeding BOTH the router prune and the route compliance facts; `limits:`
 wraps every strategy-engaged run as the outermost budget but never touches direct-named requests.
+
+`openreading.config.apply` runs that union once, before dispatch, on every path, so the helpers
+below call it exactly where `openreading.api` does and then compile the request it produced.
 """
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ from dataclasses import dataclass
 import pytest
 
 from openreading import api
+from openreading.config import apply as apply_config
 from openreading.credentials import EnvCredentialBroker
 from openreading.router.clock import FakeClock
 from openreading.router.router import RouterConfig
@@ -38,11 +42,19 @@ def _req(compliance=None):
     return OpenReadingRequest.model_validate(body)
 
 
-def _compile(cfg, name, reg, req):
-    return compile_strategy(req, name, StrategyConfig.model_validate(cfg), reg, RouterConfig())
+def _applied(cfg, req, base=None):
+    """The request and RouterConfig a surface hands to `compile_strategy`: the file `policy:`
+    block already unioned in, exactly as `openreading.api` does before it dispatches."""
+    return apply_config(req, cfg.get("policy"), base or RouterConfig())
+
+
+def _compile(cfg, name, reg, req, base=None):
+    req, router_config = _applied(cfg, req, base)
+    return compile_strategy(req, name, StrategyConfig.model_validate(cfg), reg, router_config)
 
 
 def _run(cfg, name, reg, req):
+    req, _ = _applied(cfg, req)
     compiled = _compile(cfg, name, reg, req)
     return run_strategy(
         compiled, req, registry=reg, broker=EnvCredentialBroker(), clock=FakeClock()
@@ -172,7 +184,7 @@ def test_policy_merge_carries_unnamed_router_config_fields_forward():
         "policy": {"allow_unverified_compliance": True},
         "strategies": {"s": ["pymupdf"]},
     }
-    compiled = compile_strategy(_req(), "s", StrategyConfig.model_validate(cfg), reg, base)
+    compiled = _compile(cfg, "s", reg, _req(), base)
 
     merged = compiled.router_config
     assert merged.allow_unverified_compliance is True  # the file policy still OR-s in

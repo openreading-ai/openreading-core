@@ -62,7 +62,7 @@ the literal on the emitted `FactRecord` is `status: "unavailable"`, next to `"ma
 - `size_over_mb` / `size_under_mb` — byte length above / below N MB. Free once bytes exist.
 - `filename_matches` — regex over `document.filename`. Free; only when a filename was supplied.
 - `compliance: { <field>: <value> }` — a **nested object**, every listed field must equal its
-  value — the **post-union effective** compliance constraint (request ∪ `--policy` ∪ file
+  value — the **post-union effective** compliance constraint (request ∪ file
   `policy:`, most-restrictive-wins); a file `policy:` key makes its fact constant for every
   request. Free; **always** computable. The spec wrote this fact as a dotted key
   `compliance.<field>`; **that spelling is not in the shipped grammar** — the schema's `when` is

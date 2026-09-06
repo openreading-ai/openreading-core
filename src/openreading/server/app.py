@@ -46,12 +46,11 @@ of, and independent from, the existing stage-1 compliance filter — a scope-den
 reaches make_adapter/build_run_context, so no vendor credential is ever resolved for a backend the
 caller isn't scoped to (the same "gate before spend" discipline compliance itself already gets).
 Configured key values are read ONCE at process startup, from the environment ONLY — the same
-OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE-style deploy knob pattern, never a request body or a CLI
-flag, so a token never appears in `ps`, shell history, or a request the schema/compliance layer
-touches. Bind 127.0.0.1 by default; CORS off unless --cors-origin is passed (and, when both are
+deploy-knob pattern OPENREADING_CONFIG follows, never a request body or a CLI flag, so a token
+never appears in `ps`, shell history, or a request the schema/compliance layer touches. Bind 127.0.0.1 by default; CORS off unless --cors-origin is passed (and, when both are
 configured, CORS is registered OUTERMOST — see create_app — so a browser's unauthenticated preflight
-OPTIONS still gets a CORS answer instead of a 401). RouterConfig comes from the process env
-(deploy-time knobs), never the request body. Fresh adapter instances per request
+OPTIONS still gets a CORS answer instead of a 401). RouterConfig comes from the `policy:` block of
+the openreading.yaml at OPENREADING_CONFIG, read once at startup, never the request body. Fresh adapter instances per request
 (build_registry / make_adapter), so a credential-bound client never leaks across requests
 (D-v2-8.1, which also fixes why `api.run_request` — sync, driving the job loop via asyncio.run —
 is offloaded with run_in_threadpool, and why fastapi is imported at module level).
@@ -105,26 +104,16 @@ the CLI / Python API, which read them through the same strategy loader and EnvCr
     id can forge. Unset (the default) refuses it with 401. The hatch exists for a vendor that
     strips query parameters from the callback URL it is given; it buys working webhooks at the
     price of forgeable completions (`_allow_unsigned_webhooks`).
-  OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE — `1`/`true`/`yes` lets UNVERIFIED compliance fields
-    survive the router's compliance stage. Unset (or anything else) ⇒ fail closed: unverified
-    is eliminated. The one switch that widens the eligible set; leave it off without a reason.
-  OPENREADING_TRAIN_OPTOUT_CONFIRMED — comma-separated slugs whose no-train opt-out you have
-    confirmed with the vendor (blank entries dropped). Gates `trains_on_customer_data: opt_out`
-    only: unset ⇒ an opt-out backend fails `no_train_on_data` closed. A literally `unverified`
-    posture is governed by OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE, not this var
-    (`openreading.router.compliance`).
-  OPENREADING_BAA_TIER_CONFIRMED — comma-separated slugs whose tier-gated BAA you have actually
-    signed (e.g. `reducto`). Unset ⇒ `hipaa_baa: tier_gated` fails `require_baa` (D7a).
-    Both attestation lists are read per request by _server_router_config (D7: an account-level
-    assertion the operator makes, never a per-request wire field).
-  OPENREADING_CONFIG — path to a strategy file, loaded once in create_app with allow_cwd=False.
-    Unset ⇒ no user-defined strategies: the presets (`openreading.strategies.presets`) still run
-    configless through api.run_request; any other `strategy:<name>` → 400 unknown_strategy. The
-    server never sniffs `./openreading.yaml` in its cwd (D-v3-5), so this is the only non-flag
-    way to load one. A file that fails the config schema fails startup. A malformed `policy:`
-    block is compiled later, so it surfaces as a 500 with `category: "error"` on the first
-    request that engages a strategy. Also discovery step 2 for the CLI / Python API
-    (`openreading.strategies.loader`).
+  OPENREADING_CONFIG — path to the openreading.yaml, loaded once in create_app with
+    allow_cwd=False. Its `policy:` block is this deployment's compliance posture, folded into
+    EVERY request before it routes, whether or not the request names a strategy
+    (`openreading.config.apply`). Unset ⇒ no policy and no user-defined strategies: the presets
+    (`openreading.strategies.presets`) still run configless through api.run_request; any other
+    `strategy:<name>` → 400 unknown_strategy. The server never sniffs `./openreading.yaml` in its
+    cwd (D-v3-5), so this is the only non-flag way to load one. A file that fails the config
+    schema, or whose `policy:` block is not a policy, fails startup: an operator learns the file
+    is wrong from the process that will not start, not from one caller's 500. Also discovery step
+    2 for the CLI / Python API (`openreading.config`).
   Backend credential vars (REDUCTO_API_KEY, the AWS_* chain, REDUCTO_WEBHOOK_SECRET, ...) —
     resolved per request through EnvCredentialBroker (`openreading.credentials`), never taken
     from a body. A missing key on a named backend ⇒ 424 naming the var; a missing
@@ -189,7 +178,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
-from openreading import __version__, api, schemas
+from openreading import __version__, api, config, schemas
 from openreading.adapters.registry import BUILTIN_ADAPTERS, build_registry, make_adapter
 from openreading.batch.sources import DEFAULT_MAX_ITEMS
 from openreading.credentials import (
@@ -338,7 +327,7 @@ def _job_dict(rec: JobRecord) -> dict[str, Any]:
 # scheduler thread, so sweeping is lazy: _sweep_jobs runs at the top of every submit/GET call
 # rather than on a timer. Plain module globals, read once when this module is imported (the same
 # effective timing as process startup for `openreading serve`) rather than per-request like
-# _server_router_config/_gate_document_path below: a malformed value should fail at boot, not
+# _gate_document_path below: a malformed value should fail at boot, not
 # crash unpredictably on the first job request that happens to touch it (the same reasoning
 # _load_api_key_config gives for parsing OPENREADING_API_KEYS once in create_app, AC-7) — and
 # unlike those two, _sweep_jobs is a plain top-level function with no `app` closure to cache a
@@ -464,30 +453,6 @@ def _verify_svix(secret: str, raw: bytes, headers: dict[str, str]) -> None:
         Webhook(secret).verify(raw, svix_headers)
 
 
-def _server_router_config() -> RouterConfig:
-    """Deployment-level router knobs from the environment (never the request body — D7)."""
-    allow = os.environ.get("OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE", "").lower() in (
-        "1",
-        "true",
-        "yes",
-    )
-    optout = frozenset(
-        s.strip()
-        for s in os.environ.get("OPENREADING_TRAIN_OPTOUT_CONFIRMED", "").split(",")
-        if s.strip()
-    )
-    baa_tier = frozenset(
-        s.strip()
-        for s in os.environ.get("OPENREADING_BAA_TIER_CONFIRMED", "").split(",")
-        if s.strip()
-    )
-    return RouterConfig(
-        allow_unverified_compliance=allow,
-        train_optout_confirmed=optout,
-        baa_tier_confirmed=baa_tier,
-    )
-
-
 class _GatedFileRefused(Exception):
     """`_read_gated_file` will not hand back this file. Its message is caller-facing (it becomes a
     400 body), so it names the failure and never the server-side detail behind it."""
@@ -608,10 +573,9 @@ class ApiKeyConfig:
 
 
 def _load_api_key_config() -> ApiKeyConfig:
-    """OPENREADING_API_KEYS: comma-separated bearer tokens (the same comma-list convention
-    OPENREADING_TRAIN_OPTOUT_CONFIRMED/OPENREADING_BAA_TIER_CONFIRMED already use) — unset or
-    empty means caller auth is off (AC-1's byte-for-byte-unchanged default). Unlike those two
-    siblings, an empty ENTRY here is a hard failure rather than silently dropped: a key is
+    """OPENREADING_API_KEYS: comma-separated bearer tokens — unset or empty means caller auth is
+    off (AC-1's byte-for-byte-unchanged default). An empty ENTRY here is a hard failure rather
+    than silently dropped: a key is
     security-bearing, so a stray comma should never be able to leave an operator believing a token
     is configured when a parse quietly discarded it.
 
@@ -742,7 +706,10 @@ def _engages_a_strategy(req: OpenReadingRequest, strategy_config: Any) -> bool:
 
 
 def _out_of_scope_backend(
-    req: OpenReadingRequest, scope: frozenset[str], strategy_config: Any = None
+    req: OpenReadingRequest,
+    scope: frozenset[str],
+    strategy_config: Any = None,
+    router_config: RouterConfig | None = None,
 ) -> str | None:
     """A backend id naming why `req` cannot run under `scope`, or None when it can.
 
@@ -783,7 +750,7 @@ def _out_of_scope_backend(
     if _engages_a_strategy(req, strategy_config):
         return None  # checked inside the walk — see above
     if backend_id == "auto" or strat == "none":
-        plan = Router(build_registry(), _server_router_config()).route(req)
+        plan = Router(build_registry(), router_config or RouterConfig()).route(req)
         if plan.chosen is None:
             return None  # compliance's refusal, not scope's
         if plan.restrict_to(scope).chosen is not None:
@@ -1036,14 +1003,22 @@ def create_app(*, cors_origins: list[str] | None = None):
     # A no-op when OPENREADING_LEDGER is unset.
     api.reap_expired_now()
 
-    # Strategy config is loaded ONLY from OPENREADING_CONFIG — the server never sniffs its cwd
-    # (spec §1.2). A broken config fails fast at startup.
-    from openreading.strategies.loader import load_config as _load_strategy_config
+    # The openreading.yaml is loaded ONLY from OPENREADING_CONFIG — the server never sniffs its
+    # cwd (spec §1.2). A broken file fails fast at startup, and so does a `policy:` block that is
+    # not a policy: an operator learns the file is wrong from the process that will not start,
+    # rather than from the first caller whose request happened to engage a strategy.
+    from openreading.strategies.loader import build_config as _build_strategy_config
 
-    _loaded = _load_strategy_config(None, allow_cwd=False)
-    app.state.strategy_config = _loaded.config if _loaded else None
+    _loaded = config.load(None, allow_cwd=False)
+    _strategy = _build_strategy_config(_loaded)
+    app.state.strategy_config = _strategy.config if _strategy else None
+    # The deployment's compliance posture, read once. Every handler folds it into the request it
+    # is about to route (`config.apply`), which is what gives a request naming a backend by name
+    # the same constraints a strategy run has always had.
+    app.state.policy = _loaded.policy if _loaded else None
+    app.state.router_config = config.router_config(app.state.policy)
 
-    # BL-159: parsed ONCE here, not per-request (unlike _server_router_config) — a malformed
+    # BL-159: parsed ONCE here, not per-request — a malformed
     # OPENREADING_API_KEYS/_SCOPES config must fail server startup (AC-7), and re-parsing per
     # request would only ever surface that on the first authenticated request instead.
     api_key_config = _load_api_key_config()
@@ -1244,12 +1219,22 @@ def create_app(*, cors_origins: list[str] | None = None):
         refusal, req = _gate_document_path(req)
         if refusal is not None:
             return _bad_request(refusal)
+        # The operator's `policy:` block unions into the request before anything routes it, so a
+        # request naming a backend is gated by the same constraints a strategy run is (law P4).
+        # The fold can REFUSE, not only return: a body naming a region the file forbids has no
+        # intersection with it. That is a compliance outcome and takes the 403 every other
+        # compliance refusal takes, so it is caught here rather than escaping the handler's own
+        # try/except below as a bare 500 with no body.
+        try:
+            req, router_config = config.apply(req, app.state.policy, app.state.router_config)
+        except _ADAPTER_ERRORS as e:
+            return _error_response(e)
         # BL-159 AC-3: scope-gate BEFORE run_request ever constructs an adapter or resolves a
         # vendor credential — for both a directly-named backend outside the key's allow-list and
         # an "auto" request the router would otherwise have picked one for.
         scope = getattr(request.state, "api_key_scope", None)
         if scope is not None:
-            denied = _out_of_scope_backend(req, scope, app.state.strategy_config)
+            denied = _out_of_scope_backend(req, scope, app.state.strategy_config, router_config)
             if denied is not None:
                 return _scope_denied_response(denied)
         try:
@@ -1258,7 +1243,7 @@ def create_app(*, cors_origins: list[str] | None = None):
             result = await run_in_threadpool(
                 api.run_request,
                 req,
-                config=_server_router_config(),
+                config=router_config,
                 strategy_config=app.state.strategy_config,
                 keep_candidates=keep,
                 cache=app.state.result_cache,
@@ -1269,14 +1254,6 @@ def create_app(*, cors_origins: list[str] | None = None):
             )
         except KeyError as e:
             return _unknown_backend(e)
-        except api.PolicyError as e:
-            # The OPERATOR's `openreading.yaml` `policy:` block, refused at the compile boundary
-            # (strategies/prune._validated_policy). Deliberately not an _ADAPTER_ERRORS member —
-            # it is a server misconfiguration, not a backend outcome, so it takes the table's
-            # "500 anything else" rung rather than a 4xx that would blame the caller's request.
-            # Routed through _error_response so it still answers with the documented envelope
-            # instead of an unhandled 500 with no body.
-            return _error_response(e)
         except _ADAPTER_ERRORS as e:
             return _error_response(e)
         schemas.validate_response(result)  # never emit a non-conforming response
@@ -1288,7 +1265,11 @@ def create_app(*, cors_origins: list[str] | None = None):
             req = await _parse_request(request)
         except Exception as e:  # noqa: BLE001
             return _bad_request(_validation_message(e))
-        plan = Router(build_registry(), _server_router_config()).route(req)
+        try:
+            req, router_config = config.apply(req, app.state.policy, app.state.router_config)
+        except _ADAPTER_ERRORS as e:  # a body/file compliance conflict — 403, never a 500
+            return _error_response(e)
+        plan = Router(build_registry(), router_config).route(req)
         return {
             "chosen": plan.chosen.descriptor.id if plan.chosen else None,
             "fallbacks": [a.descriptor.id for a in plan.fallbacks],
@@ -1516,11 +1497,14 @@ def create_app(*, cors_origins: list[str] | None = None):
                     refusal, item_req = _gate_document_path(item_req)
                     if refusal is not None:
                         raise ValueError(refusal)
+                    item_req, item_cfg = config.apply(
+                        item_req, app.state.policy, app.state.router_config
+                    )
                 except Exception:  # noqa: BLE001 — an unbuildable item is run_batch's own M6
                     # per-item-isolation concern (surfaces there as a `failed` item); it is not a
                     # scope decision, so this pre-check defers to that existing path.
                     continue
-                denied = _out_of_scope_backend(item_req, scope, app.state.strategy_config)
+                denied = _out_of_scope_backend(item_req, scope, app.state.strategy_config, item_cfg)
                 if denied is not None:
                     return _scope_denied_response(denied)
 
@@ -1544,9 +1528,11 @@ def create_app(*, cors_origins: list[str] | None = None):
             refusal, req = _gate_document_path(req)
             if refusal is not None:
                 raise ValueError(refusal)
+            # A refusal here is this ITEM's outcome, isolated like any other bad item (M6).
+            req, item_router_config = config.apply(req, app.state.policy, app.state.router_config)
             return api.run_request(
                 req,
-                config=_server_router_config(),
+                config=item_router_config,
                 strategy_config=app.state.strategy_config,
                 # A `strategy:` batch is the highest-volume way to reach an out-of-scope backend —
                 # one request, `documents[]` items of spend — and the top-level `backend` check
@@ -1586,6 +1572,10 @@ def create_app(*, cors_origins: list[str] | None = None):
             req = await _parse_request(request)
         except Exception as e:  # noqa: BLE001
             return _bad_request(_validation_message(e))
+        try:
+            req, router_config = config.apply(req, app.state.policy, app.state.router_config)
+        except _ADAPTER_ERRORS as e:  # a body/file compliance conflict — 403, never a 500
+            return _error_response(e)
         backend = req.backend.id
 
         # `strategy:<name>` — wrap the WHOLE strategy walk as one synthetic job (integration.md
@@ -1597,7 +1587,7 @@ def create_app(*, cors_origins: list[str] | None = None):
                 result = await run_in_threadpool(
                     api.run_request,
                     req,
-                    config=_server_router_config(),
+                    config=router_config,
                     strategy_config=app.state.strategy_config,
                     # Same walk, same gate as /v1/parse: wrapping it in a job must not be a way to
                     # reach a backend the token is refused when it asks synchronously.
@@ -1605,8 +1595,6 @@ def create_app(*, cors_origins: list[str] | None = None):
                 )
             except KeyError as e:
                 return _unknown_backend(e)
-            except api.PolicyError as e:  # operator config — /v1/parse's sibling above
-                return _error_response(e)
             except _ADAPTER_ERRORS as e:
                 # UnknownStrategyError is a TerminalError, so this catches it too;
                 # _error_response maps it to its own 400 before the generic terminal branch.
@@ -1638,7 +1626,7 @@ def create_app(*, cors_origins: list[str] | None = None):
         # constructs an adapter or resolves a vendor credential.
         scope = getattr(request.state, "api_key_scope", None)
         if scope is not None:
-            denied = _out_of_scope_backend(req, scope, app.state.strategy_config)
+            denied = _out_of_scope_backend(req, scope, app.state.strategy_config, router_config)
             if denied is not None:
                 return _scope_denied_response(denied)
         try:
@@ -1649,7 +1637,7 @@ def create_app(*, cors_origins: list[str] | None = None):
             # deadline_ms=None (BL-153): no request-schema field originates a real per-request
             # deadline for this path yet — see api.prepare_named_backend's own docstring.
             adapter, req, ctx = api.prepare_named_backend(
-                req, backend, config=_server_router_config(), deadline_ms=None
+                req, backend, config=router_config, deadline_ms=None
             )
         except KeyError as e:
             return _unknown_backend(e)

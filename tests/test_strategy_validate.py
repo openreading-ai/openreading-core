@@ -6,25 +6,24 @@ message locates (file + node path), explains, and suggests a fix.
 
 from __future__ import annotations
 
-import json
-
 import pytest
+from pydantic import ValidationError
 
 from openreading.cli.app import main
 from openreading.strategies import StrategyConfig, validate_config
 
 
-def _issues(cfg, policy=None):
+def _issues(cfg):
     model = StrategyConfig.model_validate(cfg)
-    return validate_config(model, policy=policy, raw=cfg)
+    return validate_config(model, raw=cfg)
 
 
-def _errors(cfg, policy=None):
-    return [i for i in _issues(cfg, policy) if i.level == "error"]
+def _errors(cfg):
+    return [i for i in _issues(cfg) if i.level == "error"]
 
 
-def _warnings(cfg, policy=None):
-    return [i for i in _issues(cfg, policy) if i.level == "warning"]
+def _warnings(cfg):
+    return [i for i in _issues(cfg) if i.level == "warning"]
 
 
 def _has(issues, path_frag, msg_frag):
@@ -119,12 +118,15 @@ def test_decide_candidates_colliding_on_one_label():
     assert _has(_errors(cfg), "strategies.x", "both resolve to the candidate label 'parallel'")
 
 
-def test_secret_pattern_key_in_open_subtree():
-    # the policy block is an open superset; a secret hiding there is caught
-    errs = _errors(
-        {"version": 1, "policy": {"api_key": "sk-xxx"}, "strategies": {"x": ["pymupdf"]}}
-    )
-    assert _has(errs, "policy.api_key", "looks like a secret")
+def test_a_secret_in_the_policy_block_is_refused_outright():
+    """`policy:` was an open subtree, so a secret hiding there could only be WARNED about by the
+    secret scan. v0.3 closed the block, so `api_key` is now simply not a policy key and the
+    config will not build at all. Refusing beats warning: nothing downstream can read it."""
+    with pytest.raises(ValidationError) as exc:
+        StrategyConfig.model_validate(
+            {"version": 1, "policy": {"api_key": "sk-xxx"}, "strategies": {"x": ["pymupdf"]}}
+        )
+    assert "api_key" in str(exc.value)
 
 
 def test_with_allowlist_secret_also_caught():
@@ -345,8 +347,12 @@ def test_judged_over_three_candidates_warns():
 
 
 def test_policy_unreachable_step_warns():
-    cfg = {"version": 1, "strategies": {"x": ["pymupdf", "reducto"]}}
-    w = _warnings(cfg, policy={"require_local": True})
+    cfg = {
+        "version": 1,
+        "policy": {"require_local": True},
+        "strategies": {"x": ["pymupdf", "reducto"]},
+    }
+    w = _warnings(cfg)
     assert _has(w, "steps[1].backend", "filtered out by the policy")
 
 
@@ -399,34 +405,27 @@ def test_cli_validate_schema_error_located(_clean_cwd, capsys):
     assert str(f) in capsys.readouterr().err
 
 
-def test_cli_validate_with_policy(_clean_cwd, capsys, tmp_path):
+def test_cli_validate_with_a_policy_block(_clean_cwd, capsys):
     f = _clean_cwd / "openreading.yaml"
-    f.write_text("version: 1\nstrategies:\n  x: [pymupdf, reducto]\n")
-    pol = _clean_cwd / "phi.json"
-    pol.write_text(json.dumps({"require_local": True}))
-    rc = main(["strategy", "validate", "--config", str(f), "--policy", str(pol)])
+    f.write_text(
+        "version: 1\npolicy: {require_local: true}\nstrategies:\n  x: [pymupdf, reducto]\n"
+    )
+    rc = main(["strategy", "validate", "--config", str(f)])
     # warnings don't fail the exit code
     assert rc == 0
     assert "filtered out by the policy" in capsys.readouterr().out
 
 
-def test_cli_validate_unreadable_policy_exits_3_without_a_traceback(_clean_cwd, capsys):
-    # An unreadable --policy fails the same way an unreadable --config does: one tagged stderr
-    # line, exit 3. main() returning at all is what pins "no traceback".
+def test_cli_validate_a_policy_block_that_is_not_a_policy_exits_3(_clean_cwd, capsys):
+    """The block is the only spelling of a policy, so a key that is not one is an error here and
+    not an advisory. One tagged stderr line, exit 3; main() returning at all pins "no traceback"."""
     f = _clean_cwd / "openreading.yaml"
-    f.write_text("version: 1\nstrategies:\n  x: [pymupdf]\n")
-    malformed = _clean_cwd / "bad.json"
-    malformed.write_text("{not json")
-    for pol in (_clean_cwd / "missing.json", malformed):
-        rc = main(["strategy", "validate", "--config", str(f), "--policy", str(pol)])
-        assert rc == 3
-        err = capsys.readouterr().err
-        # A file that will not open and a file whose bytes are not JSON say which one failed.
-        if pol is malformed:
-            assert err.startswith(f"[strategy validate] policy {malformed} is not valid JSON")
-        else:
-            assert err.startswith("[strategy validate] cannot read policy")
-        assert len(err.splitlines()) == 1
+    f.write_text("version: 1\npolicy: {require_locall: true}\nstrategies:\n  x: [pymupdf]\n")
+    rc = main(["strategy", "validate", "--config", str(f)])
+    assert rc == 3
+    err = capsys.readouterr().err
+    assert "require_locall" in err
+    assert "Traceback" not in err
 
 
 # ---- P3: Plain-dialect validation (§8 strategy-validate rows, harness §15 T4/T6) --------------
@@ -438,10 +437,10 @@ def test_cli_validate_unreadable_policy_exits_3_without_a_traceback(_clean_cwd, 
 from openreading.strategies.plain import desugar_config  # noqa: E402
 
 
-def _plain_issues(cfg, policy=None):
+def _plain_issues(cfg):
     desugared, plain_info = desugar_config(cfg)
     model = StrategyConfig.model_validate(desugared)
-    return validate_config(model, policy=policy, raw=desugared, plain_info=plain_info)
+    return validate_config(model, raw=desugared, plain_info=plain_info)
 
 
 def _plain_errors(cfg):
@@ -702,8 +701,8 @@ def test_cli_validate_refuses_unenforced_guardrails_and_never_affirms_them(_clea
 def test_cli_validate_with_no_config_anywhere_exits_3_not_0(_clean_cwd, capsys):
     """A CI job whose whole purpose is `openreading strategy validate` must not pass when there is
     nothing to validate. Reported as exiting 0 (a false green) and re-measured at 3 in every
-    invocation form — auto-discovery, an explicit `--config` naming a missing file, with and
-    without `--policy`. This pins that, since the finding would have been real if it were true."""
+    invocation form: auto-discovery, and an explicit `--config` naming a missing file. This pins
+    that, since the finding would have been real if it were true."""
     for argv in (
         ["strategy", "validate"],
         ["strategy", "validate", "--config", str(_clean_cwd / "nope.yaml")],

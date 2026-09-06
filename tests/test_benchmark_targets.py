@@ -38,7 +38,6 @@ def test_execute_target_uses_public_api_for_backend(monkeypatch) -> None:
         "doc.pdf",
         BenchmarkTarget.parse("backend:pymupdf"),
         product="parse",
-        policy={"require_local": True},
     )
 
     assert result["status"]["state"] == "succeeded"
@@ -50,7 +49,6 @@ def test_execute_target_uses_public_api_for_backend(monkeypatch) -> None:
             {
                 "backend": "pymupdf",
                 "config": None,
-                "policy": {"require_local": True},
                 # ParseBench reads tables out of `<table>` markup and ignores GFM pipe tables.
                 "outputs": {"tables": "html"},
             },
@@ -80,7 +78,6 @@ def test_execute_target_passes_strategy_config_and_extract_schema(monkeypatch) -
     assert calls[0][1] == {
         "strategy": "fields",
         "config": "openreading.yaml",
-        "policy": None,
         "extraction_schema": {"json_schema": schema, "citations": True},
         "outputs": {"typed_fields": True},
     }

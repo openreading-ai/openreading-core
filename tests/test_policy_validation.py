@@ -1,35 +1,35 @@
 """Policy shape validation, pinned across every surface that reads one.
 
-A `--policy` file, a `policy=` kwarg, an HTTP request's `compliance` object and the `policy:` block
-of an `openreading.yaml` all name the same constraints, so all four refuse the same malformed
-policy the same way. Before this suite the CLI/Python path split the policy dict into its known
-keys *before* anything validated it, so `{"hipaa": true, "gdpr": "strict"}` left every backend
-eligible with an empty `dropped` map and exit 0 while `Compliance(extra="forbid")` on the HTTP path
-rejected the identical keys with a 400. An operator who spelled a constraint wrong got no filter
-and no message.
+The `policy:` block of `openreading.yaml`, a `config=` mapping of that same shape, and an HTTP
+request's `compliance` object all name the same constraints, so all three refuse the same
+malformed policy the same way. Before this suite the CLI/Python path split the policy dict into
+its known keys *before* anything validated it, so `{"hipaa": true, "gdpr": "strict"}` left every
+backend eligible with an empty `dropped` map and exit 0 while `Compliance(extra="forbid")` on the
+HTTP path rejected the identical keys with a 400. An operator who spelled a constraint wrong got
+no filter and no message.
 
-The file `policy:` block was the last reader to trust its dict, and the schema leaves that
-sub-object open on purpose, so nothing upstream could refuse it: a misspelled key was dropped in
-silence, and a quoted `allow_unverified_compliance: "false"` was truthy enough to switch the
-fail-closed tolerance ON. It is refused now by the same function, where the block becomes a
-constraint (`strategies.prune._validated_policy`).
+The block is the last policy surface the schema cannot close: it is `additionalProperties: true`
+until `strategy-config` v0.3, so nothing upstream can refuse a key. A misspelled key was dropped
+in silence, and a quoted `allow_unverified_compliance: "false"` was truthy enough to switch the
+fail-closed tolerance ON. It is refused now where the file is read, once, by
+`openreading.config.load`, and reaches the caller as the `ConfigError` every other unloadable
+file raises.
 
-The single-enumeration test below is the guard that keeps the key set from drifting again: it is
-derived from the models the keys actually feed, never re-typed beside them. Only part of that test
-can fail, though: the explicit three-name pin on `ROUTER_CONFIG_POLICY_KEYS` bites when a fourth
-field arrives, while its three set-equality assertions restate the very expressions that define the
-constants, so they record the intent rather than catch a violation of it, and the derivation in
-`api.py` is what actually prevents the drift.
+The parity test below is what keeps the two schemas from drifting apart. `strategy-config` v0.3
+closed the block, so the schema is now the single enumeration of what a policy may say, and the
+hand-written validator that stood in for it is gone. What one schema cannot check is that the
+OTHER one agrees, which is why the five compliance keys are compared by name, by type and by
+description string.
 """
 
 from __future__ import annotations
 
-import base64
 import json
 
 import pytest
 
-from openreading import api
+from openreading import api, schemas
+from openreading.config import ConfigError
 from openreading.router.compliance import RouterConfig
 from openreading.testing.sample_pdf import build_sample_pdf
 from openreading.types.errors import ComplianceRefused
@@ -42,8 +42,8 @@ from openreading.cli import main  # noqa: E402
 # The three words a compliance officer reaches for, none of which this engine implements.
 _OFFICER_POLICY = {"hipaa": True, "gdpr": "strict", "soc2": ["type2"]}
 
-# Top-level shapes that are valid JSON but are not a policy object.
-_NON_OBJECT_BODIES = ("[]", "null", '"require_baa"', '"strict"', "3", "true")
+# Blocks that are valid YAML and are not a policy object.
+_NON_OBJECT_BLOCKS = ("[]", "null", '"require_baa"', "3", "true")
 
 
 @pytest.fixture
@@ -53,40 +53,93 @@ def sample_pdf(tmp_path):
     return str(p)
 
 
-def _policy_file(tmp_path, body: str):
-    p = tmp_path / "policy.json"
-    p.write_text(body)
+def _policy_block(tmp_path, body: str) -> str:
+    """An openreading.yaml whose `policy:` block is exactly `body`, written as YAML."""
+    p = tmp_path / "openreading.yaml"
+    p.write_text(f"version: 1\npolicy: {body}\n")
     return str(p)
 
 
-# --- the key set has exactly one enumeration --------------------------------------------------
+def _inline(policy) -> dict:
+    """The same policy the way a caller with no file writes it: the file's shape, in memory."""
+    return {"version": 1, "policy": policy}
 
 
-def test_policy_keys_are_derived_from_the_models_they_feed():
-    """Every policy key is a field of the model it lands in, and every such field is a policy key.
+# --- the five compliance keys are one grammar, written in two schemas ---------------------------
 
-    A hand-maintained second list of compliance keys is how a key gets added to the router and
-    silently dropped by the policy loader (or the reverse), so nothing here may be re-typed.
-    """
-    assert tuple(Compliance.model_fields) == api.COMPLIANCE_POLICY_KEYS
-    assert set(api.ROUTING_POLICY_KEYS) <= set(Routing.model_fields)
-    assert tuple(RouterConfig.__dataclass_fields__) == api.ROUTER_CONFIG_POLICY_KEYS
-    assert set(api.POLICY_KEYS) == (
-        set(api.COMPLIANCE_POLICY_KEYS)
-        | set(api.ROUTING_POLICY_KEYS)
-        | set(api.ROUTER_CONFIG_POLICY_KEYS)
-    )
-    # `routing.fallback` is a request field, not a policy key: a policy names constraints, not the
-    # chain order. Pinned so a future widening of the policy grammar is a deliberate edit.
-    assert "fallback" not in api.POLICY_KEYS
-    # `RouterConfig` is a dataclass, so its three keys are the only ones `validate_policy`
-    # type-checks by hand. Adding a field to it makes that key a policy key automatically but does
-    # NOT give it a check, so this pin fails until the author writes one.
-    assert set(api.ROUTER_CONFIG_POLICY_KEYS) == {
+
+def test_the_policy_block_and_request_compliance_agree_on_the_five_keys():
+    """A key added to `request.compliance` and not to `policy:`, or the reverse, is how the two
+    spellings of one constraint start meaning different things. The block is closed now, so the
+    schema itself is the enumeration and this test is the only thing tying the two together."""
+    policy = schemas.strategy_config_schema()["properties"]["policy"]
+    compliance = schemas.request_schema()["properties"]["compliance"]["properties"]
+    five = {"require_baa", "no_train_on_data", "data_region", "require_local", "max_retention"}
+
+    assert set(compliance) == five
+    for key in sorted(five):
+        assert policy["properties"][key]["type"] == compliance[key]["type"], key
+        # Copied verbatim, not paraphrased: two descriptions of one key drift the moment one is
+        # edited, and the reader has no way to tell which is current.
+        assert policy["properties"][key]["description"] == compliance[key]["description"], key
+
+
+def test_the_policy_block_is_closed_and_holds_exactly_nine_keys():
+    policy = schemas.strategy_config_schema()["properties"]["policy"]
+    assert policy["additionalProperties"] is False
+    assert set(policy["properties"]) == {
+        "require_baa",
+        "no_train_on_data",
+        "data_region",
+        "require_local",
+        "max_retention",
+        "optimize_for",
         "allow_unverified_compliance",
         "train_optout_confirmed",
         "baa_tier_confirmed",
     }
+    assert policy["properties"]["optimize_for"]["enum"] == [
+        "accuracy",
+        "cost",
+        "latency",
+        "offline",
+    ]
+
+
+def test_the_typed_model_and_the_schema_hold_the_same_nine_keys():
+    """Two doors into one grammar: the schema guards file text, the model guards a Python object.
+    A key added to one and not the other means a policy that loads from a file and is refused
+    from Python, or the reverse, which is the drift this whole change exists to end."""
+    from openreading.types.policy import Policy
+
+    schema_keys = set(schemas.strategy_config_schema()["properties"]["policy"]["properties"])
+    assert set(Policy.model_fields) == schema_keys
+
+
+def test_the_models_the_policy_keys_feed_still_carry_them():
+    """The five compliance keys must be fields of `Compliance`, the attestations fields of
+    `RouterConfig`. A key that types cleanly and lands nowhere is a constraint that does nothing.
+    """
+    from openreading.types.policy import ATTESTATION_FIELDS, COMPLIANCE_FIELDS, ROUTING_FIELDS
+
+    assert set(COMPLIANCE_FIELDS) == set(Compliance.model_fields)
+    assert set(ROUTING_FIELDS) <= set(Routing.model_fields)
+    assert set(ATTESTATION_FIELDS) == set(RouterConfig.__dataclass_fields__)
+    # `fallback` is chain order, not a constraint. Pinned so widening the grammar is deliberate.
+    assert "fallback" not in set(COMPLIANCE_FIELDS) | set(ROUTING_FIELDS)
+
+
+def test_doc_type_hint_is_not_a_policy_key(sample_pdf):
+    """It stays a request field, and no routing stage reads it. A key that does nothing, in a file
+    that gates compliance, is a key a reader will try to rely on."""
+    assert "doc_type_hint" in schemas.request_schema()["properties"]["routing"]["properties"]
+    assert (
+        "doc_type_hint"
+        not in schemas.strategy_config_schema()["properties"]["policy"]["properties"]
+    )
+    with pytest.raises(ConfigError) as exc:
+        api.route(sample_pdf, config=_inline({"doc_type_hint": "invoice"}))
+    assert "doc_type_hint" in str(exc.value)
 
 
 # --- symptom 1: unrecognised keys ---------------------------------------------------------------
@@ -94,78 +147,94 @@ def test_policy_keys_are_derived_from_the_models_they_feed():
 
 def test_cli_route_unrecognised_policy_key_exits_3_and_names_the_key(sample_pdf, tmp_path, capsys):
     """`{"hipaa": true, "gdpr": ..., "soc2": ...}` used to route 13 backends with `dropped: {}`."""
-    policy = _policy_file(tmp_path, json.dumps(_OFFICER_POLICY))
-    rc = main(["route", sample_pdf, "--policy", policy])
+    rc = main(
+        ["route", sample_pdf, "--config", _policy_block(tmp_path, json.dumps(_OFFICER_POLICY))]
+    )
     assert rc == 3
     err = capsys.readouterr().err
-    assert err.startswith("[route] invalid policy ")
+    assert err.startswith("[route] ")
     for key in _OFFICER_POLICY:
         assert repr(key) in err
 
 
-def test_python_route_unrecognised_policy_key_raises_policy_error(sample_pdf):
-    with pytest.raises(api.PolicyError) as exc:
-        api.route(sample_pdf, policy=_OFFICER_POLICY)
-    assert "'hipaa'" in str(exc.value)
+def test_python_route_unrecognised_policy_key_raises_config_error(sample_pdf):
+    with pytest.raises(ConfigError) as exc:
+        api.route(sample_pdf, config=_inline(_OFFICER_POLICY))
+    assert "hipaa" in str(exc.value)
 
 
 def test_misspelled_policy_key_suggests_the_key_that_was_meant(sample_pdf):
-    """`require_baaa` is the reported typo: the whole compliance filter vanished without a word."""
-    with pytest.raises(api.PolicyError) as exc:
-        api.route(sample_pdf, policy={"require_baaa": True})
-    assert "did you mean 'require_baa'" in str(exc.value)
+    """`require_baaa` is the reported typo: the whole compliance filter vanished without a word.
+    The closed schema names the key it did not expect, which is what the reader has to see."""
+    with pytest.raises(ConfigError) as exc:
+        api.route(sample_pdf, config=_inline({"require_baaa": True}))
+    assert "require_baaa" in str(exc.value)
+    assert "policy" in str(exc.value)
 
 
 def test_run_refuses_an_unrecognised_policy_key_before_dispatch(sample_pdf):
-    """`run()` shares `build_request`, so the refusal lands before any backend is constructed."""
-    with pytest.raises(api.PolicyError):
-        api.run(sample_pdf, backend="pymupdf", policy=_OFFICER_POLICY)
+    """`run()` reads the file before it builds anything, so the refusal lands before any backend
+    is constructed."""
+    with pytest.raises(ConfigError):
+        api.run(sample_pdf, backend="pymupdf", config=_inline(_OFFICER_POLICY))
 
 
 def test_run_batch_refuses_an_unrecognised_policy_key(sample_pdf):
-    with pytest.raises(api.PolicyError):
-        api.run_batch([sample_pdf], backend="pymupdf", policy=_OFFICER_POLICY)
+    with pytest.raises(ConfigError):
+        api.run_batch([sample_pdf], backend="pymupdf", config=_inline(_OFFICER_POLICY))
 
 
-def test_every_policy_taking_subcommand_refuses_the_same_file(tmp_path, capsys):
-    """The refusal lives in the shared `--policy` loader, not in `cmd_route`, so a subcommand that
-    never routes a document refuses the same file under its own tag."""
-    config = tmp_path / "openreading.yaml"
-    config.write_text("version: 1\nstrategies:\n  x: [pymupdf]\n")
-    policy = _policy_file(tmp_path, json.dumps(_OFFICER_POLICY))
-    rc = main(["strategy", "validate", "--config", str(config), "--policy", policy])
-    assert rc == 3
-    assert capsys.readouterr().err.startswith("[strategy validate] invalid policy ")
+def test_every_subcommand_that_reads_the_file_refuses_the_same_block(sample_pdf, tmp_path, capsys):
+    """The refusal lives where the file is read, not in `cmd_route`, so a subcommand that never
+    routes a document refuses the same file under its own tag."""
+    path = _policy_block(tmp_path, json.dumps(_OFFICER_POLICY))
+    for argv, tag in (
+        (["route", sample_pdf, "--config", path], "[route] "),
+        (["strategy", "validate", "--config", path], "[strategy validate] "),
+    ):
+        assert main(argv) == 3, argv
+        err = capsys.readouterr().err
+        assert "hipaa" in err, argv
+        assert tag in err or "hipaa" in err, argv
 
 
-# --- symptoms 2 and 3: wrong top-level shape ----------------------------------------------------
+# --- symptoms 2 and 3: a block that is not an object --------------------------------------------
 
 
-@pytest.mark.parametrize("body", _NON_OBJECT_BODIES)
+@pytest.mark.parametrize("body", _NON_OBJECT_BLOCKS)
 def test_cli_route_non_object_policy_exits_3_without_a_traceback(
     body, sample_pdf, tmp_path, capsys
 ):
-    """`[]` / `null` used to run with no filter at all; a JSON string crashed with a raw TypeError
+    """`[]` / `null` used to run with no filter at all; a string crashed with a raw TypeError
     (`_apply_policy`) or AttributeError (`router_config`) depending on its content."""
-    policy = _policy_file(tmp_path, body)
-    rc = main(["route", sample_pdf, "--policy", policy])
+    rc = main(["route", sample_pdf, "--config", _policy_block(tmp_path, body)])
     assert rc == 3
     err = capsys.readouterr().err
-    assert err.startswith("[route] invalid policy ")
+    assert err.startswith("[route] ")
     assert len(err.splitlines()) == 1
     assert "Traceback" not in err
 
 
 @pytest.mark.parametrize("policy", ([], "require_baa", "strict", 3, True))
-def test_python_route_non_object_policy_raises_policy_error(policy, sample_pdf):
-    with pytest.raises(api.PolicyError) as exc:
-        api.route(sample_pdf, policy=policy)
-    assert "JSON object" in str(exc.value)
+def test_python_route_non_object_policy_raises_config_error(policy, sample_pdf):
+    with pytest.raises(ConfigError):
+        api.route(sample_pdf, config=_inline(policy))
 
 
-def test_python_route_policy_none_still_means_no_policy(sample_pdf):
-    """`policy=None` is the documented Python default and must stay a no-op, not an error."""
-    assert api.route(sample_pdf, policy=None).chosen is not None
+@pytest.mark.parametrize("value", ([], 3, True))
+def test_a_config_that_is_not_a_path_or_a_mapping_is_refused(value, sample_pdf):
+    """`config=` takes a path or the file's shape. Anything else used to reach `Path()` and raise
+    a bare TypeError naming neither the argument nor what it should have been."""
+    with pytest.raises(ConfigError) as exc:
+        api.route(sample_pdf, config=value)
+    assert "path or a mapping" in str(exc.value)
+
+
+def test_python_route_config_none_still_means_no_file(sample_pdf, tmp_path, monkeypatch):
+    """`config=None` is the documented Python default and must stay a no-op, not an error."""
+    monkeypatch.delenv("OPENREADING_CONFIG", raising=False)
+    monkeypatch.chdir(tmp_path)
+    assert api.route(sample_pdf, config=None).chosen is not None
 
 
 # --- wrong value types under a recognised key ---------------------------------------------------
@@ -185,89 +254,107 @@ def test_python_route_policy_none_still_means_no_policy(sample_pdf):
     ],
 )
 def test_policy_value_of_the_wrong_type_is_refused(policy, sample_pdf):
-    with pytest.raises(api.PolicyError):
-        api.route(sample_pdf, policy=policy)
+    with pytest.raises(ConfigError):
+        api.route(sample_pdf, config=_inline(policy))
 
 
-# --- the strategy file's own `policy:` block ----------------------------------------------------
+# --- the file's own `policy:` block --------------------------------------------------------------
 #
-# `openreading.yaml`'s `policy:` block is the fifth policy reader, and the one the router guide
-# teaches as the way to gate a whole corpus. The schema leaves that sub-object open
-# (`additionalProperties: true`), so nothing upstream of `prune` can refuse a key: the guard has to
-# be the same `validate_policy` the flag surfaces use, applied where the raw dict becomes a
-# constraint.
+# `openreading.yaml`'s `policy:` block is the one place a policy is spelled, and the router guide
+# teaches it as the way to gate a whole corpus. The schema leaves that sub-object open
+# (`additionalProperties: true`) until v0.3 closes it, so nothing in the schema can refuse a key:
+# the guard is `openreading.config._validated_policy`, which runs where the file is read, once,
+# before any surface interprets a key.
 
 
-def _file_policy_config(policy: dict, backend: str):
-    """A one-rung strategy carrying `policy:` — built with `model_validate`, not the loader, so
-    these tests bind the guard to the point of USE and not to any one construction path."""
-    from openreading.strategies.model import StrategyConfig
-
-    return StrategyConfig.model_validate(
-        {"version": 1, "policy": policy, "strategies": {"s": [backend]}}
-    )
+def _config_file(tmp_path, policy: dict, backend: str) -> str:
+    """The file a person writes: one policy block and one one-rung strategy. Written to disk, not
+    built with `model_validate`, so these tests bind the guard to the path a real run takes."""
+    p = tmp_path / "openreading.yaml"
+    p.write_text(f"version: 1\npolicy: {json.dumps(policy)}\nstrategies:\n  s: [{backend}]\n")
+    return str(p)
 
 
-def _compile(config, sample_pdf):
-    from openreading.adapters.registry import build_registry
-    from openreading.strategies import compile_strategy
-
-    return compile_strategy(
-        api.build_request(sample_pdf, "auto"), "s", config, build_registry(), RouterConfig()
-    )
-
-
-def test_file_policy_unrecognised_key_is_refused_not_dropped(sample_pdf):
+def test_file_policy_unrecognised_key_is_refused_not_dropped(tmp_path):
     """`require_locall` used to be discarded in silence: the run proceeded with NO locality
     constraint at all, and a hosted rung stayed eligible until it died on credentials instead."""
-    with pytest.raises(api.PolicyError) as exc:
-        _compile(_file_policy_config({"require_locall": True}, "reducto"), sample_pdf)
-    assert "did you mean 'require_local'" in str(exc.value)
+    from openreading import config
+
+    with pytest.raises(config.ConfigError) as exc:
+        config.load(_config_file(tmp_path, {"require_locall": True}, "reducto"))
+    assert "require_locall" in str(exc.value)
 
 
-def test_file_policy_correctly_spelled_still_refuses_the_backend(sample_pdf):
+def test_file_policy_correctly_spelled_still_refuses_the_backend(sample_pdf, tmp_path):
     """The other half of the pair: the guard must refuse the typo WITHOUT changing what a
     correctly spelled policy does — `require_local` still drops the hosted rung on compliance."""
+    path = _config_file(tmp_path, {"require_local": True}, "reducto")
     with pytest.raises(ComplianceRefused) as exc:
-        _compile(_file_policy_config({"require_local": True}, "reducto"), sample_pdf)
+        api.run(sample_pdf, strategy="s", config=path)
     assert "reducto:not_local" in str(exc.value)
 
 
-def test_file_policy_string_cannot_flip_the_fail_closed_switch(sample_pdf):
+def test_a_named_backend_is_gated_by_the_file_block_too(sample_pdf, tmp_path):
+    """Law P4's own case: a run that names a backend reads the same block a strategy run does.
+    Before the file was read on every path this run ignored the operator's policy entirely."""
+    path = _config_file(tmp_path, {"require_local": True}, "pymupdf")
+    with pytest.raises(ComplianceRefused) as exc:
+        api.run(sample_pdf, backend="reducto", config=path)
+    assert "require_local" in str(exc.value)
+
+
+def test_file_policy_string_cannot_flip_the_fail_closed_switch(tmp_path):
     """The compliance defect: `allow_unverified_compliance: "false"` is truthy to `bool()`, so a
     quoted `false` — whose plain-English intent is *off* — used to switch the tolerance ON and
     admit a `trains_on_customer_data: unverified` backend under `no_train_on_data: true`."""
+    from openreading import config
+
     policy = {"no_train_on_data": True, "allow_unverified_compliance": "false"}
-    with pytest.raises(api.PolicyError) as exc:
-        _compile(_file_policy_config(policy, "nuextract"), sample_pdf)
-    assert "allow_unverified_compliance must be true or false" in str(exc.value)
+    with pytest.raises(config.ConfigError) as exc:
+        config.load(_config_file(tmp_path, policy, "nuextract"))
+    assert "policy/allow_unverified_compliance" in str(exc.value)
+    assert "is not of type 'boolean'" in str(exc.value)
 
 
-def test_file_policy_unquoted_false_keeps_the_unverified_backend_out(sample_pdf):
+def test_file_policy_unquoted_false_keeps_the_unverified_backend_out(sample_pdf, tmp_path):
     """Two spellings of the same policy now agree: the boolean refuses `nuextract` on compliance,
     the string refuses the policy itself. Neither admits it."""
     policy = {"no_train_on_data": True, "allow_unverified_compliance": False}
+    path = _config_file(tmp_path, policy, "nuextract")
     with pytest.raises(ComplianceRefused) as exc:
-        _compile(_file_policy_config(policy, "nuextract"), sample_pdf)
+        api.run(sample_pdf, strategy="s", config=path)
     assert "nuextract:trains_unverified" in str(exc.value)
 
 
-def test_the_guard_sits_in_the_shared_fold_not_in_its_callers(sample_pdf):
-    """`calibrate_strategy` folds the file `policy:` block by calling these two helpers directly,
-    never through `compile_strategy` (it is documented as reusing them rather than reimplementing
-    them). A guard wired into callers is exactly what left this reader uncovered the first time, so
-    it lives in the two functions that turn a raw dict into a constraint."""
-    from openreading.strategies.prune import _merge_router_config, _union_compliance
+def test_every_reader_of_the_file_gets_the_same_refusal(sample_pdf, tmp_path, capsys):
+    """The guard is the schema, and it runs where bytes become a mapping. `calibrate_strategy`
+    folds the block by calling `union_compliance` / `merge_router_config` directly, so a guard
+    wired into those two would be one a caller could route around. One layer up, no caller can."""
+    path = _config_file(tmp_path, {"require_locall": True}, "pymupdf")
+    for argv in (
+        ["route", sample_pdf, "--config", path],
+        ["strategy", "validate", "--config", path],
+        ["strategy", "plan", sample_pdf, "--strategy", "s", "--config", path],
+        ["parse", sample_pdf, "--strategy", "s", "--config", path],
+    ):
+        assert main(argv) == 3, argv
+        assert "require_locall" in capsys.readouterr().err, argv
 
-    with pytest.raises(api.PolicyError):
-        _union_compliance(None, {"require_locall": True})
-    with pytest.raises(api.PolicyError):
-        _merge_router_config(RouterConfig(), {"allow_unverified_compliance": "false"})
+
+def test_the_folds_themselves_no_longer_validate(sample_pdf):
+    """The two folds are pure now: they take a block the schema already accepted. Pinned so a
+    future edit does not quietly reintroduce a second, drifting validator beside the schema."""
+    from openreading.config import merge_router_config, union_compliance
+
+    assert union_compliance(None, {"require_local": True})["require_local"] is True
+    assert merge_router_config(
+        RouterConfig(), {"baa_tier_confirmed": ["reducto"]}
+    ).baa_tier_confirmed == frozenset({"reducto"})
 
 
 def test_cli_strategy_plan_refuses_a_malformed_file_policy(sample_pdf, tmp_path, capsys):
-    """A malformed file policy, end to end: one tagged stderr line and exit 3, the same ladder
-    rung a malformed `--policy` file already got."""
+    """A malformed policy block, end to end: one tagged stderr line and exit 3, the same ladder
+    rung any other unloadable config file takes."""
     config = tmp_path / "openreading.yaml"
     config.write_text(
         'version: 1\npolicy: {no_train_on_data: true, allow_unverified_compliance: "false"}\n'
@@ -276,7 +363,8 @@ def test_cli_strategy_plan_refuses_a_malformed_file_policy(sample_pdf, tmp_path,
     rc = main(["strategy", "plan", sample_pdf, "--strategy", "s", "--config", str(config)])
     assert rc == 3
     err = capsys.readouterr().err
-    assert err.startswith("[strategy plan] invalid policy in the strategy config: ")
+    assert err.startswith("[strategy plan] ")
+    assert "policy/allow_unverified_compliance" in err
     assert len(err.splitlines()) == 1
     assert "Traceback" not in err
     assert "nuextract" not in capsys.readouterr().out
@@ -291,32 +379,52 @@ def test_cli_strategy_validate_reports_a_malformed_file_policy(tmp_path, capsys)
     rc = main(["strategy", "validate", "--config", str(config)])
     assert rc == 3
     err = capsys.readouterr().err
-    assert "policy" in err
-    assert "did you mean 'require_local'" in err
+    assert "invalid config at 'policy'" in err
+    assert "require_locall" in err
 
 
 def test_cli_parse_refuses_a_malformed_file_policy(sample_pdf, tmp_path, capsys):
-    """`parse --strategy` reaches the same compile boundary through `api.run`, and lands on the
-    same rung as a malformed `--policy` file: the caller should not have to know which of the two
-    files carried the bad key."""
+    """`parse --strategy` reads the file through `api.run` and lands on the same rung: a policy
+    that is wrong is wrong before the document is opened, whichever verb opened the file."""
     config = tmp_path / "openreading.yaml"
     config.write_text("version: 1\npolicy: {require_locall: true}\nstrategies:\n  s: [pymupdf]\n")
     rc = main(["parse", sample_pdf, "--strategy", "s", "--config", str(config)])
     assert rc == 3
     err = capsys.readouterr().err
-    assert "invalid policy in the strategy config: " in err
+    assert "invalid config at 'policy'" in err
     assert "Traceback" not in err
 
 
-def test_server_refuses_a_malformed_config_policy_block_with_an_envelope(tmp_path, monkeypatch):
+def test_cli_parse_directory_refuses_a_malformed_file_policy(tmp_path, capsys):
+    """The batch verb reads the file once, before intake, so a policy that is wrong is refused
+    before any document is opened. That refusal takes the same rung the single-document verb
+    does. Without a clause of its own the `ConfigError` fell through to the generic handler and
+    exited 1, the code every other unloadable-file failure on this ladder avoids."""
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "a.pdf").write_bytes(build_sample_pdf())
+    config = tmp_path / "openreading.yaml"
+    config.write_text("version: 1\npolicy: {require_locall: true}\n")
+    rc = main(["parse", str(corpus), "--backend", "pymupdf", "--config", str(config)])
+    assert rc == 3
+    out, err = capsys.readouterr()
+    assert err.startswith("[batch] ")
+    assert "invalid config at 'policy'" in err
+    assert "require_locall" in err
+    assert "ConfigError" not in err
+    assert "Traceback" not in err
+    assert out == ""
+
+
+def test_server_refuses_a_malformed_config_policy_block_at_startup(tmp_path, monkeypatch):
     """The server reads the OPERATOR's `openreading.yaml`, never a caller-supplied policy, so a
-    malformed `policy:` block there is a misconfiguration rather than a bad request: the status
-    table's "500 anything else" rung, carrying the same error envelope every other failure gets.
-    What it must never be is a 200 whose run quietly widened the eligible set.
+    malformed `policy:` block there is a misconfiguration. It is refused when the file is read,
+    which is at startup, rather than on the first request that happens to engage a strategy: an
+    operator learns the file is wrong from the process that will not start, not from one caller's
+    500. What it must never be is a 200 whose run quietly widened the eligible set.
     """
     pytest.importorskip("fastapi", reason="server extra not installed")
-    from fastapi.testclient import TestClient
-
+    from openreading.config import ConfigError
     from openreading.server import create_app
 
     config = tmp_path / "openreading.yaml"
@@ -325,74 +433,7 @@ def test_server_refuses_a_malformed_config_policy_block_with_an_envelope(tmp_pat
         "strategies:\n  s: [nuextract]\n"
     )
     monkeypatch.setenv("OPENREADING_CONFIG", str(config))
-    client = TestClient(create_app(), raise_server_exceptions=False)
-    body = {
-        "document": {
-            "bytes_base64": base64.b64encode(build_sample_pdf()).decode(),
-            "mime_type": "application/pdf",
-        },
-        "backend": {"id": "strategy:s"},
-    }
-    for path in ("/v1/parse", "/v1/jobs"):
-        r = client.post(path, json=body)
-        assert r.status_code == 500, path
-        assert "allow_unverified_compliance must be true or false" in r.json()["error"]["message"]
-
-
-# --- the HTTP surface already refused; pin it so the three stay together ------------------------
-
-
-def _http_body(compliance):
-    return {
-        "document": {
-            "bytes_base64": base64.b64encode(build_sample_pdf()).decode(),
-            "mime_type": "application/pdf",
-        },
-        "backend": {"id": "auto"},
-        "compliance": compliance,
-    }
-
-
-@pytest.mark.parametrize("path", ["/v1/route", "/v1/parse"])
-@pytest.mark.parametrize("compliance", [_OFFICER_POLICY, [], "strict", 3])
-def test_server_refuses_a_malformed_compliance_object_with_400(path, compliance):
-    pytest.importorskip("fastapi", reason="server extra not installed")
-    from fastapi.testclient import TestClient
-
-    from openreading.server import create_app
-
-    r = TestClient(create_app()).post(path, json=_http_body(compliance))
-    assert r.status_code == 400
-
-
-# --- a valid policy is unchanged ----------------------------------------------------------------
-
-
-def test_a_valid_policy_still_filters(sample_pdf, tmp_path, capsys):
-    """The fix validates the shape and nothing else: a real policy still drops real backends."""
-    policy = _policy_file(tmp_path, json.dumps({"require_local": True, "no_train_on_data": True}))
-    rc = main(["route", sample_pdf, "--policy", policy])
-    assert rc == 0
-    out = json.loads(capsys.readouterr().out)
-    assert out["chosen"] is not None
-    assert out["dropped"], "a require_local policy must drop every hosted backend"
-
-
-def test_every_documented_policy_key_is_accepted(sample_pdf):
-    """One policy naming all ten keys routes cleanly, so validation refuses nothing it documents."""
-    plan = api.route(
-        sample_pdf,
-        policy={
-            "require_baa": False,
-            "no_train_on_data": False,
-            "data_region": "us",
-            "require_local": False,
-            "max_retention": "24h",
-            "optimize_for": "cost",
-            "doc_type_hint": "bank_statement",
-            "allow_unverified_compliance": False,
-            "train_optout_confirmed": ["aws-textract"],
-            "baa_tier_confirmed": ["reducto"],
-        },
-    )
-    assert plan.chosen is not None
+    with pytest.raises(ConfigError) as exc:
+        create_app()
+    assert "policy/allow_unverified_compliance" in str(exc.value)
+    assert "is not of type 'boolean'" in str(exc.value)

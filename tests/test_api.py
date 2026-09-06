@@ -4,6 +4,7 @@ real; URL download uses an injected httpx MockTransport, so no default test perf
 from __future__ import annotations
 
 import base64
+import json
 
 import httpx
 import pytest
@@ -24,6 +25,73 @@ def pdf_path(tmp_path):
     return str(p)
 
 
+def _policy(policy: dict) -> dict:
+    """A policy the way a caller with no file on disk writes one: the file's own shape, inline."""
+    return {"version": 1, "policy": policy}
+
+
+def _policy_file(tmp_path, policy: dict) -> str:
+    body = ", ".join(f"{k}: {json.dumps(v)}" for k, v in policy.items())
+    p = tmp_path / "openreading.yaml"
+    p.write_text(f"version: 1\npolicy: {{{body}}}\n")
+    return str(p)
+
+
+# --- config= is the one container (the file's shape, from a path or from memory) -----------------
+
+
+def test_run_takes_the_same_policy_from_a_dict_and_from_a_file(pdf_path, tmp_path):
+    """A dict passed to `config=` is the file, held in memory. Same shape, same validation, same
+    result — otherwise a caller with no file on disk has a second grammar to learn."""
+    policy = {"require_local": True}
+    from_dict = openreading.run(pdf_path, backend="auto", config=_policy(policy))
+    from_file = openreading.run(pdf_path, backend="auto", config=_policy_file(tmp_path, policy))
+    assert from_dict["backend"]["id"] == from_file["backend"]["id"]
+    assert from_dict["document"]["text"] == from_file["document"]["text"]
+
+
+def test_route_takes_the_same_policy_from_a_dict_and_from_a_file(pdf_path, tmp_path):
+    policy = {"require_local": True}
+    from_dict = openreading.route(pdf_path, config=_policy(policy))
+    from_file = openreading.route(pdf_path, config=_policy_file(tmp_path, policy))
+    assert from_dict.chosen is not None and from_file.chosen is not None
+    assert from_dict.chosen.descriptor.id == from_file.chosen.descriptor.id
+    assert sorted(from_dict.dropped) == sorted(from_file.dropped)
+
+
+def test_run_batch_takes_the_same_policy_from_a_dict_and_from_a_file(pdf_path, tmp_path):
+    policy = {"require_local": True}
+    from_dict = openreading.run_batch([pdf_path], backend="auto", config=_policy(policy))
+    from_file = openreading.run_batch(
+        [pdf_path], backend="auto", config=_policy_file(tmp_path, policy)
+    )
+    keys = ("total", "succeeded", "failed", "skipped")
+    assert {k: from_dict["summary"][k] for k in keys} == {k: from_file["summary"][k] for k in keys}
+    assert [i.get("response", {}).get("backend") for i in from_dict["items"]] == [
+        i.get("response", {}).get("backend") for i in from_file["items"]
+    ]
+
+
+def test_a_dict_that_is_not_a_policy_is_refused_from_python_too(pdf_path):
+    """A shape refused from a file is refused from Python, and the message says which it was."""
+    from openreading.config import ConfigError
+
+    with pytest.raises(ConfigError) as exc:
+        openreading.run(pdf_path, backend="pymupdf", config=_policy({"require_locall": True}))
+    assert "<dict>" in str(exc.value)
+    assert "require_locall" in str(exc.value)
+
+
+@pytest.mark.parametrize("call", ["run", "route", "run_batch"])
+def test_the_policy_keyword_is_gone(pdf_path, call):
+    """One container, not two. `policy=` was the second spelling and it is removed outright, so a
+    caller who passes it learns that from Python rather than from a silently ignored constraint."""
+    fn = getattr(openreading, call)
+    source = [pdf_path] if call == "run_batch" else pdf_path
+    with pytest.raises(TypeError, match="policy"):
+        fn(source, policy={"require_local": True})
+
+
 def test_run_named_local_backend_returns_schema_dict(pdf_path):
     result = openreading.run(pdf_path, backend="pymupdf")
     from openreading import schemas
@@ -41,7 +109,7 @@ def test_run_from_bytes(pdf_path):
 
 def test_run_auto_routes_and_executes_local(pdf_path):
     # require_local → the router picks a local backend and the executor runs it
-    result = openreading.run(pdf_path, backend="auto", policy={"require_local": True})
+    result = openreading.run(pdf_path, backend="auto", config=_policy({"require_local": True}))
     assert make_adapter(result["backend"]["id"]).descriptor.compliance.runs_fully_local
 
 
@@ -55,7 +123,7 @@ def test_run_named_missing_credentials_raises_naming_vars(pdf_path, monkeypatch)
 
 
 def test_route_returns_plan(pdf_path):
-    plan = openreading.route(pdf_path, policy={"require_local": True})
+    plan = openreading.route(pdf_path, config=_policy({"require_local": True}))
     assert plan.chosen is not None
     assert plan.chosen.descriptor.compliance.runs_fully_local
 
@@ -284,7 +352,7 @@ def test_run_named_backend_respects_compliance(pdf_path, monkeypatch):
     from openreading.types.errors import ComplianceRefused
 
     with pytest.raises(ComplianceRefused):
-        openreading.run(pdf_path, backend="reducto", policy={"require_local": True})
+        openreading.run(pdf_path, backend="reducto", config=_policy({"require_local": True}))
 
 
 def test_build_request_rejects_a_document_override(pdf_path):
@@ -319,13 +387,13 @@ def test_named_tier_gated_backend_needs_confirmation_and_warns(pdf_path, monkeyp
         lambda: make_backend("tiered", hipaa_baa="tier_gated", trains="no", regions=["us"]),
     )
     with pytest.raises(ComplianceRefused) as exc:
-        openreading.run(pdf_path, backend="tiered", policy={"require_baa": True})
+        openreading.run(pdf_path, backend="tiered", config=_policy({"require_baa": True}))
     assert exc.value.constraint == "no_baa"
 
     result = openreading.run(
         pdf_path,
         backend="tiered",
-        policy={"require_baa": True, "baa_tier_confirmed": ["tiered"]},
+        config=_policy({"require_baa": True, "baa_tier_confirmed": ["tiered"]}),
     )
     note = next(w for w in result["warnings"] if w["code"] == "baa_tier_confirmed")
     assert note["field"] == "tiered" and "tier_gated" in note["message"]

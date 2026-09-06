@@ -74,12 +74,113 @@ def test_parse_extract_on_structural_backend_reports_unsupported(sample_pdf, cap
     assert "unsupported feature" in err and "custom_schema_extraction" in err
 
 
+def _write_policy(directory, policy: dict, name: str = "openreading.yaml") -> str:
+    """The one file a person writes, holding nothing but a policy block."""
+    body = ", ".join(f"{k}: {json.dumps(v)}" for k, v in policy.items())
+    p = directory / name
+    p.write_text(f"version: 1\npolicy: {{{body}}}\n")
+    return str(p)
+
+
+# The plan `--policy` printed for these keys, captured from the release before the flag was
+# removed. `route` reading the same keys out of `openreading.yaml` has to print it byte for byte,
+# or the file is not the same policy the flag was (product spec acceptance criterion 2).
+_REQUIRE_LOCAL_PLAN = {
+    "chosen": "pymupdf",
+    "fallbacks": ["docling", "tesseract", "qwen-vl"],
+    "dropped": dict.fromkeys(
+        [
+            "anthropic-claude",
+            "aws-textract",
+            "azure-document-intelligence",
+            "chunkr",
+            "google-document-ai",
+            "google-gemini",
+            "mistral-ocr",
+            "nuextract",
+            "open-ocr",
+            "pulse",
+            "reducto",
+        ],
+        "not_local",
+    ),
+}
+# The plan an empty policy printed, which is what a directory with no file has to print now.
+_NO_POLICY_PLAN = {
+    "chosen": "pymupdf",
+    "fallbacks": [
+        "docling",
+        "azure-document-intelligence",
+        "google-document-ai",
+        "chunkr",
+        "aws-textract",
+        "reducto",
+        "nuextract",
+        "tesseract",
+        "qwen-vl",
+        "open-ocr",
+        "mistral-ocr",
+        "pulse",
+        "anthropic-claude",
+        "google-gemini",
+    ],
+    "dropped": {},
+}
+
+
+def _plan_codes(out: str) -> dict:
+    plan = json.loads(out)
+    return {
+        "chosen": plan["chosen"],
+        "fallbacks": plan["fallbacks"],
+        "dropped": {k: v["code"] for k, v in plan["dropped"].items()},
+    }
+
+
+def test_route_reads_the_policy_block_from_the_working_directory(sample_pdf, tmp_path, capsys):
+    """No flag. The file in the working directory is found, and its block gates the plan."""
+    _write_policy(tmp_path, {"require_local": True})
+    import os
+
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        rc = main(["route", sample_pdf])
+    finally:
+        os.chdir(cwd)
+    assert rc == 0
+    assert _plan_codes(capsys.readouterr().out) == _REQUIRE_LOCAL_PLAN
+
+
+def test_route_config_flag_and_the_directory_file_agree(sample_pdf, tmp_path, capsys):
+    path = _write_policy(tmp_path, {"require_local": True}, name="airgapped.yaml")
+    assert main(["route", sample_pdf, "--config", path]) == 0
+    assert _plan_codes(capsys.readouterr().out) == _REQUIRE_LOCAL_PLAN
+
+
+def test_route_in_an_empty_directory_is_the_no_policy_plan(
+    sample_pdf, tmp_path, capsys, monkeypatch
+):
+    """Law P5: no file means the behaviour of every release before the file was read here."""
+    monkeypatch.delenv("OPENREADING_CONFIG", raising=False)
+    monkeypatch.chdir(tmp_path)
+    assert main(["route", sample_pdf]) == 0
+    assert _plan_codes(capsys.readouterr().out) == _NO_POLICY_PLAN
+
+
+def test_route_no_longer_takes_a_policy_flag(sample_pdf, tmp_path, capsys):
+    """The flag is removed outright, so argparse says so in its own words and exits 2."""
+    with pytest.raises(SystemExit) as exc:
+        main(["route", sample_pdf, "--policy", str(tmp_path / "phi.json")])
+    assert exc.value.code == 2
+    assert "unrecognized arguments: --policy" in capsys.readouterr().err
+
+
 def test_route_phi_policy_chooses_compliant_and_drops_noncompliant(sample_pdf, tmp_path, capsys):
-    policy = tmp_path / "phi.json"
-    policy.write_text(
-        json.dumps({"require_baa": True, "no_train_on_data": True, "optimize_for": "accuracy"})
+    path = _write_policy(
+        tmp_path, {"require_baa": True, "no_train_on_data": True, "optimize_for": "accuracy"}
     )
-    rc = main(["route", sample_pdf, "--policy", str(policy)])
+    rc = main(["route", sample_pdf, "--config", path])
     plan = json.loads(capsys.readouterr().out)
     assert rc == 0 and plan["chosen"] is not None
     # aws-textract trains=opt_out and the opt-out is not confirmed here -> dropped at stage 1
@@ -97,33 +198,29 @@ def test_route_phi_policy_chooses_compliant_and_drops_noncompliant(sample_pdf, t
 
 
 def test_route_confirmed_baa_tier_readmits_reducto(sample_pdf, tmp_path, capsys):
-    policy = tmp_path / "phi.json"
-    policy.write_text(json.dumps({"require_baa": True, "baa_tier_confirmed": ["reducto"]}))
-    main(["route", sample_pdf, "--policy", str(policy)])
+    path = _write_policy(tmp_path, {"require_baa": True, "baa_tier_confirmed": ["reducto"]})
+    main(["route", sample_pdf, "--config", path])
     plan = json.loads(capsys.readouterr().out)
     assert "reducto" in [plan["chosen"], *plan["fallbacks"]]
 
 
 def test_route_confirmed_optout_readmits_textract(sample_pdf, tmp_path, capsys):
-    policy = tmp_path / "phi.json"
-    policy.write_text(
-        json.dumps(
-            {
-                "require_baa": True,
-                "no_train_on_data": True,
-                "train_optout_confirmed": ["aws-textract"],
-            }
-        )
+    path = _write_policy(
+        tmp_path,
+        {
+            "require_baa": True,
+            "no_train_on_data": True,
+            "train_optout_confirmed": ["aws-textract"],
+        },
     )
-    main(["route", sample_pdf, "--policy", str(policy)])
+    main(["route", sample_pdf, "--config", path])
     plan = json.loads(capsys.readouterr().out)
     assert "aws-textract" in [plan["chosen"], *plan["fallbacks"]]
 
 
 def test_route_require_local_drops_all_hosted_and_can_run(sample_pdf, tmp_path, capsys):
-    policy = tmp_path / "local.json"
-    policy.write_text(json.dumps({"require_local": True, "optimize_for": "offline"}))
-    rc = main(["route", sample_pdf, "--policy", str(policy), "--run"])
+    path = _write_policy(tmp_path, {"require_local": True, "optimize_for": "offline"})
+    rc = main(["route", sample_pdf, "--config", path, "--run"])
     plan = json.loads(capsys.readouterr().out)
     assert rc == 0
     from openreading.adapters.registry import make_adapter
@@ -159,9 +256,10 @@ def test_route_run_normalize_crash_is_a_clean_error_not_a_traceback(
 
     monkeypatch.setattr(PyMuPDFAdapter, "normalize", _boom)
 
-    policy = tmp_path / "empty.json"
-    policy.write_text("{}")  # no constraints: the local set (pymupdf among it) is eligible
-    rc = main(["route", sample_pdf, "--policy", str(policy), "--run"])
+    # no constraints: the local set (pymupdf among it) is eligible
+    path = tmp_path / "openreading.yaml"
+    path.write_text("version: 1\n")
+    rc = main(["route", sample_pdf, "--config", str(path), "--run"])
 
     assert calls, "pymupdf.normalize was never attempted — the crash path was not exercised"
     err = capsys.readouterr().err
@@ -180,7 +278,7 @@ def test_route_run_normalize_crash_is_a_clean_error_not_a_traceback(
 # `.strerror` is correct "for a real FileNotFoundError/PermissionError" — but every regression test it
 # added or extended only ever constructed a missing file (FileNotFoundError/SourceNotFoundError) or
 # malformed JSON (json.JSONDecodeError). Nothing in the suite ever triggered a real OS-level
-# PermissionError, and the same-shaped IsADirectoryError gap (a caller pointing --policy/--trace/
+# PermissionError, and the same-shaped IsADirectoryError gap (a caller pointing --config/--trace/
 # --response at a directory) was never covered either. The line itself is coverage-covered by the
 # tested cases (shared branch), so --cov-fail-under=91 can't see this gap — these tests close it
 # directly, without relying on line coverage as a proxy for fault-class coverage.
@@ -213,39 +311,25 @@ def test_describe_read_error_is_a_directory_error_returns_bare_strerror(tmp_path
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="chmod 000 is a POSIX permission model")
-def test_route_unreadable_policy_exits_3_without_a_traceback(sample_pdf, tmp_path, capsys):
-    # A missing path, malformed JSON, and an unreadable (chmod 000) file are all user errors, so they
-    # land in the same soft-failure bucket --config already uses: one tagged stderr line, exit 3.
-    # main() returning at all (rather than propagating FileNotFoundError/JSONDecodeError/
-    # PermissionError) is what pins "no traceback". BL-144: the chmod'd case is the one
-    # through-the-CLI proof that _describe_read_error's PermissionError branch — docstring-claimed
-    # since BL-141, never previously exercised anywhere — behaves like its FileNotFoundError/
-    # JSONDecodeError siblings below, on `_load_policy`, the one non-SourceNotFoundError call site.
-    malformed = tmp_path / "bad.json"
-    malformed.write_text("{not json")
-    unreadable = tmp_path / "unreadable.json"
-    unreadable.write_text(json.dumps({"require_local": True}))
+def test_route_unreadable_config_exits_3_without_a_traceback(sample_pdf, tmp_path, capsys):
+    # A missing path, malformed YAML, and an unreadable (chmod 000) file are all user errors, so
+    # they land in one soft-failure bucket: one tagged stderr line, exit 3. main() returning at all
+    # (rather than propagating FileNotFoundError/YAMLError/PermissionError) is what pins "no
+    # traceback". BL-144: the chmod'd case is the one through-the-CLI proof that
+    # _describe_read_error's PermissionError branch behaves like its siblings.
+    malformed = tmp_path / "bad.yaml"
+    malformed.write_text("version: 1\nstrategies:\n  a: [unclosed\n")
+    unreadable = tmp_path / "unreadable.yaml"
+    unreadable.write_text("version: 1\npolicy: {require_local: true}\n")
     unreadable.chmod(0o000)
     try:
-        for policy in (tmp_path / "missing.json", malformed, unreadable):
-            rc = main(["route", sample_pdf, "--policy", str(policy)])
-            assert rc == 3
+        for path in (tmp_path / "missing.yaml", malformed, unreadable):
+            rc = main(["route", sample_pdf, "--config", str(path)])
+            assert rc == 3, path
             err = capsys.readouterr().err
-            # A file that will not open and a file whose bytes are not JSON are different
-            # problems, and each says which one it is rather than sending the reader to check
-            # permissions on a file that reads fine.
-            expected = (
-                f"[route] policy {malformed} is not valid JSON"
-                if policy is malformed
-                else "[route] cannot read policy"
-            )
-            assert err.startswith(expected)
-            assert len(err.splitlines()) == 1
-            # BL-141: the path (a missing-file FileNotFoundError, a JSONDecodeError, and now a
-            # PermissionError alike) is named exactly once — not once in the "cannot read policy
-            # <path>:" prefix and again inside {e}'s own string, the way a real OSError's str()
-            # already embeds ": '<path>'".
-            assert err.count(str(policy)) == 1
+            assert err.startswith("[route] ")
+            assert "Traceback" not in err
+            assert str(path) in err
     finally:
         unreadable.chmod(0o644)  # restore so tmp_path's own teardown can remove it
 
@@ -318,17 +402,11 @@ _HOSTED_ONLY = "strategies:\n  hosted_only:\n    steps:\n      - backend: reduct
 
 @pytest.fixture
 def refusing_config(tmp_path):
-    """A strategy whose only backend is hosted — refused outright under `require_local`."""
+    """A strategy whose only backend is hosted, under a policy block that requires a local one:
+    the step is pruned and the run is refused outright."""
     cfg = tmp_path / "openreading.yaml"
-    cfg.write_text("version: 1\n" + _HOSTED_ONLY)
+    cfg.write_text("version: 1\npolicy: {require_local: true}\n" + _HOSTED_ONLY)
     return str(cfg)
-
-
-@pytest.fixture
-def local_policy(tmp_path):
-    p = tmp_path / "local.json"
-    p.write_text(json.dumps({"require_local": True}))
-    return str(p)
 
 
 def _raise_refused(*args, **kwargs):
@@ -352,44 +430,19 @@ def test_parse_batch_compliance_refused_exits_3(sample_pdf, capsys, monkeypatch)
     assert "nothing is compliant here" in capsys.readouterr().err
 
 
-def test_strategy_plan_compliance_refused_exits_3(
-    sample_pdf, refusing_config, local_policy, capsys
-):
+def test_strategy_plan_compliance_refused_exits_3(sample_pdf, refusing_config, capsys):
     rc = main(
-        [
-            "strategy",
-            "plan",
-            sample_pdf,
-            "--strategy",
-            "hosted_only",
-            "--config",
-            refusing_config,
-            "--policy",
-            local_policy,
-        ]
+        ["strategy", "plan", sample_pdf, "--strategy", "hosted_only", "--config", refusing_config]
     )
     assert rc == 3
     err = capsys.readouterr().err
     assert "[strategy plan]" in err and "no compliant backend" in err
 
 
-def test_replay_compliance_refused_exits_3(
-    sample_pdf, refusing_config, local_policy, tmp_path, capsys
-):
+def test_replay_compliance_refused_exits_3(sample_pdf, refusing_config, tmp_path, capsys):
     trace = tmp_path / "trace.json"
     trace.write_text(json.dumps({"orchestration": {"strategy": "hosted_only", "decisions": []}}))
-    rc = main(
-        [
-            "replay",
-            sample_pdf,
-            "--trace",
-            str(trace),
-            "--config",
-            refusing_config,
-            "--policy",
-            local_policy,
-        ]
-    )
+    rc = main(["replay", sample_pdf, "--trace", str(trace), "--config", refusing_config])
     assert rc == 3
     err = capsys.readouterr().err
     assert "[replay]" in err and "no compliant backend" in err
@@ -610,8 +663,8 @@ def test_compare_fanout_unsupported_feature_error_exits_3_clean(sample_pdf, caps
 
 # ---- BL-133: a missing document/trace/response path is a clean, coded exit — never a traceback --
 #
-# Same defect class BL-32 (sprint 6) fixed for --policy/--config on these same commands
-# (test_route_unreadable_policy_exits_3_without_a_traceback above is the shape every test below
+# Same defect class BL-32 (sprint 6) fixed for --config on these same commands
+# (test_route_unreadable_config_exits_3_without_a_traceback above is the shape every test below
 # mirrors); BL-32 never touched the positional document/--trace/--response argument each of these
 # commands also reads first. `cmd_parse`'s single-document branch gets exit 2 (SourceNotFoundError,
 # matching `_cmd_parse_batch`'s own sibling handling of the identical condition); the rest get exit
@@ -722,21 +775,20 @@ def test_parse_still_dispatches_a_file_with_no_extension(sample_pdf, tmp_path, c
     schemas.validate_response(json.loads(capsys.readouterr().out))
 
 
-def test_route_rejects_an_empty_policy_path_by_naming_the_flag(sample_pdf, capsys):
-    # `Path("")` is the working directory, so an empty value used to be reported as "cannot read
-    # policy : Is a directory", which describes neither the flag nor the mistake.
-    rc = main(["route", sample_pdf, "--policy", ""])
+def test_route_rejects_an_empty_config_path_by_naming_the_file(sample_pdf, capsys):
+    # `Path("")` is the working directory, so an empty value has to be reported as a config file
+    # that is not there rather than as a directory that will not read.
+    rc = main(["route", sample_pdf, "--config", ""])
     assert rc == 3
-    assert capsys.readouterr().err == (
-        "[route] --policy needs a file path, and an empty value was given\n"
-    )
+    err = capsys.readouterr().err
+    assert err.startswith("[route] config file not found")
+    assert len(err.splitlines()) == 1
 
 
 def test_route_missing_document_exits_3_without_a_traceback(tmp_path, capsys):
-    policy = tmp_path / "phi.json"
-    policy.write_text(json.dumps({"require_baa": True}))
+    path = _write_policy(tmp_path, {"require_baa": True})
     missing = tmp_path / "missing.pdf"
-    rc = main(["route", str(missing), "--policy", str(policy)])
+    rc = main(["route", str(missing), "--config", path])
     assert rc == 3
     err = capsys.readouterr().err
     assert err.startswith("[route] cannot read")

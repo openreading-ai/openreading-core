@@ -422,48 +422,35 @@ def test_calibrate_malformed_config_exits_3(tmp_path, capsys):
     assert "[calibrate]" in capsys.readouterr().err
 
 
-# ---- an unreadable --policy fails soft too, exactly like --config -------------------------------
+# ---- a `policy:` block that is not a policy fails soft, exactly like a grammar error -----------
 #
-# Both cases (a path that isn't there, and a file that isn't JSON) must produce one tagged stderr
-# line and exit 3. main() returning at all — rather than propagating FileNotFoundError /
-# JSONDecodeError out of the command — is what pins "no traceback".
+# One tagged stderr line and exit 3. main() returning at all — rather than propagating the error
+# out of the command — is what pins "no traceback".
+
+_BAD_POLICY = "version: 1\npolicy: {require_locall: true}\nstrategies:\n  local_only: [pymupdf]\n"
 
 
-def _unreadable_policies(tmp_path):
-    """One policy that will not open and one whose bytes are not JSON, each paired with what the
-    message must open with. The two are different problems for the reader, so one wording for both
-    would send them to check permissions on a file that reads fine."""
-    malformed = tmp_path / "bad.json"
-    malformed.write_text("{not json")
-    return (
-        (tmp_path / "missing.json", "cannot read policy"),
-        (malformed, f"policy {malformed} is not valid JSON"),
-    )
-
-
-def test_replay_unreadable_policy_exits_3_without_a_traceback(sample_pdf, tmp_path, capsys):
-    cfg = _write_config(tmp_path, _CONFIG)
+def test_replay_malformed_policy_block_exits_3_without_a_traceback(sample_pdf, tmp_path, capsys):
+    cfg = _write_config(tmp_path, _BAD_POLICY)
     trace = tmp_path / "t.json"
     trace.write_text(json.dumps({"orchestration": {"strategy": "local_only", "decisions": []}}))
-    for pol, opening in _unreadable_policies(tmp_path):
-        args = ["replay", sample_pdf, "--trace", str(trace), "--config", cfg, "--policy", str(pol)]
-        rc = main(args)
-        assert rc == 3
-        err = capsys.readouterr().err
-        assert err.startswith(f"[replay] {opening}")
-        assert len(err.splitlines()) == 1
+    rc = main(["replay", sample_pdf, "--trace", str(trace), "--config", cfg])
+    assert rc == 3
+    err = capsys.readouterr().err
+    assert err.startswith("[replay] ")
+    assert "require_locall" in err
+    assert len(err.splitlines()) == 1
 
 
-def test_calibrate_unreadable_policy_exits_3_without_a_traceback(tmp_path, capsys):
-    cfg = _write_config(tmp_path, _CONFIG)
+def test_calibrate_malformed_policy_block_exits_3_without_a_traceback(tmp_path, capsys):
+    cfg = _write_config(tmp_path, _BAD_POLICY)
     ds = _dataset(tmp_path, 1)
-    for pol, opening in _unreadable_policies(tmp_path):
-        args = ["calibrate", ds, "--strategy", "local_only", "--config", cfg, "--policy", str(pol)]
-        rc = main(args)
-        assert rc == 3
-        err = capsys.readouterr().err
-        assert err.startswith(f"[calibrate] {opening}")
-        assert len(err.splitlines()) == 1
+    rc = main(["calibrate", ds, "--strategy", "local_only", "--config", cfg])
+    assert rc == 3
+    err = capsys.readouterr().err
+    assert err.startswith("[calibrate] ")
+    assert "require_locall" in err
+    assert len(err.splitlines()) == 1
 
 
 def test_calibrate_cli_refuses_a_parallel_first_rung_without_a_traceback(tmp_path, capsys):

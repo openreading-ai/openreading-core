@@ -163,7 +163,7 @@ def test_registered_parsebench_provider_runs_and_normalizes_offline(sample_pdf: 
 
     target = BenchmarkTarget.parse("backend:pymupdf")
     try:
-        pipeline_name = parsebench._register(target, config=None, policy=None)
+        pipeline_name = parsebench._register(target, config=None)
     except parsebench.BenchmarkDependencyError as exc:  # a publisher version this pin rejects
         pytest.skip(str(exc))
 
@@ -184,17 +184,16 @@ def test_registered_parsebench_provider_runs_and_normalizes_offline(sample_pdf: 
 
 def test_pipeline_name_is_stable_and_separates_configurations() -> None:
     target = BenchmarkTarget.parse("backend:pymupdf")
-    base = pipeline_name("parsebench", target, config=None, policy=None)
+    base = pipeline_name("parsebench", target, config=None)
 
-    assert base == pipeline_name("parsebench", target, config=None, policy=None)
-    assert base != pipeline_name("parsebench", target, config="openreading.yaml", policy=None)
-    assert base != pipeline_name("parsebench", target, config=None, policy={"require_local": True})
+    assert base == pipeline_name("parsebench", target, config=None)
+    assert base != pipeline_name("parsebench", target, config="openreading.yaml")
     assert base != pipeline_name(
-        "parsebench", BenchmarkTarget.parse("strategy:pymupdf"), config=None, policy=None
+        "parsebench", BenchmarkTarget.parse("strategy:pymupdf"), config=None
     )
     # The publisher keys its artifact directory on this name and both commands default to
     # ./benchmark-results, so the two products must not land in one directory.
-    assert base != pipeline_name("extractbench", target, config=None, policy=None)
+    assert base != pipeline_name("extractbench", target, config=None)
 
 
 def test_registered_extractbench_provider_reaches_the_adapter(sample_pdf: Path) -> None:
@@ -214,7 +213,7 @@ def test_registered_extractbench_provider_reaches_the_adapter(sample_pdf: Path) 
 
     target = BenchmarkTarget.parse("backend:pymupdf")
     try:
-        pipeline_name = extractbench._register(target, config=None, policy=None)
+        pipeline_name = extractbench._register(target, config=None)
     except extractbench.BenchmarkDependencyError as exc:
         pytest.skip(str(exc))
 
@@ -241,7 +240,7 @@ def test_extractbench_provider_refuses_a_case_with_no_schema(sample_pdf: Path) -
 
     target = BenchmarkTarget.parse("backend:pymupdf")
     try:
-        pipeline_name = extractbench._register(target, config=None, policy=None)
+        pipeline_name = extractbench._register(target, config=None)
     except extractbench.BenchmarkDependencyError as exc:
         pytest.skip(str(exc))
 
@@ -268,7 +267,7 @@ def test_extractbench_provider_normalizes_a_projection(sample_pdf: Path) -> None
 
     target = BenchmarkTarget.parse("backend:pymupdf")
     try:
-        pipeline_name = extractbench._register(target, config=None, policy=None)
+        pipeline_name = extractbench._register(target, config=None)
     except extractbench.BenchmarkDependencyError as exc:
         pytest.skip(str(exc))
 
@@ -346,7 +345,7 @@ def test_the_whole_bridge_runs_offline_over_a_limited_corpus(tmp_path) -> None:
 
     target = BenchmarkTarget.parse("backend:pymupdf")
     try:
-        pipeline_name = parsebench._register(target, config=None, policy=None)
+        pipeline_name = parsebench._register(target, config=None)
     except parsebench.BenchmarkDependencyError as exc:
         pytest.skip(str(exc))
 

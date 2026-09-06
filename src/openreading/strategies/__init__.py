@@ -53,14 +53,14 @@ Two invariants this package exists to keep
 
 **No file ⇒ byte-identical.** Absent a config file, every request takes exactly the legacy code
 path and the response is byte-identical to a run without this package. The package is not even
-imported on that path: `openreading.api` inlines the `strategy:` prefix check and imports
-`load_config` lazily, ONLY for `auto` / `strategy:` requests (a named-backend run importing
-nothing from `openreading.strategies` is proven in a subprocess test). The reason: an operator
-who never wrote a YAML must be able to upgrade without any behavior change, and a stray file
-must never be able to alter a request that named its backend.
+imported on that path: `openreading.api` inlines the `strategy:` prefix check, reads the file
+through `openreading.config` (which imports nothing from here), and builds the STRATEGY half of
+it lazily, ONLY for `auto` / `strategy:` requests. A named-backend run importing nothing from
+`openreading.strategies` is proven in a subprocess test. The reason: an operator who never wrote
+a YAML must be able to upgrade without any behavior change.
 
 **Compliance is never widened.** The 3-stage router's compliance/capability filter prunes the
-tree BEFORE execution (`openreading.strategies.prune`); constraints from the request, `--policy`,
+tree BEFORE execution (`openreading.strategies.prune`); constraints from the request
 and the file's `policy:` block union most-restrictive-wins; `compliance` is not a catchable
 `on_error` class (naming it is a load-time error); every decision point (gate band, `decide`,
 judge) enumerates its candidates first and any decider — engine or LLM — selects from that list.
@@ -76,7 +76,7 @@ Discovery (first hit wins; sources are never merged)
 3. `./openreading.yaml` (or `.yml`) in the working directory — CLI and Python API ONLY.
 4. Nothing found → no config; the legacy path.
 
-**The server reads the env var only** (`loader.discover(allow_cwd=False)`): a long-running
+**The server reads the env var only** (`config.discover(allow_cwd=False)`): a long-running
 service must never change behavior because a YAML landed in its cwd. No home-directory
 discovery. A found-but-broken file raises `ConfigError` — an explicitly requested config that
 cannot load is an error, never a silent fall-through.

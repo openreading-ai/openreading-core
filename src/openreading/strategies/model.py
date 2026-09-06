@@ -63,7 +63,7 @@ with `yaml.safe_load` only (D-v3-1: a config file may never construct arbitrary 
 ```yaml
 version: 1                    # required — config format version (additive evolution)
 
-policy:                       # optional — superset of the existing --policy JSON, same flat keys
+policy:                       # optional — the only place a compliance policy is written
   require_baa: true           #   compliance keys → request.compliance (unioned, most-restrictive-wins)
   no_train_on_data: true
   allow_unverified_compliance: false    # deployment keys → RouterConfig, as today
@@ -91,7 +91,8 @@ on the direct path (`credentials_ref` indirection only). Any key matching a cred
 a `strategy validate` error (`validate._scan_secrets`) — the schema's open sub-trees (`policy`,
 `with.*`) do not lock it down, so such a file still parses (§9). Under `with.*` it then runs;
 under `policy:` it does not, because a secret-looking key is also an unknown policy key and
-`prune._validated_policy` refuses the whole block before any of it becomes a constraint.
+`openreading.config` refuses the whole block where the file is read, before any of it becomes a
+constraint.
 
 1.2 Discovery order (first hit wins; sources are never merged)
 --------------------------------------------------------------
@@ -101,7 +102,7 @@ under `policy:` it does not, because a secret-looking key is also an unknown pol
 3. `./openreading.yaml` in the working directory — CLI and Python API ONLY.
 4. Nothing found → no config; behavior is byte-identical to the no-file path.
 
-The server loads config only via `OPENREADING_CONFIG` (`loader.discover(allow_cwd=False)`) — a
+The server loads config only via `OPENREADING_CONFIG` (`config.discover(allow_cwd=False)`) — a
 long-running service must never change behavior because a stray YAML landed in its cwd. There is
 no home-directory discovery. A found-but-broken file raises `ConfigError`: an explicitly
 requested config that cannot load is an error, never a silent fall-through.
@@ -131,18 +132,21 @@ so the no-file path never imports this package (the no-change law — package do
   before (formally the desugared cascade of §7 rule 7).
 
 Precedence, highest first: **request wire fields → CLI flags → config `defaults:` → built-ins.**
-Compliance is outside precedence: constraints from the request, `--policy`, and the file's
-`policy:` block are **unioned, most-restrictive-wins** — constraints only ever add. D-v3-12 fixes
-the union (done in `prune.compile_strategy`): the boolean PHI constraints `require_baa` /
-`no_train_on_data` / `require_local` OR to True; `data_region` / `max_retention` take the
-request's value if set, else the file adds it (request-wins-else-file — there is no total order
-on regions, and the request is the more specific choice); deployment keys map to `RouterConfig`
+Compliance is outside precedence: constraints from the request and the file's
+`policy:` block are **intersected, most-restrictive-wins** — neither source can weaken the other.
+D-v3-12 fixes the union (`openreading.config.apply`, applied before dispatch and again defensively
+in `prune.compile_strategy`): the boolean PHI constraints `require_baa` / `no_train_on_data` /
+`require_local` OR to True; `max_retention` keeps the LOWER of the two ceilings; `data_region` has
+no ordering and a request cannot name two regions at once, so two different values refuse with
+`region_conflict` rather than pick a winner; deployment keys map to `RouterConfig`
 (`allow_unverified_compliance` ORs; `train_optout_confirmed` / `baa_tier_confirmed` union). The
 effective compliance is what prunes the tree AND what the route `compliance` facts read.
+`optimize_for` is the one key where the request wins outright, because it orders the survivors and
+never changes the set: it is a preference, and a preference is not a constraint.
 
-The block is refused whole (`api.PolicyError`, via `prune._validated_policy`) if it names a key
-outside `api.POLICY_KEYS` or gives one the wrong type. The schema declares this sub-object
-`additionalProperties: true`, so that check is the only thing standing between a typo and a run
+The block is refused whole (`ConfigError`, from `openreading.config.load`) if it names a key
+outside those nine or gives one the wrong type. `strategy-config` v0.3 declares this sub-object
+`additionalProperties: false` with every key typed, which is what stands between a typo and a run
 with no constraint: `require_locall` used to be dropped in silence, and a quoted
 `allow_unverified_compliance: "false"` was truthy enough to switch the fail-closed tolerance ON.
 
@@ -518,7 +522,7 @@ definitions, availability, and computation notes; this section is the binding su
 - `filename_matches` [regex string] — source: `document.filename`. If unavailable: rule doesn't
   match.
 - `compliance.<field>` [bool/string] — source: the post-union effective compliance (request ∪
-  `--policy` ∪ file `policy:`, most-restrictive-wins — the same constraint set that pruned the
+  file `policy:`, most-restrictive-wins — the same constraint set that pruned the
   tree). Consequence: a file `policy:` key makes its matching fact constant for every request. If
   unavailable: always available.
 - `sample_percent` [number 0–100] — source: deterministic sha256(document bytes) bucket — stable per
@@ -930,7 +934,7 @@ present with no decider configured (it will resolve to `review_default`; said up
 `decide` node with no decider configured (it will always take `otherwise:`) · `fields_required`
 (Plain `missing`) on a backend whose descriptor cannot produce typed fields (the rung always
 escalates) · judged comparison with more than 3 non-shadow candidates (2·(n−1) pairwise LLM
-calls — slow) · steps unreachable under the file's own `policy:` block or `--policy` ("`reducto`
+calls — slow) · steps unreachable under the file's own `policy:` block ("`reducto`
 is filtered out by the policy — remove it or relax the policy") · the Plain desugar's own
 warnings (`openreading.strategies.plain`). There is no nested-fan-out / worst-case-attempts
 warning.
@@ -939,8 +943,8 @@ Errors follow the Elm doctrine: locate (file + node path, e.g.
 `strategies.cheap.steps[0].escalate_if`), explain in domain terms, suggest the fix. Line-precise
 location is a documented follow-up (D-v3-8: `yaml.safe_load` discards source marks, and the
 injected-`__line__` trick breaks the schema's `additionalProperties: false`; the node path already
-satisfies "locate"). With `--policy p.json`, `validate` additionally flags steps that can never
-run *in that compliance context*.
+satisfies "locate"). `validate` reads the file's own `policy:` block, so it additionally flags
+steps that can never run *in that compliance context*.
 
 
 10. JSON Schema and editor experience
@@ -992,7 +996,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from openreading.types.policy import Policy, coerce_policy
 
 # A raw strategy node exactly as it appears in the file after schema validation: a bare string
 # (backend id / "auto" / "strategy:<name>"), a list (cascade shorthand), or a map form. The typed
@@ -1049,10 +1055,18 @@ class StrategyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     version: int
-    # `policy` is a superset of the --policy JSON (compliance + RouterConfig keys); it is
-    # deliberately open (additionalProperties: true in the schema) and consumed via the same
-    # flat-key path as api._apply_policy / api.router_config.
-    policy: dict[str, Any] | None = None
+    # `policy` carries the compliance and RouterConfig keys, typed and closed by
+    # `strategy-config` v0.3 for a file and by `openreading.types.policy.Policy` for a config a
+    # caller builds in Python. The validator below is STRICT where pydantic's default is lax: a
+    # lax bool accepts the string "true", which is the widening the schema refuses on the file
+    # path, and a config built with `model_validate` reaches no schema at all.
+    policy: Policy | None = None
+
+    @field_validator("policy", mode="before")
+    @classmethod
+    def _strict_policy(cls, value: Any) -> Any:
+        return coerce_policy(value)
+
     limits: Limits | None = None
     decider: DeciderConfig | None = None
     defaults: Defaults | None = None

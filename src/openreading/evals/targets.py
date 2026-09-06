@@ -78,12 +78,25 @@ class BenchmarkTarget:
         return f"{self.kind}:{self.name}"
 
 
+def _config_identity(config) -> str | None:
+    """A canonical digest of the configuration at `config`, or the raw value when there is none
+    to read. Formatting and key order do not change it; any meaningful content change does."""
+    if not config:
+        return None
+    from openreading import config as config_module
+
+    try:
+        loaded = config_module.load(config)
+    except ValueError:
+        return config
+    return loaded.content_hash if loaded is not None else config
+
+
 def pipeline_name(
     benchmark_id: str,
     target: BenchmarkTarget,
     *,
-    config: str | None,
-    policy: dict[str, Any] | None,
+    config,
 ) -> str:
     """Name the publisher pipeline one target plus one configuration produces.
 
@@ -92,17 +105,21 @@ def pipeline_name(
     identity for that reason: `benchmark run parsebench --target backend:pymupdf` and
     `benchmark run extractbench --target backend:pymupdf` default to the same `--output-dir`, and
     without the id they would write parse results and extract results into one directory and then
-    resume across products. Config and policy are in it because the same backend under a different
-    compliance policy is a different measurement, and stable ordering keeps a rerun's name
-    identical so the publisher can resume rather than redo.
+    The config is in it because the same backend under a different `openreading.yaml`, and so
+    under a different compliance policy, is a different measurement. Stable ordering keeps a
+    rerun's name identical so the publisher can resume rather than redo.
     """
 
     identity = json.dumps(
         {
             "benchmark": benchmark_id,
             "target": target.reference,
-            "config": config,
-            "policy": policy,
+            # The file's CONTENT, never its path. The publisher keys its artifact directory and
+            # its resume on this name, so hashing the path let an edited policy reuse results
+            # measured under the previous one while labelling them as the current run. A file that
+            # will not load contributes its path, because refusing to name a pipeline is not this
+            # function's job — the loader raises for the caller a moment later.
+            "config": _config_identity(config),
         },
         sort_keys=True,
     )
@@ -116,8 +133,7 @@ def execute_target(
     target: BenchmarkTarget,
     *,
     product: BenchmarkProduct,
-    config: str | None = None,
-    policy: dict[str, Any] | None = None,
+    config=None,
     extraction_schema: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run one publisher case through the public OpenReading API."""
@@ -130,7 +146,6 @@ def execute_target(
     # `extraction_schema`, which is what a plain `openreading parse` already does.
     kwargs: dict[str, Any] = {
         "config": config,
-        "policy": policy,
     }
     if target.kind == "backend":
         kwargs["backend"] = target.name

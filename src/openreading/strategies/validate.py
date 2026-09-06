@@ -19,6 +19,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from openreading import schemas
 from openreading.adapters.registry import BUILTIN_ADAPTERS, make_adapter
 from openreading.router import compliance as comp
 from openreading.router.compliance import RouterConfig
@@ -150,13 +151,13 @@ class _Ctx:
 def validate_config(
     config: StrategyConfig,
     *,
-    policy: dict[str, Any] | None = None,
     raw: dict[str, Any] | None = None,
     plain_info: dict[str, PlainInfo] | None = None,
 ) -> list[ValidationIssue]:
-    """Return every world-consistency issue (errors + warnings) for `config`. `policy` is an
-    optional extra compliance context (from `--policy`); `raw` is the pre-model dict, scanned for
-    secret-pattern keys the schema's open sub-trees (`policy`, `with.*`) don't lock down.
+    """Return every world-consistency issue (errors + warnings) for `config`. The compliance
+    context is the file's own `policy:` block, which is the only place a policy is written; `raw`
+    is the pre-model dict, scanned for secret-pattern keys the schema's open sub-trees (`policy`,
+    `with.*`) don't lock down.
     `plain_info` (from the loader) tags each strategy's dialect so §8 issues on a Plain body are
     phrased in Plain vocabulary, and surfaces the desugar-computed Plain warnings."""
     library: dict[str, RawNode]
@@ -173,8 +174,8 @@ def validate_config(
     # truthy and reports a `trains_on_customer_data: unverified` backend as reachable. When the
     # policy is refused the context is dropped rather than built from a dict we do not trust, so
     # the rest of the file is still checked and this error is the only thing said about the policy.
-    merged_policy, policy_issue = _checked_merged_policy(config, policy)
-    ctx = _Ctx(config, library, merged_policy, plain_info)
+    checked_policy, policy_issue = _checked_policy(config)
+    ctx = _Ctx(config, library, checked_policy, plain_info)
     if policy_issue is not None:
         ctx.issues.append(policy_issue)
 
@@ -213,29 +214,28 @@ def validate_config(
 # --------------------------------------------------------------------------- helpers
 
 
-def _merged_policy(config: StrategyConfig, extra: dict[str, Any] | None) -> dict[str, Any] | None:
-    base = dict(config.policy) if config.policy else {}
-    if extra:
-        base.update(extra)  # --policy adds / tightens
-    return base or None
-
-
-def _checked_merged_policy(
-    config: StrategyConfig, extra: dict[str, Any] | None
+def _checked_policy(
+    config: StrategyConfig,
 ) -> tuple[dict[str, Any] | None, ValidationIssue | None]:
-    """The merged policy, or `(None, issue)` when it is not a well-formed policy object.
+    """The file's `policy:` block, or `(None, issue)` when it is not a well-formed policy object.
 
-    Reported as an ERROR, not a warning: `prune._validated_policy` refuses the identical block on
-    the run path, so a file this returns an issue for cannot run at all. `strategy validate` saying
-    OK about a config that `strategy plan` refuses would be the worse half of the same defect.
+    Reported as an ERROR, not a warning: `openreading.schemas` refuses the identical block where
+    the file is read, so a file this returns an issue for cannot run at all. `strategy validate`
+    saying OK about a config that `strategy plan` refuses would be the worse half of the same
+    defect.
+
+    This surface checks the block against the same schema rather than trusting the loader that
+    read it, because `validate_config` takes a `StrategyConfig` and a caller embedding this
+    package can build one without going through a file at all.
     """
-    from openreading.api import PolicyError, validate_policy  # lazy: api is the layer above
-
-    merged = _merged_policy(config, extra)
+    if config.policy is None:
+        return None, None
+    block = config.policy.model_dump(exclude_none=True)
     try:
-        return validate_policy(merged), None
-    except PolicyError as e:
-        return None, ValidationIssue("error", "policy", str(e))
+        schemas.validate_strategy_config({"version": 1, "policy": block})
+    except Exception as e:  # noqa: BLE001 — jsonschema.ValidationError, or a schema error
+        return None, ValidationIssue("error", "policy", getattr(e, "message", None) or str(e))
+    return block, None
 
 
 def _descriptor(slug: str):
@@ -446,7 +446,7 @@ def _check_leaf(node: dict[str, Any], path: str, ctx: _Ctx, eff_deadline_ms: Any
             f"per-attempt timeout {node['timeout']} exceeds the effective deadline and will be "
             "clamped",
         )
-    # steps unreachable under the file's own policy (or --policy)
+    # steps unreachable under the file's own `policy:` block
     drop = ctx.policy_drop(desc)
     if drop is not None:
         ctx.warn(

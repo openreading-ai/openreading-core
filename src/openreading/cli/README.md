@@ -249,8 +249,8 @@ You get a refusal, never geometry-only output pretending to be an answer.
 - stdout carries the result only, because a progress line there would break every `| jq` consumer.
   `openreading.cli.app` enforces this by redirecting stdout during the run.
 - A printed envelope is schema-validated first, so a non-conforming document never reaches stdout.
-- No flag widens the eligible set. The policy file sets it, and three of its keys widen it
-  deliberately. A policy that leaves nothing to run is exit 3 from every verb that
+- No flag widens the eligible set. The `policy:` block of your `openreading.yaml` sets it, and
+  three of its keys widen it deliberately. A policy that leaves nothing to run is exit 3 from every verb that
   executes. Bare `route` prints the empty plan and exits 4 ([Routing and
   keys](../router/README.md)).
 - Keys never travel on the command line, so they never land in shell history or `ps`.
@@ -422,10 +422,6 @@ that fills mid-run was not measured.
 
 ## Not built yet
 
-- `parse --policy` does not exist. `route`, `strategy validate`, `strategy plan`, `replay`,
-  `calibrate`, and `leaderboard` take a policy, and `parse` does not. Source: the `openreading.cli`
-  docstring, "Batch: a directory, a glob, or two or more sources", which says "`parse` has no
-  `--policy` flag".
 - Batch-level resume does not exist, so an interrupted batch names no run id. Source: the
   `openreading.cli` docstring, "Exit codes", 6: "a batch names none (batch-level resume is out of
   scope)".

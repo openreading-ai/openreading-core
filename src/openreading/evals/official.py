@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from openreading.evals.benchmarks import get_benchmark
 from openreading.evals.targets import BenchmarkTarget
@@ -114,7 +113,6 @@ def run_official_benchmark(
     output_dir: str | Path,
     preset: str = "smoke",
     config: str | None = None,
-    policy: dict[str, Any] | None = None,
     jobs: int = 1,
     force: bool = False,
 ) -> OfficialRun:
@@ -130,7 +128,6 @@ def run_official_benchmark(
         "output_dir": Path(output_dir),
         "smoke": smoke,
         "config": config,
-        "policy": policy,
         "jobs": jobs,
         "force": force,
     }

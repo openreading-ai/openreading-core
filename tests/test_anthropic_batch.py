@@ -323,9 +323,9 @@ def test_run_batch_native_refuses_compliance_override_before_create_batch(tmp_pa
 
 
 def test_run_batch_native_refuses_policy_before_create_batch(tmp_path, monkeypatch):
-    # the documented, promoted spelling (`policy={...}`) must refuse identically — this is the
-    # structurally-broken path: `policy` is its own named run_batch parameter, so it can never land
-    # in **request_overrides, and _run_native never threaded it into build_request at all.
+    # The documented spelling of a policy (a `policy:` block, here passed inline as `config=`)
+    # must refuse identically to a raw `compliance=` override. This was a structurally-broken
+    # path: the policy never reached build_request on the native branch at all.
     client = FakeBatchClient(_results_ok_and_error())
     monkeypatch.setitem(
         BUILTIN_ADAPTERS, "anthropic-claude", lambda: AnthropicClaudeAdapter(client=client)
@@ -334,7 +334,7 @@ def test_run_batch_native_refuses_policy_before_create_batch(tmp_path, monkeypat
         run_batch(
             [str(_one_doc_corpus(tmp_path))],
             backend="anthropic-claude",
-            policy={"require_local": True},
+            config={"version": 1, "policy": {"require_local": True}},
         )
     assert client.created is None
 
@@ -349,7 +349,7 @@ def test_run_batch_native_dispatches_when_compliance_compatible(tmp_path, monkey
     env = run_batch(
         [str(_one_doc_corpus(tmp_path))],
         backend="anthropic-claude",
-        policy={"require_baa": True},
+        config={"version": 1, "policy": {"require_baa": True}},
     )
     assert client.created is not None  # create_batch WAS reached
     schemas.validate_batch_result(env)

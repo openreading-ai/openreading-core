@@ -128,7 +128,7 @@ way, for someone who did not follow the discussion.
 ## Reporting bugs
 
 Open an issue with what you expected, what happened, and the smallest input that reproduces it
-(a document, a command, a policy file). Security vulnerabilities are the exception: follow
+(a document, a command, an `openreading.yaml`). Security vulnerabilities are the exception: follow
 [`SECURITY.md`](SECURITY.md) instead of filing a public issue.
 
 ## Licensing of contributions

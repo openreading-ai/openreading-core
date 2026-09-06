@@ -18,6 +18,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient  # noqa: E402
 
 from openreading import schemas  # noqa: E402
+from openreading.adapters.registry import make_adapter  # noqa: E402
 from openreading.server import create_app  # noqa: E402
 from openreading.testing.sample_pdf import build_sample_pdf  # noqa: E402
 
@@ -509,25 +510,94 @@ def test_route_returns_plan_shape(client):
     assert plan["dropped"]["aws-textract"]["code"] == "trains_on_data"  # unconfirmed opt-out
 
 
-def test_route_config_from_env_readmits_textract(client, monkeypatch):
-    monkeypatch.setenv("OPENREADING_TRAIN_OPTOUT_CONFIRMED", "aws-textract")
-    payload = _pdf_body("auto")
-    payload["compliance"] = {"require_baa": True, "no_train_on_data": True}
-    r = client.post("/v1/route", json=payload)
-    plan = r.json()
+def _policy_server(tmp_path, monkeypatch, policy: dict, strategies: str = ""):
+    """A server started the way an operator starts one: OPENREADING_CONFIG at a file whose
+    `policy:` block is the deployment's compliance posture."""
+    body = ", ".join(f"{k}: {json.dumps(v)}" for k, v in policy.items())
+    path = tmp_path / "openreading.yaml"
+    path.write_text(f"version: 1\npolicy: {{{body}}}\n{strategies}")
+    monkeypatch.setenv("OPENREADING_CONFIG", str(path))
+    return TestClient(create_app())
+
+
+def test_the_file_policy_readmits_textract_for_a_confirmed_optout(tmp_path, monkeypatch):
+    server = _policy_server(
+        tmp_path,
+        monkeypatch,
+        {
+            "require_baa": True,
+            "no_train_on_data": True,
+            "train_optout_confirmed": ["aws-textract"],
+        },
+    )
+    plan = server.post("/v1/route", json=_pdf_body("auto")).json()
     assert "aws-textract" in [plan["chosen"], *plan["fallbacks"]]
 
 
-def test_route_tier_gated_baa_needs_the_deploy_env_confirmation(client, monkeypatch):
-    monkeypatch.delenv("OPENREADING_BAA_TIER_CONFIRMED", raising=False)
-    payload = _pdf_body("auto")
-    payload["compliance"] = {"require_baa": True}
-    plan = client.post("/v1/route", json=payload).json()
+def test_a_tier_gated_baa_needs_the_confirmation_in_the_file(tmp_path, monkeypatch):
+    refused = _policy_server(tmp_path, monkeypatch, {"require_baa": True})
+    plan = refused.post("/v1/route", json=_pdf_body("auto")).json()
     assert plan["dropped"]["reducto"]["code"] == "no_baa"
 
-    monkeypatch.setenv("OPENREADING_BAA_TIER_CONFIRMED", "reducto")
-    plan = client.post("/v1/route", json=payload).json()
+    confirmed = _policy_server(
+        tmp_path, monkeypatch, {"require_baa": True, "baa_tier_confirmed": ["reducto"]}
+    )
+    plan = confirmed.post("/v1/route", json=_pdf_body("auto")).json()
     assert "reducto" in [plan["chosen"], *plan["fallbacks"]]
+
+
+def test_the_file_policy_gates_a_request_that_names_no_strategy(tmp_path, monkeypatch):
+    """Law P4. The server's non-strategy path is the one that forgot to union: a request naming a
+    backend, or asking for `auto`, reached the router carrying none of the operator's
+    constraints. `require_local` in the file has to drop every hosted backend on both."""
+    server = _policy_server(tmp_path, monkeypatch, {"require_local": True})
+
+    plan = server.post("/v1/route", json=_pdf_body("auto")).json()
+    for bid in [plan["chosen"], *plan["fallbacks"]]:
+        assert make_adapter(bid).descriptor.compliance.runs_fully_local, bid
+    assert all(d["code"] == "not_local" for d in plan["dropped"].values())
+
+    r = server.post("/v1/parse", json=_pdf_body("reducto"))
+    assert r.status_code == 403
+    assert "require_local" in r.json()["error"]["message"]
+
+
+def test_a_named_backend_the_file_policy_allows_still_runs(tmp_path, monkeypatch):
+    """The other half of the pair: the gate must refuse the hosted backend WITHOUT refusing the
+    local one the same policy admits."""
+    server = _policy_server(tmp_path, monkeypatch, {"require_local": True})
+    r = server.post("/v1/parse", json=_pdf_body("pymupdf"))
+    assert r.status_code == 200
+    assert r.json()["backend"]["id"] == "pymupdf"
+
+
+@pytest.mark.parametrize(
+    "var",
+    [
+        "OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE",
+        "OPENREADING_TRAIN_OPTOUT_CONFIRMED",
+        "OPENREADING_BAA_TIER_CONFIRMED",
+    ],
+)
+def test_the_removed_environment_variables_change_nothing(tmp_path, monkeypatch, var):
+    """These three were a third parser for three of the nine keys, with their own truthiness
+    rules. They are gone, and a deployment that still sets one gets the file's posture, not a
+    widened one."""
+    monkeypatch.setenv(var, "1" if var.endswith("COMPLIANCE") else "reducto,aws-textract")
+    server = _policy_server(tmp_path, monkeypatch, {"require_local": True})
+    plan = server.post("/v1/route", json=_pdf_body("auto")).json()
+    for bid in [plan["chosen"], *plan["fallbacks"]]:
+        assert make_adapter(bid).descriptor.compliance.runs_fully_local, bid
+
+
+def test_no_config_file_leaves_the_server_exactly_as_it_was(tmp_path, monkeypatch):
+    """Law P5, on the server: no `OPENREADING_CONFIG` means no policy, and the server never
+    sniffs its working directory for one."""
+    monkeypatch.delenv("OPENREADING_CONFIG", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "openreading.yaml").write_text("version: 1\npolicy: {require_local: true}\n")
+    plan = TestClient(create_app()).post("/v1/route", json=_pdf_body("auto")).json()
+    assert plan["dropped"] == {}
 
 
 # --- async jobs (8.2) ------------------------------------------------------------------
@@ -3688,3 +3758,27 @@ def test_caller_auth_scope_is_enforced_when_defaults_strategy_makes_auto_a_walk(
     assert not (r.status_code == 200 and r.json()["backend"]["id"] == "pymupdf")
     assert r.status_code == 403
     assert r.json()["error"]["category"] == "scope_denied"
+
+
+def test_a_region_conflict_is_a_403_and_not_an_unhandled_500(tmp_path, monkeypatch):
+    """`config.apply` can now REFUSE, where before it only ever returned. It runs before the
+    handler's own try/except, so its refusal escaped as a bare 500 with no body: the caller was
+    told the server broke when the server had in fact enforced the operator's policy."""
+    from openreading.types.errors import ComplianceRefused  # noqa: F401  (documents the type)
+
+    server = _policy_server(tmp_path, monkeypatch, {"data_region": "eu"})
+    body = _pdf_body("pymupdf")
+    body["compliance"] = {"data_region": "us"}
+    r = server.post("/v1/parse", json=body)
+    assert r.status_code == 403
+    err = r.json()["error"]
+    assert err["category"] == "compliance_refused"
+    assert err["backend_code"] == "region_conflict"
+    assert "eu" in err["message"] and "us" in err["message"]
+
+
+def test_a_region_conflict_on_the_route_endpoint_is_also_a_403(tmp_path, monkeypatch):
+    server = _policy_server(tmp_path, monkeypatch, {"data_region": "eu"})
+    body = _pdf_body("auto")
+    body["compliance"] = {"data_region": "us"}
+    assert server.post("/v1/route", json=body).status_code == 403

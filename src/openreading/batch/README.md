@@ -27,11 +27,12 @@ The batch layer wraps the single-document path and never changes what that path 
 first step, and it expands your sources into one sorted list of files. Each item then runs exactly
 as `parse one.pdf` would, with its own routing and its own compliance check.
 
-A policy is a short list of rules about which backends may see a document. The per-item compliance
-check enforces whatever policy reached the request. `parse` has no `--policy` flag, so the command
-above runs with an empty policy. A policy reaches a corpus in two ways. The first is a `policy:`
-block in `openreading.yaml`, with the folder run under a strategy from that file. The second is
-`openreading.run_batch(paths, policy={…})` from Python, which takes a policy directly. [Routing and
+A policy is a short list of rules about which backends may see a document, written once in the
+`policy:` block of your `openreading.yaml`. The per-item compliance check enforces it on every
+item. The command above ran with no filter because that directory holds no such file; write one
+and the same command gates the whole corpus, whether it names a backend or runs a strategy. From
+Python, `openreading.run_batch(paths, config="openreading.yaml")` reads the same file, and
+`config={"version": 1, "policy": {…}}` passes the same shape inline. [Routing and
 keys](../router/README.md#recipes) runs both.
 
 ```mermaid

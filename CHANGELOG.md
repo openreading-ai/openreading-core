@@ -26,6 +26,15 @@ them.
 
 ### Added
 
+- **`strategy-config` v0.3.** The `policy:` block is a closed, typed object: the five compliance
+  keys carrying `request.compliance`'s own descriptions verbatim, `optimize_for` as its enum, and
+  the three attestation keys as `boolean` and `array` of `string`. A quoted `"false"` and a bare
+  `reducto` where a list belongs are refused by the schema now rather than by a hand-written
+  validator standing in for it, and `validate_policy`, `POLICY_KEYS` and `PolicyError` are gone
+  with it. `doc_type_hint` leaves the policy grammar and stays a request field, because no routing
+  stage reads it and a key that does nothing in a file that gates compliance is one a reader will
+  try to rely on. The config `version` const stays `1`: no file that was valid and meaningful
+  becomes invalid.
 - **`openreading help [TOPIC]`.** The CLI now carries its own manual. `openreading help` prints a
   topic index grouped by what you are trying to do, and `openreading help batch` prints one
   chapter. The chapters are sections of the `openreading.cli` package docstring, located by
@@ -58,6 +67,56 @@ them.
   dollar. `--yes` answers in advance and is required with no terminal attached.
 
 ### Changed
+
+**File and request constraints intersect, and neither can weaken the other.** The union took the
+request's value for `data_region` and `max_retention` whenever it had one, which read as "the
+caller is more specific" and behaved as "the caller may relax the deployment": a file requiring
+`max_retention: zero` and a request asking for `48h` produced `48h`, so a backend retaining data
+for 24 hours survived a policy that forbade retention outright. Retention now keeps the lower
+ceiling. Two different regions refuse with `region_conflict`, because regions have no ordering and
+no value means both. `optimize_for` still takes the request's value, because it orders the
+survivors and never changes the set.
+
+**A policy is enforced at every public entry point, not only through `openreading.run`.**
+`compile_strategy` assumed some earlier surface had folded the block in, so a caller who built a
+`StrategyConfig` and compiled it got no policy at all; it now applies the block itself, which is
+idempotent. `config.apply`, `config.router_config` and `StrategyConfig` validate a mapping into a
+typed `Policy` before reading a field, so the two shapes that used to buy permission instead of
+raising (`allow_unverified_compliance: "false"`, which is truthy, and a bare
+`train_optout_confirmed: "aws-textract"`, which became a set of characters) are refused from
+Python exactly as the schema refuses them from a file.
+
+**`leaderboard` applies the file's compliance to every case.** It passed only the three
+attestations through, so the keys that widen the eligible set applied while the five requirements
+they qualify did not. A hosted backend could be ranked under `require_local: true`.
+
+**One batch reads the file once.** A two-item batch parsed it three times, so items from one
+returned envelope could run under different policies.
+
+**Resume compares the policy as written.** The ledger stores the request after the file was folded
+into it, so removing a constraint left the stored request carrying it and the run identity
+unchanged: the resume ran under a policy the file no longer asked for and said nothing. The block
+as written now takes part in `config_hash`, so adding and removing both refuse. Runs armed before
+this change cannot be resumed and report a header mismatch.
+
+**Publisher pipeline identity follows the file's content.** It hashed the path, so editing the
+policy left the artifact directory and resume identity unchanged and a rerun reused results
+measured under the previous policy. Reformatting or reordering keys still resumes.
+
+**A policy is written once, in `openreading.yaml`.** The `policy:` block of that file is now the
+only place a compliance policy is spelled, and every command, every Python call and the server
+find that file the same way and read the same block. `route` and `leaderboard` gain `--config`,
+the two of the seven `--policy` verbs that lacked it. `config=` accepts a path or a mapping of the
+file's own shape, so a caller with no file on disk writes `config={"version": 1, "policy": {...}}`
+and gets the identical validation a file gets. Discovery order is unchanged, and a directory with
+no file routes exactly as it did before. Reading the file no longer imports the strategy engine,
+so a run that names a backend pays nothing for a package it does not use.
+
+**A directory's `openreading.yaml` now gates a run that names a backend.** `parse --backend
+reducto` in a folder whose file says `require_local: true` is refused, where before it ran as
+though no file existed. That is the point of the file, and the refusal names the key. Anyone
+keeping a strategy file next to documents they parse by name should read its `policy:` block
+before upgrading.
 
 **The project is `openreading`, was `openmanifold`.** The vendors this repository integrates all
 sell the category as *document intelligence*. The name now claims the plain-English version of it.
@@ -188,6 +247,17 @@ tells a win from a tie.
 **Ledger timestamps use a wall clock**, so a retention expiry survives a reboot.
 
 ### Removed
+
+**`--policy PATH`, the `policy=` keyword, and three server environment variables.** The flag is
+gone from `route`, `strategy validate`, `strategy plan`, `replay`, `calibrate`, `benchmark run`
+and `leaderboard`; passing it is an argparse error and exit 2. `policy=` is gone from
+`build_request`, `route`, `run` and `run_batch`; passing it raises `TypeError` naming the
+replacement. `OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE`, `OPENREADING_TRAIN_OPTOUT_CONFIRMED` and
+`OPENREADING_BAA_TIER_CONFIRMED` are no longer read: the server takes all three attestations from
+the file's `policy:` block instead, and a deployment that still sets one gets the file's posture
+rather than a widened one. Write the same keys in `openreading.yaml` and pass `--config` or
+`config=` where a path is needed. The package is pre-release with no tag, so the flag is removed
+outright rather than tombstoned.
 
 **`openreading compare --serial`.** The flag was never read by any code path. Compare's fan-out has
 always been serial, and the concurrent mode the flag implied an opt-out of was never built. Fan-out

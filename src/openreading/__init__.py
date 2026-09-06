@@ -27,7 +27,7 @@ otherwise never discovers:
     parse      parse doc.pdf --backend X        run(), run_batch()        POST /v1/parse, /v1/batch
     compare    compare a.json b.json            compare()                 POST /v1/compare
     strategy/  parse --strategy X;              run(strategy=), route()   backend.id "strategy:X";
-    route      route doc.pdf --policy p.json                              POST /v1/route
+    route      route doc.pdf                                             POST /v1/route
     evals      leaderboard DIR --backends X,Y   evals.run_leaderboard()   (none)
 
 `compare` says WHERE two backends disagree and never which one is right, because it has no
@@ -156,16 +156,16 @@ matched, capped per side). Not counts, not structure:
 
 Route with compliance (HIPAA / no-train / local-only). A plan, no execution:
 
-    plan = openreading.route("doc.pdf", policy={"require_baa": True, "no_train_on_data": True})
+    plan = openreading.route("doc.pdf")           # the policy: block of your openreading.yaml
     plan.chosen, plan.fallbacks, plan.dropped     # dropped = {backend_id: DropReason, ...}
-    # CLI: openreading route doc.pdf --policy phi.json --run   # plan + WHY each drop, then run
+    # CLI: openreading route doc.pdf --run        # plan + WHY each drop, then run
 
 Compliance is a hard filter never relaxed by fallback; an unverified claim fails closed (the
 backend is dropped). So does a CONDITIONAL one: a training opt-out you have not applied
 (`trains_on_customer_data: opt_out`) or a BAA the vendor sells only on a higher plan
 (`hipaa_baa: tier_gated`). Assert those per deployment with `train_optout_confirmed` /
-`baa_tier_confirmed` (lists of backend ids) in the policy; the run then carries a warning naming
-the confirmation it rests on.
+`baa_tier_confirmed` (lists of backend ids) in the `policy:` block; the run then carries a
+warning naming the confirmation it rests on.
 
 Strategies (optional `openreading.yaml` orchestration):
 
@@ -319,7 +319,7 @@ Rules a caller must not get wrong
   decider. So never propose a construct that widens it, and treat
   `allow_unverified_compliance` as the operator's call rather than yours, because it waives
   verification for every vendor at once while the other two assert a checked fact about named
-  ones. `route --policy` prints the reason each backend was dropped.
+  ones. `route` prints the reason each backend was dropped.
 - Batch is decided by input FORM, not count. Do not add `--jobs` / `--max-items` to a
   single-file parse (batch-only flags).
 - `--jobs` vs native batch: most hosted APIs are one-document-per-call, so a batch is N
@@ -381,15 +381,17 @@ prose. Branch on:
   for them in output. Per surface:
     * Python raises a typed exception, and the type IS the branch: `RetryableError` (retry with
       backoff), `TerminalError` (do not retry), `UnsupportedFeatureError`, `ComplianceRefused`,
-      `MissingCredentialsError`, `PlanExhaustedError`, `UnknownStrategyError`, `PolicyError`,
+      `MissingCredentialsError`, `PlanExhaustedError`, `UnknownStrategyError`,
       `SourceNotFoundError`. This is the only surface that separates every condition, so prefer it
-      when an agent must branch. ALL NINE import from the top level:
+      when an agent must branch. ALL EIGHT import from the top level:
 
           from openreading import ComplianceRefused, RetryableError, TerminalError
 
-      Their home modules are `openreading.types.errors` (all but `PolicyError`) and
-      `openreading.api` (`PolicyError`, raised by policy parsing, not by a backend); importing
-      from either still works. THREE of them SUBCLASS `TerminalError` -- `MissingCredentialsError`,
+      Their home module is `openreading.types.errors`, and importing from there still works. An
+      `openreading.yaml` that will not load, a `policy:` block that is not a policy included,
+      raises `openreading.config.ConfigError` instead, because it is a file the caller wrote
+      rather than a backend outcome. THREE of them SUBCLASS `TerminalError` --
+      `MissingCredentialsError`,
       `PlanExhaustedError` and `UnknownStrategyError` -- so catch those first or a broad
       `except TerminalError` swallows all three. Handling them as `TerminalError` is not WRONG
       (none is retryable), it just loses which one happened.
@@ -507,9 +509,10 @@ Known gaps: no MCP surface (integrate via CLI/JSON, Python dicts, or HTTP; desig
 `design/agentic.md`, `product/specs/agentic.product-spec.md`); no shipped `DeciderPort` executor
 (design records: `design/decider-executor.md`, `product/specs/decider.product-spec.md`); no
 intent schema or its routing mechanics (design records: `design/intent.md`,
-`product/specs/intent.product-spec.md`); no translation stage or profile grammar, which has no
-design record anywhere; `warnings[]` has no closed registry (the `openreading.schemas` docstring
-lists today's known codes, which is a list to read rather than an enum to validate against); the
+`product/specs/intent.product-spec.md`); no translation
+stage or profile grammar, which has no design record anywhere; `warnings[]` has no closed
+registry (the `openreading.schemas` docstring lists today's known codes, which is a list to read
+rather than an enum to validate against); the
 `orchestration` block's inner shape is not itself schema-validated, so every closed set inside it
 is a code-level guarantee only; `status.error` is never populated on a single-document response;
 `confidence` is populated only where a backend honestly has one; there is no run-stats
@@ -557,8 +560,8 @@ at `src/openreading/README.md`. Those are files in this repo that a reader can o
 
 from __future__ import annotations
 
-from openreading.api import PolicyError, route, run, run_batch
 from openreading.api import resume_run as resume
+from openreading.api import route, run, run_batch
 from openreading.comparison import compare
 
 # The triage above tells an agent to branch on the exception TYPE, because Python is the only
@@ -566,8 +569,7 @@ from openreading.comparison import compare
 # be imported, and every one of these classes used to live two packages down, so the import an
 # agent actually writes -- `from openreading import ComplianceRefused` -- raised ImportError on the
 # very surface the briefing recommends. They are re-exported here and their home is unchanged:
-# `openreading.types.errors` defines all but `PolicyError`, which `openreading.api` defines
-# because it is raised by policy parsing rather than by a backend.
+# `openreading.types.errors` is the home of every one of them.
 from openreading.types.errors import (
     ComplianceRefused,
     MissingCredentialsError,
@@ -593,7 +595,6 @@ __all__ = [
     "ComplianceRefused",
     "MissingCredentialsError",
     "PlanExhaustedError",
-    "PolicyError",
     "RetryableError",
     "SourceNotFoundError",
     "TerminalError",

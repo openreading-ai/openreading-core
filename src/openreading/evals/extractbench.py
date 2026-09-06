@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from openreading.evals.official import BenchmarkDependencyError, OfficialComparison, OfficialRun
 from openreading.evals.targets import (
@@ -63,7 +62,14 @@ def prepare(*, data_dir: Path, smoke: bool, force: bool) -> int:
     return int(BenchCLI().download(data_dir=data_dir, force=force, test=smoke))
 
 
-def _register(target: BenchmarkTarget, *, config: str | None, policy: dict[str, Any] | None) -> str:
+def _load_config(config):
+    """The configuration this registration and every inference under it will share, read once."""
+    from openreading import config as config_module
+
+    return config_module.load(config)
+
+
+def _register(target: BenchmarkTarget, *, config: str | None) -> str:
     (
         _,
         register_pipeline,
@@ -75,7 +81,12 @@ def _register(target: BenchmarkTarget, *, config: str | None, policy: dict[str, 
         RawInferenceResult,
         ProductType,
     ) = _imports()
-    pipeline_name = build_pipeline_name("extractbench", target, config=config, policy=policy)
+    # ONE read, used for both halves. The pipeline name is a digest of this content, and the
+    # provider below executes this same snapshot: registering from one read and executing from
+    # another files a run's artifacts under the policy that happened to be on disk at
+    # registration, while the documents ran under whatever replaced it.
+    snapshot = _load_config(config)
+    pipeline_name = build_pipeline_name("extractbench", target, config=snapshot)
     provider_name = pipeline_name
 
     class OpenReadingExtractProvider(Provider):
@@ -89,8 +100,7 @@ def _register(target: BenchmarkTarget, *, config: str | None, policy: dict[str, 
                 request.source_file_path,
                 target,
                 product="extract",
-                config=config,
-                policy=policy,
+                config=snapshot,
                 extraction_schema=request.schema_override,
             )
             completed = datetime.now(UTC)
@@ -146,14 +156,13 @@ def run(
     output_dir: Path,
     smoke: bool,
     config: str | None,
-    policy: dict[str, Any] | None,
     jobs: int,
     force: bool,
 ) -> OfficialRun:
     """Register the target, then delegate inference and scoring to ExtractBench."""
 
     BenchCLI, *_ = _imports()
-    pipeline_name = _register(target, config=config, policy=policy)
+    pipeline_name = _register(target, config=config)
     output_dir.mkdir(parents=True, exist_ok=True)
     code = int(
         BenchCLI().run(

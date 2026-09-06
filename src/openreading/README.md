@@ -40,7 +40,7 @@ same surfaces today, and a native tool surface is [not built](#not-built-yet).
 |---|---|---|---|
 | `parse` | `parse doc.pdf --backend X` | `run()`, `run_batch()`; `POST /v1/parse`, `POST /v1/batch` | the exit code, then `status.state` and `warnings[]` |
 | `compare` | `compare a.json b.json` | `compare()`; `POST /v1/compare` | `headline.verdict`: `equivalent`, `divergent`, `mixed` |
-| `strategy` | `parse --strategy X`; `route doc.pdf --policy p.json` | `run(strategy=)`, `route()`; `backend.id "strategy:X"`; `POST /v1/route` | `orchestration.outcome`, `attempts[].category`, `decisions[]` |
+| `strategy` | `parse --strategy X`; `route doc.pdf` | `run(strategy=)`, `route()`; `backend.id "strategy:X"`; `POST /v1/route` | `orchestration.outcome`, `attempts[].category`, `decisions[]` |
 | `evals` | `benchmark run NAME --target backend:X`; `leaderboard DIR --backends X,Y` | CLI only | official reports or the ranked rows |
 
 Source: `src/openreading/__init__.py` (The 3x3). Live truth: `uv run python -m pydoc openreading`.
@@ -135,8 +135,39 @@ The table below tells you which guide answers which need and how long each takes
 | look up a backend's variables, license, and compliance posture | [Backend adapters](adapters/README.md) | look up as needed |
 | call it from Python: `run()`, `route()`, `compare()`, `run_batch()`, and one exception type per condition | reference only: `uv run python -m pydoc openreading.api` | look up as needed |
 | look up the pydantic models that mirror the schemas | reference only: `uv run python -m pydoc openreading.types` | look up as needed |
+| look up how `openreading.yaml` is found, and the nine keys its `policy:` block takes | reference only: `uv run python -m pydoc openreading.config` | look up as needed |
 | gate your own adapter against the conformance kit | reference only: `uv run python -m pydoc openreading.testing` | look up as needed |
 
+### Every guide, by file
+
+The same set as a reviewer's checklist, one row per file. The order is a reading order rather
+than an alphabet: the front door, then this page, then one guide per surface, then the reference
+pages you look things up in. Each guide stands alone and carries its own `See also` line, so
+reading them out of order costs nothing.
+
+| File | Guide | What is in it | Lines |
+|---|---|---|---|
+| [`README.md`](../../README.md) | The front door | Install, the four walkthroughs (parse, compare, route, strategy), and what this is not. | 529 |
+| [`src/openreading/README.md`](README.md) | Docs home | This page. The map above, plus how an agent drives the engine. | 434 |
+| [`src/openreading/cli/README.md`](cli/README.md) | The command line | One JSON envelope on stdout, everything else on stderr, and an exit code a script can branch on. | 454 |
+| [`src/openreading/router/README.md`](router/README.md) | Routing and keys | Which backends a policy allows, why each was dropped, and how to write the `policy:` block. | 568 |
+| [`src/openreading/strategies/README.md`](strategies/README.md) | Strategies | Cascades, races and gates in `openreading.yaml`, and the trace each run leaves. | 743 |
+| [`src/openreading/batch/README.md`](batch/README.md) | Batch runs | A folder, a glob or several files as one `batch-result` envelope. | 400 |
+| [`src/openreading/comparison/README.md`](comparison/README.md) | Compare | Where two backends disagree on one document, as a verdict plus findings. | 402 |
+| [`src/openreading/evals/README.md`](evals/README.md) | Evals | Public benchmarks, and ranking backends on documents you labeled. | 713 |
+| [`src/openreading/ledger/README.md`](ledger/README.md) | The run ledger | Resume after an interruption, replay offline, and crypto-shred what a run recorded. | 410 |
+| [`src/openreading/server/README.md`](server/README.md) | The HTTP server | `openreading serve`: the same engine behind a local JSON API, with bearer auth. | 509 |
+| [`src/openreading/adapters/README.md`](adapters/README.md) | Backend adapters | The catalog: each backend's formats, variables, price and compliance posture. | 378 |
+| [`src/openreading/schemas/README.md`](schemas/README.md) | JSON Schemas | The contract every surface speaks, and how a version is cut. | 401 |
+| [`src/openreading/derive/README.md`](derive/README.md) | The channel contract | Why a field is absent rather than wrong, and who computed it. | 280 |
+| [`examples/README.md`](../../examples/README.md) | Example documents | The two synthetic bank statements the guides parse, and where they came from. | 96 |
+
+Three more files sit at the repository root and are not guides. [`SECURITY.md`](../../SECURITY.md)
+states what a compliance policy does and does not guarantee, and is the page to read before
+approving this for regulated data. [`CHANGELOG.md`](../../CHANGELOG.md) carries every breaking
+change with the reason for it. [`AGENTS.md`](../../AGENTS.md) is the contributor contract, and
+explains why there is no `docs/` directory: documentation lives in the module docstring beside
+the code, and each directory's `README.md` indexes those places rather than restating them.
 The Evals and Compare rows sound alike and answer different questions. `compare` has no ground
 truth, so it can only tell you which fields two backends read differently. `leaderboard` scores
 each backend against documents you labeled yourself, so it is the only one that can say which
@@ -178,14 +209,19 @@ uv run openreading parse sample.pdf --backend reducto > out.json; echo "exit=$?"
 exit=3
 ```
 
-`parse --backend <id>` names one backend directly and takes no policy. To put a choice under a
-compliance policy, use `route --policy` for a single document. For a corpus run through
-`--strategy` or `--config`, put a `policy:` block in `openreading.yaml`. [Routing and
-keys](router/README.md) covers both. The single-document form, run for real:
+`parse --backend <id>` names one backend directly, and the `policy:` block of your
+`openreading.yaml` gates it like everything else. `route` prints that plan without running
+anything. [Routing and keys](router/README.md) covers both. The single-document form, run for
+real:
 
 ```bash
-echo '{"require_baa": true, "no_train_on_data": true}' > phi.json
-uv run openreading route sample.pdf --policy phi.json --run
+cat > openreading.yaml <<'YAML'
+version: 1
+policy:
+  require_baa: true
+  no_train_on_data: true
+YAML
+uv run openreading route sample.pdf --run
 ```
 ```json
 { "chosen": "pymupdf",

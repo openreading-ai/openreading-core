@@ -98,12 +98,12 @@ Surface: CLI + Python (local backends `pymupdf` / `tesseract`, no keys)
   uv run openreading backends                     # readiness table + the MISSING env vars
   uv run openreading parse sample.pdf --backend pymupdf     # schema-validated JSON on stdout
   uv run openreading parse sample.pdf --backend tesseract   # OCR path; graceful without binary
-  uv run openreading route sample.pdf --policy phi.json --run   # compliance-first, run chain
-     (phi.json: {"require_baa": true, "no_train_on_data": true})
+  uv run openreading route sample.pdf --run       # compliance-first plan, then run the chain
+     (openreading.yaml: `version: 1` + `policy: {require_baa: true, no_train_on_data: true}`)
 
   resp = openreading.run(pdf_bytes, backend="pymupdf", mime_type="application/pdf")  # dict
   assert resp["status"]["state"] == "succeeded"
-  plan = openreading.route(pdf_bytes, policy={...}, mime_type=...)   # RoutePlan dataclass:
+  plan = openreading.route(pdf_bytes, config={...}, mime_type=...)   # RoutePlan dataclass:
   plan.chosen.descriptor.id; [a.descriptor.id for a in plan.fallbacks]   # chosen, fallbacks,
                                                                           # dropped, terminal_reason
 

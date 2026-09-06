@@ -14,7 +14,7 @@ rungs, a parallel with no branches, a route rule whose target is gone, a decide 
 empties — disappears and its parent re-evaluates; a route whose `default:` target is fully
 pruned collapses whole (matched or not, so `_eval_route` may assume `r["default"]` exists);
 the root collapsing is the terminal `no_compliant_backend` refusal before any attempt.
-`strategy validate --policy` flags each leaf unreachable under the policy — a `default:` target
+`strategy validate` flags each leaf unreachable under the file's policy — a `default:` target
 included — per leaf, not as a route-specific warning.
 
 Hook point and surfaces (wiring facts)
@@ -40,16 +40,16 @@ Hook point and surfaces (wiring facts)
   table gains no new row).
 - CLI: `parse` alone takes `--strategy <name>` (sugar for the prefixed id — a separate flag
   because `--backend` is an argparse `choices=` list that would reject the prefix), `--no-strategy`
-  (`strategy:none`) and `--config PATH`; `route` takes only `file --policy p.json [--run]` (plus
+  (`strategy:none`) and `--config PATH`; `route` takes only `file [--config PATH] [--run]` (plus
   the shared `--env-file`) and never consults a strategy. Subcommands (each takes `[--config
   PATH]` except `explain`, which takes only the shared `--env-file` and its positional):
-  `strategy validate [--policy p.json]` — grammar + world-consistency of every strategy (with a
-  policy: flag steps unreachable under it); `strategy plan <file> --strategy <name> [--policy]` —
+  `strategy validate` — grammar + world-consistency of every strategy, flagging steps unreachable
+  under the file's own `policy:` block; `strategy plan <file> --strategy <name>` —
   the normalized, PRUNED tree for this document / policy, no execution; `strategy show <name>
   [--longhand]` — the body of a named strategy or built-in preset as written (or normalized);
   `strategy normalize` — shorthand → canonical longhand; `strategy list` — named strategies +
   presets in scope; `explain <response.json>` — the orchestration block as a narrative; `replay
-  <file> --trace <trace.json> [--strategy] [--policy]` — re-execute taking each logged choice;
+  <file> --trace <trace.json> [--strategy]` — re-execute taking each logged choice;
   `calibrate <dataset> --strategy <name> [--target-escalation F] [--max-cost-per-doc $]` —
   threshold tuning from a target escalation rate (proposes, never rewrites). Python:
   `openreading.run(source, strategy=..., config=...)`.

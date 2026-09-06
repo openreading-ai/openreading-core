@@ -218,11 +218,10 @@ HTTP status codes
      `credentials_ref_alias_not_allowed` and `endpoint_not_request_configurable`. Read
      `backend_code` before deciding a 502 is a server outage
 504  deadline exceeded, retryables exhausted (`retryable_exhausted`)
-500  a server fault. Two bodies are possible here. A malformed `policy:` block in the loaded
-     config answers the envelope with `category: "error"` and a message naming the bad key,
-     once a request engages a strategy. Anything no handler caught falls through to the ASGI
-     framework, which returns the plain text `Internal Server Error`. Branch on the status
-     before you parse a body, and report a 500 as a bug rather than handling it.
+500  a server fault. Anything no handler caught falls through to the ASGI framework, which
+     returns the plain text `Internal Server Error`. Report a 500 as a bug rather than handling
+     it. A malformed `policy:` block never reaches this rung: the file is read at startup, so a
+     server carrying one does not start.
 
 Error body — also the shape of a failed job's `error` (`missing_env` only for missing
 credentials, `trail` only for `plan_exhausted`):
@@ -310,10 +309,17 @@ comparison is constant-time (`hmac.compare_digest`).
 What this does NOT add: rate limiting, spend accounting, transport encryption. A scoped caller can
 still submit a large batch within its backends, and a token over plain HTTP is readable on the
 wire — terminate TLS in front of this like any other credential-bearing endpoint.
-Deployment-level router knobs (`OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE`,
-`OPENREADING_TRAIN_OPTOUT_CONFIRMED`, `OPENREADING_BAA_TIER_CONFIRMED`) come from the environment,
-never the request body (DECISIONS D7: the operator attests an account-level fact, not a
-per-document one, and the wire schema is `extra=forbid`).
+The deployment's compliance policy is the `policy:` block of the `openreading.yaml` at
+`OPENREADING_CONFIG`, read once at startup and applied to every request, whether or not it names a
+strategy (`openreading.config`). The three attestation keys in it come from that file and never
+from a request body (DECISIONS D7: the operator attests an account-level fact, not a per-document
+one, and the wire schema is `extra=forbid`). A request body may still carry `compliance` and
+`routing`, and those INTERSECT with the file: neither source can weaken the other. Booleans OR.
+`max_retention` keeps the lower ceiling, so a body asking for `48h` under a file requiring `zero`
+is held to `zero`. `data_region` has no ordering and a body cannot name two regions at once, so a
+body asking for `us` under a file requiring `eu` is a 403 `compliance_refused` carrying
+`backend_code: "region_conflict"` rather than one side winning. `optimize_for` is the exception the
+body takes outright, because it orders the survivors and never changes the set.
 """
 
 from __future__ import annotations

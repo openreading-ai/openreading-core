@@ -88,7 +88,7 @@ TOPICS: tuple[Topic, ...] = (
         "Batch: a directory, a glob, or two or more sources",
         ("folder", "folders", "directory", "glob", "many"),
     ),
-    Topic("compliance", "route <file|url> --policy policy.json [--run]", ("route", "policy")),
+    Topic("compliance", "route <file|url> [--config FILE] [--run]", ("route", "policy")),
     Topic("cost", "What a run costs, and how to spend less", ("money", "spend", "billing")),
     Topic("env", "Environment variables this module reads", ("environment", "keys", "credentials")),
     Topic("datasets", "Datasets for calibrate, leaderboard and rules", ("dataset", "labels")),
