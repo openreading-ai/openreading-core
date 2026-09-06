@@ -3,7 +3,7 @@ credentials from the environment (`.env` / process env), dispatches to a backend
 and prints the one response schema.
 
     openreading parse   <file> --backend reducto        # run one backend
-    openreading route   <file> --policy phi.json --run  # compliance-first plan (+ execute chain)
+    openreading route   <file> --run                    # compliance-first plan (+ execute chain)
     openreading backends                                # which backends are configured, and why not
     openreading backends --check docling                # ...and is it actually answering? (probes)
     openreading benchmark list                          # public corpora and their terms lanes
@@ -55,7 +55,7 @@ from pathlib import Path
 from typing import Any, Literal, TypeGuard
 
 from openreading import __version__ as openreading_version
-from openreading import api, schemas
+from openreading import api, config, schemas
 from openreading.adapters.registry import BUILTIN_ADAPTERS, build_registry, make_adapter
 from openreading.batch.runner import MAX_BATCH_JOBS, JobsLimitError
 from openreading.batch.sources import (
@@ -78,7 +78,7 @@ from openreading.readiness import (
     missing_reason,
 )
 from openreading.router.executor import execute_plan
-from openreading.router.router import Router
+from openreading.router.router import Router, RouterConfig
 from openreading.strategies import (
     PRESET_NAMES,
     ConfigError,
@@ -127,9 +127,8 @@ def _print_exhausted(tag: str, e: PlanExhaustedError, trail_summary: str) -> Non
         print(f"[{tag}] {auth_rejected_hint(backend)}", file=sys.stderr)
 
 
-class _PolicyError(Exception):
-    """A file a command was told to read that could not be opened, does not hold JSON, or (for
-    `--policy`) is not valid as a policy."""
+class _InputFileError(Exception):
+    """A file a command was told to read that could not be opened or does not hold JSON."""
 
 
 def _describe_read_error(e: OSError | json.JSONDecodeError) -> str:
@@ -154,55 +153,23 @@ def _describe_read_error(e: OSError | json.JSONDecodeError) -> str:
     return str(e)
 
 
-def _read_json_or_fail(path: str, noun: str = "") -> Any:
+def _read_json_or_fail(path: str) -> Any:
     """Read and parse a JSON file, or raise with a message that says which of the two failed. A
     file the process cannot open and a file whose bytes are not JSON are different problems for
     the reader, and one wording for both sends them to check permissions on a file that reads
     fine.
 
-    `noun` names the kind of file when the caller's flag has a word for it ("policy"), so a
-    command that reads both a document and a policy still says which of the two it means.
+    Every caller reads machine output a previous command wrote: a response, a trace, a comparison
+    report. Nothing a person authors is JSON.
     """
-    what = f"{noun} {path}" if noun else path
     try:
         return json.loads(Path(path).read_text())
     except OSError as e:
-        raise _PolicyError(f"cannot read {what}: {_describe_read_error(e)}") from e
+        raise _InputFileError(f"cannot read {path}: {_describe_read_error(e)}") from e
     except json.JSONDecodeError as e:
-        raise _PolicyError(
-            f"{what} is not valid JSON: {e.msg} at line {e.lineno} column {e.colno}"
+        raise _InputFileError(
+            f"{path} is not valid JSON: {e.msg} at line {e.lineno} column {e.colno}"
         ) from e
-
-
-def _load_policy(path: str | None) -> dict[str, Any] | None:
-    """Read and validate a `--policy` JSON file. Raises like `load_config` does for `--config` so
-    each command reports it under its own tag — a bad policy path is a user error, not a crash.
-
-    Validation is `api.validate_policy`, the same call `route()`/`run()` make, so a policy the
-    library refuses is never accepted here. It is done at LOAD time rather than left to the first
-    reader because every `--policy` subcommand shares this function, and a policy that is wrong is
-    wrong before the document is even opened. `cannot read` covers a file that will not open,
-    `is not valid JSON` covers bytes that will not parse, and `invalid policy` covers content that
-    parses and is not a policy. All three are the same soft-failure bucket (exit 3) for the caller.
-    """
-    # `is None`, not falsy: only an absent flag means "no policy". An explicit `--policy ""` has to
-    # fail loudly rather than silently drop the compliance constraints the caller meant to apply.
-    if path is None:
-        return None
-    # `Path("")` resolves to the working directory, so without this the empty value is reported as
-    # a directory that cannot be read, describing neither the flag nor the mistake.
-    if path == "":
-        raise _PolicyError("--policy needs a file path, and an empty value was given")
-    raw = _read_json_or_fail(path, "policy")
-    # A file holding `null` parses fine, and `validate_policy(None)` means "no policy" — correct
-    # for the Python default, wrong for a flag the caller typed on purpose. Rejected here, where
-    # the difference between "argument omitted" and "file says null" is still visible.
-    if raw is None:
-        raise _PolicyError(f"invalid policy {path}: policy must be a JSON object, got null")
-    try:
-        return api.validate_policy(raw)
-    except api.PolicyError as e:
-        raise _PolicyError(f"invalid policy {path}: {e}") from e
 
 
 def cmd_parse(args) -> int:
@@ -330,9 +297,9 @@ def cmd_parse(args) -> int:
         print(f"[{label}] cannot read {args.files[0]}: {_describe_read_error(e)}", file=sys.stderr)
         return 2
     except (api.PolicyError, ConfigError) as e:
-        # A `--policy` file is already refused by _load_policy before we get here; this is the
-        # openreading.yaml, refused where it is read. Exit 3 either way — the caller should not
-        # have to know which of the two files carried the bad key.
+        # The openreading.yaml, refused where it is read: a grammar error, or a `policy:` block
+        # that is not a policy. Exit 3, the rung a caller-side mistake takes, and named before the
+        # document is opened.
         print(f"[{label}] {e}", file=sys.stderr)
         return 3
     except Exception as e:  # noqa: BLE001
@@ -587,16 +554,17 @@ def cmd_route(args) -> int:
     """`openreading route`: print the compliance-first plan as JSON, and with `--run` execute the
     whole chain. The plan is still printed when the chain is exhausted."""
     try:
-        policy = _load_policy(args.policy)
-    except _PolicyError as e:
+        loaded = config.load(args.config)
+    except ConfigError as e:
         print(f"[route] {e}", file=sys.stderr)
         return 3
     try:
-        req = api.build_request(args.file, "auto", policy=policy)
+        req = api.build_request(args.file, "auto")
     except OSError as e:
         print(f"[route] cannot read {args.file}: {_describe_read_error(e)}", file=sys.stderr)
         return 3
-    plan = Router(build_registry(), api.router_config(policy)).route(req)
+    req, router_config = config.apply(req, loaded.policy if loaded else None, RouterConfig())
+    plan = Router(build_registry(), router_config).route(req)
     out: dict[str, Any] = {
         "chosen": plan.chosen.descriptor.id if plan.chosen else None,
         "fallbacks": [a.descriptor.id for a in plan.fallbacks],
@@ -843,7 +811,7 @@ def cmd_strategy_list(args) -> int:
 
 def cmd_strategy_validate(args) -> int:
     """Check an openreading.yaml: grammar (schema, via the loader) + world-consistency. Prints
-    every error and warning; exit 3 if any error, else 0. `--policy p.json` adds a compliance
+    every error and warning; exit 3 if any error, else 0. The file's own `policy:` block adds a
     context for the steps-unreachable check."""
     try:
         loaded = load_config(args.config)
@@ -856,14 +824,7 @@ def cmd_strategy_validate(args) -> int:
     if loaded is None:
         print("[strategy validate] no openreading.yaml found (use --config PATH)", file=sys.stderr)
         return 3
-    try:
-        policy = _load_policy(args.policy)
-    except _PolicyError as e:
-        print(f"[strategy validate] {e}", file=sys.stderr)
-        return 3
-    issues = validate_config(
-        loaded.config, policy=policy, raw=loaded.raw, plain_info=loaded.plain_info
-    )
+    issues = validate_config(loaded.config, raw=loaded.raw, plain_info=loaded.plain_info)
     errors = [i for i in issues if i.level == "error"]
     warnings = [i for i in issues if i.level == "warning"]
     for issue in errors + warnings:
@@ -945,20 +906,16 @@ def cmd_strategy_plan(args) -> int:
         print("[strategy plan] no openreading.yaml found (use --config PATH)", file=sys.stderr)
         return 3
     try:
-        policy = _load_policy(args.policy)
-    except _PolicyError as e:
-        print(f"[strategy plan] {e}", file=sys.stderr)
-        return 3
-    try:
-        req = api.build_request(args.file, "auto", policy=policy)
+        req = api.build_request(args.file, "auto")
     except OSError as e:
         print(
             f"[strategy plan] cannot read {args.file}: {_describe_read_error(e)}", file=sys.stderr
         )
         return 3
+    req, router_config = config.apply(req, loaded.config.policy, RouterConfig())
     try:
         compiled = compile_strategy(
-            req, args.strategy, loaded.config, build_registry(), api.router_config(policy)
+            req, args.strategy, loaded.config, build_registry(), router_config
         )
     # PolicyError: the file's own `policy:` block, refused where the file is read
     # (openreading.config.load). Same rung as any other unloadable file — a policy that is wrong is
@@ -1040,7 +997,7 @@ def cmd_explain(args) -> int:
     """Render a response's orchestration block, or a comparison report, as a human story."""
     try:
         doc = _read_json_or_fail(args.response)
-    except _PolicyError as e:
+    except _InputFileError as e:
         print(f"[explain] {e}", file=sys.stderr)
         return 3
     if "subjects" in doc and "fields" in doc and "findings" in doc:  # a comparison report
@@ -1094,7 +1051,7 @@ def cmd_replay(args) -> int:
 
     try:
         trace_doc = _read_json_or_fail(args.trace)
-    except _PolicyError as e:
+    except _InputFileError as e:
         print(f"[replay] {e}", file=sys.stderr)
         return 3
     orch = trace_doc.get("orchestration") or trace_doc  # a full response OR a bare orchestration
@@ -1114,18 +1071,14 @@ def cmd_replay(args) -> int:
         print("[replay] no openreading.yaml found (use --config PATH)", file=sys.stderr)
         return 3
     try:
-        policy = _load_policy(args.policy)
-    except _PolicyError as e:
-        print(f"[replay] {e}", file=sys.stderr)
-        return 3
-    try:
-        req = api.build_request(args.file, "auto", policy=policy)
+        req = api.build_request(args.file, "auto")
     except OSError as e:
         print(f"[replay] cannot read {args.file}: {_describe_read_error(e)}", file=sys.stderr)
         return 3
+    req, router_config = config.apply(req, loaded.config.policy, RouterConfig())
     registry = build_registry()
     try:
-        compiled = compile_strategy(req, name, loaded.config, registry, api.router_config(policy))
+        compiled = compile_strategy(req, name, loaded.config, registry, router_config)
         # BL-163: a whole-trace check, before any decision point is consulted — `config_hash`
         # captures the compliance posture + eligible/dropped backend set a trace was recorded
         # under, so a mismatch means this trace's logged decisions were made against a DIFFERENT
@@ -1189,11 +1142,6 @@ def cmd_calibrate(args) -> int:
         print("[calibrate] no openreading.yaml found (use --config PATH)", file=sys.stderr)
         return 3
     try:
-        policy = _load_policy(args.policy)
-    except _PolicyError as e:
-        print(f"[calibrate] {e}", file=sys.stderr)
-        return 3
-    try:
         # backend stdout advisories (e.g. PyMuPDF) → stderr so stdout is only the JSON report
         with contextlib.redirect_stdout(sys.stderr):
             report = calibrate_strategy(
@@ -1203,7 +1151,7 @@ def cmd_calibrate(args) -> int:
                 build_registry(),
                 target_escalation=args.target_escalation,
                 max_cost_per_doc=args.max_cost_per_doc,
-                router_config=api.router_config(policy),
+                router_config=config.router_config(loaded.config.policy),
             )
     # calibrate_strategy resolves and drives its rung-1 backend directly — no Router/execute_plan/
     # run_strategy machinery anywhere on this call graph, so PlanExhaustedError can never be raised
@@ -1317,8 +1265,8 @@ def cmd_leaderboard(args) -> int:
     from openreading.evals.leaderboard import run_leaderboard
 
     try:
-        policy = _load_policy(args.policy)
-    except _PolicyError as e:
+        loaded = config.load(args.config)
+    except ConfigError as e:
         print(f"[leaderboard] {e}", file=sys.stderr)
         return 3
 
@@ -1349,7 +1297,10 @@ def cmd_leaderboard(args) -> int:
         # backend stdout advisories (e.g. PyMuPDF) → stderr so stdout is only the rendered report.
         with contextlib.redirect_stdout(sys.stderr):
             report = run_leaderboard(
-                args.dataset, ids, build_registry(), router_config=api.router_config(policy)
+                args.dataset,
+                ids,
+                build_registry(),
+                router_config=config.router_config(loaded.policy if loaded else None),
             )
     # Mirrors cmd_calibrate's own except tuple for the identical dataset-driven shape: a per-case
     # backend fault never reaches here (run_case/run_dataset are unchanged and always return a
@@ -1622,11 +1573,6 @@ def cmd_benchmark_run(args) -> int:
         print("[benchmark] --jobs must be at least 1", file=sys.stderr)
         return 2
     try:
-        policy = _load_policy(args.policy)
-    except _PolicyError as exc:
-        print(f"[benchmark] {exc}", file=sys.stderr)
-        return 2
-    try:
         data_dir = prepare_official_benchmark(
             descriptor.id,
             cache_dir=Path(args.cache_dir),
@@ -1652,7 +1598,6 @@ def cmd_benchmark_run(args) -> int:
                 output_dir=Path(args.output_dir),
                 preset=args.preset,
                 config=args.config,
-                policy=policy,
                 jobs=args.jobs,
                 force=args.force,
             )
@@ -1827,7 +1772,7 @@ def cmd_compare(args) -> int:
     if args.from_response:
         try:
             doc = _read_json_or_fail(args.from_response)
-        except _PolicyError as e:
+        except _InputFileError as e:
             print(f"[compare] {e}", file=sys.stderr)
             return 5
         orch = doc.get("orchestration") or {}
@@ -1953,7 +1898,7 @@ def cmd_compare(args) -> int:
         for p in args.inputs:
             try:
                 responses.append(_read_json_or_fail(p))
-            except _PolicyError as e:
+            except _InputFileError as e:
                 print(f"[compare] {e}", file=sys.stderr)
                 return 5
             sources.append("file")
@@ -2096,14 +2041,15 @@ expired, or a refusal because openreading.yaml changed since the first run.
 More: openreading help resume, openreading help exit-codes""",
     "route": """\
 Examples:
-  echo '{"require_baa": true, "no_train_on_data": true}' > phi.json
-  openreading route examples/john_smith_1000_2026_01.pdf --policy phi.json
-  openreading route doc.pdf --policy phi.json --run > out.json
+  printf 'version: 1\\npolicy: {require_baa: true, no_train_on_data: true}\\n' \\
+    > openreading.yaml
+  openreading route examples/john_smith_1000_2026_01.pdf
+  openreading route doc.pdf --run > out.json
 
-A policy is a JSON object of compliance constraints, and these ten keys are
-the whole grammar. An unknown key is refused by name, at exit 3:
+A policy is the policy: block of your openreading.yaml, and these nine keys
+are the whole grammar. An unknown key is refused by name, at exit 3:
   require_baa   no_train_on_data   data_region   require_local
-  max_retention   optimize_for   doc_type_hint
+  max_retention   optimize_for
   allow_unverified_compliance   train_optout_confirmed   baa_tier_confirmed
 Nothing widens the set a policy allows. The plan prints as JSON either way,
 naming every dropped backend with the stage and code that dropped it.
@@ -2112,8 +2058,8 @@ Then:
   openreading backends --check pymupdf   # is the chosen backend answering
 
 Exits: 0 a plan. 4 an empty plan, also with --run. The plan still prints.
-3 an unreadable or invalid policy, an unreadable document, or --run on a plan
-every backend in which failed.
+3 an openreading.yaml that will not load, an unreadable document, or --run on
+a plan every backend in which failed.
 
 More: openreading help compliance, openreading help backends""",
     "backends": """\
@@ -2222,14 +2168,13 @@ More: openreading help strategy""",
     "strategy validate": """\
 Examples:
   openreading strategy validate                    # grammar, then English
-  openreading strategy validate --policy phi.json  # flag unreachable steps
   openreading strategy validate --config ci/openreading.yaml
 
 You get, per strategy, a dialect badge, the body as you wrote it, a
 plain-English summary, and a glossary of the judgment words it uses. Errors go
 to stderr and warnings to stdout, and a warning never fails the run. Issues
-carry a file and a node path rather than a line number. With --policy, a step
-that policy makes unreachable is flagged before you ever run it.
+carry a file and a node path rather than a line number. A step the file's own
+policy: block makes unreachable is flagged before you ever run it.
 
 Then:
   openreading strategy plan doc.pdf --strategy fast  # prune it for one doc
@@ -2261,7 +2206,6 @@ More: openreading help strategy""",
     "strategy plan": """\
 Examples:
   openreading strategy plan doc.pdf --strategy fast --config openreading.yaml
-  openreading strategy plan doc.pdf --strategy main --policy phi.json
   openreading strategy plan doc.pdf --strategy fast | jq .dropped
 
 This verb needs an openreading.yaml even to plan a built-in preset, so pass
@@ -2330,7 +2274,6 @@ Examples:
   openreading parse doc.pdf --strategy main > run.json
   openreading replay doc.pdf --trace run.json > again.json
   openreading replay doc.pdf --trace run.json --strategy main
-  openreading replay doc.pdf --trace run.json --policy phi.json
 
 At every decision point this takes the choice the trace logged instead of
 deciding again, so the run is deterministic and consults no LLM. A decision
@@ -2353,7 +2296,6 @@ Examples:
     --config openreading.yaml       # the sample dataset that ships here
   openreading calibrate samples/ --strategy main --target-escalation 0.15
   openreading calibrate samples/ --strategy main --max-cost-per-doc 0.05
-  openreading calibrate samples/ --strategy main --policy phi.json
 
 This needs an openreading.yaml, because it tunes a strategy you wrote. A gate
 is a threshold your strategy sets for a result it will accept. This
@@ -2559,7 +2501,7 @@ Examples:
     --backends pymupdf,tesseract           # two local backends, no key
   openreading leaderboard mydata --all-ready       # every ready backend
   openreading leaderboard mydata --backends a,b --format json > rank.json
-  openreading leaderboard mydata --backends a,b --policy phi.json
+  openreading leaderboard mydata --backends a,b --config policy.yaml
 
 Pass one of --backends or --all-ready, and rank at least two. This takes a
 LABELED dataset of <case>/case.json, not a folder of documents, and it runs
@@ -2600,7 +2542,7 @@ I WANT TO ...                          RUN
   read a folder, a glob, or a list     openreading parse DIR/ --backend SLUG
   let OpenReading pick the backend     openreading parse FILE --no-strategy
   follow a plan I wrote down           openreading parse FILE --strategy NAME
-  know which backends a policy allows  openreading route FILE --policy P.json
+  know which backends a policy allows  openreading route FILE
   see where two backends disagree      openreading compare A.json B.json
   know why a run chose what it chose   openreading explain RUN.json
   rank backends on my labeled dataset  openreading leaderboard DIR --all-ready
@@ -2616,7 +2558,7 @@ Read `openreading help batch` before you point this at a corpus.
 
 THINGS CHAIN.
   parse > out.json  ->  compare > report.json  ->  explain report.json
-  route --policy P.json --run  ->  jq .result  ->  compare
+  route --run  ->  jq .result  ->  compare
   parse --strategy  ->  explain, replay;  calibrate  ->  strategy validate
 
 LEARN MORE
@@ -2857,12 +2799,7 @@ def build_parser() -> argparse.ArgumentParser:
         "the rest were dropped, before anything runs.",
     )
     route.add_argument("file", help="path or http(s):// URL")
-    route.add_argument(
-        "--policy",
-        required=True,
-        help="path to a policy.json of compliance constraints and deployment confirmations. "
-        "See `openreading help compliance` for the keys and their meaning.",
-    )
+    route.add_argument("--config", default=None, metavar="PATH", help="path to an openreading.yaml")
     route.add_argument(
         "--run",
         action="store_true",
@@ -2967,11 +2904,6 @@ def build_parser() -> argparse.ArgumentParser:
         "world it runs in, then explain each one in plain English.",
     )
     st_val.add_argument("--config", default=None, help="path to an openreading.yaml")
-    st_val.add_argument(
-        "--policy",
-        default=None,
-        help="path to a policy.json. Steps it makes unreachable are flagged.",
-    )
     st_val.set_defaults(func=cmd_strategy_validate)
 
     st_norm = strat_sub.add_parser(
@@ -2992,9 +2924,6 @@ def build_parser() -> argparse.ArgumentParser:
     st_plan.add_argument("file", help="path or http(s):// URL")
     st_plan.add_argument("--strategy", required=True, help="strategy or preset name")
     st_plan.add_argument("--config", default=None, help="path to an openreading.yaml")
-    st_plan.add_argument(
-        "--policy", default=None, help="path to a policy.json of compliance constraints"
-    )
     st_plan.set_defaults(func=cmd_strategy_plan)
 
     compare = sub.add_parser(
@@ -3106,9 +3035,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     replay.add_argument("--strategy", default=None, help="strategy name (default: from the trace)")
     replay.add_argument("--config", default=None, help="path to an openreading.yaml")
-    replay.add_argument(
-        "--policy", default=None, help="path to a policy.json of compliance constraints"
-    )
     replay.set_defaults(func=cmd_replay)
 
     calibrate = sub.add_parser(
@@ -3125,9 +3051,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     calibrate.add_argument("--strategy", required=True, help="the strategy to tune")
     calibrate.add_argument("--config", default=None, help="path to an openreading.yaml")
-    calibrate.add_argument(
-        "--policy", default=None, help="path to a policy.json of compliance constraints"
-    )
     calibrate.add_argument(
         "--target-escalation",
         type=float,
@@ -3266,9 +3189,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     benchmark_run.add_argument("--config", default=None, help="strategy openreading.yaml path")
     benchmark_run.add_argument(
-        "--policy", default=None, help="policy.json applied to every OpenReading request"
-    )
-    benchmark_run.add_argument(
         "--cache-dir",
         type=Path,
         default=Path.home() / ".cache" / "openreading" / "benchmarks",
@@ -3337,12 +3257,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--all-ready", action="store_true", help="rank every backend the environment is ready for"
     )
     how = leaderboard.add_argument_group("how it runs and prints")
-    how.add_argument(
-        "--policy",
-        default=None,
-        metavar="PATH",
-        help="path to a policy.json of compliance constraints",
-    )
+    how.add_argument("--config", default=None, metavar="PATH", help="path to an openreading.yaml")
     how.add_argument(
         "--format",
         choices=["table", "json"],

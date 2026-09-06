@@ -175,6 +175,13 @@ def load(
     a file is refused from Python. Raises `ConfigError` for a file that will not parse or fails
     the schema, and `openreading.api.PolicyError` for a `policy:` block that is not a policy.
     """
+    if config is not None and not isinstance(config, str | os.PathLike | dict):
+        # Without this the value reaches `Path()`, which raises a bare TypeError naming neither
+        # the argument nor what it should have been.
+        raise ConfigError(
+            f"config must be a path or a mapping of the openreading.yaml shape, got "
+            f"{type(config).__name__}"
+        )
     if isinstance(config, dict):
         # A dict has no bytes of its own, so the hash comes from a canonical rendering of it. Two
         # callers who wrote the same keys in a different order get the same provenance.
@@ -186,7 +193,13 @@ def load(
         path = discover(config, allow_cwd=allow_cwd)
         if path is None:
             return None
-        text = path.read_text(encoding="utf-8")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            # A file the process cannot open is the same class of problem as one that will not
+            # parse. Left bare it reaches the surfaces as a raw PermissionError and exits 1 with a
+            # traceback, which tells the reader nothing about which file was meant.
+            raise ConfigError(f"cannot read config file {path}: {exc.strerror or exc}") from exc
         raw = parse(text, source=str(path))
         source_hash = "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
     # The schema still declares `policy` an open object, so this stands in for it until

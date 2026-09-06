@@ -1,16 +1,16 @@
 """Policy shape validation, pinned across every surface that reads one.
 
-A `--policy` file, a `policy=` kwarg, an HTTP request's `compliance` object and the `policy:` block
-of an `openreading.yaml` all name the same constraints, so all four refuse the same malformed
-policy the same way. Before this suite the CLI/Python path split the policy dict into its known
-keys *before* anything validated it, so `{"hipaa": true, "gdpr": "strict"}` left every backend
-eligible with an empty `dropped` map and exit 0 while `Compliance(extra="forbid")` on the HTTP path
-rejected the identical keys with a 400. An operator who spelled a constraint wrong got no filter
-and no message.
+The `policy:` block of `openreading.yaml`, a `config=` mapping of that same shape, and an HTTP
+request's `compliance` object all name the same constraints, so all three refuse the same
+malformed policy the same way. Before this suite the CLI/Python path split the policy dict into
+its known keys *before* anything validated it, so `{"hipaa": true, "gdpr": "strict"}` left every
+backend eligible with an empty `dropped` map and exit 0 while `Compliance(extra="forbid")` on the
+HTTP path rejected the identical keys with a 400. An operator who spelled a constraint wrong got
+no filter and no message.
 
-The file `policy:` block was the last reader to trust its dict, and the schema leaves that
-sub-object open on purpose, so nothing upstream could refuse it: a misspelled key was dropped in
-silence, and a quoted `allow_unverified_compliance: "false"` was truthy enough to switch the
+The block is the last policy surface the schema cannot close: it is `additionalProperties: true`
+until `strategy-config` v0.3, so nothing upstream can refuse a key. A misspelled key was dropped
+in silence, and a quoted `allow_unverified_compliance: "false"` was truthy enough to switch the
 fail-closed tolerance ON. It is refused now where the file is read, once, by
 `openreading.config.load`, and reaches the caller as the `ConfigError` every other unloadable
 file raises.
@@ -30,6 +30,7 @@ import json
 import pytest
 
 from openreading import api
+from openreading.config import ConfigError
 from openreading.router.compliance import RouterConfig
 from openreading.testing.sample_pdf import build_sample_pdf
 from openreading.types.errors import ComplianceRefused
@@ -42,8 +43,8 @@ from openreading.cli import main  # noqa: E402
 # The three words a compliance officer reaches for, none of which this engine implements.
 _OFFICER_POLICY = {"hipaa": True, "gdpr": "strict", "soc2": ["type2"]}
 
-# Top-level shapes that are valid JSON but are not a policy object.
-_NON_OBJECT_BODIES = ("[]", "null", '"require_baa"', '"strict"', "3", "true")
+# Blocks that are valid YAML and are not a policy object.
+_NON_OBJECT_BLOCKS = ("[]", "null", '"require_baa"', "3", "true")
 
 
 @pytest.fixture
@@ -53,10 +54,16 @@ def sample_pdf(tmp_path):
     return str(p)
 
 
-def _policy_file(tmp_path, body: str):
-    p = tmp_path / "policy.json"
-    p.write_text(body)
+def _policy_block(tmp_path, body: str) -> str:
+    """An openreading.yaml whose `policy:` block is exactly `body`, written as YAML."""
+    p = tmp_path / "openreading.yaml"
+    p.write_text(f"version: 1\npolicy: {body}\n")
     return str(p)
+
+
+def _inline(policy) -> dict:
+    """The same policy the way a caller with no file writes it: the file's shape, in memory."""
+    return {"version": 1, "policy": policy}
 
 
 # --- the key set has exactly one enumeration --------------------------------------------------
@@ -94,78 +101,92 @@ def test_policy_keys_are_derived_from_the_models_they_feed():
 
 def test_cli_route_unrecognised_policy_key_exits_3_and_names_the_key(sample_pdf, tmp_path, capsys):
     """`{"hipaa": true, "gdpr": ..., "soc2": ...}` used to route 13 backends with `dropped: {}`."""
-    policy = _policy_file(tmp_path, json.dumps(_OFFICER_POLICY))
-    rc = main(["route", sample_pdf, "--policy", policy])
+    rc = main(
+        ["route", sample_pdf, "--config", _policy_block(tmp_path, json.dumps(_OFFICER_POLICY))]
+    )
     assert rc == 3
     err = capsys.readouterr().err
-    assert err.startswith("[route] invalid policy ")
+    assert err.startswith("[route] ")
     for key in _OFFICER_POLICY:
         assert repr(key) in err
 
 
-def test_python_route_unrecognised_policy_key_raises_policy_error(sample_pdf):
-    with pytest.raises(api.PolicyError) as exc:
-        api.route(sample_pdf, policy=_OFFICER_POLICY)
+def test_python_route_unrecognised_policy_key_raises_config_error(sample_pdf):
+    with pytest.raises(ConfigError) as exc:
+        api.route(sample_pdf, config=_inline(_OFFICER_POLICY))
     assert "'hipaa'" in str(exc.value)
 
 
 def test_misspelled_policy_key_suggests_the_key_that_was_meant(sample_pdf):
     """`require_baaa` is the reported typo: the whole compliance filter vanished without a word."""
-    with pytest.raises(api.PolicyError) as exc:
-        api.route(sample_pdf, policy={"require_baaa": True})
+    with pytest.raises(ConfigError) as exc:
+        api.route(sample_pdf, config=_inline({"require_baaa": True}))
     assert "did you mean 'require_baa'" in str(exc.value)
 
 
 def test_run_refuses_an_unrecognised_policy_key_before_dispatch(sample_pdf):
-    """`run()` shares `build_request`, so the refusal lands before any backend is constructed."""
-    with pytest.raises(api.PolicyError):
-        api.run(sample_pdf, backend="pymupdf", policy=_OFFICER_POLICY)
+    """`run()` reads the file before it builds anything, so the refusal lands before any backend
+    is constructed."""
+    with pytest.raises(ConfigError):
+        api.run(sample_pdf, backend="pymupdf", config=_inline(_OFFICER_POLICY))
 
 
 def test_run_batch_refuses_an_unrecognised_policy_key(sample_pdf):
-    with pytest.raises(api.PolicyError):
-        api.run_batch([sample_pdf], backend="pymupdf", policy=_OFFICER_POLICY)
+    with pytest.raises(ConfigError):
+        api.run_batch([sample_pdf], backend="pymupdf", config=_inline(_OFFICER_POLICY))
 
 
-def test_every_policy_taking_subcommand_refuses_the_same_file(tmp_path, capsys):
-    """The refusal lives in the shared `--policy` loader, not in `cmd_route`, so a subcommand that
-    never routes a document refuses the same file under its own tag."""
-    config = tmp_path / "openreading.yaml"
-    config.write_text("version: 1\nstrategies:\n  x: [pymupdf]\n")
-    policy = _policy_file(tmp_path, json.dumps(_OFFICER_POLICY))
-    rc = main(["strategy", "validate", "--config", str(config), "--policy", policy])
-    assert rc == 3
-    assert capsys.readouterr().err.startswith("[strategy validate] invalid policy ")
+def test_every_subcommand_that_reads_the_file_refuses_the_same_block(sample_pdf, tmp_path, capsys):
+    """The refusal lives where the file is read, not in `cmd_route`, so a subcommand that never
+    routes a document refuses the same file under its own tag."""
+    path = _policy_block(tmp_path, json.dumps(_OFFICER_POLICY))
+    for argv, tag in (
+        (["route", sample_pdf, "--config", path], "[route] "),
+        (["strategy", "validate", "--config", path], "[strategy validate] "),
+    ):
+        assert main(argv) == 3, argv
+        err = capsys.readouterr().err
+        assert "'hipaa'" in err, argv
+        assert tag in err or "hipaa" in err, argv
 
 
-# --- symptoms 2 and 3: wrong top-level shape ----------------------------------------------------
+# --- symptoms 2 and 3: a block that is not an object --------------------------------------------
 
 
-@pytest.mark.parametrize("body", _NON_OBJECT_BODIES)
+@pytest.mark.parametrize("body", _NON_OBJECT_BLOCKS)
 def test_cli_route_non_object_policy_exits_3_without_a_traceback(
     body, sample_pdf, tmp_path, capsys
 ):
-    """`[]` / `null` used to run with no filter at all; a JSON string crashed with a raw TypeError
+    """`[]` / `null` used to run with no filter at all; a string crashed with a raw TypeError
     (`_apply_policy`) or AttributeError (`router_config`) depending on its content."""
-    policy = _policy_file(tmp_path, body)
-    rc = main(["route", sample_pdf, "--policy", policy])
+    rc = main(["route", sample_pdf, "--config", _policy_block(tmp_path, body)])
     assert rc == 3
     err = capsys.readouterr().err
-    assert err.startswith("[route] invalid policy ")
+    assert err.startswith("[route] ")
     assert len(err.splitlines()) == 1
     assert "Traceback" not in err
 
 
 @pytest.mark.parametrize("policy", ([], "require_baa", "strict", 3, True))
-def test_python_route_non_object_policy_raises_policy_error(policy, sample_pdf):
-    with pytest.raises(api.PolicyError) as exc:
-        api.route(sample_pdf, policy=policy)
-    assert "JSON object" in str(exc.value)
+def test_python_route_non_object_policy_raises_config_error(policy, sample_pdf):
+    with pytest.raises(ConfigError):
+        api.route(sample_pdf, config=_inline(policy))
 
 
-def test_python_route_policy_none_still_means_no_policy(sample_pdf):
-    """`policy=None` is the documented Python default and must stay a no-op, not an error."""
-    assert api.route(sample_pdf, policy=None).chosen is not None
+@pytest.mark.parametrize("value", ([], 3, True))
+def test_a_config_that_is_not_a_path_or_a_mapping_is_refused(value, sample_pdf):
+    """`config=` takes a path or the file's shape. Anything else used to reach `Path()` and raise
+    a bare TypeError naming neither the argument nor what it should have been."""
+    with pytest.raises(ConfigError) as exc:
+        api.route(sample_pdf, config=value)
+    assert "path or a mapping" in str(exc.value)
+
+
+def test_python_route_config_none_still_means_no_file(sample_pdf, tmp_path, monkeypatch):
+    """`config=None` is the documented Python default and must stay a no-op, not an error."""
+    monkeypatch.delenv("OPENREADING_CONFIG", raising=False)
+    monkeypatch.chdir(tmp_path)
+    assert api.route(sample_pdf, config=None).chosen is not None
 
 
 # --- wrong value types under a recognised key ---------------------------------------------------
@@ -185,8 +206,8 @@ def test_python_route_policy_none_still_means_no_policy(sample_pdf):
     ],
 )
 def test_policy_value_of_the_wrong_type_is_refused(policy, sample_pdf):
-    with pytest.raises(api.PolicyError):
-        api.route(sample_pdf, policy=policy)
+    with pytest.raises(ConfigError):
+        api.route(sample_pdf, config=_inline(policy))
 
 
 # --- the file's own `policy:` block --------------------------------------------------------------

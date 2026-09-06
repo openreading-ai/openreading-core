@@ -113,6 +113,20 @@ def test_a_malformed_file_raises_config_error_naming_the_path(clean_cwd):
     assert str(bad) in str(exc.value)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="chmod 000 is a POSIX permission model")
+def test_a_file_that_cannot_be_opened_raises_config_error(clean_cwd):
+    blocked = clean_cwd / "openreading.yaml"
+    blocked.write_text("version: 1\n")
+    blocked.chmod(0o000)
+    try:
+        with pytest.raises(config.ConfigError) as exc:
+            config.load(None)
+    finally:
+        blocked.chmod(0o644)  # restore so the tmp_path teardown can remove it
+    assert "cannot read config file" in str(exc.value)
+    assert str(blocked) in str(exc.value)
+
+
 def test_a_file_that_is_not_a_mapping_raises_config_error(clean_cwd):
     (clean_cwd / "openreading.yaml").write_text("- one\n- two\n")
     with pytest.raises(config.ConfigError) as exc:
@@ -167,6 +181,13 @@ def test_a_dict_that_fails_the_schema_is_refused_and_labelled(clean_cwd):
     with pytest.raises(config.ConfigError) as exc:
         config.load({"version": 2})
     assert "<dict>" in str(exc.value)
+
+
+@pytest.mark.parametrize("value", [[], 3, True, ("a",)])
+def test_a_config_that_is_neither_a_path_nor_a_mapping_is_refused(clean_cwd, value):
+    with pytest.raises(config.ConfigError) as exc:
+        config.load(value)
+    assert "path or a mapping" in str(exc.value)
 
 
 def test_a_dict_has_no_path_and_still_carries_a_hash(clean_cwd):

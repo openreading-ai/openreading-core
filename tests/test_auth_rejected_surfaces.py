@@ -120,15 +120,16 @@ def only_reducto(monkeypatch, rejecting_reducto):
 
 @pytest.fixture
 def open_policy(tmp_path):
-    p = tmp_path / "policy.json"
-    p.write_text(json.dumps({"optimize_for": "accuracy"}))
+    """A policy that constrains nothing and only states a preference."""
+    p = tmp_path / "openreading.yaml"
+    p.write_text("version: 1\npolicy: {optimize_for: accuracy}\n")
     return str(p)
 
 
 def test_route_run_exhaustion_prints_trail_hint_and_still_emits_the_plan(
     sample_pdf, only_reducto, open_policy, capsys
 ):
-    rc = main(["route", sample_pdf, "--policy", open_policy, "--run"])
+    rc = main(["route", sample_pdf, "--config", open_policy, "--run"])
     assert rc == 3
     captured = capsys.readouterr()
 
@@ -143,7 +144,7 @@ def test_route_run_exhaustion_prints_trail_hint_and_still_emits_the_plan(
 
 
 def test_route_run_without_run_flag_is_unaffected(sample_pdf, only_reducto, open_policy, capsys):
-    rc = main(["route", sample_pdf, "--policy", open_policy])
+    rc = main(["route", sample_pdf, "--config", open_policy])
     assert rc == 0  # planning never touches a credential
     assert json.loads(capsys.readouterr().out)["chosen"] == "reducto"
 

@@ -201,35 +201,27 @@ def test_cli_strategy_plan(_clean_cwd, capsys):
     assert out["strategy"] == "cheap" and "tree" in out and out["config_hash"].startswith("sha256:")
 
 
-def test_cli_strategy_plan_unreadable_policy_exits_3_without_a_traceback(_clean_cwd, capsys):
-    # An unreadable --policy fails the same way an unreadable --config does: one tagged stderr
-    # line, exit 3. main() returning at all is what pins "no traceback".
+def test_cli_strategy_plan_malformed_policy_block_exits_3_without_a_traceback(_clean_cwd, capsys):
+    # A `policy:` block that is not a policy fails the same way a grammar error does: one tagged
+    # stderr line, exit 3. main() returning at all is what pins "no traceback".
     cfg = _clean_cwd / "openreading.yaml"
-    cfg.write_text("version: 1\nstrategies:\n  cheap: [pymupdf]\n")
-    malformed = _clean_cwd / "bad.json"
-    malformed.write_text("{not json")
-    for pol in (_clean_cwd / "missing.json", malformed):
-        rc = main(
-            [
-                "strategy",
-                "plan",
-                str(_clean_cwd / "s.pdf"),
-                "--strategy",
-                "cheap",
-                "--config",
-                str(cfg),
-                "--policy",
-                str(pol),
-            ]
-        )
-        assert rc == 3
-        err = capsys.readouterr().err
-        # A file that will not open and a file whose bytes are not JSON say which one failed.
-        if pol is malformed:
-            assert err.startswith(f"[strategy plan] policy {malformed} is not valid JSON")
-        else:
-            assert err.startswith("[strategy plan] cannot read policy")
-        assert len(err.splitlines()) == 1
+    cfg.write_text("version: 1\npolicy: {require_locall: true}\nstrategies:\n  cheap: [pymupdf]\n")
+    rc = main(
+        [
+            "strategy",
+            "plan",
+            str(_clean_cwd / "s.pdf"),
+            "--strategy",
+            "cheap",
+            "--config",
+            str(cfg),
+        ]
+    )
+    assert rc == 3
+    err = capsys.readouterr().err
+    assert err.startswith("[strategy plan] ")
+    assert "did you mean 'require_local'" in err
+    assert len(err.splitlines()) == 1
 
 
 def test_cli_explain(_clean_cwd, capsys, tmp_path):

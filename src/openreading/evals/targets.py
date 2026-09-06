@@ -83,7 +83,6 @@ def pipeline_name(
     target: BenchmarkTarget,
     *,
     config: str | None,
-    policy: dict[str, Any] | None,
 ) -> str:
     """Name the publisher pipeline one target plus one configuration produces.
 
@@ -92,9 +91,9 @@ def pipeline_name(
     identity for that reason: `benchmark run parsebench --target backend:pymupdf` and
     `benchmark run extractbench --target backend:pymupdf` default to the same `--output-dir`, and
     without the id they would write parse results and extract results into one directory and then
-    resume across products. Config and policy are in it because the same backend under a different
-    compliance policy is a different measurement, and stable ordering keeps a rerun's name
-    identical so the publisher can resume rather than redo.
+    The config is in it because the same backend under a different `openreading.yaml`, and so
+    under a different compliance policy, is a different measurement. Stable ordering keeps a
+    rerun's name identical so the publisher can resume rather than redo.
     """
 
     identity = json.dumps(
@@ -102,7 +101,6 @@ def pipeline_name(
             "benchmark": benchmark_id,
             "target": target.reference,
             "config": config,
-            "policy": policy,
         },
         sort_keys=True,
     )
@@ -117,7 +115,6 @@ def execute_target(
     *,
     product: BenchmarkProduct,
     config: str | None = None,
-    policy: dict[str, Any] | None = None,
     extraction_schema: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run one publisher case through the public OpenReading API."""
@@ -130,7 +127,6 @@ def execute_target(
     # `extraction_schema`, which is what a plain `openreading parse` already does.
     kwargs: dict[str, Any] = {
         "config": config,
-        "policy": policy,
     }
     if target.kind == "backend":
         kwargs["backend"] = target.name

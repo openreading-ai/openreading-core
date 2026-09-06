@@ -70,7 +70,6 @@ def test_run_dispatches_target_and_returns_publisher_artifact(monkeypatch, tmp_p
         output_dir=tmp_path / "results",
         preset="full",
         config="openreading.yaml",
-        policy={"require_local": True},
         jobs=3,
         force=True,
     )
@@ -84,7 +83,6 @@ def test_run_dispatches_target_and_returns_publisher_artifact(monkeypatch, tmp_p
             "output_dir": tmp_path / "results",
             "smoke": False,
             "config": "openreading.yaml",
-            "policy": {"require_local": True},
             "jobs": 3,
             "force": True,
         }

@@ -86,22 +86,23 @@ def test_leaderboard_cli_missing_dataset_exits_3(capsys, tmp_path):
     assert "Traceback" not in err
 
 
-def test_leaderboard_cli_unreadable_policy_exits_3_without_a_traceback(capsys, tmp_path):
-    bad_policy = tmp_path / "policy.json"
-    bad_policy.write_text("{not valid json")
+def test_leaderboard_cli_malformed_policy_block_exits_3_without_a_traceback(capsys, tmp_path):
+    bad_config = tmp_path / "openreading.yaml"
+    bad_config.write_text("version: 1\npolicy: {require_locall: true}\n")
     rc = main(
         [
             "leaderboard",
             SAMPLE,
             "--backends",
             "pymupdf,tesseract",
-            "--policy",
-            str(bad_policy),
+            "--config",
+            str(bad_config),
         ]
     )
     assert rc == 3
     err = capsys.readouterr().err
     assert "[leaderboard]" in err
+    assert "did you mean 'require_local'" in err
     assert "Traceback" not in err
 
 

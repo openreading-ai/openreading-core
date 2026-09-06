@@ -27,7 +27,7 @@ otherwise never discovers:
     parse      parse doc.pdf --backend X        run(), run_batch()        POST /v1/parse, /v1/batch
     compare    compare a.json b.json            compare()                 POST /v1/compare
     strategy/  parse --strategy X;              run(strategy=), route()   backend.id "strategy:X";
-    route      route doc.pdf --policy p.json                              POST /v1/route
+    route      route doc.pdf                                             POST /v1/route
     evals      leaderboard DIR --backends X,Y   evals.run_leaderboard()   (none)
 
 `compare` says WHERE two backends disagree and never which one is right, because it has no
@@ -156,16 +156,16 @@ matched, capped per side). Not counts, not structure:
 
 Route with compliance (HIPAA / no-train / local-only). A plan, no execution:
 
-    plan = openreading.route("doc.pdf", policy={"require_baa": True, "no_train_on_data": True})
+    plan = openreading.route("doc.pdf")           # the policy: block of your openreading.yaml
     plan.chosen, plan.fallbacks, plan.dropped     # dropped = {backend_id: DropReason, ...}
-    # CLI: openreading route doc.pdf --policy phi.json --run   # plan + WHY each drop, then run
+    # CLI: openreading route doc.pdf --run        # plan + WHY each drop, then run
 
 Compliance is a hard filter never relaxed by fallback; an unverified claim fails closed (the
 backend is dropped). So does a CONDITIONAL one: a training opt-out you have not applied
 (`trains_on_customer_data: opt_out`) or a BAA the vendor sells only on a higher plan
 (`hipaa_baa: tier_gated`). Assert those per deployment with `train_optout_confirmed` /
-`baa_tier_confirmed` (lists of backend ids) in the policy; the run then carries a warning naming
-the confirmation it rests on.
+`baa_tier_confirmed` (lists of backend ids) in the `policy:` block; the run then carries a
+warning naming the confirmation it rests on.
 
 Strategies (optional `openreading.yaml` orchestration):
 
@@ -319,7 +319,7 @@ Rules a caller must not get wrong
   decider. So never propose a construct that widens it, and treat
   `allow_unverified_compliance` as the operator's call rather than yours, because it waives
   verification for every vendor at once while the other two assert a checked fact about named
-  ones. `route --policy` prints the reason each backend was dropped.
+  ones. `route` prints the reason each backend was dropped.
 - Batch is decided by input FORM, not count. Do not add `--jobs` / `--max-items` to a
   single-file parse (batch-only flags).
 - `--jobs` vs native batch: most hosted APIs are one-document-per-call, so a batch is N

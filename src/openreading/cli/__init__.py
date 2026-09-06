@@ -203,7 +203,7 @@ envelope next.
 Decide before you run.
 
     openreading backends --check pymupdf         # is it reachable right now
-    openreading route doc.pdf --policy phi.json  # which backends may see it
+    openreading route doc.pdf                    # which backends may see it
     openreading strategy plan doc.pdf --strategy main   # the pruned tree
 
 Read what a run did.
@@ -308,7 +308,7 @@ How to spend less.
 
 Start local. `pymupdf` and `tesseract` need no key and bill nothing, so a
 pipeline is worth debugging on them before a hosted backend ever sees it. Ask
-first. `openreading route doc.pdf --policy p.json` and `openreading strategy
+first. `openreading route doc.pdf` and `openreading strategy
 plan doc.pdf --strategy main` print what WOULD run and execute nothing. Cascade
 instead of fanning out. A `try:` strategy pays for the expensive backend only
 on the documents the cheap one could not read, where `compare:` pays for both
@@ -446,8 +446,8 @@ file, so it lands here with the same hint on stderr AND each item's `error` --
 `--max-items` or `--max-jobs` exceeded; 3 cannot run at all, which on a batch
 means only a native-batch backend's one vendor call refusing before any item
 ran (missing credentials, `ComplianceRefused`, or a `RetryableError` / deadline
-from `submit_many`, which has no next rung and does not retry); `parse` has no
-`--policy` flag, so a bad policy is not a `parse` exit; 6 interrupted while
+from `submit_many`, which has no next rung and does not retry), or an
+`openreading.yaml` that will not load; 6 interrupted while
 `OPENREADING_LEDGER` was set -- per-item runs may be individually resumable,
 but batch-level resume is not supported, so no single run id is named.
 
@@ -496,42 +496,49 @@ Also exit 3: an unknown `RUN_ID`, `OPENREADING_LEDGER` unset, or a run whose
 payloads the retention reaper has already crypto-shredded (`PayloadExpired`).
 Python: `openreading.resume(id)`.
 
-route <file|url> --policy policy.json [--run]
----------------------------------------------
+route <file|url> [--config FILE] [--run]
+----------------------------------------
 Print the compliance-first plan; with `--run`, execute the whole chain (chosen,
-then fallbacks).
+then fallbacks). The policy comes from `openreading.yaml`, found in the working
+directory or named with `--config`.
 
-    echo '{"require_baa": true, "no_train_on_data": true,
-           "optimize_for": "accuracy"}' > phi.json
-    openreading route loan.pdf --policy phi.json
-    openreading route loan.pdf --policy phi.json --run > plan.json
+    cat > openreading.yaml <<'YAML'
+    version: 1
+    policy:
+      require_baa: true
+      no_train_on_data: true
+      optimize_for: accuracy
+    YAML
+    openreading route loan.pdf
+    openreading route loan.pdf --run > plan.json
     jq '.result' plan.json > out.json
 
 `route --run` puts the response inside its plan's `result` field. Check the
 exit code before extracting it for `compare` or other response consumers.
-`parse` has no `--policy` flag and does not inherit a previously printed plan.
-Use `route --run` to execute under this policy, or a strategy config's
-`policy:` block to constrain `parse --strategy`.
+`parse` reads the same file and applies the same block, so a plan you print
+here is the plan a `parse` in that directory runs under. A different posture is
+a different file: `openreading route loan.pdf --config airgapped.yaml`.
 
-`policy.json` keys: `require_baa`, `no_train_on_data`, `data_region`,
-`require_local`, `max_retention`, `optimize_for`, `doc_type_hint`,
+`policy:` keys: `require_baa`, `no_train_on_data`, `data_region`,
+`require_local`, `max_retention`, `optimize_for`,
 `allow_unverified_compliance`, `train_optout_confirmed`, `baa_tier_confirmed`.
-Those ten are the whole grammar: the file must be a JSON object, any other key
-is refused by name (with a `did you mean` for a near miss), and a value of the
-wrong type is refused too -- exit 3, `[route] invalid policy <path>: ...`, from
-every `--policy` flag in this CLI, because a compliance constraint that can be
-turned off by a typo is not a constraint (`api.validate_policy`). Output is
-`{chosen, fallbacks, dropped: {id: {stage, code, reason}}, terminal_reason}`
-plus, with `--run`, a `result`. `--run` never widens the plan; a fallback
-actually used is recorded in the result's `warnings[]`. Exits: 0; 4 no
-compliant backend (the empty plan is still printed as JSON); 3 an unreadable or
-invalid policy, an unreadable document, or a plan-exhausted `--run` (the plan
-is still printed; the stderr trail names each backend's failure and a `check
-<VAR>` hint for every rejected key).
+Those nine are the whole grammar. Any other key is refused by name (with a `did
+you mean` for a near miss), and a value of the wrong type is refused too, so a
+malformed block is exit 3 before a backend is contacted, because a compliance
+constraint that can be turned off by a typo is not a constraint. A policy never
+names a backend: it names a requirement, and each backend's descriptor either
+meets it or does not. Output is `{chosen, fallbacks, dropped: {id: {stage,
+code, reason}}, terminal_reason}` plus, with `--run`, a `result`. `--run` never
+widens the plan; a fallback actually used is recorded in the result's
+`warnings[]`. Exits: 0; 4 no compliant backend (the empty plan is still printed
+as JSON); 3 an unloadable config file, an unreadable document, or a
+plan-exhausted `--run` (the plan is still printed; the stderr trail names each
+backend's failure and a `check <VAR>` hint for every rejected key).
 
 The last three keys are router configuration, not request fields
-(`api.router_config` folds them into `RouterConfig`, DECISIONS D7 / D7a), and
-they are two different kinds of knob. `allow_unverified_compliance` is a
+(`openreading.config.router_config` folds them into `RouterConfig`, DECISIONS
+D7 / D7a), and they are two different kinds of knob.
+`allow_unverified_compliance` is a
 TOLERANCE switch (default `false` = fail closed): it admits a backend whose own
 disclosure is unverified on the axis you asked about
 (`openreading.router.compliance`) -- training posture (`trains_unverified`),
@@ -689,7 +696,7 @@ file, such as `{"text_contains": ["OpenReading Test Document"]}`.
 
 leaderboard <dataset_dir>
 -------------------------
-Usage: `leaderboard DIR (--backends a,b | --all-ready) [--policy p.json]
+Usage: `leaderboard DIR (--backends a,b | --all-ready) [--config FILE]
 [--format table|json]`.
 Rank N registered backends on ONE dataset -- measured, not vendor-claimed. Runs
 the same `case.json` corpus (`openreading.evals.dataset`; the repo ships one
@@ -822,9 +829,10 @@ and the run refuses, naming `--yes`, because a CI job hung on stdin is worse
 than one that stops.
 
 Every document calls `openreading.run`, including a `strategy:NAME` target
-selected with `--config`. `--policy` therefore keeps its normal compliance
-behavior. The raw publisher artifact retains the complete OpenReading response.
-The official normalized artifact receives Markdown and layout for ParseBench,
+selected with `--config`. The file's `policy:` block therefore keeps its normal
+compliance behavior. The raw publisher artifact retains the complete
+OpenReading response. The official normalized artifact receives Markdown and
+layout for ParseBench,
 or typed values and citations for ExtractBench. Two or more successful targets
 also produce the publisher's cross-pipeline leaderboard.
 
@@ -852,36 +860,35 @@ strategy <verb>: list, show, validate, normalize, plan
 ------------------------------------------------------
 Inspect and drive `openreading.yaml` strategies. `openreading.strategies` maps
 the package and `openreading.strategies.model` is the grammar reference. Every
-verb takes `--config PATH` (else the discovery order above); those marked with
-`--policy` take a compliance context. `validate`, `plan`, `normalize`, `replay`
-and `calibrate` need a config and exit 3 without one ("no openreading.yaml
-found"); `list` and `show` run config-free on the built-in presets (an
-unparseable config is exit 3 for every verb).
+verb takes `--config PATH` (else the discovery order above), and the compliance
+context is that file's own `policy:` block. `validate`, `plan`, `normalize`,
+`replay` and `calibrate` need a config and exit 3 without one ("no
+openreading.yaml found"); `list` and `show` run config-free on the built-in
+presets (an unparseable config is exit 3 for every verb).
 
-    openreading strategy validate [--policy p.json]
-    openreading strategy plan doc.pdf --strategy NAME [--policy p.json]
+    openreading strategy validate
+    openreading strategy plan doc.pdf --strategy NAME
     openreading strategy show NAME [--longhand]
     openreading strategy list
     openreading strategy normalize
     openreading explain response.json
-    openreading replay doc.pdf --trace response.json [--strategy NAME] \
-      [--policy p.json]
+    openreading replay doc.pdf --trace response.json [--strategy NAME]
     openreading calibrate samples/ --strategy NAME [--target-escalation 0.15]
-      [--max-cost-per-doc 0.05] [--policy p.json]
+      [--max-cost-per-doc 0.05]
 
 - `validate`: grammar (schema) + world-consistency check of the whole file,
   then per strategy a dialect badge (`dialect: plain` or `dialect: advanced
   (first advanced key: ...)`), the body as written, a plain-English summary,
   and a glossary of the criterion words used. Errors go to stderr and warnings
   to stdout; exit 3 on any error, 0 otherwise -- warnings never fail (DECISIONS
-  D-v3-8). Issues are located by file + node path, not line number. With
-  `--policy`, steps unreachable under that policy are flagged. A grammar error
+  D-v3-8). Issues are located by file + node path, not line number. Steps
+  unreachable under the file's own `policy:` block are flagged. A grammar error
   prints untagged (`ERROR <source>: <detail>`) so every line shares one `LEVEL
   source:path: message` shape.
 - `plan`: the Terraform-style speculative plan -- the pruned tree for THIS
   document + policy (`{strategy, config_hash, eligible, dropped[], tree}`), no
-  execution. Exit 3 on an unreadable document/policy, an unknown strategy, or
-  `ComplianceRefused`.
+  execution. Exit 3 on an unreadable document or config file, an unknown
+  strategy, or `ComplianceRefused`.
 - `show NAME`: a strategy or preset body AS WRITTEN (a Plain strategy prints
   Plain); `--longhand` prints the canonical desugared full-grammar tree
   instead. Unknown name: exit 3.
@@ -928,7 +935,7 @@ scorers, sweeps each gated threshold, and prints candidate operating points
 ready-to-paste `escalate_if:` RECOMMENDATION for your `--target-escalation` /
 `--max-cost-per-doc`. It PROPOSES; it never rewrites the config (DECISIONS
 D-v3-21) -- the file you commit is the authority. Each case's rung-1 run is
-gated first (request, `--policy` and the file's own `policy:` block union
+gated first (the request and the file's own `policy:` block union
 most-restrictive-wins); a non-compliant case refuses with `ComplianceRefused`
 (exit 3) before the document is sent. A case whose `expected` names none of the
 scorer's five recognized dimensions is an ordinary "not labeled yet" case:
@@ -1020,10 +1027,10 @@ Exit codes
      topic.
   3  cannot run: missing credentials (names the exact vars + signup URL),
      `auth_rejected`, `unsupported_format` on a named single-document parse,
-     `unsupported_feature`, an unreadable `--config` /
-     `--policy` / document / `--trace` / `explain` argument, a `--policy` file
-     that is not a valid policy object (an unknown key, a non-object top level,
-     or a value of the wrong type), a `ComplianceRefused` refusal (from
+     `unsupported_feature`, an unreadable `--config` / document / `--trace` /
+     `explain` argument, a `policy:` block that is not a policy (an unknown
+     key, a non-object block, or a value of the wrong type), a
+     `ComplianceRefused` refusal (from
      `parse`, `strategy plan`, `replay`, `calibrate`, `compare`, `leaderboard`;
      under `benchmark` only when it is raised outside the publisher's own
      per-document boundary, which otherwise records the refusal as a failed
