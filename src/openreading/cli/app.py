@@ -367,8 +367,19 @@ def _usd(v: float) -> str:
 def _page_number(raw: str) -> int:
     """argparse type for --pages. A page number below 1 is a typo on a 1-based flag, and letting
     it reach the request model turns it into a pydantic dump and exit 1, where every other bad
-    flag value on this CLI is one line and exit 2."""
-    value = int(raw)
+    flag value on this CLI is one line and exit 2.
+
+    The failure this raises for a non-number is the common one, and it is not a typo: `--pages`
+    takes a variable number of values, so `parse --pages 1 doc.pdf` feeds argparse the FILE. The
+    message says that, because argparse's own would name this function at the reader.
+    """
+    try:
+        value = int(raw)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"'{raw}' is not a page number. --pages takes several values, so name FILE before it"
+            " (`parse doc.pdf --pages 1 2`) or close the list with --"
+        ) from None
     if value < 1:
         raise argparse.ArgumentTypeError("page numbers are 1-based")
     return value
@@ -966,25 +977,9 @@ def cmd_strategy_plan(args) -> int:
     return 0
 
 
-def cmd_explain(args) -> int:
-    """Render a response's orchestration block, or a comparison report, as a human story."""
-    try:
-        doc = _read_json_or_fail(args.response)
-    except _PolicyError as e:
-        print(f"[explain] {e}", file=sys.stderr)
-        return 3
-    if "subjects" in doc and "fields" in doc and "findings" in doc:  # a comparison report
-        from openreading.comparison.render import render_table
-
-        print(render_table(doc))
-        return 0
-    orch = doc.get("orchestration")
-    if not orch:
-        print(
-            "[explain] no orchestration block in this response (was it a strategy run?)",
-            file=sys.stderr,
-        )
-        return 3
+def _render_orchestration(orch: dict) -> None:
+    """One response's orchestration block, as a story. Shared by the single-document path and by
+    the per-item walk a folder run needs."""
     print(
         f"strategy {orch.get('strategy')}  →  {orch.get('chosen_backend')} ({orch.get('outcome')})"
     )
@@ -1028,6 +1023,64 @@ def cmd_explain(args) -> int:
         print(line)
     for d in orch.get("dropped", []):
         print(f"  dropped {d['backend']} (stage {d['stage']}: {d['code']})")
+
+
+def _batch_items(doc: dict) -> list[dict] | None:
+    """The items of a batch-result, or None when `doc` is a single response.
+
+    A `parse <folder>` run is one batch-result holding a response per document, so a strategy's
+    orchestration sits one level down. Reading only the top level told a reader who had just run
+    a strategy over a folder that they had not run one.
+    """
+    items = doc.get("items")
+    return items if isinstance(items, list) and "summary" in doc else None
+
+
+def cmd_explain(args) -> int:
+    """Render a response's orchestration block, or a comparison report, as a human story."""
+    try:
+        doc = _read_json_or_fail(args.response)
+    except _PolicyError as e:
+        print(f"[explain] {e}", file=sys.stderr)
+        return 3
+    if "subjects" in doc and "fields" in doc and "findings" in doc:  # a comparison report
+        from openreading.comparison.render import render_table
+
+        print(render_table(doc))
+        return 0
+
+    items = _batch_items(doc)
+    if items is not None:
+        explained = 0
+        for item in items:
+            where = (item.get("source") or {}).get("relpath") or "?"
+            state = item.get("state")
+            item_orch = ((item.get("response") or {}).get("orchestration")) or None
+            if not item_orch:
+                # A skipped or failed item, or one a named backend ran. Name it either way: a
+                # document missing from the report is the thing a reader cannot ask about.
+                print(f"{where}  ({state}, no orchestration)")
+                continue
+            print(f"{where}")
+            _render_orchestration(item_orch)
+            explained += 1
+        if not explained:
+            print(
+                "[explain] no orchestration in any item of this batch-result (was it a"
+                " --strategy run?)",
+                file=sys.stderr,
+            )
+            return 3
+        return 0
+
+    orch = doc.get("orchestration")
+    if not orch:
+        print(
+            "[explain] no orchestration block in this response (was it a strategy run?)",
+            file=sys.stderr,
+        )
+        return 3
+    _render_orchestration(orch)
     return 0
 
 
@@ -1767,11 +1820,26 @@ def cmd_compare(args) -> int:
         except _PolicyError as e:
             print(f"[compare] {e}", file=sys.stderr)
             return 5
-        cands = (doc.get("orchestration") or {}).get("candidates") or []
+        orch = doc.get("orchestration") or {}
+        cands = orch.get("candidates") or []
         if not cands:
+            # Blaming the missing flag is wrong most of the time. The usual cause is a strategy
+            # that never branched: a `try:` cascade answered on its first rung, so there was no
+            # losing branch to keep, and the run carried the flag all along.
+            attempts = len(orch.get("attempts") or [])
+            if not orch:
+                why = "this response has no orchestration block, so it was not a strategy run"
+            elif attempts <= 1:
+                why = (
+                    f"strategy '{orch.get('strategy')}' resolved on its first rung, so no branch"
+                    " lost and there is nothing to compare against"
+                )
+            else:
+                why = "this run kept no candidates"
             print(
-                "[compare] --from: this response kept no candidates. Re-run "
-                "`parse --strategy <name> --keep-candidates`.",
+                f"[compare] --from: {why}. Candidates come from a strategy that BRANCHES, a"
+                " `compare:` or `race:` step, run with `parse --strategy <name>"
+                " --keep-candidates`.",
                 file=sys.stderr,
             )
             return 5
@@ -1791,6 +1859,18 @@ def cmd_compare(args) -> int:
             )
             return 2
         doc = args.inputs[0]
+        # A folder is the next thing a reader tries after `parse <folder>`, and fan-out takes one
+        # document. Left alone it reached the adapter and came back as a raw IsADirectoryError at
+        # exit 1, which names an errno rather than the way through.
+        if not is_url(doc) and Path(doc).is_dir():
+            print(
+                f"[compare] fan-out compares ONE document, and '{doc}' is a directory. Parse the"
+                " folder once per backend and compare the two envelopes:"
+                f" `openreading parse {doc} --backend A > a.json`, the same for B, then"
+                " `openreading compare a.json b.json`.",
+                file=sys.stderr,
+            )
+            return 2
         if args.all_ready:
             broker = EnvCredentialBroker()
             ids = [

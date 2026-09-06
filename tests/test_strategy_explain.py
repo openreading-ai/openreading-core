@@ -239,3 +239,74 @@ def test_explain_renders_decisions_downgraded_only_when_set(tmp_path, capsys):
     assert "otherwise" in d1_line  # ...alongside the decision's chosen value
     assert "reducto" in d2_line  # a non-downgraded decision's chosen value is shown
     assert "downgraded" not in d2_line  # ...with no downgrade annotation
+
+
+# --- a folder run is a batch-result, and every item carries its own orchestration -----------
+
+
+def _batch_of(*orchestrations) -> dict:
+    """A minimal batch-result envelope: one item per orchestration, plus one skipped file."""
+    return {
+        "schema_version": "0.1",
+        "status": {"state": "succeeded"},
+        "items": [
+            {
+                "state": "succeeded",
+                "source": {"relpath": f"doc{i}.pdf", "filename": f"doc{i}.pdf"},
+                "response": {"status": {"state": "succeeded"}, "orchestration": orch},
+            }
+            for i, orch in enumerate(orchestrations)
+        ]
+        + [{"state": "skipped", "source": {"relpath": "notes.txt", "filename": "notes.txt"}}],
+        "summary": {"total": len(orchestrations) + 1, "succeeded": len(orchestrations)},
+    }
+
+
+def _orch(name: str, backend: str) -> dict:
+    return {
+        "strategy": name,
+        "chosen_backend": backend,
+        "outcome": "ok",
+        "attempts": [
+            {
+                "node": "steps[0]",
+                "backend": backend,
+                "category": "ok",
+                "duration_ms": 5,
+                "gates": [],
+            }
+        ],
+        "decisions": [],
+        "dropped": [],
+    }
+
+
+def test_explain_reads_a_folder_run_item_by_item(tmp_path, capsys):
+    """A `parse <folder> --strategy X` run is a batch-result, so the orchestration lives one level
+    down, per item. Refusing it told the reader "was it a strategy run?" when it was."""
+    path = tmp_path / "all.json"
+    path.write_text(json.dumps(_batch_of(_orch("fast", "pymupdf"), _orch("fast", "tesseract"))))
+    rc = cmd_explain(types.SimpleNamespace(response=str(path)))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "doc0.pdf" in out and "doc1.pdf" in out
+    assert "pymupdf" in out and "tesseract" in out
+    assert "notes.txt" in out  # the skipped file is named, not silently dropped
+
+
+def test_explain_refuses_a_folder_run_that_orchestrated_nothing(tmp_path, capsys):
+    """A `--backend` folder run has no orchestration anywhere, which is a different message."""
+    env = _batch_of()
+    env["items"].insert(
+        0,
+        {
+            "state": "succeeded",
+            "source": {"relpath": "doc.pdf", "filename": "doc.pdf"},
+            "response": {"status": {"state": "succeeded"}},
+        },
+    )
+    path = tmp_path / "plain.json"
+    path.write_text(json.dumps(env))
+    rc = cmd_explain(types.SimpleNamespace(response=str(path)))
+    assert rc == 3
+    assert "no orchestration" in capsys.readouterr().err

@@ -244,6 +244,16 @@ def calibrate_strategy(
     rung1 = steps[0]
     gate = rung1.get("escalate_if") if isinstance(rung1, dict) else None
     predicates = calibratable_predicates(gate)
+    if isinstance(rung1, dict) and "backend" not in rung1:
+        # A `compare:` or `race:` step compiles to a node keyed `parallel`, which runs several
+        # backends and names none. Calibration sweeps ONE rung-1 backend's scores, so there is
+        # nothing here to sweep. Say so the way the not-a-cascade case does, rather than reading
+        # a key that is not there and handing the reader a KeyError.
+        raise ValueError(
+            f"strategy {strategy_name!r} starts with a parallel step, which runs several"
+            " backends at once. Calibration sweeps one rung-1 backend, so start the strategy"
+            " with a single backend, or calibrate a cascade that does"
+        )
     rung1_backend = rung1["backend"] if isinstance(rung1, dict) else str(rung1)
     rung2_backend = (
         (steps[1].get("backend") if isinstance(steps[1], dict) else str(steps[1]))

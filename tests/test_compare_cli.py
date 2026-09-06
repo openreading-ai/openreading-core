@@ -201,3 +201,15 @@ def test_explain_renders_comparison_report(tmp_path, capsys) -> None:
     rc = main(["explain", str(rpath)])
     assert rc == 0
     assert "COMPARE" in capsys.readouterr().out
+
+
+def test_compare_fanout_over_a_directory_is_usage_not_an_errno(tmp_path, capsys):
+    """`parse <folder>` works, so a reader tries `compare <folder> --backends a,b` next. It used
+    to reach the adapter and come back as a raw IsADirectoryError at exit 1, naming an errno
+    rather than the way through."""
+    (tmp_path / "docs").mkdir()
+    rc = main(["compare", str(tmp_path / "docs"), "--backends", "pymupdf,tesseract"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "is a directory" in err
+    assert "openreading compare a.json b.json" in err  # the way through, not just the refusal

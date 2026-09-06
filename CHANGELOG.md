@@ -340,6 +340,19 @@ and `tests/test_schema_evolution.py` pins every released file byte for byte.
   of English in front of the JSON and stopped parsing at all. Every site now imports `pymupdf`,
   the same package under the name that stays quiet, and a test refuses the alias tree-wide. The
   `pymupdf` floor moves to 1.24.3, the release that introduced that name.
+- **`explain` reads a folder run.** A `parse <folder> --strategy X` run is a batch-result holding
+  a response per document, so the orchestration sits one level down. `explain` read only the top
+  level and told the reader "was it a strategy run?" when it was. It now walks the items, names
+  each document, and names the ones that carry no orchestration rather than dropping them.
+- **`compare --from` says why a run kept no candidates.** It used to tell the reader to re-run
+  with `--keep-candidates`, which is usually the flag they already passed. The real cause is a
+  strategy that never branched, and the message now says which case it hit.
+- **`calibrate` refuses a parallel first rung instead of raising KeyError.** A `compare:` or
+  `race:` step compiles to a node that names no single backend, and calibration sweeps one.
+- **`compare <folder> --backends a,b` is usage, not an errno.** It reached the adapter and came
+  back as a raw IsADirectoryError at exit 1. It now exits 2 and prints the way through.
+- **`--pages` explains the argparse trap it falls into.** `parse --pages 1 doc.pdf` feeds the
+  file to `--pages`, and the error named a private function at the reader.
 
 ### Security
 

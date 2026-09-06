@@ -464,3 +464,23 @@ def test_calibrate_unreadable_policy_exits_3_without_a_traceback(tmp_path, capsy
         err = capsys.readouterr().err
         assert err.startswith(f"[calibrate] {opening}")
         assert len(err.splitlines()) == 1
+
+
+def test_calibrate_cli_refuses_a_parallel_first_rung_without_a_traceback(tmp_path, capsys):
+    """A `compare:` or `race:` step compiles to a node keyed `parallel`, which carries no single
+    backend. Reading `rung1["backend"]` raised a bare KeyError at exit 1, with a traceback and no
+    `[calibrate]` tag, where every other unsupported shape here is one line and exit 3."""
+    cfg = _write_config(
+        tmp_path,
+        "version: 1\nstrategies:\n  side_by_side:\n"
+        "    compare: [pymupdf, tesseract]\n    then: docling\n",
+    )
+    dataset = tmp_path / "cases" / "one"
+    dataset.mkdir(parents=True)
+    (dataset / "case.json").write_text('{"expected": {"text_contains": ["x"]}}')
+    rc = main(["calibrate", str(tmp_path / "cases"), "--strategy", "side_by_side", "--config", cfg])
+    assert rc == 3
+    err = capsys.readouterr().err
+    assert "[calibrate]" in err
+    assert "Traceback" not in err
+    assert "side_by_side" in err
