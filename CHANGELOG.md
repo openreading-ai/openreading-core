@@ -59,6 +59,21 @@ them.
 
 ### Changed
 
+**A policy is written once, in `openreading.yaml`.** The `policy:` block of that file is now the
+only place a compliance policy is spelled, and every command, every Python call and the server
+find that file the same way and read the same block. `route` and `leaderboard` gain `--config`,
+the two of the seven `--policy` verbs that lacked it. `config=` accepts a path or a mapping of the
+file's own shape, so a caller with no file on disk writes `config={"version": 1, "policy": {...}}`
+and gets the identical validation a file gets. Discovery order is unchanged, and a directory with
+no file routes exactly as it did before. Reading the file no longer imports the strategy engine,
+so a run that names a backend pays nothing for a package it does not use.
+
+**A directory's `openreading.yaml` now gates a run that names a backend.** `parse --backend
+reducto` in a folder whose file says `require_local: true` is refused, where before it ran as
+though no file existed. That is the point of the file, and the refusal names the key. Anyone
+keeping a strategy file next to documents they parse by name should read its `policy:` block
+before upgrading.
+
 **The project is `openreading`, was `openmanifold`.** The vendors this repository integrates all
 sell the category as *document intelligence*. The name now claims the plain-English version of it.
 A parser is named for its input, and reading is named for what the reader came to find out.
@@ -188,6 +203,17 @@ tells a win from a tie.
 **Ledger timestamps use a wall clock**, so a retention expiry survives a reboot.
 
 ### Removed
+
+**`--policy PATH`, the `policy=` keyword, and three server environment variables.** The flag is
+gone from `route`, `strategy validate`, `strategy plan`, `replay`, `calibrate`, `benchmark run`
+and `leaderboard`; passing it is an argparse error and exit 2. `policy=` is gone from
+`build_request`, `route`, `run` and `run_batch`; passing it raises `TypeError` naming the
+replacement. `OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE`, `OPENREADING_TRAIN_OPTOUT_CONFIRMED` and
+`OPENREADING_BAA_TIER_CONFIRMED` are no longer read: the server takes all three attestations from
+the file's `policy:` block instead, and a deployment that still sets one gets the file's posture
+rather than a widened one. Write the same keys in `openreading.yaml` and pass `--config` or
+`config=` where a path is needed. The package is pre-release with no tag, so the flag is removed
+outright rather than tombstoned.
 
 **`openreading compare --serial`.** The flag was never read by any code path. Compare's fan-out has
 always been serial, and the concurrent mode the flag implied an opt-out of was never built. Fan-out

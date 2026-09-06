@@ -8,8 +8,9 @@
 OpenReading reads your documents with the backends your rules allow, and returns one JSON whose
 shape does not depend on which backend did the work. A backend is the thing that does the reading,
 such as PyMuPDF on your machine or Reducto's hosted API. Policy-aware means you write those rules
-once instead of choosing a backend for each document. A policy is a short JSON file naming what a
-backend must guarantee before it may run, and no fallback relaxes it. Intelligent means a strategy
+once instead of choosing a backend for each document. A policy is a block in your
+`openreading.yaml` naming what a backend must guarantee before it may run, and no fallback relaxes
+it ([how it decides](src/openreading/router/README.md#how-it-decides)). Intelligent means a strategy
 acts on what a run reveals, so a local backend that returns almost no text escalates to a stronger
 one. One command takes a single document or a whole folder, and a folder comes back as one envelope
 holding one response per document.
@@ -266,8 +267,13 @@ out every vendor that does not publish a BAA, the HIPAA contract a vendor signs 
 regulated data. `no_train_on_data` refuses vendors that train on what you send:
 
 ```bash
-echo '{"require_baa": true, "no_train_on_data": true}' > phi.json
-uv run openreading route examples/john_smith_1000_2026_01.pdf --policy phi.json
+cat > openreading.yaml <<'YAML'
+version: 1
+policy:
+  require_baa: true
+  no_train_on_data: true
+YAML
+uv run openreading route examples/john_smith_1000_2026_01.pdf
 ```
 ```json
 { "chosen": "pymupdf",
@@ -277,8 +283,9 @@ uv run openreading route examples/john_smith_1000_2026_01.pdf --policy phi.json
   "terminal_reason": null }
 ```
 
-That printed a plan and read nothing. Add `--run` to execute the chosen backend and get the
-envelope back beside the plan. Reducto is dropped because its BAA is offered only on some tiers
+That printed a plan and read nothing, and no flag named the policy: every command finds
+`openreading.yaml` in the working directory the same way. Add `--run` to execute the chosen
+backend and get the envelope back beside the plan. Reducto is dropped because its BAA is offered only on some tiers
 and none is confirmed here. The three hosted vendors that survive each publish a BAA. That claim
 comes from the backend's descriptor, its static self-description of formats, variables and
 compliance posture. That is a vendor's advertised offer read on a date, not an agreement you hold,
@@ -291,8 +298,8 @@ which no policy key reads
 ([Backend adapters](src/openreading/adapters/README.md#where-those-compliance-claims-come-from)).
 
 The `fallbacks` list is the order a `--run` tries next if `pymupdf` fails. A dropped backend never
-joins that list, because a fallback that readmits it would leak the statement silently. Your policy
-file is the only thing that sets the eligible set, the backends allowed to run. Three of the
+joins that list, because a fallback that readmits it would leak the statement silently. Your
+`policy:` block is the only thing that sets the eligible set, the backends allowed to run. Three of the
 policy's keys widen that set on purpose, which
 [Routing and keys](src/openreading/router/README.md#how-it-decides) names. A key the router does
 not recognise is refused rather than ignored. That way a typo cannot leave you with a clean exit
@@ -348,11 +355,10 @@ The total is three because `examples/README.md` is in that folder too. It is ski
 always accounts for every file you pointed at. `scripts/batch_demo.sh path/to/docs` runs the same
 sweep with both local backends and compares the two corpora.
 
-`parse` takes no `--policy`, so the command above runs with no compliance filter in force. A
-corpus reaches the router's compliance filter two other ways: a `policy:` block in
-`openreading.yaml` under `parse <dir> --strategy <name> --config openreading.yaml`, or
-`openreading.run_batch(paths, policy={…})` from Python.
-[Routing and keys](src/openreading/router/README.md#recipes) runs both.
+The command above ran with no compliance filter in force, because that directory holds no
+`openreading.yaml`. Write one with a `policy:` block and the same command gates every document in
+the folder, whether it names a backend or runs a strategy.
+[Routing and keys](src/openreading/router/README.md#recipes) runs it both ways.
 
 ## Bring your own key
 
@@ -391,7 +397,7 @@ import openreading
 doc = "examples/john_smith_1000_2026_01.pdf"
 resp = openreading.run(doc, backend="pymupdf")                    # dict
 print(resp["status"]["state"], resp["backend"]["id"])            # succeeded pymupdf
-plan = openreading.route(doc, policy={"require_baa": True, "no_train_on_data": True})
+plan = openreading.route(doc)                                    # ./openreading.yaml
 print(plan.eligible_ids[0], plan.dropped["reducto"].code)        # pymupdf no_baa
 delta = openreading.compare([resp, openreading.run(doc, backend="tesseract")])
 print(delta["headline"]["verdict"])                              # equivalent

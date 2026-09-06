@@ -85,7 +85,7 @@ def compute_facts(
     req: OpenReadingRequest, effective_compliance: dict[str, Any] | None = None
 ) -> Facts:
     """Compute every available fact for `req`. `effective_compliance` (the post-union request ∪
-    --policy ∪ file `policy:` set, from compile) feeds the compliance fact; absent it falls back
+    request ∪ file `policy:` set, from compile) feeds the compliance fact; absent it falls back
     to the request's own compliance block."""
     d = req.document
     data = doc_bytes(req)

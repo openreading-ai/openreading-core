@@ -59,7 +59,7 @@ class CompiledPlan:
     config_hash: str
     overrides_fallback: bool = False
     warnings: list[tuple[str, str]] = field(default_factory=list)  # (code, message)
-    # the post-union effective compliance (request ∪ --policy ∪ file policy:) — feeds route facts
+    # the post-union effective compliance (request ∪ file policy:) — feeds route facts
     effective_compliance: dict[str, Any] = field(default_factory=dict)
     # `limits:` operator time ceiling wrapping every strategy-engaged run (spec §6.4)
     max_duration_ms: int | None = None

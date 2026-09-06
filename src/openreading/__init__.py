@@ -507,9 +507,10 @@ Known gaps: no MCP surface (integrate via CLI/JSON, Python dicts, or HTTP; desig
 `design/agentic.md`, `product/specs/agentic.product-spec.md`); no shipped `DeciderPort` executor
 (design records: `design/decider-executor.md`, `product/specs/decider.product-spec.md`); no
 intent schema or its routing mechanics (design records: `design/intent.md`,
-`product/specs/intent.product-spec.md`); a policy can still be spelled four ways, and the move
-to one `policy:` block in `openreading.yaml` is in progress (design records:
-`design/policy-one-yaml.md`, `product/specs/policy-one-yaml.product-spec.md`); no translation
+`product/specs/intent.product-spec.md`); the `policy:` block is still open in the
+`strategy-config` schema, so a hand validator stands in for the closed grammar until v0.3 lands
+(design records: `design/policy-one-yaml.md`,
+`product/specs/policy-one-yaml.product-spec.md`); no translation
 stage or profile grammar, which has no design record anywhere; `warnings[]` has no closed
 registry (the `openreading.schemas` docstring lists today's known codes, which is a list to read
 rather than an enum to validate against); the

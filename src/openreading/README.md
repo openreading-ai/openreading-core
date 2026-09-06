@@ -40,7 +40,7 @@ same surfaces today, and a native tool surface is [not built](#not-built-yet).
 |---|---|---|---|
 | `parse` | `parse doc.pdf --backend X` | `run()`, `run_batch()`; `POST /v1/parse`, `POST /v1/batch` | the exit code, then `status.state` and `warnings[]` |
 | `compare` | `compare a.json b.json` | `compare()`; `POST /v1/compare` | `headline.verdict`: `equivalent`, `divergent`, `mixed` |
-| `strategy` | `parse --strategy X`; `route doc.pdf --policy p.json` | `run(strategy=)`, `route()`; `backend.id "strategy:X"`; `POST /v1/route` | `orchestration.outcome`, `attempts[].category`, `decisions[]` |
+| `strategy` | `parse --strategy X`; `route doc.pdf` | `run(strategy=)`, `route()`; `backend.id "strategy:X"`; `POST /v1/route` | `orchestration.outcome`, `attempts[].category`, `decisions[]` |
 | `evals` | `benchmark run NAME --target backend:X`; `leaderboard DIR --backends X,Y` | CLI only | official reports or the ranked rows |
 
 Source: `src/openreading/__init__.py` (The 3x3). Live truth: `uv run python -m pydoc openreading`.
@@ -178,14 +178,19 @@ uv run openreading parse sample.pdf --backend reducto > out.json; echo "exit=$?"
 exit=3
 ```
 
-`parse --backend <id>` names one backend directly and takes no policy. To put a choice under a
-compliance policy, use `route --policy` for a single document. For a corpus run through
-`--strategy` or `--config`, put a `policy:` block in `openreading.yaml`. [Routing and
-keys](router/README.md) covers both. The single-document form, run for real:
+`parse --backend <id>` names one backend directly, and the `policy:` block of your
+`openreading.yaml` gates it like everything else. `route` prints that plan without running
+anything. [Routing and keys](router/README.md) covers both. The single-document form, run for
+real:
 
 ```bash
-echo '{"require_baa": true, "no_train_on_data": true}' > phi.json
-uv run openreading route sample.pdf --policy phi.json --run
+cat > openreading.yaml <<'YAML'
+version: 1
+policy:
+  require_baa: true
+  no_train_on_data: true
+YAML
+uv run openreading route sample.pdf --run
 ```
 ```json
 { "chosen": "pymupdf",

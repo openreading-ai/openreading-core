@@ -442,7 +442,7 @@ def _check_leaf(node: dict[str, Any], path: str, ctx: _Ctx, eff_deadline_ms: Any
             f"per-attempt timeout {node['timeout']} exceeds the effective deadline and will be "
             "clamped",
         )
-    # steps unreachable under the file's own policy (or --policy)
+    # steps unreachable under the file's own `policy:` block
     drop = ctx.policy_drop(desc)
     if drop is not None:
         ctx.warn(

@@ -59,7 +59,7 @@ Hold the four facts below in mind, and every command on this page follows from t
    openreading's own probe about this backend's output. Is it garbled, near-empty, or a text-layer
    read of a scanned page? A gate that fires keeps the result as best-so-far and moves to the next
    rung. A rung is one step of a cascade, so the next rung is the next backend in order.
-3. Compliance prunes the tree before anything runs. The request's policy, `--policy`, and the file's
+3. Compliance prunes the tree before anything runs. The request's constraints and the file's
    own `policy:` block are combined, and the most restrictive wins. A dropped backend lands in
    `orchestration.dropped[]`. Nothing in the file can bring it back.
 4. Every run leaves the same trace, whoever decided. The engine, a replayed trace, or an enabled LLM
@@ -366,10 +366,9 @@ WARNING local.yaml:strategies.onprem.steps[1].backend: 'reducto' is filtered out
 **You should see** a two-rung tree where you wrote three. `plan` prints the pruned tree for this
 document and policy, with no execution. Run it with `parse sample.pdf --config local.yaml --strategy
 onprem > onprem.json`. `explain onprem.json` ends with the line `dropped reducto (stage 1:
-not_local)`, and `jq -c '.orchestration.dropped' onprem.json` prints the same record. `--policy
-phi.json` on `strategy plan`, `replay`, or `calibrate` combines with the file's block the same way.
-`parse` has no `--policy` flag, so a parse gets its policy from the file or from Python's
-`run(policy=)`.
+not_local)`, and `jq -c '.orchestration.dropped' onprem.json` prints the same record. Every verb
+reads the same block from the same file, so `strategy plan`, `replay`, `calibrate` and a plain
+`parse` all prune against one policy.
 
 > [!IMPORTANT]
 > Nothing in the file can re-admit a dropped backend. A later rung, `then:`, `auto`, and an
@@ -734,7 +733,8 @@ The category column in `explain` is the closed vocabulary `CATEGORIES` in
 ## See also
 
 - [Docs home](../README.md)
-- [Routing and keys](../router/README.md): drop codes, `--policy`, attesting a BAA, bringing a key.
+- [Routing and keys](../router/README.md): drop codes, the `policy:` block, attesting a BAA,
+  bringing a key.
 - [Compare](../comparison/README.md): the verdicts behind `compare --from`.
 - [Evals](../evals/README.md): building the dataset `calibrate` needs.
 - [The run ledger](../ledger/README.md): resuming and replaying whole runs.

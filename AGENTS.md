@@ -164,6 +164,8 @@ src/openreading/
                that docstring back as the CLI's own manual          exit codes, the manual)
   server/      `openreading serve`                             (docstring: endpoints, status codes)
   api.py          `run` / `route` / `compare` / `resume`       (docstring: exports and return shapes)
+  config.py       the one reader of `openreading.yaml`         (docstring: discovery, the nine
+                                                                policy keys, the union, P4-P6)
   credentials.py  BYO-key broker                               (docstring: precedence, per-backend vars)
   readiness.py    is a backend runnable here, and which vars are missing
   liveness.py     is a backend answering right now

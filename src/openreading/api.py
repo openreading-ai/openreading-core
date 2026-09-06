@@ -346,8 +346,8 @@ _MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
 # lands in the overrides bag, where `run()` reports it as an unknown request field and
 # `run_batch()` ignores it entirely. Either way the constraints the caller wrote do not apply.
 _REMOVED_KWARGS = {
-    "policy": 'policy= was removed; pass the file\'s own shape as config={"version": 1, '
-    '"policy": {...}}, or a path to an openreading.yaml',
+    "policy": "the policy keyword was removed; pass the file's own shape as "
+    'config={"version": 1, "policy": {...}}, or a path to an openreading.yaml',
 }
 
 
@@ -1532,7 +1532,8 @@ def _run_native(
     path either (BL-98): `policy` is applied per item via `build_request` exactly like the platform
     path's `run()` already does — closing a structural no-op, since `policy` is `run_batch`'s own
     named parameter and previously could never reach here at all — and the resulting
-    `req.compliance` (from either the `policy=` or the raw `compliance=` override spelling) is
+    `req.compliance` (from either the file's `policy:` block or the raw `compliance=` override
+    spelling) is
     enforced with the same `Router.check_eligible` call `run_request`'s named-backend branch uses,
     before `adapter.submit_many` ever sees a document. Every item in a batch shares identical
     policy/overrides, so `req.compliance` is identical across `reqs` — checking the first stands in

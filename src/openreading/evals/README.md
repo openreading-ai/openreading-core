@@ -552,8 +552,8 @@ case names, rules included, so a case asserting both kinds gets one mean over bo
 
 **Rank under a compliance policy.**
 ```bash
-echo '{"require_local": true}' > local.json
-uv run openreading leaderboard mydata --backends pymupdf,tesseract,reducto --policy local.json
+printf 'version: 1\npolicy:\n  require_local: true\n' > local.yaml
+uv run openreading leaderboard mydata --backends pymupdf,tesseract,reducto --config local.yaml
 ```
 ```text
    3  reducto                           —     0/3     0.3750       3  

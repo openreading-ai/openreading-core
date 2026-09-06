@@ -63,7 +63,7 @@ with `yaml.safe_load` only (D-v3-1: a config file may never construct arbitrary 
 ```yaml
 version: 1                    # required — config format version (additive evolution)
 
-policy:                       # optional — superset of the existing --policy JSON, same flat keys
+policy:                       # optional — the only place a compliance policy is written
   require_baa: true           #   compliance keys → request.compliance (unioned, most-restrictive-wins)
   no_train_on_data: true
   allow_unverified_compliance: false    # deployment keys → RouterConfig, as today
@@ -102,7 +102,7 @@ constraint.
 3. `./openreading.yaml` in the working directory — CLI and Python API ONLY.
 4. Nothing found → no config; behavior is byte-identical to the no-file path.
 
-The server loads config only via `OPENREADING_CONFIG` (`loader.discover(allow_cwd=False)`) — a
+The server loads config only via `OPENREADING_CONFIG` (`config.discover(allow_cwd=False)`) — a
 long-running service must never change behavior because a stray YAML landed in its cwd. There is
 no home-directory discovery. A found-but-broken file raises `ConfigError`: an explicitly
 requested config that cannot load is an error, never a silent fall-through.
@@ -132,7 +132,7 @@ so the no-file path never imports this package (the no-change law — package do
   before (formally the desugared cascade of §7 rule 7).
 
 Precedence, highest first: **request wire fields → CLI flags → config `defaults:` → built-ins.**
-Compliance is outside precedence: constraints from the request, `--policy`, and the file's
+Compliance is outside precedence: constraints from the request and the file's
 `policy:` block are **unioned, most-restrictive-wins** — constraints only ever add. D-v3-12 fixes
 the union (done in `prune.compile_strategy`): the boolean PHI constraints `require_baa` /
 `no_train_on_data` / `require_local` OR to True; `data_region` / `max_retention` take the
@@ -519,7 +519,7 @@ definitions, availability, and computation notes; this section is the binding su
 - `filename_matches` [regex string] — source: `document.filename`. If unavailable: rule doesn't
   match.
 - `compliance.<field>` [bool/string] — source: the post-union effective compliance (request ∪
-  `--policy` ∪ file `policy:`, most-restrictive-wins — the same constraint set that pruned the
+  file `policy:`, most-restrictive-wins — the same constraint set that pruned the
   tree). Consequence: a file `policy:` key makes its matching fact constant for every request. If
   unavailable: always available.
 - `sample_percent` [number 0–100] — source: deterministic sha256(document bytes) bucket — stable per
@@ -931,7 +931,7 @@ present with no decider configured (it will resolve to `review_default`; said up
 `decide` node with no decider configured (it will always take `otherwise:`) · `fields_required`
 (Plain `missing`) on a backend whose descriptor cannot produce typed fields (the rung always
 escalates) · judged comparison with more than 3 non-shadow candidates (2·(n−1) pairwise LLM
-calls — slow) · steps unreachable under the file's own `policy:` block or `--policy` ("`reducto`
+calls — slow) · steps unreachable under the file's own `policy:` block ("`reducto`
 is filtered out by the policy — remove it or relax the policy") · the Plain desugar's own
 warnings (`openreading.strategies.plain`). There is no nested-fan-out / worst-case-attempts
 warning.
@@ -940,8 +940,8 @@ Errors follow the Elm doctrine: locate (file + node path, e.g.
 `strategies.cheap.steps[0].escalate_if`), explain in domain terms, suggest the fix. Line-precise
 location is a documented follow-up (D-v3-8: `yaml.safe_load` discards source marks, and the
 injected-`__line__` trick breaks the schema's `additionalProperties: false`; the node path already
-satisfies "locate"). With `--policy p.json`, `validate` additionally flags steps that can never
-run *in that compliance context*.
+satisfies "locate"). `validate` reads the file's own `policy:` block, so it additionally flags
+steps that can never run *in that compliance context*.
 
 
 10. JSON Schema and editor experience
@@ -1050,9 +1050,9 @@ class StrategyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     version: int
-    # `policy` is a superset of the --policy JSON (compliance + RouterConfig keys); it is
-    # deliberately open (additionalProperties: true in the schema) and consumed via the same
-    # flat-key path as api._apply_policy / api.router_config.
+    # `policy` carries the compliance and RouterConfig keys. It is still open in the schema
+    # (additionalProperties: true), so `openreading.config` refuses an unknown key where the file
+    # is read; v0.3 closes the block and that guard goes away with it.
     policy: dict[str, Any] | None = None
     limits: Limits | None = None
     decider: DeciderConfig | None = None

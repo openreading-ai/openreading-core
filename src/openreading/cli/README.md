@@ -422,10 +422,6 @@ that fills mid-run was not measured.
 
 ## Not built yet
 
-- `parse --policy` does not exist. `route`, `strategy validate`, `strategy plan`, `replay`,
-  `calibrate`, and `leaderboard` take a policy, and `parse` does not. Source: the `openreading.cli`
-  docstring, "Batch: a directory, a glob, or two or more sources", which says "`parse` has no
-  `--policy` flag".
 - Batch-level resume does not exist, so an interrupted batch names no run id. Source: the
   `openreading.cli` docstring, "Exit codes", 6: "a batch names none (batch-level resume is out of
   scope)".
