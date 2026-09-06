@@ -395,6 +395,27 @@ def test_cli_parse_refuses_a_malformed_file_policy(sample_pdf, tmp_path, capsys)
     assert "Traceback" not in err
 
 
+def test_cli_parse_directory_refuses_a_malformed_file_policy(tmp_path, capsys):
+    """The batch verb reads the file once, before intake, so a policy that is wrong is refused
+    before any document is opened. That refusal takes the same rung the single-document verb
+    does. Without a clause of its own the `ConfigError` fell through to the generic handler and
+    exited 1, the code every other unloadable-file failure on this ladder avoids."""
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "a.pdf").write_bytes(build_sample_pdf())
+    config = tmp_path / "openreading.yaml"
+    config.write_text("version: 1\npolicy: {require_locall: true}\n")
+    rc = main(["parse", str(corpus), "--backend", "pymupdf", "--config", str(config)])
+    assert rc == 3
+    out, err = capsys.readouterr()
+    assert err.startswith("[batch] ")
+    assert "invalid config at 'policy'" in err
+    assert "require_locall" in err
+    assert "ConfigError" not in err
+    assert "Traceback" not in err
+    assert out == ""
+
+
 def test_server_refuses_a_malformed_config_policy_block_at_startup(tmp_path, monkeypatch):
     """The server reads the OPERATOR's `openreading.yaml`, never a caller-supplied policy, so a
     malformed `policy:` block there is a misconfiguration. It is refused when the file is read,

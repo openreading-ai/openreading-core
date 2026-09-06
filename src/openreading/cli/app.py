@@ -479,6 +479,13 @@ def _cmd_parse_batch(args, overrides: dict, label: str) -> int:
         # batch-dispatch sibling of BL-122's cmd_parse/cmd_compare fix).
         print(f"[{label}] {e}", file=sys.stderr)
         return 3
+    except ConfigError as e:
+        # The openreading.yaml is an input to the whole batch, read once before intake (P4), so a
+        # `policy:` block that is not a policy is refused here, before any document is opened.
+        # Exit 3 is the rung the single-document verb takes for the same file. A ValueError
+        # subclass, so without this clause it fell to the generic exit 1 below.
+        print(f"[batch] {e}", file=sys.stderr)
+        return 3
     except Exception as e:  # noqa: BLE001
         print(f"[batch] error: {type(e).__name__}: {e}", file=sys.stderr)
         return 1
