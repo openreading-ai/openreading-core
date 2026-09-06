@@ -121,17 +121,25 @@ sufficient, and confirming the executed paperwork is yours to do out of band.
 [Routing and keys](src/openreading/router/README.md) states this where the policy keys are
 introduced, and lists a coded reason for every backend dropped.
 
-The three attestation variables are the operator's own assertion. `.env.example` puts it this way:
-"TRAIN_OPTOUT / BAA_TIER are ATTESTATIONS, not feature toggles: you assert paperwork exists outside
-the system; the router cannot verify that, which is why the default is to refuse." No request body
-can set any of them, on any surface. All three widen the eligible set, on three different axes.
-`OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE` admits the backends that stayed silent on a fact, and
-without it unverified compliance fails closed. `OPENREADING_BAA_TIER_CONFIRMED` admits a named
-backend whose tier-gated BAA you signed, and `OPENREADING_TRAIN_OPTOUT_CONFIRMED` a named backend
-whose training opt-out you applied. Nothing downstream of the policy widens the set again, and that
-downstream half is the part you can promise an auditor.
-[Routing and keys](src/openreading/router/README.md#how-it-decides) lists the same three keys in
-their policy-file spelling.
+The three attestation keys are the operator's own assertion, and they are attestations rather than
+feature toggles: you assert that paperwork exists outside the system, the router cannot verify
+that, and the default is therefore to refuse. All three live in the `policy:` block of your
+`openreading.yaml`, which is the only place any of them can be written. No request body can set
+one, on any surface, and the server reads them from the file at `OPENREADING_CONFIG` rather than
+from its own environment. All three widen the eligible set, on three different axes.
+`allow_unverified_compliance` admits the backends that stayed silent on a fact, and without it
+unverified compliance fails closed. `baa_tier_confirmed` admits a named backend whose tier-gated
+BAA you signed, and `train_optout_confirmed` a named backend whose training opt-out you applied.
+Nothing downstream of the policy widens the set again, and that downstream half is the part you
+can promise an auditor.
+[Routing and keys](src/openreading/router/README.md#how-it-decides) lists the same three keys
+beside the effect each one has.
+
+Three environment variables (`OPENREADING_ALLOW_UNVERIFIED_COMPLIANCE`,
+`OPENREADING_TRAIN_OPTOUT_CONFIRMED`, `OPENREADING_BAA_TIER_CONFIRMED`) used to carry these three
+assertions on the server alone. They are removed and no longer read anywhere. A deployment that
+still sets one gets the file's posture, so the failure mode is a backend dropped that used to be
+admitted, never the reverse.
 
 ### Non-goals
 

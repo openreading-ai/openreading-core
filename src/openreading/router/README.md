@@ -349,6 +349,51 @@ registered and no keys set. `Keeps` counts the chosen backend plus its fallbacks
 `uv run openreading route sample.pdf | jq -c '.dropped | map_values(.code)'`, with the backends
 sharing a code collapsed into a count.
 
+### Writing the block
+
+The block sits at the top level of `openreading.yaml`, beside `strategies:` rather than inside
+one, because it gates every run whether or not a strategy is involved. Six keys take a scalar and
+two take a list:
+
+```yaml
+version: 1
+policy:
+  require_baa: true              # boolean, unquoted
+  no_train_on_data: true
+  data_region: eu                # string, matched exactly against declared regions
+  max_retention: 48h             # string: "zero", "0", "24", "48h"
+  optimize_for: accuracy         # accuracy | cost | latency | offline
+  baa_tier_confirmed: [reducto]  # list of backend ids, even for one
+strategies:                      # optional, and gated by the block above
+  cheap_first:
+    steps: [pymupdf, reducto]
+    escalate_if: default
+```
+
+Every key is optional, and a file with no `policy:` block at all is the no-policy behaviour. The
+schema types the block (`strategy-config` v0.3), so the five mistakes YAML invites are refused
+before a backend is contacted, at exit 3, each naming the key and what it should have been:
+
+| What you write | What the CLI says |
+|---|---|
+| `allow_unverified_compliance: "false"` | `invalid config at 'policy/allow_unverified_compliance': 'false' is not of type 'boolean'` |
+| `train_optout_confirmed: aws-textract` | `invalid config at 'policy/train_optout_confirmed': 'aws-textract' is not of type 'array'` |
+| `max_retention: 0` | `invalid config at 'policy/max_retention': 0 is not of type 'string'` |
+| `optimize_for: speed` | `invalid config at 'policy/optimize_for': 'speed' is not one of ['accuracy', 'cost', 'latency', 'offline']` |
+| `require_local: true` at the top level | `invalid config: Additional properties are not allowed ('require_local' was unexpected)` |
+
+The first two are why the schema is typed rather than open. A quoted `"false"` is truthy to
+Python, so it used to switch the fail-closed tolerance ON, the opposite of what the word says. A
+bare `aws-textract` where a list belongs used to become a set of its own characters, confirming no
+backend at all while looking like it confirmed one. Both now fail to load.
+
+`max_retention` is quoted-string territory in general: write `zero` or `48h`, never `0`. A value
+that parses as YAML but not as a duration, such as `soon`, loads fine and then drops every hosted
+backend with `retention_unparseable` at routing time. That is your input rather than the vendor's,
+so no switch relaxes it.
+
+### The eleven
+
 | # | `policy:` | Keeps | Drops, by code |
 |---|---|---|---|
 | 1 | `require_local: true` | 4 | 11 `not_local` |
