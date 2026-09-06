@@ -11,6 +11,7 @@ those fails a normal test run, so they fail here instead.
 
 from __future__ import annotations
 
+import argparse
 import re
 
 import pytest
@@ -151,3 +152,75 @@ def test_a_stripped_interpreter_refuses_rather_than_printing_nothing(monkeypatch
     monkeypatch.setattr(openreading.cli, "__doc__", None)
     assert main(["help", "batch"]) == 3
     assert "python -OO" in capsys.readouterr().err
+
+
+# --- the argparse pages -------------------------------------------------------------------
+
+
+def _commands() -> dict[str, argparse.ArgumentParser]:
+    """Every addressable command, keyed by what the reader types after `openreading`."""
+    out: dict[str, argparse.ArgumentParser] = {}
+
+    def walk(parser, prefix=""):
+        for action in parser._actions:
+            if not isinstance(action, argparse._SubParsersAction):
+                continue
+            for name, sub in action.choices.items():
+                key = f"{prefix} {name}".strip()
+                out[key] = sub
+                walk(sub, key)
+
+    walk(build_parser())
+    return out
+
+
+_COMMANDS = _commands()
+_EPILOG_WIDTH = 79
+_EPILOG_LINES = 24
+
+
+@pytest.mark.parametrize("name", sorted(_COMMANDS))
+def test_every_command_says_what_the_reader_gets(name):
+    """A `--help` page with no description is a usage line and a flag list, which tells a reader
+    what the command accepts and never what it does."""
+    text = (_COMMANDS[name].description or "").strip()
+    assert text, f"`openreading {name}` has no description"
+    assert text.endswith("."), f"`openreading {name}`'s description is not a sentence"
+
+
+@pytest.mark.parametrize("name", sorted(_COMMANDS))
+def test_every_command_carries_a_worked_epilog(name):
+    """The four parts every page owes a reader: something to paste, what to run next, the codes
+    this command can actually return, and where the long form lives."""
+    epilog = _COMMANDS[name].epilog or ""
+    assert "Examples:" in epilog, f"`openreading {name}` shows no example"
+    assert "openreading " in epilog, f"`openreading {name}`'s epilog has no runnable line"
+    assert "Exits:" in epilog, f"`openreading {name}` never names an exit code"
+    assert "More: openreading help " in epilog, f"`openreading {name}` points at no chapter"
+
+
+@pytest.mark.parametrize("name", sorted(_COMMANDS))
+def test_every_epilog_fits_one_screen(name):
+    """A flag page a reader has to scroll is a flag page a reader stops reading. The long form
+    already has a home in `openreading help`."""
+    lines = (_COMMANDS[name].epilog or "").splitlines()
+    assert len(lines) <= _EPILOG_LINES, f"`openreading {name}`'s epilog runs {len(lines)} lines"
+    over = [line for line in lines if len(line) > _EPILOG_WIDTH]
+    assert not over, f"`openreading {name}`'s epilog exceeds {_EPILOG_WIDTH} columns: {over}"
+
+
+@pytest.mark.parametrize("name", sorted(_COMMANDS))
+def test_no_help_page_sends_a_reader_to_a_private_repo_or_to_uv(name):
+    """`internal/` names a file the reader cannot open, and a reader who installed the package
+    from an index has no `uv`."""
+    page = _COMMANDS[name].format_help()
+    assert "internal/" not in page, f"`openreading {name}` points at the private repo"
+    assert "uv run" not in page, f"`openreading {name}` assumes uv is installed"
+
+
+def test_the_front_door_names_folders_and_chaining():
+    """The two things the CLI never said out loud, and the reasons this verb set was rewritten."""
+    page = build_parser().format_help()
+    assert "FOLDERS AND GLOBS" in page
+    assert "THINGS CHAIN." in page
+    assert "openreading help" in page
