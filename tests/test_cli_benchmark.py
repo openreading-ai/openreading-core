@@ -224,6 +224,8 @@ def test_benchmark_run_drops_a_repeated_target(
             "backend:pymupdf",
             "--target",
             "backend:pymupdf",
+            "--cache-dir",
+            str(tmp_path / "cache"),
             "--output-dir",
             str(tmp_path / "out"),
         ]

@@ -236,6 +236,23 @@ def test_recursive_glob_matches_every_depth(tmp_path):
     assert got == ["a/b/c/three.pdf", "a/b/two.pdf", "a/one.pdf", "top.pdf"]
 
 
+@pytest.mark.parametrize("pattern", ["**", "**/*", "**/**/*.pdf"])
+def test_recursive_glob_selects_each_file_once(tmp_path, pattern):
+    _mk(tmp_path / "top.pdf")
+    _mk(tmp_path / "a" / "one.pdf")
+    _mk(tmp_path / "a" / "b" / "two.pdf")
+    got = resolve_intake([str(tmp_path / pattern)], max_items=3)
+    assert [r.ref.relpath for r in got] == ["a/b/two.pdf", "a/one.pdf", "top.pdf"]
+    assert len({r.ref.path for r in got}) == 3
+
+
+def test_separate_source_arguments_preserve_deliberate_repeats(tmp_path):
+    source = _mk(tmp_path / "doc.pdf")
+    got = resolve_intake([str(source), str(tmp_path / "**")])
+    assert [r.ref.path for r in got] == [str(source), str(source)]
+    assert [r.ref.relpath for r in got] == ["doc.pdf", "doc.pdf"]
+
+
 def test_glob_relpath_keeps_the_directories_below_the_pattern(tmp_path):
     # relpath is the cross-run pairing key (batch-result.v0.1.json) and the --save-dir layout.
     # Two same-named files under different parents must stay two distinct records.

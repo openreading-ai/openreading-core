@@ -390,7 +390,8 @@ def _cmd_parse_batch(args, overrides: dict, label: str) -> int:
     to stderr; stdout stays the single batch-result JSON. Exit 4 = partial (some items failed)."""
     bkwargs: dict[str, Any] = {**overrides, "config": args.config, "operation": args.operation}
     if getattr(args, "keep_candidates", False):
-        bkwargs["keep_candidates"] = True  # retained per item, so `compare --from` works on a batch
+        # Saved item responses retain alternatives that `compare --from` can read individually.
+        bkwargs["keep_candidates"] = True
     if args.strategy:
         bkwargs["strategy"] = args.strategy
     elif args.no_strategy:
@@ -1833,11 +1834,12 @@ def cmd_compare(args) -> int:
         orch = doc.get("orchestration") or {}
         cands = orch.get("candidates") or []
         if not cands:
-            # Blaming the missing flag is wrong most of the time. The usual cause is a strategy
-            # that never branched: a `try:` cascade answered on its first rung, so there was no
-            # losing branch to keep, and the run carried the flag all along.
+            # The flag cannot retain a response that never completed, such as a cancelled race
+            # loser. Name the input limitation before suggesting another potentially billed run.
             attempts = len(orch.get("attempts") or [])
-            if not orch:
+            if is_batch_envelope(doc):
+                why = "this is a batch-result. Pass one item's response saved with parse --save-dir"
+            elif not orch:
                 why = "this response has no orchestration block, so it was not a strategy run"
             elif attempts <= 1:
                 why = (
@@ -1847,9 +1849,9 @@ def cmd_compare(args) -> int:
             else:
                 why = "this run kept no candidates"
             print(
-                f"[compare] --from: {why}. Candidates come from a strategy that BRANCHES, a"
-                " `compare:` or `race:` step, run with `parse --strategy <name>"
-                " --keep-candidates`.",
+                f"[compare] --from: {why}. Candidates require completed parallel alternatives"
+                " and --keep-candidates. Sequential steps retain none. A race can cancel them."
+                " Use a compare: step to wait for alternatives. See openreading help chaining.",
                 file=sys.stderr,
             )
             return 5
@@ -2059,8 +2061,8 @@ Examples:
   openreading parse doc.pdf --strategy fast > run.json   # follow a plan
 
 One file or URL prints one response. A folder, a glob, or two or more
-arguments prints one batch-result over all of them. A file the backend cannot
-read is skipped with a reason, never a crash and never a silence.
+arguments prints one batch-result over all of them. Unsupported formats are
+skipped in a batch. One file with an unsupported extension exits 3.
 
 Then:
   openreading compare mu.json te.json --format table   # where they differ
@@ -2074,7 +2076,7 @@ More: openreading help parse, openreading help batch""",
     "resume": """\
 Examples:
   export OPENREADING_LEDGER=./.openreading  # arm the journal before you run
-  openreading parse examples/ --strategy fast    # Ctrl-C here gives exit 6
+  openreading parse big.pdf --strategy offline_first   # Ctrl-C gives an id
   openreading resume 7dbf6b71-adb5-4e90-9188-a184fdba9d05 > resumed.json
   ls $OPENREADING_LEDGER/*.header.json    # find an id nobody wrote down
 
@@ -2083,7 +2085,7 @@ the ledger was armed for it, whether it went on to succeed, was interrupted,
 or crashed. Every step already finished replays from the journal with no
 network call, and only what was never reached runs for real. Only a strategy
 dispatch journals, so a named --backend run writes nothing while looking
-armed. RUN_ID is the only run option this takes.
+armed. A batch names no single run ID. RUN_ID is the only run option here.
 
 Then:
   openreading explain resumed.json     # what the finished run decided
@@ -2110,7 +2112,7 @@ naming every dropped backend with the stage and code that dropped it.
 Then:
   openreading backends --check pymupdf   # is the chosen backend answering
 
-Exits: 0 a plan. 4 no compliant backend, and the empty plan still prints.
+Exits: 0 a plan. 4 an empty plan, also with --run. The plan still prints.
 3 an unreadable or invalid policy, an unreadable document, or --run on a plan
 every backend in which failed.
 
@@ -2157,7 +2159,7 @@ Then:
   curl -s localhost:8787/v1/backends       # the backends table, as JSON
 
 Exits: 0 a clean stop. 3 the [server] extra is missing, the port is already
-bound, or OPENREADING_API_KEYS is malformed. 143 stopped by SIGTERM.
+bound, or either auth variable is malformed. 143 stopped by SIGTERM.
 
 More: openreading help serve   (path roots, token scopes, minting a token)""",
     "strategy": """\
@@ -2289,8 +2291,9 @@ diffs leads with a content verdict, then tables, types and block counts, so
 repackaged text never reads as missing text. When every subject is a
 batch-result from `parse <folder>`, documents pair across runs into a corpus
 report, so name each run after the backend that produced it. Fan-out runs
-serially, so --all-ready cannot stampede a rate limit. Only a run that
-escalated, raced or compared retains candidates for --from.
+serially, so --all-ready cannot stampede a rate limit. --from reads completed
+parallel outputs only. Sequential steps retain none. Races can cancel them.
+Corpus mode refuses --baseline, --truth and --show-agreements.
 
 Then:
   openreading compare a.json b.json > report.json   # save the delta
@@ -2317,7 +2320,7 @@ batch-result, so this reads each item's own response in turn.
 
 Then:
   openreading replay doc.pdf --trace run.json   # take those decisions again
-  openreading calibrate samples/ --strategy fast   # move the thresholds
+  openreading calibrate samples/ --strategy main   # tune a configured cascade
 
 Exits: 0 ok. 3 an unreadable file, or no orchestration anywhere in it, which
 is what a plain --backend run gives you.
@@ -2363,12 +2366,12 @@ Unlabeled cases are fine and sit out of the agreement number.
 
 Then:
   openreading strategy validate     # after you paste the recommendation
-  openreading parse examples/ --strategy fast   # run with the new gate
+  openreading parse examples/ --strategy main   # run with the new gate
 
 Exits: 0 ok. 3 no openreading.yaml, an unreadable dataset or policy, a
 compliance refusal on a case, or a first-rung backend that cannot run.
 
-More: openreading help calibrate, openreading help strategy""",
+More: openreading help calibrate, openreading help datasets""",
     "benchmark": """\
 Examples:
   openreading benchmark list                # offline, no package needed
@@ -2530,7 +2533,7 @@ Then:
 Exits: 0 ok. 3 a dataset directory with no <case>/case.json, or a case.json
 that will not parse.
 
-More: openreading help rules, openreading help leaderboard""",
+More: openreading help rules, openreading help datasets""",
     "help": """\
 Examples:
   openreading help                # every chapter, grouped by what you want
@@ -2548,7 +2551,7 @@ Then:
   python -m pydoc openreading.cli   all of it, in source order
 
 Exits: 0 the index or a chapter. 2 an unknown topic, which prints the index
-on stderr with the nearest name it knows.
+on stderr with a suggestion when available. 3 python -OO discarded the manual.
 
 More: openreading help quickstart""",
     "leaderboard": """\
@@ -2572,7 +2575,7 @@ Then:
 Exits: 0 ok. 2 fewer than two backends, or an unknown id in --backends. 3 an
 unreadable policy, an empty or unresolvable dataset, or a cannot-run fault.
 
-More: openreading help leaderboard, openreading help cost""",
+More: openreading help leaderboard, openreading help datasets""",
 }
 
 # argparse renders the description before the subcommand list and the epilog after it. The
@@ -2582,13 +2585,14 @@ TOP_DESCRIPTION = """\
 One JSON shape from every document parser, so switching or comparing parsers
 never changes your code.
 
-QUICKSTART. No key, no account, straight from a fresh clone.
+QUICKSTART. No key or account. Install dependencies first (see the README).
 
   openreading backends                        # what already runs here
   F=examples/john_smith_1000_2026_01.pdf
   openreading parse $F --backend pymupdf > out.json     # one document
   openreading parse examples/ --backend pymupdf > all.json    # a folder
-  openreading compare $F --backends pymupdf,tesseract --format table"""
+  openreading compare $F --backends pymupdf,tesseract --format table
+  # comparison needs the tesseract executable on PATH"""
 
 TOP_EPILOG = """\
 I WANT TO ...                          RUN
@@ -2600,7 +2604,8 @@ I WANT TO ...                          RUN
   know which backends a policy allows  openreading route FILE --policy P.json
   see where two backends disagree      openreading compare A.json B.json
   know why a run chose what it chose   openreading explain RUN.json
-  rank backends, mine or published     openreading leaderboard | benchmark
+  rank backends on my labeled dataset  openreading leaderboard DIR --all-ready
+  explore published benchmarks         openreading benchmark list
   pick a run back up after a stop      openreading resume RUN_ID
   call this from another language      openreading serve
 
@@ -2612,7 +2617,8 @@ Read `openreading help batch` before you point this at a corpus.
 
 THINGS CHAIN.
   parse > out.json  ->  compare > report.json  ->  explain report.json
-  route --policy  ->  parse;  parse --strategy  ->  explain, replay, calibrate
+  route --policy P.json --run  ->  jq .result  ->  compare
+  parse --strategy  ->  explain, replay;  calibrate  ->  strategy validate
 
 LEARN MORE
   openreading COMMAND --help   # examples and exit codes for one command
@@ -2821,8 +2827,9 @@ def build_parser() -> argparse.ArgumentParser:
     budget.add_argument(
         "--keep-candidates",
         action="store_true",
-        help="retain every strategy branch's output under orchestration.candidates[], which is "
-        "what `compare --from` reads. Off by default, and no effect on a direct backend run",
+        help="retain completed parallel alternatives under orchestration.candidates[] for "
+        "`compare --from`. Sequential steps retain none. A race can cancel its alternatives. "
+        "Off by default, and no effect on a direct backend run",
     )
     parse.set_defaults(func=cmd_parse)
 
@@ -2854,8 +2861,8 @@ def build_parser() -> argparse.ArgumentParser:
     route.add_argument(
         "--policy",
         required=True,
-        help="path to a policy.json of compliance constraints. The same keys go under "
-        "`compliance` in an HTTP request body and under `policy=` in openreading.run.",
+        help="path to a policy.json of compliance constraints and deployment confirmations. "
+        "See `openreading help compliance` for the keys and their meaning.",
     )
     route.add_argument(
         "--run",
@@ -3021,8 +3028,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="RUN.json",
         help="a saved strategy response (run parse with --keep-candidates): compare its winner "
-        "against the retained orchestration.candidates[]. Only a run that escalated, raced or "
-        "compared retains any",
+        "against completed parallel alternatives in orchestration.candidates[]. Sequential "
+        "steps retain none. A race can cancel its alternatives. For a batch, pass one item's "
+        "response written by parse --save-dir",
     )
     pick.add_argument(
         "--save-dir",
@@ -3052,20 +3060,23 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument(
         "--show-agreements",
         action="store_true",
-        help="in human formats, also list agreeing fields (hidden by default)",
+        help="also list agreeing fields in table/md formats (hidden by default). "
+        "Single-response subjects only; refused for corpus comparisons",
     )
     show.add_argument(
         "--baseline",
         default=None,
         metavar="SUBJECT",
-        help="sign deltas against this subject (a label, or a response JSON added as a subject)",
+        help="sign deltas against a subjects[].label (normally backend.id), or add a response "
+        "JSON as a new baseline subject. Single-response subjects only; refused for corpus",
     )
     score = compare.add_argument_group("scoring against a golden")
     score.add_argument(
         "--truth",
         default=None,
         metavar="GOLDEN.json",
-        help="score each subject against a golden.json (evals `expected` shape)",
+        help="score each subject against a golden.json containing the evals expected object. "
+        "Single-response subjects only; refused for corpus. See `openreading help datasets`",
     )
     compare.set_defaults(func=cmd_compare)
 
@@ -3076,7 +3087,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="Print what a saved strategy run did, gate by gate, or render a saved "
         "comparison report.",
     )
-    explain.add_argument("response", help="path to a saved response or comparison-report JSON")
+    explain.add_argument(
+        "response",
+        help="path to a saved response, batch-result or comparison-report JSON. "
+        "Corpus comparison reports are not supported",
+    )
     explain.set_defaults(func=cmd_explain)
 
     replay = sub.add_parser(
@@ -3247,7 +3262,8 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_run.add_argument(
         "--yes",
         action="store_true",
-        help="skip the spending confirmation. Required when no terminal is attached.",
+        help="skip the spending confirmation for unpriced or over-$1 runs. "
+        "Those runs require this flag when no terminal is attached.",
     )
     benchmark_run.add_argument("--config", default=None, help="strategy openreading.yaml path")
     benchmark_run.add_argument(

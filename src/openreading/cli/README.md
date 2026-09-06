@@ -411,6 +411,8 @@ that fills mid-run was not measured.
 
 - `uv run openreading help` lists the manual's chapters; `uv run openreading help <topic>` prints
   one. Start with `quickstart`, `batch` and `chaining`.
+- `uv run openreading help datasets` shows the case inputs and expectations used for calibration
+  and scoring. The `calibrate` chapter provides a complete cascade and shows where proposed gates go.
 - `uv run openreading --help` for the task map, then `uv run openreading <verb> --help` for one
   command's flags, examples and exit codes.
 - `uv run python -m pydoc openreading.cli` for the whole reference in source order, which is what
@@ -428,8 +430,8 @@ that fills mid-run was not measured.
   `openreading.cli` docstring, "Exit codes", 6: "a batch names none (batch-level resume is out of
   scope)".
 - There is no coded exit for a non-conforming single-document response. Source: the
-  `openreading.cli` docstring, "Invariants shared by every subcommand", which says "surfaces as an
-  uncaught traceback, not a coded exit".
+  `openreading.cli` docstring, "What lands on stdout, on stderr, and in the exit code", which
+  explains why response validation can surface as an uncaught traceback.
 
 Four inconsistencies between verbs are known and unfixed. Each is safe once you know it, and
 each would be a breaking change to correct, so read the flag's own `--help` rather than assuming

@@ -79,6 +79,7 @@ class Topic:
 TOPICS: tuple[Topic, ...] = (
     # start here
     Topic("quickstart", "Quickstart", ("start", "tutorial")),
+    Topic("help", "help [TOPIC]", ("manual",)),
     Topic("output", "What lands on stdout, on stderr, and in the exit code", ("stdout", "stderr")),
     Topic("chaining", "Chaining one verb into the next", ("chain", "pipeline", "compose")),
     # do one job
@@ -90,6 +91,7 @@ TOPICS: tuple[Topic, ...] = (
     Topic("compliance", "route <file|url> --policy policy.json [--run]", ("route", "policy")),
     Topic("cost", "What a run costs, and how to spend less", ("money", "spend", "billing")),
     Topic("env", "Environment variables this module reads", ("environment", "keys", "credentials")),
+    Topic("datasets", "Datasets for calibrate, leaderboard and rules", ("dataset", "labels")),
     # when something stops
     Topic("exit-codes", "Exit codes", ("exits", "exit", "exitcodes")),
     Topic("signals", "Signals, and what a stopped run leaves behind", ("ctrl-c", "sigterm")),
@@ -99,7 +101,7 @@ TOPICS: tuple[Topic, ...] = (
     Topic("resume", "resume RUN_ID", ("ledger", "journal")),
     Topic("compare", "compare <subjects...>", ("diff", "delta")),
     Topic("strategy", "strategy <verb>: list, show, validate, normalize, plan", ("strategies",)),
-    Topic("explain", "explain <response.json | comparison-report.json>"),
+    Topic("explain", "explain <response.json | batch-result.json | comparison-report.json>"),
     Topic("replay", "replay <file|url> --trace <response.json>"),
     Topic("calibrate", "calibrate <dataset> --strategy NAME"),
     Topic("benchmark", "benchmark <list|show|prepare|estimate|run|report>"),
@@ -118,8 +120,8 @@ TOPICS: tuple[Topic, ...] = (
 
 # Which heading each group of the index prints under, in index order.
 _GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("START HERE", ("quickstart", "output", "chaining")),
-    ("DO ONE JOB", ("batch", "compliance", "cost", "env")),
+    ("START HERE", ("quickstart", "help", "output", "chaining")),
+    ("DO ONE JOB", ("batch", "compliance", "cost", "env", "datasets")),
     ("WHEN SOMETHING STOPS", ("exit-codes", "signals")),
     (
         "ONE COMMAND AT A TIME",
@@ -144,12 +146,14 @@ _GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
 # One line per topic for the index. Written in the reader's terms, not the module's.
 _BLURBS: dict[str, str] = {
     "quickstart": "four commands, from a clone to parsed JSON, with no key",
+    "help": "find a chapter, its aliases, or one command's flags",
     "output": "what goes to stdout, what goes to stderr, what the code says",
     "chaining": "which verb's output feeds which verb's input",
     "batch": "a folder, a glob, or many files as one run and one JSON",
     "compliance": "say which backends may see a document, and see who was dropped",
     "cost": "what a run charges you, before it starts charging you",
     "env": "where keys come from, and every variable this CLI reads",
+    "datasets": "case.json inputs and expectations for calibration and scoring",
     "exit-codes": "every exit code, what caused it, and whether to retry",
     "signals": "Ctrl-C, SIGTERM, and what a stopped run leaves behind",
     "parse": "read one document, a folder, or a glob",

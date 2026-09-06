@@ -329,6 +329,11 @@ and `tests/test_schema_evolution.py` pins every released file byte for byte.
 
 ### Fixed
 
+- Recursive globs select each file once, including patterns such as `corpus/**` that also match
+  directories. This prevents repeated backend calls and premature failures from `--max-items`.
+- CLI help examples now use completed comparison alternatives, backend labels and resumable
+  single-document runs. New `help` and `datasets` chapters cover manual usage and scoring inputs.
+  Calibration help includes a runnable cascade and explains where its proposed thresholds belong.
 - `pulse` uploads to `/extract` as multipart, and no longer leaks its id prefix into the response.
   Its structured extraction returns per-field confidence and citations.
 - `nuextract` uploads a job as multipart, and reads table grids embedded as HTML.

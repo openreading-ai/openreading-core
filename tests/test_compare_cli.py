@@ -225,3 +225,27 @@ def test_compare_fanout_on_a_missing_document_is_usage_not_an_errno(tmp_path, ca
     assert "nope.pdf" in err
     assert "Errno" not in err
     assert "no such file or directory" in err
+
+
+def test_compare_from_cancelled_race_explains_missing_candidates(tmp_path, capsys):
+    response = make_envelope("pymupdf")
+    response["orchestration"] = {
+        "strategy": "fast",
+        "attempts": [
+            {"backend": "pymupdf", "category": "succeeded"},
+            {"backend": "tesseract", "category": "raced_lost", "detail": "cancelled"},
+        ],
+    }
+    path = tmp_path / "run.json"
+    path.write_text(json.dumps(response))
+    assert main(["compare", "--from", str(path)]) == 5
+    err = capsys.readouterr().err
+    assert "cancel" in err and "completed" in err and "openreading help chaining" in err
+
+
+def test_compare_from_batch_points_to_saved_item_responses(tmp_path, capsys):
+    path = tmp_path / "batch.json"
+    path.write_text(json.dumps({"items": [], "summary": {}, "status": {"state": "failed"}}))
+    assert main(["compare", "--from", str(path)]) == 5
+    err = capsys.readouterr().err
+    assert "batch-result" in err and "--save-dir" in err

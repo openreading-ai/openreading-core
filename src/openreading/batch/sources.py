@@ -9,6 +9,9 @@ files, directories, globs, http(s) URLs — into an ordered list of `ResolvedSou
   supplied supported-format set → unsupported_format / unknown_format / kept. Nothing is dropped.
 - M4 size guard: expansion beyond `max_items` is a hard, early error (before any bytes are read).
 - M5 mixed sources: files, dirs, globs, and URLs may be mixed; URLs pass through (not read).
+
+A glob selects each file once, even when recursive matches overlap with expanded directories.
+Separate source arguments preserve deliberate repeats, such as naming the same document twice.
 """
 
 from __future__ import annotations
@@ -181,17 +184,19 @@ def _expand_arg(arg: str) -> list[_RawRef]:
         # root keeps the directories the wildcard walked; a bare basename would collapse
         # `x/invoice.pdf` and `y/invoice.pdf` into one record and one saved file.
         root = _glob_root(arg)
-        raws: list[_RawRef] = []
+        # Recursive patterns can match a directory and its descendants, or reach one file through
+        # several `**` components. Deduplicate within this argument to avoid repeated backend calls.
+        paths: set[Path] = set()
         for m in matches:
             p = Path(m)
             if p.is_dir():
-                raws += [
-                    (str(fp), None, f"{p.relative_to(root).as_posix()}/{rel}", fp.name)
-                    for fp, rel in _expand_dir(p)
-                ]
+                paths.update(fp for fp, _ in _expand_dir(p))
             elif p.is_file():
-                raws.append((str(p), None, p.relative_to(root).as_posix(), p.name))
-        return raws
+                paths.add(p)
+        return [
+            (str(p), None, p.relative_to(root).as_posix(), p.name)
+            for p in sorted(paths, key=lambda p: p.relative_to(root).as_posix())
+        ]
     p = Path(arg)
     if p.is_dir():
         return [(str(fp), None, rel, fp.name) for fp, rel in _expand_dir(p)]

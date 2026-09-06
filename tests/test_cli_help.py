@@ -12,7 +12,10 @@ those fails a normal test run, so they fail here instead.
 from __future__ import annotations
 
 import argparse
+import json
 import re
+import shlex
+import textwrap
 
 import pytest
 
@@ -54,8 +57,6 @@ def test_every_subcommand_resolves_to_a_topic():
         a for a in build_parser()._actions if getattr(a, "choices", None) and a.dest == "command"
     )
     for name in sub.choices:
-        if name == "help":
-            continue
         assert resolve(name) is not None, f"`openreading {name}` has no `openreading help` topic"
 
 
@@ -122,6 +123,12 @@ def test_a_topic_prints_its_chapter(capsys):
     assert main(["help", "batch"]) == 0
     out = capsys.readouterr().out
     assert out.startswith("Batch: a directory, a glob, or two or more sources")
+
+
+def test_help_has_its_own_chapter(capsys):
+    assert main(["help", "help"]) == 0
+    out = capsys.readouterr().out
+    assert "help [TOPIC]" in out and "python -OO" in out
 
 
 def test_an_alias_reaches_the_same_chapter(capsys):
@@ -195,6 +202,7 @@ def test_every_command_carries_a_worked_epilog(name):
     epilog = _COMMANDS[name].epilog or ""
     assert "Examples:" in epilog, f"`openreading {name}` shows no example"
     assert "openreading " in epilog, f"`openreading {name}`'s epilog has no runnable line"
+    assert "Then:" in epilog, f"`openreading {name}` gives no next step"
     assert "Exits:" in epilog, f"`openreading {name}` never names an exit code"
     assert "More: openreading help " in epilog, f"`openreading {name}` points at no chapter"
 
@@ -235,3 +243,108 @@ def test_the_quickstart_is_above_the_verb_list():
     verbs = next(i for i, line in enumerate(page) if line.startswith("positional arguments"))
     assert quickstart < verbs
     assert quickstart < 24, f"the quickstart starts at line {quickstart + 1}, below the fold"
+
+
+def test_manual_baseline_example_uses_a_real_subject_label(tmp_path, monkeypatch, capsys):
+    from tests.fakes import make_envelope
+
+    monkeypatch.chdir(tmp_path)
+    for filename, backend in (("a.json", "pymupdf"), ("b.json", "tesseract")):
+        (tmp_path / filename).write_text(json.dumps(make_envelope(backend)))
+    command = next(
+        line.strip()
+        for line in _DOC
+        if line.strip().startswith("openreading compare a.json b.json --baseline")
+    )
+    assert main(shlex.split(command, comments=True)[1:]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert {s["label"] for s in report["subjects"]} == {"pymupdf", "tesseract"}
+
+
+def test_chaining_recipe_keeps_a_slower_completed_candidate():
+    import yaml
+
+    from openreading.api import build_request
+    from openreading.credentials import EnvCredentialBroker
+    from openreading.router.clock import FakeClock
+    from openreading.router.router import RouterConfig
+    from openreading.strategies import StrategyConfig, compile_strategy, run_strategy
+    from openreading.strategies.plain import desugar_config
+    from openreading.testing.sample_pdf import build_sample_pdf
+    from tests.fakes import ScriptedBackend, scripted_registry
+
+    chapter = "\n".join(sections()[resolve("chaining").heading])
+    command = next(
+        line.strip()
+        for line in chapter.splitlines()
+        if line.strip().startswith("openreading parse ") and "--keep-candidates" in line
+    )
+    args = build_parser().parse_args(shlex.split(command.split(">")[0])[1:])
+    config_block = re.search(r"(?m)^    version: 1\n(?:    .*\n)*", chapter)
+    config = (
+        yaml.safe_load(textwrap.dedent(config_block.group()))
+        if config_block
+        else {"version": 1, "strategies": {}}
+    )
+    desugared, plain_info = desugar_config(config)
+    registry = scripted_registry(
+        ScriptedBackend("pymupdf", local=True, latency_ms=5),
+        ScriptedBackend("tesseract", local=True, latency_ms=20),
+    )
+    pytest.importorskip("pymupdf")
+    request = build_request(build_sample_pdf(), "auto", mime_type="application/pdf")
+    compiled = compile_strategy(
+        request,
+        args.strategy,
+        StrategyConfig.model_validate(desugared),
+        registry,
+        RouterConfig(),
+        plain_info=plain_info,
+    )
+    result = run_strategy(
+        compiled,
+        request,
+        registry=registry,
+        broker=EnvCredentialBroker(),
+        clock=FakeClock(),
+        keep_candidates=args.keep_candidates,
+    )
+    assert result.orchestration.get("candidates"), "the recipe cancelled the output it needs"
+
+
+def test_explain_calibration_next_step_can_produce_a_recommendation(tmp_path, monkeypatch, capsys):
+    from openreading.cli.app import EPILOGS
+
+    pytest.importorskip("pymupdf")
+    monkeypatch.chdir(tmp_path)
+    case = tmp_path / "samples" / "one"
+    case.mkdir(parents=True)
+    (case / "case.json").write_text(json.dumps({"input": {"builtin_sample": True}}))
+    chapter = "\n".join(sections()[resolve("calibrate").heading])
+    config = re.search(r"(?m)^    version: 1\n(?:    .*\n)*", chapter)
+    assert config, "calibration help needs a cascade with a numeric first-step gate"
+    (tmp_path / "openreading.yaml").write_text(textwrap.dedent(config.group()))
+    command = next(
+        line.strip()
+        for line in EPILOGS["explain"].splitlines()
+        if line.strip().startswith("openreading calibrate ")
+    )
+    assert main(shlex.split(command, comments=True)[1:]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["n_docs"] == 1 and report["recommended"]["escalate_if"]
+
+
+def test_dataset_chapter_example_loads_for_calibration(tmp_path, monkeypatch, capsys):
+    from openreading.evals.dataset import load_case
+
+    pytest.importorskip("pymupdf")
+    monkeypatch.chdir(tmp_path)
+    assert main(["help", "datasets"]) == 0
+    chapter = capsys.readouterr().out
+    example = re.search(r"(?m)^    \{\n(?:    .*\n)*    \}", chapter)
+    assert example, "dataset help needs a complete case.json example"
+    path = tmp_path / "case.json"
+    path.write_text(textwrap.dedent(example.group()))
+    case = load_case(path, backend_id="pymupdf")
+    assert case.request_body["document"]["bytes_base64"]
+    assert case.expected["text_contains"]

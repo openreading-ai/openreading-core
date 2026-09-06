@@ -9,10 +9,12 @@ backend, a strategy, or the router, and the one response schema is printed.
 
 Quickstart
 ----------
-Four commands, from a fresh clone, with no key and no account. Both backends
-they name run locally.
+Four commands parse and compare local documents with no key and no account.
+A backend is the parser or extraction engine that reads your document.
+Install the clone's dependencies first with `make sync`, as the root README
+explains. The comparison also needs the `tesseract` executable on your PATH.
 
-    F=examples/john_smith_1000_2026_01.pdf     # just to save typing
+    F=examples/john_smith_1000_2026_01.pdf
 
     openreading backends
     openreading parse $F --backend pymupdf > out.json
@@ -38,25 +40,44 @@ is sent, and it does not fail the run.
 From a clone the command is `uv run openreading`; an installed package puts
 `openreading` on your PATH. Read the topics with `openreading help`.
 
+help [TOPIC]
+------------
+Print one chapter of this manual, or the topic index when you omit TOPIC.
+Every chapter comes from the `openreading.cli` docstring, so `pydoc` carries
+the same text in source order.
+
+    openreading help
+    openreading help batch
+    openreading help folder
+    openreading help exit-codes | grep 143
+
+Topic names and aliases ignore case, so `folder` and `BATCH` open the same
+chapter. Pipe a chapter to `less` when you want a pager. For nested command
+flags, run `openreading strategy show --help` or `openreading benchmark run
+--help`. Their longer chapters are `help strategy` and `help benchmark`.
+
+Exits: 0 an index or chapter; 2 an unknown topic, with suggestions on stderr;
+3 when `python -OO` discarded the docstrings. Use a normal interpreter then.
+
 Invariants shared by every subcommand
 -------------------------------------
 - `--env-file PATH` is accepted by every verb (default `./.env` when present).
-  On `strategy` it belongs before the sub-verb (`openreading strategy
-  --env-file ci.env validate`). It never overrides an already-set process
-  variable, so an exported value always beats the file.
+  On `strategy` and `benchmark` it belongs before the sub-verb. For example:
+  `openreading strategy --env-file ci.env validate`. An exported process
+  variable always beats the file.
 - `openreading --version` prints `openreading <version>` on stdout and exits 0,
   with no subcommand -- the same string as `openreading.__version__` and the
   `version` field of the server's `GET /healthz`, so an incident's first
   question has an answer that does not require a running server.
-- The three streams have their own chapter, `openreading help output`:
-  stdout carries only the envelope, every line this CLI writes to stderr
-  carries a bracket tag, and nothing is printed before it validates.
+- The three streams have their own chapter, `openreading help output`.
+  Output formats depend on the command. For example, `parse` prints JSON while
+  `strategy show` prints YAML. Read that chapter before building a pipeline.
 - A `<file>` starting with `http(s)://` is a URL: backends that ingest URLs
   natively get it as-is, the rest download to bytes first.
-- No flag widens the eligible set; the policy file sets it, and three of its
-  keys widen it deliberately. A policy that leaves nothing compliant to run is
-  a `ComplianceRefused` refusal, exit 3, from every command that EXECUTES under
-  `--policy`; bare `route` prints the empty plan and exits 4 (D7, D7a).
+- No fallback widens the set of backends allowed by the policy (D7, D7a).
+  A policy that leaves nothing compliant prevents dispatch. `route`, including
+  `route --run`, prints the empty plan and exits 4. Other commands report the
+  refusal through their own exit codes or per-case results.
 - The CLI passes no result cache (DECISIONS D-v3-3): silent memoization inside
   a library call is a footgun; a caller who wants it constructs one in Python.
 - `OPENREADING_LEDGER` (a directory) arms the run journal that `resume` and
@@ -66,9 +87,11 @@ Invariants shared by every subcommand
 
 What lands on stdout, on stderr, and in the exit code
 -----------------------------------------------------
-stdout carries ONLY the JSON envelope, or the rendered report a human format
-asks for. Progress, the cost preflight, a backend's own chatter and every error
-line go to stderr, so `> out.json` is always safe and always parses.
+`parse`, `resume` and `replay` print JSON envelopes on stdout. Their progress,
+backend chatter and errors go to stderr, so a successful `> out.json` parses.
+`help`, `backends`, `explain` and strategy inspection print human-readable text
+or YAML. `benchmark run` prints its preflight and publisher report on stdout.
+Use `benchmark report --format json` to obtain JSON from its saved artifacts.
 
     openreading parse examples/ --backend pymupdf > all.json   # JSON only
     openreading parse examples/ --backend pymupdf 2> run.log   # the story
@@ -93,7 +116,8 @@ named backend's descriptor caps). Its exit-3 cannot-run line carries the run
 label, not `[batch]`. A `compare` fan-out tags `[<backend>]` on a fanned-out
 backend's FAILURE; a fan-out that succeeds prints nothing per backend.
 
-Two kinds of line carry no tag. A backend's own chatter is redirected from
+Some lines carry no tag. Argument-parser usage errors and server logs use
+their own formats. A backend's own chatter is redirected from
 stdout to stderr and arrives exactly as that library wrote it, so PyMuPDF's
 layout advisory shows up untagged in front of your own lines. And `strategy
 validate`'s grammar error prints untagged on purpose, so every line of that
@@ -140,13 +164,15 @@ These are the variables the CLI itself changes behaviour on.
                             Each dispatched backend's descriptor may tighten
                             it and none may widen it.
   OPENREADING_LLM_DECIDER   the second enablement key for the LLM decider.
+                            Set `1`, `true`, `yes` or `on` to enable it.
                             Unset, a configured decision point downgrades to
                             the engine default with reason `env_disabled`. Two
                             keys are deliberate, so a checked-in YAML cannot
                             start spending tokens on its own.
   OPENREADING_ALLOW_PRIVATE_URLS
                             allow a document URL whose host resolves to a
-                            private or loopback address. Unset refuses one
+                            private or loopback address. Any nonempty value
+                            enables it, including `0`. Unset refuses one
                             before the request leaves this process, which is
                             what stops a supplied URL from probing your
                             internal network.
@@ -196,25 +222,38 @@ response is a first-class subject and so is a whole folder run.
 Two batch-results pair their documents by `relpath`, so name each run after the
 backend that produced it; the labels come from the filenames.
 
-Compare a strategy's winner against the branches it beat. This needs a strategy
-that actually BRANCHES. A `try:` cascade that succeeds on rung 1 retains
-nothing, and `--from` then says so. The `fast` preset is a race, so it always
-has a loser to keep.
+Compare a strategy's winner against completed parallel alternatives. A cascade
+of backend steps retains no candidates, even when it escalates. The `fast` race
+can cancel every loser before its response exists. Put this comparison
+strategy in `openreading.yaml` to wait for both backends:
 
-    openreading parse doc.pdf --strategy fast --keep-candidates > run.json
+    version: 1
+    strategies:
+      duel:
+        compare: [pymupdf, tesseract]
+
+    openreading parse doc.pdf --strategy duel --keep-candidates > run.json
     openreading compare --from run.json --format table
+
+Both backends must complete successfully to produce a winner and a retained
+alternative. `--from` reads one response, so save a batch's individual
+responses with `parse DIR --strategy duel --keep-candidates --save-dir out`.
+Then compare one with `openreading compare --from out/invoice.pdf.json`.
 
 Pick a run back up. Arm the journal first, because a run that journalled
 nothing cannot be resumed.
 
     export OPENREADING_LEDGER=./.openreading
-    openreading parse big/ --strategy main      # Ctrl-C prints a run id
+    openreading parse big.pdf --strategy main   # Ctrl-C prints a run id
     openreading resume 7dbf6b71-adb5-4e90-9188-a184fdba9d05
 
 A resumed run reads its options from the journal, and the journal records the
 config's HASH rather than its path. When your config is not
 `./openreading.yaml` export `OPENREADING_CONFIG` before you resume, or the
 resumed run cannot find the strategy by name.
+
+An interrupted batch prints no single run ID. Its per-document journals may
+be resumable individually. `openreading help resume` explains where IDs live.
 
 Tune a gate from your own documents, then check what you pasted.
 
@@ -244,9 +283,11 @@ line tells you whether a folder run spent anything at all.
     $ jq -c .usage out.json
     {"pages_processed":1,"cost_basis":"infra_only"}
 
-Hosted backends bill per PAGE, not per document, which is the arithmetic that
-surprises people. A folder of 40 one-page invoices and a folder of 40
-forty-page contracts are the same file count and forty times apart on the bill.
+Per-page backends charge for pages, so document count alone understates a
+multi-page corpus. Forty forty-page documents contain forty times the pages
+of forty single-page documents. Other backends bill tokens or operations.
+Their per-page equivalent rates are estimates, when available, rather than
+the vendor's billing unit.
 
 Four commands can spend more than you expect, each for its own reason.
 
@@ -316,7 +357,7 @@ Single-document flags:
                       backends. `--pages` and `--extract` take a variable
                       number of values, so name FILE before them or close the
                       flag list with `--`.
-  --keep-candidates   retain every strategy branch's output under
+  --keep-candidates   retain completed parallel alternatives under
                       `orchestration.candidates[]` (what `compare --from`
                       reads). Off by default (payload bloat); no effect on a
                       direct backend run; in batch mode it applies per item
@@ -335,7 +376,8 @@ Single-document flags:
 Single-document exits: 0 printed; 2 selector misuse, unknown backend/strategy,
 unresolvable source; 3 cannot run (missing credentials -- the message names the
 exact vars and signup URL -- `auth_rejected` with its `check <VAR>` hint,
-`unsupported_feature`, `ComplianceRefused`, an exhausted `auto` plan, or a
+`unsupported_format` for a named backend, `unsupported_feature`,
+`ComplianceRefused`, an exhausted `auto` plan, or a
 `RetryableError` reaching a directly-named backend: rate-limit exhaustion or a
 poll job past its deadline / `MAX_CONSECUTIVE_FAULTS`
 (`openreading.router.driver`, 120), which has no next rung to fall back to the
@@ -350,7 +392,9 @@ The envelope is decided by input FORM (invariant M2): a directory, a glob, or
 explicit file/URL stays the single-document `response` above, byte-identical.
 Sources may mix files, dirs, globs and URLs; a directory expands recursively
 (sorted; hidden files and symlinks skipped). Quote a glob so your shell hands
-it over whole, and `**` matches every depth. Each item's `relpath` is measured
+it over whole, and `**` matches every depth. Each glob selects a file once,
+even when its directory matches overlap. Repeating a source in separate
+arguments still requests repeated processing. Each item's `relpath` is measured
 from the directory you named, or from the fixed part of the pattern before the
 first wildcard, so two files with one name under different parents stay two
 records and `--save-dir` writes two files. Each succeeded item carries a full
@@ -459,7 +503,15 @@ then fallbacks).
 
     echo '{"require_baa": true, "no_train_on_data": true,
            "optimize_for": "accuracy"}' > phi.json
-    openreading route loan.pdf --policy phi.json [--run]
+    openreading route loan.pdf --policy phi.json
+    openreading route loan.pdf --policy phi.json --run > plan.json
+    jq '.result' plan.json > out.json
+
+`route --run` puts the response inside its plan's `result` field. Check the
+exit code before extracting it for `compare` or other response consumers.
+`parse` has no `--policy` flag and does not inherit a previously printed plan.
+Use `route --run` to execute under this policy, or a strategy config's
+`policy:` block to constrain `parse --strategy`.
 
 `policy.json` keys: `require_baa`, `no_train_on_data`, `data_region`,
 `require_local`, `max_retention`, `optimize_for`, `doc_type_hint`,
@@ -560,7 +612,7 @@ stampede provider rate limits).
     openreading compare a.json b.json --format table --show-agreements
     openreading compare doc.pdf --backends pymupdf,tesseract  # fan out first
     openreading compare a.json b.json --format diff       # exactly 2 subjects
-    openreading compare a.json b.json --baseline a        # sign deltas vs `a`
+    openreading compare a.json b.json --baseline pymupdf  # a.json's backend
     openreading compare a.json b.json --truth golden.json   # score vs golden
     openreading compare --from run.json
     openreading explain report.json                 # render a saved report
@@ -569,8 +621,10 @@ Flags: `--format json` (default, schema-valid, pipeable) | `table` | `md` |
 `diff` (2-way git-style text diff plus field deltas; exactly two subjects) |
 `diffs` (N-way content verdict + structure view, no packaging noise; see
 `openreading.comparison`). `--show-agreements` lists agreeing fields in the
-human formats (hidden by default). `--baseline LABEL` signs deltas against one
-subject (a label, or a response file added as a subject). `--truth golden.json`
+table and Markdown formats (hidden by default). `--baseline LABEL` signs deltas
+against one subject. Labels come from `backend.id`, not the response filename.
+Read `subjects[].label` in the JSON report when backend IDs repeat. A response
+path instead adds a new baseline subject. `--truth golden.json`
 scores each subject against a golden in the evals `expected` shape. `--deadline
 SECONDS` overrides the 120s single-document deadline for every fanned-out
 backend (the same escape hatch as `parse --backend --deadline`; `0` or negative
@@ -589,15 +643,49 @@ document's full text. It is not counts and not structure (table shapes / types
 / granularity live in `table` and the single-pair drill), because a corpus-wide
 four-section diff is a wall. Mixing batch and single-response subjects is a
 usage error (exit 2); `--format diff` is 2-way text only and is refused in
-corpus mode.
+corpus mode. Corpus mode also refuses `--baseline`, `--truth` and
+`--show-agreements` at exit 2. Those options apply to single-response subjects.
 
 Exits: 0; 2 misuse (<2 subjects, fan-out with more than one document, <2 or
 unknown fan-out backends, `--format diff` with != 2 subjects, mixed subject
 kinds); 3 a fanned-out backend cannot run (missing credentials,
 `ComplianceRefused`, `unsupported_feature`, `RetryableError`); 5 inputs are not
 schema-valid responses (unreadable file, invalid envelope) or `--from` on a run
-that kept no candidates (the message says to re-run with `--keep-candidates`,
-DECISIONS D-v4-14); 1 anything else.
+that kept no candidates (the message explains completed parallel alternatives
+and `--keep-candidates`, DECISIONS D-v4-14); 1 anything else.
+
+Datasets for calibrate, leaderboard and rules
+--------------------------------------------
+A dataset groups documents with their expected results, one `case.json` per
+case directory. `calibrate`, `leaderboard` and `rules` read this layout.
+A folder of documents from `parse` or `--save-dir` is not a dataset.
+
+Save this example as `samples/one/case.json` to use the generated local sample:
+
+    {
+      "name": "one",
+      "input": {"builtin_sample": true, "pages": [1]},
+      "expected": {"text_contains": ["OpenReading Test Document"]}
+    }
+
+For your own document, replace `input` with `{"path": "invoice.pdf"}` and
+put that file beside `case.json`. Each backend reads the formats its
+descriptor claims. A descriptor is the backend's static capability record.
+See `src/openreading/adapters/README.md` for the catalog and installation.
+
+`expected` holds the labels used for scoring. Omit it, or use `{}`, for an
+unlabeled calibration case. Those cases still inform escalation rates, but
+do not contribute to scorer agreement. `leaderboard` needs expectations for
+meaningful scores, and `rules` needs existing expectations to generate rules.
+
+    openreading leaderboard samples/ --backends pymupdf,tesseract
+    openreading calibrate samples/ --strategy main
+    openreading rules samples/
+
+The calibration command also needs the cascade from `openreading help
+calibrate`. `openreading.evals.dataset` documents the remaining case fields.
+For `compare --truth golden.json`, put only the `expected` object in that
+file, such as `{"text_contains": ["OpenReading Test Document"]}`.
 
 leaderboard <dataset_dir>
 -------------------------
@@ -721,9 +809,9 @@ order is stable, so the same `--limit` picks the same documents and a rerun
 resumes instead of re-billing.
 
 Before a target runs, `run` prints the documents it chose, their PAGE count,
-and a dollar range per target. Pages, because every hosted backend bills per
-page and the publishers count in documents: ExtractBench is 370 documents and
-4,869 pages. A range, because a descriptor carries a low and a high rate and
+and a dollar range per target. Pages expose volume that document counts hide:
+ExtractBench is 370 documents and 4,869 pages. A range, because a descriptor
+carries a low and a high rate and
 both are shown. Two things stay deliberately unpriced rather than guessed low:
 a `strategy:` target, which escalates and so bills one or more calls per
 document, and a token-billed backend that publishes no per-page rate.
@@ -802,8 +890,8 @@ unparseable config is exit 3 for every verb).
 - `normalize`: the whole config as canonical longhand YAML (the `docker compose
   config` analog).
 
-explain <response.json | comparison-report.json>
-................................................
+explain <response.json | batch-result.json | comparison-report.json>
+..................................................................
 Render a response's `orchestration` block as a story (strategy, chosen backend
 and outcome; each attempt's node, backend, category, duration and cost; gate
 rows -- grouped under their Plain source word when present -- with
@@ -811,7 +899,11 @@ observed/threshold and FIRED/skipped/ok; decisions with `decider=` and, when a
 point resolved to something other than its configured choice, `downgraded=`;
 dropped backends by stage and code). A file that is a comparison report
 (`subjects` + `fields` + `findings`) renders as the compare table instead. No
-orchestration block: exit 3.
+orchestration block: exit 3. A batch-result renders each item's orchestration
+and names skipped, failed or directly parsed items too. If no item carries
+orchestration, it exits 3. An unreadable or invalid JSON file also exits 3.
+A corpus comparison report is not a supported `explain` input. Re-run
+`compare` over the saved batch-results with `--format table` to render it.
 
 replay <file|url> --trace <response.json>
 .........................................
@@ -846,6 +938,30 @@ stderr advisory fires when some or all of the sample went unscored -- an
 unlabeled sample would otherwise yield a flat, precise-looking agreement number
 that measured nothing. Offline for local backends. Rung-1 runs under a fixed
 60s deadline; `RetryableError` / `unsupported_feature` exit 3.
+
+Calibration needs a cascade whose first step names one backend. A race such
+as `fast`, or a cascade starting with a parallel step, exits 3. Only numeric
+first-step predicates can be swept. For example, save this `openreading.yaml`:
+
+    version: 1
+    strategies:
+      main:
+        steps:
+          - backend: pymupdf
+            escalate_if:
+              chars_per_page_below: 100
+          - tesseract
+
+    openreading calibrate samples/ --strategy main \
+      --target-escalation 0.15 > calibration.json
+    jq '.recommended.escalate_if' calibration.json
+
+`openreading help datasets` shows how to create `samples/`. Stdout is a JSON
+report, with the proposed gate under `recommended.escalate_if`. Copy those
+thresholds into the first step's `escalate_if`, then run `strategy validate`.
+For a Plain strategy, use `strategy show NAME --longhand` to obtain an advanced
+body before adding advanced gate keys. Mixing both dialects in one body fails
+validation. An empty `recommended` means there is no numeric gate to propose.
 
 serve
 -----
@@ -900,9 +1016,11 @@ Exit codes
      mixed subject kinds); `leaderboard` misuse (<2 backends, unknown id);
      `benchmark` profile (unknown, or cataloged where a runnable one is
      required), target, preset, `--jobs`, terms, package, or preparation
-     errors; `replay` with no strategy name anywhere.
+     errors; `replay` with no strategy name anywhere; `help` with an unknown
+     topic.
   3  cannot run: missing credentials (names the exact vars + signup URL),
-     `auth_rejected`, `unsupported_feature`, an unreadable `--config` /
+     `auth_rejected`, `unsupported_format` on a named single-document parse,
+     `unsupported_feature`, an unreadable `--config` /
      `--policy` / document / `--trace` / `explain` argument, a `--policy` file
      that is not a valid policy object (an unknown key, a non-object top level,
      or a value of the wrong type), a `ComplianceRefused` refusal (from
@@ -912,7 +1030,7 @@ Exit codes
      case at exit 1), a plan-exhausted `route --run`, `serve` without its extra
      or with a malformed `OPENREADING_API_KEYS` / `OPENREADING_API_KEY_SCOPES`
      (one `[serve] ...` line naming the bad entry's position, never its value),
-     an unresolvable/empty `leaderboard` dataset, a a `rules` dataset with no
+     an unresolvable/empty `leaderboard` dataset, a `rules` dataset with no
      `<case>/case.json` or an unparseable `case.json`, `resume` refusal /
      unknown run / expired payloads, an `OPENREADING_LEDGER` pointing at a path
      this process cannot journal to (`ledger_unavailable`; an armed ledger is a
@@ -922,7 +1040,8 @@ Exit codes
      directly-named backend on `parse` / `compare` (rate-limit exhaustion, or a
      poll job past its deadline /
      `openreading.router.driver.MAX_CONSECUTIVE_FAULTS` -- a named backend has
-     no next rung to fall back to).
+     no next rung to fall back to); `help` under `python -OO`, which discarded
+     the manual's docstrings.
   4  `route`: no compliant backend for the policy (the empty plan is printed as
      JSON); batch `parse`: partial -- some items failed.
   5  `compare`: inputs are not schema-valid responses, or `--from` on a run
