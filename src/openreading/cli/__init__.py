@@ -12,18 +12,19 @@ Quickstart
 Four commands, from a fresh clone, with no key and no account. Both backends
 they name run locally.
 
-    F=examples/john_smith_1000_2026_01.pdf
+    F=examples/john_smith_1000_2026_01.pdf     # just to save typing
+
     openreading backends
     openreading parse $F --backend pymupdf > out.json
     openreading parse examples/ --backend pymupdf > all.json
     openreading compare $F --backends pymupdf,tesseract --format table
 
-The first says what runs on this machine and what each other backend still
-needs. The second reads one document and prints one response envelope. The
-third points the same command at a FOLDER and prints one batch-result over
-every document in it, which is the one-argument difference that most readers
-miss. The fourth runs two backends over one page and shows you the lines they
-read differently.
+`backends` says what runs on this machine and what each other backend still
+needs. The first `parse` reads one document and prints one response envelope.
+The second points the same command at a FOLDER and prints one batch-result
+over every document in it, which is the one-argument difference that most
+readers miss. `compare` runs two backends over one page and shows you the
+lines they read differently.
 
     $ jq -r .status.state out.json
     succeeded
@@ -244,12 +245,15 @@ Tune a gate from your own documents, then check what you pasted.
     # paste the printed escalate_if: into openreading.yaml, then
     openreading strategy validate
 
-Two pairs that look like chains and are not. `leaderboard` does not read a
+One pair that looks like a chain and is not. `leaderboard` does not read a
 `--save-dir` tree: it takes a labeled dataset of `<case>/case.json` and runs
-the backends itself. And `explain` reads one response, not a batch-result, so
-pull an item out of a folder run first:
+the backends itself, where `compare` needs no labels and scores nothing. They
+answer different questions, so no arrow joins them.
 
-    jq '.items[1].response' all.json > one.json && openreading explain one.json
+`explain` reads a folder run as well as a single one, naming each document:
+
+    openreading parse examples/ --strategy fast > all.json
+    openreading explain all.json
 
 What a run costs, and how to spend less
 ---------------------------------------
@@ -368,7 +372,11 @@ The envelope is decided by input FORM (invariant M2): a directory, a glob, or
 >=2 arguments produce ONE `batch-result` JSON over every document; a single
 explicit file/URL stays the single-document `response` above, byte-identical.
 Sources may mix files, dirs, globs and URLs; a directory expands recursively
-(sorted; hidden files and symlinks skipped). Each succeeded item carries a full
+(sorted; hidden files and symlinks skipped). Quote a glob so your shell hands
+it over whole, and `**` matches every depth. Each item's `relpath` is measured
+from the directory you named, or from the fixed part of the pattern before the
+first wildcard, so two files with one name under different parents stay two
+records and `--save-dir` writes two files. Each succeeded item carries a full
 `response` envelope, so a batch is a first-class `compare` subject. Under
 `--no-strategy` routing is per file (`summary.backends` tallies which backend
 took what).
