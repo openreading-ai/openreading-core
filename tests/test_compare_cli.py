@@ -213,3 +213,15 @@ def test_compare_fanout_over_a_directory_is_usage_not_an_errno(tmp_path, capsys)
     err = capsys.readouterr().err
     assert "is a directory" in err
     assert "openreading compare a.json b.json" in err  # the way through, not just the refusal
+
+
+def test_compare_fanout_on_a_missing_document_is_usage_not_an_errno(tmp_path, capsys):
+    """`parse` refuses a mistyped filename at exit 2 with a sentence, and the reason is in a
+    comment there: `str(e)` on an OSError leads with an `[Errno 2]` the reader cannot use. Fan-out
+    never got that handler, so the same typo came back as a raw SourceNotFoundError at exit 1."""
+    rc = main(["compare", str(tmp_path / "nope.pdf"), "--backends", "pymupdf,tesseract"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "nope.pdf" in err
+    assert "Errno" not in err
+    assert "no such file or directory" in err

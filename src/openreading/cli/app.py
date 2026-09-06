@@ -1452,6 +1452,16 @@ def _benchmark_targets(args):
         except ValueError as exc:
             print(f"[benchmark] {exc}", file=sys.stderr)
             return None
+        # `BenchmarkTarget.parse` checks the SYNTAX, and it lives in `openreading.evals`, which
+        # cannot see the adapter registry without the dependency running the wrong way. Identity
+        # is checked here instead, where `compare` and `leaderboard` already check theirs. A typo
+        # otherwise priced a run that could not exist, and said nothing.
+        if target.kind == "backend" and target.name not in BUILTIN_ADAPTERS:
+            print(
+                _unknown_backends_line("benchmark", [target.name], BUILTIN_ADAPTERS),
+                file=sys.stderr,
+            )
+            return None
         if target in targets:
             print(f"[benchmark] ignoring repeated target {target.reference}", file=sys.stderr)
             continue
@@ -1859,18 +1869,25 @@ def cmd_compare(args) -> int:
             )
             return 2
         doc = args.inputs[0]
-        # A folder is the next thing a reader tries after `parse <folder>`, and fan-out takes one
-        # document. Left alone it reached the adapter and came back as a raw IsADirectoryError at
-        # exit 1, which names an errno rather than the way through.
-        if not is_url(doc) and Path(doc).is_dir():
-            print(
-                f"[compare] fan-out compares ONE document, and '{doc}' is a directory. Parse the"
-                " folder once per backend and compare the two envelopes:"
-                f" `openreading parse {doc} --backend A > a.json`, the same for B, then"
-                " `openreading compare a.json b.json`.",
-                file=sys.stderr,
-            )
-            return 2
+        # Resolve the source once, before any backend runs. Left to the fan-out loop, a mistyped
+        # filename came back from the adapter as a raw `SourceNotFoundError: [Errno 2]` at exit 1,
+        # and a directory as an `IsADirectoryError`. `parse` refuses both at exit 2 with a
+        # sentence, for the reason its own handler records: an errno is not something the reader
+        # who mistyped a path can act on.
+        if not is_url(doc):
+            source = Path(doc)
+            if source.is_dir():
+                print(
+                    f"[compare] fan-out compares ONE document, and '{doc}' is a directory. Parse"
+                    " the folder once per backend and compare the two envelopes:"
+                    f" `openreading parse {doc} --backend A > a.json`, the same for B, then"
+                    " `openreading compare a.json b.json`.",
+                    file=sys.stderr,
+                )
+                return 2
+            if not source.exists():
+                print(f"[compare] cannot read {doc}: no such file or directory", file=sys.stderr)
+                return 2
         if args.all_ready:
             broker = EnvCredentialBroker()
             ids = [
@@ -2049,9 +2066,9 @@ Then:
   openreading compare mu.json te.json --format table   # where they differ
   openreading explain run.json     # what that --strategy run decided, and why
 
-Exits: 0 ok. 2 usage, or a source that resolves to no document. 3 cannot run
-(a missing key, a refused feature). 4 batch partial. 1 nothing succeeded.
-6 interrupted with OPENREADING_LEDGER armed, so the run is resumable.
+Exits: 0 ok. 2 usage, or a source that does not exist. 3 cannot run (a
+missing key, a refused feature). 4 batch partial. 1 nothing succeeded, an
+empty folder included. 6 interrupted with OPENREADING_LEDGER armed.
 
 More: openreading help parse, openreading help batch""",
     "resume": """\
@@ -2159,7 +2176,7 @@ A minimal openreading.yaml, on two backends that need no key:
 --config points elsewhere. --env-file goes before the sub-verb, not after.
 
 Then:
-  openreading parse examples/ --strategy main   # run documents through one
+  openreading parse examples/ --strategy fast   # run documents through one
   openreading explain out.json     # what the finished run actually decided
 
 Exits: 0 ok. 3 no config, an unparseable one, a validate error, an unknown
@@ -2214,8 +2231,8 @@ carry a file and a node path rather than a line number. With --policy, a step
 that policy makes unreachable is flagged before you ever run it.
 
 Then:
-  openreading strategy plan doc.pdf --strategy main  # prune it for one doc
-  openreading parse examples/ --strategy main        # run it
+  openreading strategy plan doc.pdf --strategy fast  # prune it for one doc
+  openreading parse examples/ --strategy fast        # run it
 
 Exits: 0 no errors, warnings included. 3 any error, no openreading.yaml
 found, or one that will not parse.
@@ -2235,17 +2252,19 @@ before you commit a hand-written tree.
 
 Then:
   openreading strategy validate      # check the file you started from
-  openreading strategy plan doc.pdf --strategy main   # prune for one doc
+  openreading strategy plan doc.pdf --strategy fast   # prune for one doc
 
 Exits: 0 ok. 3 no openreading.yaml found, or one that will not parse.
 
 More: openreading help strategy""",
     "strategy plan": """\
 Examples:
-  openreading strategy plan examples/john_smith_1000_2026_01.pdf \\
-    --strategy fast                        # the pruned tree, nothing runs
+  openreading strategy plan doc.pdf --strategy fast --config openreading.yaml
   openreading strategy plan doc.pdf --strategy main --policy phi.json
   openreading strategy plan doc.pdf --strategy fast | jq .dropped
+
+This verb needs an openreading.yaml even to plan a built-in preset, so pass
+--config when yours is not in the working directory.
 
 You get {strategy, config_hash, eligible, dropped[], tree} as JSON and no
 execution at all, which makes this the plan step: see what this document under
@@ -2328,12 +2347,14 @@ compliance refusal.
 More: openreading help replay, openreading help exit-codes""",
     "calibrate": """\
 Examples:
-  openreading calibrate src/openreading/evals/sample --strategy main
+  openreading calibrate src/openreading/evals/sample --strategy main \\
+    --config openreading.yaml       # the sample dataset that ships here
   openreading calibrate samples/ --strategy main --target-escalation 0.15
   openreading calibrate samples/ --strategy main --max-cost-per-doc 0.05
   openreading calibrate samples/ --strategy main --policy phi.json
 
-A gate is a threshold your strategy sets for a result it will accept. This
+This needs an openreading.yaml, because it tunes a strategy you wrote. A gate
+is a threshold your strategy sets for a result it will accept. This
 runs the strategy's first rung over your sample, scores each result, sweeps
 every gated threshold, and prints candidate operating points against the
 targets you named. It proposes an escalate_if: block ready to paste. It never
@@ -2342,7 +2363,7 @@ Unlabeled cases are fine and sit out of the agreement number.
 
 Then:
   openreading strategy validate     # after you paste the recommendation
-  openreading parse examples/ --strategy main   # run with the new gate
+  openreading parse examples/ --strategy fast   # run with the new gate
 
 Exits: 0 ok. 3 no openreading.yaml, an unreadable dataset or policy, a
 compliance refusal on a case, or a first-rung backend that cannot run.
@@ -2587,9 +2608,9 @@ THINGS CHAIN.
   route --policy  ->  parse;  parse --strategy  ->  explain, replay, calibrate
 
 LEARN MORE
-  openreading COMMAND --help   examples and exit codes for one command
-  openreading help             the manual's topic index
-  openreading help batch       one chapter of it"""
+  openreading COMMAND --help   # examples and exit codes for one command
+  openreading help             # the manual's topic index
+  openreading help batch       # one chapter of it"""
 
 
 class _HelpFormatter(argparse.HelpFormatter):

@@ -367,6 +367,12 @@ and `tests/test_schema_evolution.py` pins every released file byte for byte.
   `race:` step compiles to a node that names no single backend, and calibration sweeps one.
 - **`compare <folder> --backends a,b` is usage, not an errno.** It reached the adapter and came
   back as a raw IsADirectoryError at exit 1. It now exits 2 and prints the way through.
+- **`benchmark --target backend:NAME` checks the name.** It validated the syntax and never the
+  identity, so a typo priced a run that could not exist and exited 0. It now refuses an unknown
+  id by name and lists the known ones, the way every other place a backend id is typed does.
+- **`compare <missing.pdf> --backends a,b` is usage, not an errno.** `parse` refused a mistyped
+  filename at exit 2 with a sentence; fan-out returned a raw `SourceNotFoundError: [Errno 2]` at
+  exit 1.
 - **`--pages` explains the argparse trap it falls into.** `parse --pages 1 doc.pdf` feeds the
   file to `--pages`, and the error named a private function at the reader.
 

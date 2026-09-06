@@ -472,3 +472,20 @@ def test_report_reads_a_finished_run_without_rerunning_it(tmp_path, capsys) -> N
 def test_report_on_an_empty_directory_exits_2(tmp_path, capsys) -> None:
     assert main(["benchmark", "report", "--output-dir", str(tmp_path)]) == 2
     assert "no publisher run" in capsys.readouterr().err
+
+
+def test_benchmark_target_naming_an_unknown_backend_is_usage(capsys):
+    """`--target backend:NAME` validated its SYNTAX and never its identity, so a typo priced a
+    run that could not exist and exited 0. Every other place a backend id is typed on this CLI
+    refuses an unknown one by name and lists the known ids."""
+    rc = main(["benchmark", "estimate", "parsebench", "--target", "backend:nosuchbackend"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "nosuchbackend" in err
+    assert "pymupdf" in err  # the known ids, so the typo is fixable from the message
+
+
+def test_benchmark_target_naming_a_real_backend_still_estimates(capsys):
+    rc = main(["benchmark", "estimate", "parsebench", "--target", "backend:pymupdf"])
+    assert rc == 0
+    assert "1 target(s)" in capsys.readouterr().out

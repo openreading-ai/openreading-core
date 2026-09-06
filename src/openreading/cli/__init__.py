@@ -48,32 +48,9 @@ Invariants shared by every subcommand
   with no subcommand -- the same string as `openreading.__version__` and the
   `version` field of the server's `GET /healthz`, so an incident's first
   question has an answer that does not require a running server.
-- stdout carries ONLY the JSON envelope (or the rendered report). Progress,
-  cost preflight, backend chatter (stdout is redirected during the run) and
-  every error line go to stderr, so `> out.json` is always safe.
-- stderr lines carry a bracket tag. `[<command>]` (`[route]`, `[resume]`,
-  `[compare]`, `[calibrate]`, ...) is the common shape. A single-document
-  `parse` tags its error lines with the RUN LABEL instead of the command: the
-  backend slug, `strategy:<name>` or `auto` (`[pymupdf] missing credentials
-  ...`). On that path `[parse]` appears only on selector misuse, a slug that
-  fails catalog lookup, and the interrupt lines. A batch `parse` prints
-  `[batch]` for usage and unexpected errors and for the `empty_batch` warning,
-  `[i/N]` for progress, and `[preflight]` for the two pre-run advisories (cost,
-  and a `--jobs` request the named backend's descriptor caps). Its exit-3
-  cannot-run line carries the run label, not `[batch]`. A `compare` fan-out
-  tags `[<backend>]` on a fanned-out backend's FAILURE; a fan-out that succeeds
-  prints nothing per backend. Two kinds of line carry no tag. A backend's own
-  chatter is redirected from stdout to stderr and arrives exactly as that
-  library wrote it, so PyMuPDF's layout advisory shows up untagged in front of
-  your own lines. And `strategy validate`'s grammar error prints untagged on
-  purpose (below).
-- A printed response/envelope is schema-validated first
-  (`schemas.validate_response` / `validate_batch_result`), so a non-conforming
-  document never reaches stdout. Only the batch path turns a conformance
-  failure into a coded exit (its validation sits inside the try, BL-84); in
-  single-document `parse`, `resume` and `replay` the call sits after every
-  except clause, so a non-conforming response surfaces as an uncaught
-  traceback, not a coded exit.
+- The three streams have their own chapter, `openreading help output`:
+  stdout carries only the envelope, every line this CLI writes to stderr
+  carries a bracket tag, and nothing is printed before it validates.
 - A `<file>` starting with `http(s)://` is a URL: backends that ingest URLs
   natively get it as-is, the rest download to bytes first.
 - No flag widens the eligible set; the policy file sets it, and three of its
@@ -220,11 +197,11 @@ Two batch-results pair their documents by `relpath`, so name each run after the
 backend that produced it; the labels come from the filenames.
 
 Compare a strategy's winner against the branches it beat. This needs a strategy
-that actually BRANCHES: a `try:` cascade that succeeds on rung 1 retains
-nothing, and `--from` then reports that no candidates were kept.
+that actually BRANCHES. A `try:` cascade that succeeds on rung 1 retains
+nothing, and `--from` then says so. The `fast` preset is a race, so it always
+has a loser to keep.
 
-    openreading parse doc.pdf --strategy side_by_side --keep-candidates \
-      > run.json
+    openreading parse doc.pdf --strategy fast --keep-candidates > run.json
     openreading compare --from run.json --format table
 
 Pick a run back up. Arm the journal first, because a run that journalled
@@ -955,11 +932,13 @@ Exit codes
      interrupt so a supervisor's stop signal parks a run the way an interactive
      one does. The run did not fail; it parked mid-walk. A single-document run
      names its own `RUN_ID` for `openreading resume`; a batch names none
-     (batch-level resume is out of scope). The code follows the ARMED ledger,
-     not what the run actually wrote: only a strategy dispatch journals, so a
-     named `--backend` run interrupted under an armed ledger still exits 6 and
-     still prints a run id, and `resume` then finds nothing to replay. Arm the
-     ledger for the runs you mean to resume.
+     (batch-level resume is out of scope). Only a strategy dispatch journals,
+     and the two paths test that differently. A single document tests what
+     actually armed, so an interrupted `--backend` run exits 143 and says
+     nothing was resumable, which is right. A batch tests only whether the
+     variable is set, so an interrupted `--backend` batch exits 6 and names no
+     id, and there is nothing for `resume` to replay. Arm the ledger for the
+     strategy runs you mean to resume.
 143  terminated by SIGTERM with no ledger armed: nothing was resumable, so one
      `[openreading]` line says so and names `OPENREADING_LEDGER`. Unarmed
      Ctrl-C is unchanged -- it stays an ordinary `KeyboardInterrupt`
