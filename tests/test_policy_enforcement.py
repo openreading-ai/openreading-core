@@ -439,3 +439,131 @@ def test_native_and_platform_batches_agree_on_the_verdict(tmp_path, monkeypatch)
     refused = api.run_batch(["corpus/"], backend="reducto", config="openreading.yaml")
     assert refused["summary"]["failed"] == 1
     assert "require_local" in refused["items"][0]["error"]["message"]
+
+
+# --- PF2, the boundary itself --------------------------------------------------------------------
+
+
+def test_the_policy_constructor_is_strict():
+    """`Policy(...)` is the shortest way to build one, so it cannot be the one door that coerces.
+    A lax bool accepts `"yes"`, which is the widening the schema refuses on the file path."""
+    from pydantic import ValidationError
+
+    from openreading.types.policy import Policy
+
+    with pytest.raises(ValidationError):
+        Policy(allow_unverified_compliance="yes")
+    with pytest.raises(ValidationError):
+        Policy(train_optout_confirmed="aws-textract")
+
+
+def test_assigning_to_a_policy_is_strict():
+    """The model is held past construction, so an assignment that is never re-validated is a
+    second door into the same object. `bool("false")` is `True`, so this one turns a fail-closed
+    setting into permission with a value whose plain-English intent is off."""
+    from pydantic import ValidationError
+
+    from openreading.types.policy import Policy
+
+    policy = Policy(allow_unverified_compliance=False)
+    with pytest.raises(ValidationError):
+        policy.allow_unverified_compliance = "false"
+
+
+def test_the_public_boundary_revalidates_a_policy_instance():
+    """`model_construct` skips validation by design, so trusting an object because of its class
+    is trusting whatever built it. The boundary re-validates rather than checking the type."""
+    from pydantic import ValidationError
+
+    from openreading.types.policy import Policy
+
+    forged = Policy.model_construct(allow_unverified_compliance="false")
+    with pytest.raises(ValidationError):
+        config.router_config(forged)
+
+
+def test_the_public_boundary_revalidates_attestation_contents():
+    """A list of the right shape holding the wrong contents is the same hole one level down."""
+    from pydantic import ValidationError
+
+    from openreading.types.policy import Policy
+
+    forged = Policy.model_construct(baa_tier_confirmed="reducto")
+    with pytest.raises(ValidationError):
+        config.apply(_req(), forged, RouterConfig())
+
+
+def test_the_publisher_registers_and_executes_one_snapshot(tmp_path, monkeypatch):
+    """The pipeline name is computed when the provider registers and the documents run later.
+    Reading the file twice means the artifacts are filed under the policy that was on disk at
+    registration while the run happened under whatever was there at inference."""
+    from openreading.evals import targets as targets_mod
+
+    monkeypatch.chdir(tmp_path)
+    path = tmp_path / "p.yaml"
+    path.write_text("version: 1\npolicy:\n  require_local: true\n")
+
+    seen: list[object] = []
+    monkeypatch.setattr(targets_mod, "execute_target", lambda *a, **k: seen.append(k["config"]))
+
+    snapshot = config.load(str(path))
+    name = targets_mod.pipeline_name(
+        "parsebench", targets_mod.BenchmarkTarget.parse("backend:pymupdf"), config=snapshot
+    )
+    # The file changes after registration. A provider holding the snapshot cannot notice.
+    path.write_text("version: 1\npolicy:\n  allow_unverified_compliance: true\n")
+    assert (
+        targets_mod.pipeline_name(
+            "parsebench", targets_mod.BenchmarkTarget.parse("backend:pymupdf"), config=snapshot
+        )
+        == name
+    )
+    assert snapshot.policy == {"require_local": True}
+
+
+def test_a_registered_provider_holds_the_config_it_was_named_under(tmp_path, monkeypatch):
+    """End to end through the publisher: register under policy A, replace the file with policy B,
+    then run one document. The provider must execute A, because the artifacts it writes are filed
+    under A's digest and a run whose name and content disagree is unauditable."""
+    pytest.importorskip("parse_bench", reason="publisher bridge not installed")
+    from parse_bench.inference.pipelines import get_pipeline
+    from parse_bench.inference.providers.registry import create_provider
+    from parse_bench.schemas.pipeline_io import InferenceRequest
+
+    from openreading.evals import parsebench
+    from openreading.evals.targets import BenchmarkTarget
+
+    doc = tmp_path / "s.pdf"
+    doc.write_bytes(build_sample_pdf())
+    path = tmp_path / "p.yaml"
+    path.write_text("version: 1\npolicy:\n  require_local: true\n")
+
+    try:
+        name = parsebench._register(BenchmarkTarget.parse("backend:pymupdf"), config=str(path))
+    except parsebench.BenchmarkDependencyError as exc:
+        pytest.skip(str(exc))
+
+    captured: list = []
+    monkeypatch.setattr(
+        parsebench,
+        "execute_target",
+        lambda *a, **k: (
+            captured.append(k["config"])
+            or {"status": {"state": "succeeded"}, "document": {"text": "x", "blocks": []}}
+        ),
+    )
+    # Replace the file with one that will not load at all: a provider that re-reads will raise,
+    # and one holding its snapshot will not notice.
+    path.write_text("version: 1\npolicy: {require_locall: true}\n")
+
+    provider = create_provider(get_pipeline(name))
+    provider.run_inference(
+        get_pipeline(name),
+        InferenceRequest(example_id="ex1", source_file_path=str(doc), product_type="parse"),
+    )
+    assert captured, "the provider never called execute_target"
+    held = captured[0]
+    assert isinstance(held, config.LoadedFile), (
+        f"the provider held {type(held).__name__}, not a snapshot"
+    )
+    assert held.policy == {"require_local": True}

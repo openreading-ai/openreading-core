@@ -16,7 +16,8 @@ validation refuses both, and `extra="forbid"` refuses the misspelled key that us
 in silence.
 
 `tests/test_policy_validation.py` pins this model's fields equal to the schema's, so a key added
-to one and not the other cannot ship.
+to one and not the other cannot ship. `tests/test_policy_enforcement.py` pins the three doors:
+construction, assignment, and an instance handed across a public boundary.
 """
 
 from __future__ import annotations
@@ -41,10 +42,22 @@ ATTESTATION_FIELDS = ("allow_unverified_compliance", "train_optout_confirmed", "
 
 
 class Policy(BaseModel):
-    """The nine keys, typed. `extra="forbid"` so a misspelling is an error rather than a silently
-    dropped constraint, which is the failure this whole grammar exists to prevent."""
+    """The nine keys, typed.
 
-    model_config = ConfigDict(extra="forbid")
+    Three settings, each closing a different door into the same object. `extra="forbid"` so a
+    misspelling is an error rather than a silently dropped constraint. `strict=True` so the
+    CONSTRUCTOR does not coerce: pydantic's default accepts `"yes"` for a bool, which is the
+    widening the schema refuses on the file path, and `Policy(...)` is the shortest way anyone
+    embedding this package will build one. `validate_assignment=True` so a field set after
+    construction is checked too: the model outlives the call that made it, and an unvalidated
+    assignment is a second door into an object the first door already checked.
+
+    The assignment case is the one that bites hardest. `bool("false")` is `True`, so writing the
+    string `"false"` onto `allow_unverified_compliance` turned the fail-closed posture ON, with a
+    value whose plain-English intent is off.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True, validate_assignment=True)
 
     require_baa: bool | None = None
     no_train_on_data: bool | None = None
@@ -71,6 +84,13 @@ def coerce_policy(policy: Policy | dict | None) -> Policy | None:
     """
     if policy is None:
         return None
-    if isinstance(policy, Policy):
-        return policy
-    return Policy.model_validate(policy, strict=True)
+    # Re-validated, never trusted for being the right class. `model_construct` builds a `Policy`
+    # with no validation at all, by design, so an instance says who built it and nothing about
+    # what is in it. Round-tripping through `model_dump` costs one dict per call and removes the
+    # question.
+    # `warnings=False`: dumping a `model_construct`ed object with a wrong-typed field makes
+    # pydantic warn about the serialization. That is the case this round-trip exists to catch, and
+    # the validation below rejects it a line later, so the warning is noise about a value that is
+    # already on its way to an error.
+    raw = policy.model_dump(warnings=False) if isinstance(policy, Policy) else policy
+    return Policy.model_validate(raw, strict=True)

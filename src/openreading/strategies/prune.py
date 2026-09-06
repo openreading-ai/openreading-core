@@ -263,6 +263,20 @@ def _compute_config_hash(
     the digest whenever any of the four inputs changes. `router_config`'s `frozenset` fields are
     sorted to lists first, or the digest would inherit BL-168's exact nondeterminism.
 
+    What is deliberately NOT in here: the ordered eligible ids. They are an OUTPUT of routing over
+    the live registry rather than an input an operator controls, and they reorder when an
+    `integration_priority` changes, when an install extra is added or removed, and when a
+    descriptor is edited. None of those is a policy change, and each would refuse every in-flight
+    resume on the machine. Every input that produces the order is already here: the descriptor
+    digests catch a changed descriptor, the effective compliance catches a changed constraint, and
+    the written block catches a changed file. An order that moves with no input change would be a
+    stage-3 bug rather than a reason to widen the identity.
+
+    The effective `optimize_for` is not here either, and does not need to be. A resume takes no
+    request, so a caller-supplied preference comes from the stored header and cannot move. A
+    file-supplied one lives in `file_policy`, so changing or removing it already changes the
+    digest.
+
     Never include `credentials_ref`, resolved credentials, or anything secret-bearing — every
     input here is either the pruned tree (backend ids/config, no secrets), the compliance posture,
     deployment-level compliance confirmations (backend ids only), or a backend's own descriptor

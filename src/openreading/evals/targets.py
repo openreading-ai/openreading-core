@@ -78,7 +78,7 @@ class BenchmarkTarget:
         return f"{self.kind}:{self.name}"
 
 
-def _config_identity(config: str | None) -> str | None:
+def _config_identity(config) -> str | None:
     """A canonical digest of the configuration at `config`, or the raw value when there is none
     to read. Formatting and key order do not change it; any meaningful content change does."""
     if not config:
@@ -96,7 +96,7 @@ def pipeline_name(
     benchmark_id: str,
     target: BenchmarkTarget,
     *,
-    config: str | None,
+    config,
 ) -> str:
     """Name the publisher pipeline one target plus one configuration produces.
 
@@ -133,7 +133,7 @@ def execute_target(
     target: BenchmarkTarget,
     *,
     product: BenchmarkProduct,
-    config: str | None = None,
+    config=None,
     extraction_schema: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run one publisher case through the public OpenReading API."""

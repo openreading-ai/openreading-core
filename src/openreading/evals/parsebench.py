@@ -59,6 +59,13 @@ def prepare(*, data_dir: Path, smoke: bool, force: bool) -> int:
     return int(BenchCLI().download(data_dir=data_dir, force=force, test=smoke))
 
 
+def _load_config(config):
+    """The configuration this registration and every inference under it will share, read once."""
+    from openreading import config as config_module
+
+    return config_module.load(config)
+
+
 def _register(target: BenchmarkTarget, *, config: str | None) -> str:
     (
         _,
@@ -71,7 +78,12 @@ def _register(target: BenchmarkTarget, *, config: str | None) -> str:
         RawInferenceResult,
         ProductType,
     ) = _imports()
-    pipeline_name = build_pipeline_name("parsebench", target, config=config)
+    # ONE read, used for both halves. The pipeline name is a digest of this content, and the
+    # provider below executes this same snapshot: registering from one read and executing from
+    # another files a run's artifacts under the policy that happened to be on disk at
+    # registration, while the documents ran under whatever replaced it.
+    snapshot = _load_config(config)
+    pipeline_name = build_pipeline_name("parsebench", target, config=snapshot)
     provider_name = pipeline_name
 
     class OpenReadingParseProvider(Provider):
@@ -83,7 +95,7 @@ def _register(target: BenchmarkTarget, *, config: str | None) -> str:
                 request.source_file_path,
                 target,
                 product="parse",
-                config=config,
+                config=snapshot,
             )
             completed = datetime.now(UTC)
             projection = project_parse_response(
