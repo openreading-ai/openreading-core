@@ -10,7 +10,7 @@ backend, a strategy, or the router, and the one response schema is printed.
 Quickstart
 ----------
 Four commands parse and compare local documents with no key and no account.
-A backend is the parser or extraction engine that reads your document.
+A backend is the parser or extraction engine that reads your documents.
 Install the clone's dependencies first with `make sync`, as the root README
 explains. The comparison also needs the `tesseract` executable on your PATH.
 

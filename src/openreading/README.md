@@ -1,9 +1,10 @@
-# OpenReading: one JSON over every document parser
+# OpenReading: an intelligent, policy-aware router for document processing
 
 <sub>Docs home · [The command line →](cli/README.md)</sub>
 
-> **In one sentence.** OpenReading returns one JSON shape from every document parser, so switching,
-> comparing, or routing between parsers never changes the code downstream.
+> **In one sentence.** OpenReading runs your documents through the backends your rules allow, and
+> returns one JSON shape whichever backend did the work, so switching, comparing, or routing between
+> backends never changes the code downstream.
 
 ## What OpenReading is
 
@@ -25,9 +26,9 @@ inventing a value. `channel_provenance` lists the channels this run did produce.
 entry names some of those gaps and not others, so read provenance rather than waiting for a warning
 ([The channel contract](derive/README.md#which-signal-to-trust-when-a-channel-is-missing)).
 
-A compliance policy is a short list of rules about which backends may see a document. The router is
-the step that picks a backend for each request. It applies that policy before anything runs, and no
-later step, fallback, or setting can bring a dropped backend back.
+A compliance policy is a short list of rules about which backends may see your documents. The
+router is the step that picks a backend for each request. It applies that policy before anything
+runs, and no later step, fallback, or setting can bring a dropped backend back.
 
 To follow the guides you need the install from the [root README](../../README.md) and the
 `sample.pdf` it builds. Every guide runs offline with the `pymupdf` and `tesseract` backends, and a
@@ -123,7 +124,7 @@ The table below tells you which guide answers which need and how long each takes
 | pick a backend under a policy, see why one was dropped, bring a key | [Routing and keys](router/README.md) | 10 min |
 | run backends in cascades or races under gates, then explain or replay the trace | [Strategies](strategies/README.md) | 20 min |
 | pick a gate threshold from documents you labeled, instead of guessing | [Strategies, step 8](strategies/README.md#8-ask-for-thresholds-from-a-sample) | 8 min |
-| find **where** two backends disagree on a document, when you have no labels to judge with | [Compare](comparison/README.md) | 15 min |
+| find **where** two backends disagree on your documents, when you have no labels to judge with | [Compare](comparison/README.md) | 15 min |
 | parse a folder into one JSON, then compare two runs of it | [Batch runs](batch/README.md) | 8 min |
 | resume, replay, or erase a run from its journal | [The run ledger](ledger/README.md) | 8 min |
 | run the same engine over HTTP, with auth | [The HTTP server](server/README.md) | 10 min |
@@ -244,7 +245,7 @@ table.
 | the backend cannot do what you asked | exit `3` | `UnsupportedFeatureError` | `422`, `error.category` `unsupported_feature` | route to a capable backend |
 | every backend in the plan failed | exit `3` | `PlanExhaustedError` | `502`, `error.category` `plan_exhausted`, `trail` | read `trail`. Each entry says why that rung failed |
 | a batch had failures | exit `4`, `status.state` `partial` | dict, `items[].error.code` | `200` | retry the failed subset only. `items[].error.code` is the only error code you ever see |
-| backends disagree on a document | corpus verdict `divergent` | same | `200` | route it through a `compare:` plus `then:` strategy |
+| backends disagree on your documents | corpus verdict `divergent` | same | `200` | route it through a `compare:` plus `then:` strategy |
 
 > [!IMPORTANT]
 > Exit `0` does not mean the result is clean, and no exit code reports degradation.
