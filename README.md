@@ -201,8 +201,8 @@ uv run openreading help chaining     # which command's output feeds which comman
 uv run openreading parse --help      # one command: examples, flags, exit codes
 ```
 
-`openreading help` lists twenty-two chapters. Start with `quickstart`, then `batch` if you have
-a folder of documents, then `exit-codes` before you put any of it in CI. A chapter answers to the
+`openreading help` lists every chapter. Start with `quickstart`, then `batch` if you have a
+folder of documents, then `exit-codes` before you put any of it in CI. A chapter answers to the
 name you would reach for, so `help folder` and `help glob` both open the batch chapter.
 
 Every `<command> --help` ends with the same four things: examples you can paste, the command that
