@@ -135,6 +135,7 @@ The table below tells you which guide answers which need and how long each takes
 | look up a backend's variables, license, and compliance posture | [Backend adapters](adapters/README.md) | look up as needed |
 | call it from Python: `run()`, `route()`, `compare()`, `run_batch()`, and one exception type per condition | reference only: `uv run python -m pydoc openreading.api` | look up as needed |
 | look up the pydantic models that mirror the schemas | reference only: `uv run python -m pydoc openreading.types` | look up as needed |
+| look up how `openreading.yaml` is found, and the nine keys its `policy:` block takes | reference only: `uv run python -m pydoc openreading.config` | look up as needed |
 | gate your own adapter against the conformance kit | reference only: `uv run python -m pydoc openreading.testing` | look up as needed |
 
 The Evals and Compare rows sound alike and answer different questions. `compare` has no ground

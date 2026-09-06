@@ -249,8 +249,8 @@ You get a refusal, never geometry-only output pretending to be an answer.
 - stdout carries the result only, because a progress line there would break every `| jq` consumer.
   `openreading.cli.app` enforces this by redirecting stdout during the run.
 - A printed envelope is schema-validated first, so a non-conforming document never reaches stdout.
-- No flag widens the eligible set. The policy file sets it, and three of its keys widen it
-  deliberately. A policy that leaves nothing to run is exit 3 from every verb that
+- No flag widens the eligible set. The `policy:` block of your `openreading.yaml` sets it, and
+  three of its keys widen it deliberately. A policy that leaves nothing to run is exit 3 from every verb that
   executes. Bare `route` prints the empty plan and exits 4 ([Routing and
   keys](../router/README.md)).
 - Keys never travel on the command line, so they never land in shell history or `ps`.
