@@ -188,6 +188,27 @@ uv run python -c 'from openreading.testing.sample_pdf import build_sample_pdf; o
 ls -l sample.pdf     # 8688 bytes: a title, two paragraphs, a 3×4 table, two columns, a tiny image
 ```
 
+## The CLI explains itself
+
+You do not have to come back here for a flag. The command line carries its own manual, and every
+page of it is generated from the same reference the maintainers read, so it cannot drift from
+what the code does.
+
+```bash
+uv run openreading help              # the topic index, grouped by what you want to do
+uv run openreading help batch        # one chapter: folders, globs, many files at once
+uv run openreading help chaining     # which command's output feeds which command
+uv run openreading parse --help      # one command: examples, flags, exit codes
+```
+
+`openreading help` lists every chapter. Start with `quickstart`, then `batch` if you have a
+folder of documents, then `exit-codes` before you put any of it in CI. A chapter answers to the
+name you would reach for, so `help folder` and `help glob` both open the batch chapter.
+
+Every `<command> --help` ends with the same four things: examples you can paste, the command that
+consumes this one's output, the exit codes this command can actually return, and the chapter that
+goes deeper.
+
 ## Compare, route, strategy
 
 **Compare.** Compare shows where two backends disagree on a document and names each difference.
@@ -408,7 +429,7 @@ command.
 | how to resume an interrupted run, replay one offline, or erase what it recorded | [The run ledger](src/openreading/ledger/README.md) |
 | how to put the same engine behind an HTTP API on your own machine | [The HTTP server](src/openreading/server/README.md) |
 | how to run public benchmarks or rank backends on documents you labeled | [Evals](src/openreading/evals/README.md) |
-| every command, its flags, and the exit code your script branches on | [The command line](src/openreading/cli/README.md) |
+| every command, its flags, and the exit code your script branches on | `uv run openreading help` for the manual's topic index, `uv run openreading help <topic>` for one chapter, and [The command line](src/openreading/cli/README.md) for the walkthrough |
 | why a response leaves a field out instead of inventing it | [The channel contract](src/openreading/derive/README.md) |
 | the Python API, every reference section, and how to add a backend | `uv run python -m pydoc openreading`, then the same command with `.<module>` appended. For a new backend, `uv run python -m pydoc openreading.adapters`, then `scripts/new_adapter.py` |
 | the checks a change must pass | `make verify` runs lint, types, pytest at a 91% coverage floor, and the schema and smoke checks. `uv run pytest -m "not live" --collect-only` prints the offline test count. |

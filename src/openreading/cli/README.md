@@ -5,6 +5,10 @@
 > **In one sentence.** `openreading` prints one JSON envelope on stdout, keeps everything else on
 > stderr, and exits with a code your script can branch on.
 
+This page is the walkthrough. For a flag or a rule while you work, the CLI answers for itself:
+`openreading help` lists the manual's chapters, `openreading help <topic>` prints one, and
+`openreading <cmd> --help` gives one command's examples and exit codes.
+
 ## What this gives you
 
 You want to call the parser from a shell script or a CI job and trust what comes back. The worry is
@@ -79,8 +83,9 @@ strategy label. A usage error and an interrupt carry `[parse]`. The batch layer 
 Your script can branch on the exit code alone, without reading stdout.
 
 Source: `src/openreading/cli/__init__.py` ("Exit codes", and the "Signals" paragraph under it).
-Live truth: `uv run python -m pydoc openreading.cli` → "Exit codes". If this table and that text
-disagree, the text is right. Fix the table.
+Live truth: `uv run openreading help exit-codes`. This table adds the two columns a script
+needs, whose fault a code is and whether retrying helps, plus a command that produces each one.
+If the table and that chapter disagree, the chapter is right. Fix the table.
 
 | Code | Means | Whose fault | Safe to retry | Triggered here by |
 |---|---|---|---|---|
@@ -404,9 +409,14 @@ that fills mid-run was not measured.
 
 ## Reference
 
-- `uv run openreading --help`, then `uv run openreading <verb> --help` for every flag.
-- `uv run python -m pydoc openreading.cli` → "Invariants shared by every subcommand" and
-  "Exit codes".
+- `uv run openreading help` lists the manual's chapters; `uv run openreading help <topic>` prints
+  one. Start with `quickstart`, `batch` and `chaining`.
+- `uv run openreading help datasets` shows the case inputs and expectations used for calibration
+  and scoring. The `calibrate` chapter provides a complete cascade and shows where proposed gates go.
+- `uv run openreading --help` for the task map, then `uv run openreading <verb> --help` for one
+  command's flags, examples and exit codes.
+- `uv run python -m pydoc openreading.cli` for the whole reference in source order, which is what
+  to grep when you do not know the topic's name.
 - `uv run python -m pydoc openreading.credentials` → env-file precedence, per-backend variables.
 - What stdout carries: [JSON Schemas](../schemas/README.md).
 
@@ -420,8 +430,21 @@ that fills mid-run was not measured.
   `openreading.cli` docstring, "Exit codes", 6: "a batch names none (batch-level resume is out of
   scope)".
 - There is no coded exit for a non-conforming single-document response. Source: the
-  `openreading.cli` docstring, "Invariants shared by every subcommand", which says "surfaces as an
-  uncaught traceback, not a coded exit".
+  `openreading.cli` docstring, "What lands on stdout, on stderr, and in the exit code", which
+  explains why response validation can surface as an uncaught traceback.
+
+Four inconsistencies between verbs are known and unfixed. Each is safe once you know it, and
+each would be a breaking change to correct, so read the flag's own `--help` rather than assuming
+a sibling's rule carries over.
+
+- `--format` names different value sets. `compare` takes `json|table|diff|diffs|md`, `leaderboard`
+  takes `table|json`, and `benchmark report` takes `text|json`, so `benchmark report
+  --format table` exits 2.
+- `--jobs 0` clamps to 1 on `parse` and exits 2 on `benchmark run`. `parse` also has a ceiling
+  (`--max-jobs`) and `benchmark run` does not.
+- An unknown backend id exits 2 from `compare` and `leaderboard`, and 3 from `backends --check`.
+- On `strategy` and `benchmark`, `--env-file` belongs before the sub-verb, and passing it after
+  prints the top-level usage line, which names neither the flag nor the sub-verbs.
 
 ## See also
 

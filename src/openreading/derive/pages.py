@@ -8,12 +8,12 @@ def pdf_page_count(data: bytes) -> int | None:
     library is importable or the bytes are not a parseable PDF — callers fall back to a heuristic
     (e.g. anthropic's distinct-cited-pages) or leave page_count absent."""
     try:
+        # Never the `fitz` alias: it prints a deprecation warning to stdout, and stdout
+        # carries only the JSON envelope. The quiet `pymupdf` name arrived in 1.24.3, which is
+        # the floor this package pins.
         import pymupdf  # type: ignore
     except ImportError:  # pragma: no cover - optional-dep fallback path
-        try:
-            import fitz as pymupdf  # type: ignore
-        except ImportError:
-            return None
+        return None
     try:
         doc = pymupdf.open(stream=data, filetype="pdf")
     except Exception:  # noqa: BLE001 — any parse failure → unknown page count

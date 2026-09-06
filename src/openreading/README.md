@@ -119,6 +119,7 @@ The table below tells you which guide answers which need and how long each takes
 |---|---|---|
 | know what this is, where to go next, and how an agent uses it | this page | 10 min |
 | script it from a shell or CI: stdout, exit codes, `.env` | [The command line](cli/README.md) | 10 min |
+| look up one CLI chapter without leaving the terminal | `uv run openreading help` lists the topics; `uv run openreading help batch` prints one | look up as needed |
 | pick a backend under a policy, see why one was dropped, bring a key | [Routing and keys](router/README.md) | 10 min |
 | run backends in cascades or races under gates, then explain or replay the trace | [Strategies](strategies/README.md) | 20 min |
 | pick a gate threshold from documents you labeled, instead of guessing | [Strategies, step 8](strategies/README.md#8-ask-for-thresholds-from-a-sample) | 8 min |

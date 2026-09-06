@@ -95,7 +95,8 @@ error messages.
 | New … | Must update | Existing guard |
 |---|---|---|
 | backend | its `AdapterDescriptor`; a row in `src/openreading/adapters/README.md`; a `# --- <slug> (signup: …) ---` block in `.env.example`; the adapter module docstring | `scripts/check_extras_parity.py` (the install extra), `tests/test_descriptor_specs.py` (the descriptor), `tests/test_scaffold_sentinel.py` (leftover scaffold markers). The catalog row and the `.env.example` block: none yet |
-| CLI subcommand or flag | argparse `help=` (no `internal/` paths); its section in the `openreading.cli` docstring, exit codes included; the README's docs index only for a new *kind* of question | `tests/test_cli*.py` (behaviour and exit codes). The docstring section and the `internal/`-free help text: none yet |
+| CLI subcommand or flag | argparse `help=` (no `internal/` paths, no `uv run`) and, for a subcommand, an `epilog` of runnable lines carrying Examples / Then / Exits / More; its own underlined section in the `openreading.cli` docstring, exit codes included; for a subcommand, a `TOPICS` row in `openreading.cli.help`; the README's docs index only for a new *kind* of question | `tests/test_cli_help.py` (every subcommand resolves to a topic, every page has a description and a four-part epilog inside one screen, no page names a private path or `uv`), `tests/test_cli*.py` (behaviour and exit codes) |
+| `openreading help` topic | one underlined section in the `openreading.cli` docstring, written where the fact is read and wrapped at 79 columns; a `TOPICS` row in `openreading.cli.help` giving the slug, that exact heading, and any reader-side aliases; nothing in a markdown file | `tests/test_cli_help.py` (heading and slug stay a bijection, the index lists every primary slug, rendering stays verbatim, no chapter names a private path, no docstring line exceeds 79 columns) |
 | schema version | copy to `family.vX.(Y+1).json`; the `*_SCHEMA_FILE` constant; a manifest row in `src/openreading/schemas/README.md`; the `openreading.types` default; a `CHANGELOG.md` line | `tests/test_schema_evolution.py` (byte pins), `tests/test_schema_versioning.py`, `tests/test_types_roundtrip.py` |
 | strategy key or preset | grammar in `strategies/model.py` (and `plain.py` if Plain); a cookbook entry in `strategies/presets.py`; the `strategy --help` epilog if user-facing | `tests/test_docs_truth.py` (config-shaped YAML in the seven `openreading.strategies` modules it lists, nothing outside them) |
 | env var | one commented line in `.env.example`; a section headed "Environment variables this module reads" in the module that reads it, created if the module has none; `credentials.py` only if it is a credential | none yet |
@@ -159,7 +160,8 @@ src/openreading/
   ledger/      execution journal, replay, resume
   evals/       benchmark harness (scorers, runner, leaderboard)
   testing/     conformance kit, sample PDF, fixture scrubber   (docstring: what adapter authors get)
-  cli/         `openreading …`                                 (docstring: subcommands, exit codes)
+  cli/         `openreading …` + `openreading help`, which serves  (docstring: subcommands,
+               that docstring back as the CLI's own manual          exit codes, the manual)
   server/      `openreading serve`                             (docstring: endpoints, status codes)
   api.py          `run` / `route` / `compare` / `resume`       (docstring: exports and return shapes)
   credentials.py  BYO-key broker                               (docstring: precedence, per-backend vars)
@@ -171,7 +173,14 @@ examples/      two synthetic bank statements the READMEs parse (README.md: what 
 ```
 
 To read a package's documentation, run `uv run python -m pydoc openreading.cli`, or open the file.
-The CLI documents itself with `openreading --help`.
+
+The CLI documents itself three ways, and they are one source. `openreading <cmd> --help` is the
+flag page, and its epilog carries examples, the command that consumes its output, the exit codes
+it can return, and a pointer onward. `openreading help [TOPIC]` prints one chapter of the manual,
+and every chapter is a section of the `openreading.cli` docstring, located by its heading and
+printed verbatim. `pydoc` prints that whole docstring in source order. Editing that docstring
+therefore edits user-facing help, which is why `tests/test_cli_help.py` holds it to 79 columns and
+one slug per heading. A new verb owes a docstring section, a `TOPICS` row and an epilog.
 
 ## The company repo
 

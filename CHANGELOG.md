@@ -26,6 +26,22 @@ them.
 
 ### Added
 
+- **`openreading help [TOPIC]`.** The CLI now carries its own manual. `openreading help` prints a
+  topic index grouped by what you are trying to do, and `openreading help batch` prints one
+  chapter. The chapters are sections of the `openreading.cli` package docstring, located by
+  heading and printed verbatim, so there is one source and `help`, `pydoc` and the reference
+  cannot disagree. Aliases reach the same chapter, so `help folder` and `help glob` both open the
+  batch chapter.
+- **Every command carries a worked epilog.** `openreading <cmd> --help` now shows runnable
+  examples, the verb that consumes this one's output, the exit codes that command can actually
+  return, and a pointer to its chapter. Eleven commands previously had no description at all.
+- **`openreading --help` has a front door**: a quickstart that runs from a fresh clone with no
+  key, a task map from what you want to what you type, the folder and glob rule stated where
+  everyone sees it, and the chain picture.
+- **`parse`, `compare` and `leaderboard` group their flags.** The `parse` group title states the
+  rule that decides which envelope you get back: "many documents (a directory, a glob, or two or
+  more FILE arguments)".
+
 - `openreading benchmark` discovers public corpora and runs backends or strategies through the
   official ParseBench and ExtractBench scorers. Static catalog entries keep source and dataset
   terms visible for additional research corpora without downloading or claiming support.
@@ -313,6 +329,11 @@ and `tests/test_schema_evolution.py` pins every released file byte for byte.
 
 ### Fixed
 
+- Recursive globs select each file once, including patterns such as `corpus/**` that also match
+  directories. This prevents repeated backend calls and premature failures from `--max-items`.
+- CLI help examples now use completed comparison alternatives, backend labels and resumable
+  single-document runs. New `help` and `datasets` chapters cover manual usage and scoring inputs.
+  Calibration help includes a runnable cascade and explains where its proposed thresholds belong.
 - `pulse` uploads to `/extract` as multipart, and no longer leaks its id prefix into the response.
   Its structured extraction returns per-field confidence and citations.
 - `nuextract` uploads a job as multipart, and reads table grids embedded as HTML.
@@ -326,6 +347,39 @@ and `tests/test_schema_evolution.py` pins every released file byte for byte.
 - The polling driver caps each sleep at the caller's deadline, and the fault streak resets on a
   healthy poll.
 - A resumed run replays the step error's message, not only its class name.
+- **`**` in a `parse` glob now matches every depth.** Python reads `**` as a plain `*` unless the
+  caller asks for recursion, so `parse 'scans/**/*.png'`, the pattern the CLI reference itself
+  printed, matched one directory level and reported success over a fraction of the corpus. It now
+  walks the whole tree.
+- **A glob keeps the directories it walked in each document's `relpath`.** A match used to be
+  recorded under its bare filename, so two files named `invoice.pdf` under different parents
+  collapsed into one `--save-dir` file and paired wrongly in a corpus compare. `relpath` is now
+  measured from the pattern's fixed root, which is the identity the batch-result schema promises.
+- **stdout carries only the envelope again on the paths that touch PyMuPDF.** Four modules
+  imported the `fitz` alias, which prints a deprecation warning to stdout the first time any
+  process imports it. `openreading compare DOC --all-ready --format json` therefore wrote a line
+  of English in front of the JSON and stopped parsing at all. Every site now imports `pymupdf`,
+  the same package under the name that stays quiet, and a test refuses the alias tree-wide. The
+  `pymupdf` floor moves to 1.24.3, the release that introduced that name.
+- **`explain` reads a folder run.** A `parse <folder> --strategy X` run is a batch-result holding
+  a response per document, so the orchestration sits one level down. `explain` read only the top
+  level and told the reader "was it a strategy run?" when it was. It now walks the items, names
+  each document, and names the ones that carry no orchestration rather than dropping them.
+- **`compare --from` says why a run kept no candidates.** It used to tell the reader to re-run
+  with `--keep-candidates`, which is usually the flag they already passed. The real cause is a
+  strategy that never branched, and the message now says which case it hit.
+- **`calibrate` refuses a parallel first rung instead of raising KeyError.** A `compare:` or
+  `race:` step compiles to a node that names no single backend, and calibration sweeps one.
+- **`compare <folder> --backends a,b` is usage, not an errno.** It reached the adapter and came
+  back as a raw IsADirectoryError at exit 1. It now exits 2 and prints the way through.
+- **`benchmark --target backend:NAME` checks the name.** It validated the syntax and never the
+  identity, so a typo priced a run that could not exist and exited 0. It now refuses an unknown
+  id by name and lists the known ones, the way every other place a backend id is typed does.
+- **`compare <missing.pdf> --backends a,b` is usage, not an errno.** `parse` refused a mistyped
+  filename at exit 2 with a sentence; fan-out returned a raw `SourceNotFoundError: [Errno 2]` at
+  exit 1.
+- **`--pages` explains the argparse trap it falls into.** `parse --pages 1 doc.pdf` feeds the
+  file to `--pages`, and the error named a private function at the reader.
 
 ### Security
 

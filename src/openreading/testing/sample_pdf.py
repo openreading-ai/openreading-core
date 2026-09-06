@@ -21,7 +21,7 @@ TABLE_BBOX = (72.0, 280.0, 432.0, 392.0)
 def build_sample_pdf() -> bytes:
     """Return the test PDF as bytes. Pages, text and geometry are identical every call. The PDF
     trailer /ID is not, so the bytes and their sha256 differ between calls."""
-    import fitz  # lazy: PyMuPDF is a dev/test dep, not a core dependency
+    import pymupdf as fitz  # lazy: PyMuPDF is a dev/test dep, not a core dependency
 
     doc = fitz.open()
     doc.set_metadata(
@@ -81,7 +81,7 @@ def build_scanned_pdf(pages: int = 2) -> bytes:
     `text_source: none`. Page content is stable across calls, the trailer /ID is not. Uses
     PyMuPDF (a dev/test dep) only to BUILD the fixture — the probe under test reads it with
     pypdf, never pymupdf."""
-    import fitz  # lazy: PyMuPDF is a dev/test dep, not a core dependency
+    import pymupdf as fitz  # lazy: PyMuPDF is a dev/test dep, not a core dependency
 
     doc = fitz.open()
     doc.set_metadata({"title": "OpenReading Scanned Fixture", "creationDate": "D:20260721000000Z"})
@@ -102,7 +102,7 @@ def build_garbled_pdf() -> bytes:
     """A PDF whose text layer is mojibake — selectable-but-garbage (the OCRmyPDF "damaged
     ToUnicode" failure class). The garble composite must score above the 0.3 `garbled: true` cut.
     Page content is stable across calls, the trailer /ID is not."""
-    import fitz  # lazy: PyMuPDF is a dev/test dep, not a core dependency
+    import pymupdf as fitz  # lazy: PyMuPDF is a dev/test dep, not a core dependency
 
     # latin-1 mojibake: runs of accented/symbol chars with no ASCII-vowel words — renders and
     # re-extracts as the same garbage a broken text layer produces. Includes replacement chars.

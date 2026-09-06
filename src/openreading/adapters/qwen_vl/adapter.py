@@ -529,7 +529,8 @@ class QwenVLAdapter(BackendAdapter):
             img = Image.open(BytesIO(data))
             return [(self._data_url(data, d.mime_type or "image/png"), img.width, img.height, 1)]
 
-        import fitz
+        # `pymupdf`, not the `fitz` alias, which prints a deprecation warning to stdout.
+        import pymupdf as fitz
 
         doc = fitz.open(stream=data, filetype="pdf")
         pages = self._selected(doc.page_count, req)

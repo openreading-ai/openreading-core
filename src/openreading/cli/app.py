@@ -66,6 +66,7 @@ from openreading.batch.sources import (
     looks_batch,
     normalize_input_format,
 )
+from openreading.cli.help import cmd_help
 from openreading.credentials import EnvCredentialBroker, load_dotenv
 from openreading.ledger.header import HeaderMismatch
 from openreading.ledger.ports import PayloadExpired
@@ -366,8 +367,19 @@ def _usd(v: float) -> str:
 def _page_number(raw: str) -> int:
     """argparse type for --pages. A page number below 1 is a typo on a 1-based flag, and letting
     it reach the request model turns it into a pydantic dump and exit 1, where every other bad
-    flag value on this CLI is one line and exit 2."""
-    value = int(raw)
+    flag value on this CLI is one line and exit 2.
+
+    The failure this raises for a non-number is the common one, and it is not a typo: `--pages`
+    takes a variable number of values, so `parse --pages 1 doc.pdf` feeds argparse the FILE. The
+    message says that, because argparse's own would name this function at the reader.
+    """
+    try:
+        value = int(raw)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"'{raw}' is not a page number. --pages takes several values, so name FILE before it"
+            " (`parse doc.pdf --pages 1 2`) or close the list with --"
+        ) from None
     if value < 1:
         raise argparse.ArgumentTypeError("page numbers are 1-based")
     return value
@@ -378,7 +390,8 @@ def _cmd_parse_batch(args, overrides: dict, label: str) -> int:
     to stderr; stdout stays the single batch-result JSON. Exit 4 = partial (some items failed)."""
     bkwargs: dict[str, Any] = {**overrides, "config": args.config, "operation": args.operation}
     if getattr(args, "keep_candidates", False):
-        bkwargs["keep_candidates"] = True  # retained per item, so `compare --from` works on a batch
+        # Saved item responses retain alternatives that `compare --from` can read individually.
+        bkwargs["keep_candidates"] = True
     if args.strategy:
         bkwargs["strategy"] = args.strategy
     elif args.no_strategy:
@@ -965,25 +978,9 @@ def cmd_strategy_plan(args) -> int:
     return 0
 
 
-def cmd_explain(args) -> int:
-    """Render a response's orchestration block, or a comparison report, as a human story."""
-    try:
-        doc = _read_json_or_fail(args.response)
-    except _PolicyError as e:
-        print(f"[explain] {e}", file=sys.stderr)
-        return 3
-    if "subjects" in doc and "fields" in doc and "findings" in doc:  # a comparison report
-        from openreading.comparison.render import render_table
-
-        print(render_table(doc))
-        return 0
-    orch = doc.get("orchestration")
-    if not orch:
-        print(
-            "[explain] no orchestration block in this response (was it a strategy run?)",
-            file=sys.stderr,
-        )
-        return 3
+def _render_orchestration(orch: dict) -> None:
+    """One response's orchestration block, as a story. Shared by the single-document path and by
+    the per-item walk a folder run needs."""
     print(
         f"strategy {orch.get('strategy')}  →  {orch.get('chosen_backend')} ({orch.get('outcome')})"
     )
@@ -1027,6 +1024,64 @@ def cmd_explain(args) -> int:
         print(line)
     for d in orch.get("dropped", []):
         print(f"  dropped {d['backend']} (stage {d['stage']}: {d['code']})")
+
+
+def _batch_items(doc: dict) -> list[dict] | None:
+    """The items of a batch-result, or None when `doc` is a single response.
+
+    A `parse <folder>` run is one batch-result holding a response per document, so a strategy's
+    orchestration sits one level down. Reading only the top level told a reader who had just run
+    a strategy over a folder that they had not run one.
+    """
+    items = doc.get("items")
+    return items if isinstance(items, list) and "summary" in doc else None
+
+
+def cmd_explain(args) -> int:
+    """Render a response's orchestration block, or a comparison report, as a human story."""
+    try:
+        doc = _read_json_or_fail(args.response)
+    except _PolicyError as e:
+        print(f"[explain] {e}", file=sys.stderr)
+        return 3
+    if "subjects" in doc and "fields" in doc and "findings" in doc:  # a comparison report
+        from openreading.comparison.render import render_table
+
+        print(render_table(doc))
+        return 0
+
+    items = _batch_items(doc)
+    if items is not None:
+        explained = 0
+        for item in items:
+            where = (item.get("source") or {}).get("relpath") or "?"
+            state = item.get("state")
+            item_orch = ((item.get("response") or {}).get("orchestration")) or None
+            if not item_orch:
+                # A skipped or failed item, or one a named backend ran. Name it either way: a
+                # document missing from the report is the thing a reader cannot ask about.
+                print(f"{where}  ({state}, no orchestration)")
+                continue
+            print(f"{where}")
+            _render_orchestration(item_orch)
+            explained += 1
+        if not explained:
+            print(
+                "[explain] no orchestration in any item of this batch-result (was it a"
+                " --strategy run?)",
+                file=sys.stderr,
+            )
+            return 3
+        return 0
+
+    orch = doc.get("orchestration")
+    if not orch:
+        print(
+            "[explain] no orchestration block in this response (was it a strategy run?)",
+            file=sys.stderr,
+        )
+        return 3
+    _render_orchestration(orch)
     return 0
 
 
@@ -1398,6 +1453,16 @@ def _benchmark_targets(args):
         except ValueError as exc:
             print(f"[benchmark] {exc}", file=sys.stderr)
             return None
+        # `BenchmarkTarget.parse` checks the SYNTAX, and it lives in `openreading.evals`, which
+        # cannot see the adapter registry without the dependency running the wrong way. Identity
+        # is checked here instead, where `compare` and `leaderboard` already check theirs. A typo
+        # otherwise priced a run that could not exist, and said nothing.
+        if target.kind == "backend" and target.name not in BUILTIN_ADAPTERS:
+            print(
+                _unknown_backends_line("benchmark", [target.name], BUILTIN_ADAPTERS),
+                file=sys.stderr,
+            )
+            return None
         if target in targets:
             print(f"[benchmark] ignoring repeated target {target.reference}", file=sys.stderr)
             continue
@@ -1766,11 +1831,27 @@ def cmd_compare(args) -> int:
         except _PolicyError as e:
             print(f"[compare] {e}", file=sys.stderr)
             return 5
-        cands = (doc.get("orchestration") or {}).get("candidates") or []
+        orch = doc.get("orchestration") or {}
+        cands = orch.get("candidates") or []
         if not cands:
+            # The flag cannot retain a response that never completed, such as a cancelled race
+            # loser. Name the input limitation before suggesting another potentially billed run.
+            attempts = len(orch.get("attempts") or [])
+            if is_batch_envelope(doc):
+                why = "this is a batch-result. Pass one item's response saved with parse --save-dir"
+            elif not orch:
+                why = "this response has no orchestration block, so it was not a strategy run"
+            elif attempts <= 1:
+                why = (
+                    f"strategy '{orch.get('strategy')}' resolved on its first rung, so no branch"
+                    " lost and there is nothing to compare against"
+                )
+            else:
+                why = "this run kept no candidates"
             print(
-                "[compare] --from: this response kept no candidates. Re-run "
-                "`parse --strategy <name> --keep-candidates`.",
+                f"[compare] --from: {why}. Candidates require completed parallel alternatives"
+                " and --keep-candidates. Sequential steps retain none. A race can cancel them."
+                " Use a compare: step to wait for alternatives. See openreading help chaining.",
                 file=sys.stderr,
             )
             return 5
@@ -1790,6 +1871,25 @@ def cmd_compare(args) -> int:
             )
             return 2
         doc = args.inputs[0]
+        # Resolve the source once, before any backend runs. Left to the fan-out loop, a mistyped
+        # filename came back from the adapter as a raw `SourceNotFoundError: [Errno 2]` at exit 1,
+        # and a directory as an `IsADirectoryError`. `parse` refuses both at exit 2 with a
+        # sentence, for the reason its own handler records: an errno is not something the reader
+        # who mistyped a path can act on.
+        if not is_url(doc):
+            source = Path(doc)
+            if source.is_dir():
+                print(
+                    f"[compare] fan-out compares ONE document, and '{doc}' is a directory. Parse"
+                    " the folder once per backend and compare the two envelopes:"
+                    f" `openreading parse {doc} --backend A > a.json`, the same for B, then"
+                    " `openreading compare a.json b.json`.",
+                    file=sys.stderr,
+                )
+                return 2
+            if not source.exists():
+                print(f"[compare] cannot read {doc}: no such file or directory", file=sys.stderr)
+                return 2
         if args.all_ready:
             broker = EnvCredentialBroker()
             ids = [
@@ -1943,13 +2043,628 @@ def cmd_compare(args) -> int:
     return 0
 
 
+# --- help text -----------------------------------------------------------------------------
+# One epilog per addressable command, keyed by the path a reader types after `openreading`.
+# Each carries runnable examples, the verb that consumes this verb's output, the exit codes THIS
+# command can actually return, and a pointer to its chapter. Each stays inside one screen: a flag
+# page a reader has to scroll is a flag page a reader stops reading, and the long form already
+# has a home in `openreading help`. Nothing here restates a default that the flag's own `help=`
+# already carries, because two sites for one number is how one of them goes stale.
+EPILOGS = {
+    "parse": """\
+Examples:
+  openreading parse examples/ --backend pymupdf > all.json   # a whole folder
+  openreading parse examples/ --backend pymupdf --jobs 4 --save-dir out/
+  openreading parse 'scans/**/*.png' --backend tesseract     # a glob, quoted
+  openreading parse examples/john_smith_1000_2026_01.pdf --backend pymupdf
+  openreading parse examples/ --no-strategy         # let the router choose
+  openreading parse doc.pdf --strategy fast > run.json   # follow a plan
+
+One file or URL prints one response. A folder, a glob, or two or more
+arguments prints one batch-result over all of them. Unsupported formats are
+skipped in a batch. One file with an unsupported extension exits 3.
+
+Then:
+  openreading compare mu.json te.json --format table   # where they differ
+  openreading explain run.json     # what that --strategy run decided, and why
+
+Exits: 0 ok. 2 usage, or a source that does not exist. 3 cannot run (a
+missing key, a refused feature). 4 batch partial. 1 nothing succeeded, an
+empty folder included. 6 interrupted with OPENREADING_LEDGER armed.
+
+More: openreading help parse, openreading help batch""",
+    "resume": """\
+Examples:
+  export OPENREADING_LEDGER=./.openreading  # arm the journal before you run
+  openreading parse big.pdf --strategy offline_first   # Ctrl-C gives an id
+  openreading resume 7dbf6b71-adb5-4e90-9188-a184fdba9d05 > resumed.json
+  ls $OPENREADING_LEDGER/*.header.json    # find an id nobody wrote down
+
+The journal is the on-disk record of a run's steps. A run is resumable once
+the ledger was armed for it, whether it went on to succeed, was interrupted,
+or crashed. Every step already finished replays from the journal with no
+network call, and only what was never reached runs for real. Only a strategy
+dispatch journals, so a named --backend run writes nothing while looking
+armed. A batch names no single run ID. RUN_ID is the only run option here.
+
+Then:
+  openreading explain resumed.json     # what the finished run decided
+
+Exits: 0 ok. 3 an unknown run id, OPENREADING_LEDGER unset, payloads already
+expired, or a refusal because openreading.yaml changed since the first run.
+1 anything else.
+
+More: openreading help resume, openreading help exit-codes""",
+    "route": """\
+Examples:
+  echo '{"require_baa": true, "no_train_on_data": true}' > phi.json
+  openreading route examples/john_smith_1000_2026_01.pdf --policy phi.json
+  openreading route doc.pdf --policy phi.json --run > out.json
+
+A policy is a JSON object of compliance constraints, and these ten keys are
+the whole grammar. An unknown key is refused by name, at exit 3:
+  require_baa   no_train_on_data   data_region   require_local
+  max_retention   optimize_for   doc_type_hint
+  allow_unverified_compliance   train_optout_confirmed   baa_tier_confirmed
+Nothing widens the set a policy allows. The plan prints as JSON either way,
+naming every dropped backend with the stage and code that dropped it.
+
+Then:
+  openreading backends --check pymupdf   # is the chosen backend answering
+
+Exits: 0 a plan. 4 an empty plan, also with --run. The plan still prints.
+3 an unreadable or invalid policy, an unreadable document, or --run on a plan
+every backend in which failed.
+
+More: openreading help compliance, openreading help backends""",
+    "backends": """\
+Examples:
+  openreading backends                   # what runs here, offline and free
+  openreading backends --check pymupdf   # probe one backend for real
+  openreading backends --check all       # probe every one that has a probe
+  openreading backends --env-file ci.env # resolve keys from a file
+  openreading backends 2>/dev/null | awk '$3=="yes" {print $1}'  # ready ids
+
+Configured means the extra is installed and the keys resolve. It does not
+mean reachable, so a URL pointing at a dead port is still configured. --check
+answers that other question by calling the backend, and it is never implicit,
+because a flag you typed is consent a page load can never be. Read the
+MEASURED column: yes means the backend was called, no means the status was
+inferred with no round trip. A probe is never a billed request.
+
+Then:
+  openreading parse examples/ --backend pymupdf   # run one that is ready
+
+Exits: 0 always, a backend reported unreachable included. 3 an unknown
+--check slug.
+
+More: openreading help backends, openreading help env""",
+    "serve": """\
+Examples:
+  openreading serve                  # http://127.0.0.1:8787, loopback only
+  openreading serve --port 0         # the kernel picks, the line names it
+  openreading serve --host 0.0.0.0   # reachable by others, so read below
+  openreading serve --cors-origin http://localhost:3000  # one browser origin
+
+Authentication is OFF by default. With no OPENREADING_API_KEYS set, anyone who
+reaches this socket spends your vendor credits, which is why the default bind
+is loopback and a --host outside it warns. Set OPENREADING_API_KEYS to a
+comma-separated list of bearer tokens to turn it on. Every endpoint but
+GET /healthz and POST /v1/webhooks/{backend_id} then answers 401 without an
+Authorization: Bearer header. Both auth variables are read once at startup, so
+rotating a token means a restart.
+
+Then:
+  curl -s localhost:8787/healthz   # poll this for readiness, not a log line
+  curl -s localhost:8787/v1/backends       # the backends table, as JSON
+
+Exits: 0 a clean stop. 3 the [server] extra is missing, the port is already
+bound, or either auth variable is malformed. 143 stopped by SIGTERM.
+
+More: openreading help serve   (path roots, token scopes, minting a token)""",
+    "strategy": """\
+Examples:
+  openreading strategy list                   # presets, then your own
+  openreading strategy validate               # check and explain every one
+  openreading strategy show fast --longhand   # the tree Plain compiles to
+
+A minimal openreading.yaml, on two backends that need no key:
+  version: 1
+  strategies:
+    main:
+      try: [pymupdf, tesseract]
+      escalate_when: looks_bad
+
+--config points elsewhere. --env-file goes before the sub-verb, not after.
+
+Then:
+  openreading parse examples/ --strategy fast   # run documents through one
+  openreading explain out.json     # what the finished run actually decided
+
+Exits: 0 ok. 3 no config, an unparseable one, a validate error, an unknown
+name, or a compliance refusal. A warning never fails a validate.
+
+More: openreading help strategy""",
+    "strategy show": """\
+Examples:
+  openreading strategy show fast              # a built-in preset, as written
+  openreading strategy show fast --longhand   # the full tree it compiles to
+  openreading strategy show main --config ci/openreading.yaml
+
+A strategy written in Plain prints as Plain, because that is the file you
+edit. --longhand prints the canonical desugared tree the engine walks, which
+is what you read when a run did something you did not expect. A preset needs
+no config, so this answers on a fresh clone.
+
+Then:
+  openreading strategy plan doc.pdf --strategy fast   # prune it for one doc
+  openreading parse examples/ --strategy fast         # run it
+
+Exits: 0 ok. 3 an unknown name, or an openreading.yaml that will not parse.
+
+More: openreading help strategy""",
+    "strategy list": """\
+Examples:
+  openreading strategy list                     # presets, then your own
+  openreading strategy list --config ci/openreading.yaml
+
+Four presets ship inside the package and need no file: cost_saver, fast,
+max_accuracy, offline_first. Your own strategies come from openreading.yaml,
+and the listing prints the path it read them from, so a surprise entry has an
+address. This verb runs config-free, so it works on a fresh clone.
+
+Then:
+  openreading strategy show fast     # the body of one of them
+  openreading parse examples/ --strategy fast   # run documents through it
+
+Exits: 0 ok. 3 an openreading.yaml that will not parse.
+
+More: openreading help strategy""",
+    "strategy validate": """\
+Examples:
+  openreading strategy validate                    # grammar, then English
+  openreading strategy validate --policy phi.json  # flag unreachable steps
+  openreading strategy validate --config ci/openreading.yaml
+
+You get, per strategy, a dialect badge, the body as you wrote it, a
+plain-English summary, and a glossary of the judgment words it uses. Errors go
+to stderr and warnings to stdout, and a warning never fails the run. Issues
+carry a file and a node path rather than a line number. With --policy, a step
+that policy makes unreachable is flagged before you ever run it.
+
+Then:
+  openreading strategy plan doc.pdf --strategy fast  # prune it for one doc
+  openreading parse examples/ --strategy fast        # run it
+
+Exits: 0 no errors, warnings included. 3 any error, no openreading.yaml
+found, or one that will not parse.
+
+More: openreading help strategy""",
+    "strategy normalize": """\
+Examples:
+  openreading strategy normalize                  # canonical longhand YAML
+  openreading strategy normalize > longhand.yaml  # keep it for review
+  openreading strategy normalize --config ci/openreading.yaml
+
+This is the `docker compose config` analog for strategies. It prints the whole
+file's strategies as the canonical full-grammar YAML the engine compiles them
+to, so two files that behave the same normalize the same. Use it to diff a
+Plain file against a longhand one, or to see what a Plain key expanded into
+before you commit a hand-written tree.
+
+Then:
+  openreading strategy validate      # check the file you started from
+  openreading strategy plan doc.pdf --strategy fast   # prune for one doc
+
+Exits: 0 ok. 3 no openreading.yaml found, or one that will not parse.
+
+More: openreading help strategy""",
+    "strategy plan": """\
+Examples:
+  openreading strategy plan doc.pdf --strategy fast --config openreading.yaml
+  openreading strategy plan doc.pdf --strategy main --policy phi.json
+  openreading strategy plan doc.pdf --strategy fast | jq .dropped
+
+This verb needs an openreading.yaml even to plan a built-in preset, so pass
+--config when yours is not in the working directory.
+
+You get {strategy, config_hash, eligible, dropped[], tree} as JSON and no
+execution at all, which makes this the plan step: see what this document under
+this policy would do before it spends anything. Every dropped backend carries
+the stage and the code that dropped it.
+
+Then:
+  openreading parse doc.pdf --strategy fast    # run the plan you printed
+
+Exits: 0 ok. 3 an unreadable document or policy, an unknown strategy, no
+openreading.yaml found, or a compliance refusal.
+
+More: openreading help strategy, openreading help compliance""",
+    "compare": """\
+Examples:
+  openreading compare a.json b.json --format table   # two saved responses
+  openreading compare doc.pdf --backends pymupdf,tesseract --format diffs
+  openreading compare mu.json te.json --format table    # two folder runs
+  openreading compare --from run.json     # a strategy winner vs its losers
+
+diffs leads with a content verdict, then tables, types and block counts, so
+repackaged text never reads as missing text. When every subject is a
+batch-result from `parse <folder>`, documents pair across runs into a corpus
+report, so name each run after the backend that produced it. Fan-out runs
+serially, so --all-ready cannot stampede a rate limit. --from reads completed
+parallel outputs only. Sequential steps retain none. Races can cancel them.
+Corpus mode refuses --baseline, --truth and --show-agreements.
+
+Then:
+  openreading compare a.json b.json > report.json   # save the delta
+  openreading explain report.json    # the same delta, rendered as a table
+
+Exits: 0 ok. 2 misuse (under two subjects, an unknown fan-out backend,
+--format diff with other than two, mixed subject kinds). 3 a fanned-out
+backend cannot run. 5 a bad envelope, or --from found none. 1 anything else.
+
+More: openreading help compare, openreading help chaining""",
+    "explain": """\
+Examples:
+  openreading parse doc.pdf --strategy fast > run.json
+  openreading explain run.json      # gate by gate, what the run decided
+  openreading compare a.json b.json > report.json
+  openreading explain report.json   # the saved comparison, as a table
+
+You get the strategy, the backend that answered, and each attempt with its
+node, category, duration and cost. Gate rows show observed against threshold
+and whether they fired. Decision points name the decider, and say when one
+resolved to something other than what you configured. This reads one saved
+response and calls nothing, so it is free and offline. A folder run is a
+batch-result, so this reads each item's own response in turn.
+
+Then:
+  openreading replay doc.pdf --trace run.json   # take those decisions again
+  openreading calibrate samples/ --strategy main   # tune a configured cascade
+
+Exits: 0 ok. 3 an unreadable file, or no orchestration anywhere in it, which
+is what a plain --backend run gives you.
+
+More: openreading help explain, openreading help chaining""",
+    "replay": """\
+Examples:
+  openreading parse doc.pdf --strategy main > run.json
+  openreading replay doc.pdf --trace run.json > again.json
+  openreading replay doc.pdf --trace run.json --strategy main
+  openreading replay doc.pdf --trace run.json --policy phi.json
+
+At every decision point this takes the choice the trace logged instead of
+deciding again, so the run is deterministic and consults no LLM. A decision
+the trace does not carry falls back to the engine default. The strategy name
+comes from --strategy or from the trace, and a trace whose config_hash no
+longer matches is refused rather than replayed under a different file.
+
+Then:
+  openreading explain again.json     # confirm it took the same path
+  openreading compare run.json again.json --format diffs   # or where not
+
+Exits: 0 ok. 2 no strategy name in either --strategy or the trace. 3 an
+unreadable document, trace, config or policy, a config_hash mismatch, or a
+compliance refusal.
+
+More: openreading help replay, openreading help exit-codes""",
+    "calibrate": """\
+Examples:
+  openreading calibrate src/openreading/evals/sample --strategy main \\
+    --config openreading.yaml       # the sample dataset that ships here
+  openreading calibrate samples/ --strategy main --target-escalation 0.15
+  openreading calibrate samples/ --strategy main --max-cost-per-doc 0.05
+  openreading calibrate samples/ --strategy main --policy phi.json
+
+This needs an openreading.yaml, because it tunes a strategy you wrote. A gate
+is a threshold your strategy sets for a result it will accept. This
+runs the strategy's first rung over your sample, scores each result, sweeps
+every gated threshold, and prints candidate operating points against the
+targets you named. It proposes an escalate_if: block ready to paste. It never
+rewrites openreading.yaml, because the file you commit is the authority.
+Unlabeled cases are fine and sit out of the agreement number.
+
+Then:
+  openreading strategy validate     # after you paste the recommendation
+  openreading parse examples/ --strategy main   # run with the new gate
+
+Exits: 0 ok. 3 no openreading.yaml, an unreadable dataset or policy, a
+compliance refusal on a case, or a first-rung backend that cannot run.
+
+More: openreading help calibrate, openreading help datasets""",
+    "benchmark": """\
+Examples:
+  openreading benchmark list                # offline, no package needed
+  openreading benchmark show parsebench     # sources, terms, scale
+  openreading benchmark prepare parsebench --preset smoke
+  openreading benchmark estimate parsebench --target backend:pymupdf
+  openreading benchmark run parsebench --target backend:pymupdf
+
+A profile connects one public dataset and its publisher's official scorer to
+OpenReading. A target is one backend or strategy measured on it, written
+backend:NAME or strategy:NAME. run touches two documents unless --limit says
+otherwise, and it prints pages and a dollar range before it spends.
+--env-file goes before the sub-verb, never after it.
+
+Then:
+  openreading benchmark report --format json | jq .   # for a script
+  openreading leaderboard samples/ --backends a,b     # your own documents
+
+Exits: 0 complete. 1 the publisher recorded a failure, scoring included.
+2 an unknown profile, target, preset or document, a missing package, or a run
+you stopped at the spending prompt. 3 a fault outside the publisher run.
+
+More: openreading help benchmark, openreading help cost""",
+    "benchmark list": """\
+Examples:
+  openreading benchmark list                  # every profile, offline
+  openreading benchmark list | grep runnable  # the ones you can run today
+
+Two lanes print. runnable means an official scorer package exists and this CLI
+drives it. cataloged means the profile is described here and not wired up. The
+terms column is the publisher's own dataset terms, and it decides which
+acknowledgement flag a run needs: commercial needs none, research_only needs
+--allow-research-only, unverified needs --allow-unverified-terms. Neither flag
+makes a cataloged profile runnable, and neither says a use is lawful.
+
+Then:
+  openreading benchmark show parsebench   # the detail behind one row
+
+Exits: 0 always. This verb touches no network and needs no extra package.
+
+More: openreading help benchmark""",
+    "benchmark show": """\
+Examples:
+  openreading benchmark show parsebench     # a runnable profile
+  openreading benchmark show extractbench   # the other runnable one
+  openreading benchmark show docile         # a cataloged one
+
+You get the publisher's source links, the data and code licenses and their
+terms URLs, the scorer revision pinned here, the metric dimensions, the
+published document and page counts, and the install extra. Read the two
+license lines before you download anything, because the terms are the
+publisher's and this command only reports them.
+
+Then:
+  openreading benchmark prepare parsebench --preset smoke   # download it
+  openreading benchmark estimate parsebench --target backend:pymupdf
+
+Exits: 0 ok. 2 an unknown benchmark id.
+
+More: openreading help benchmark""",
+    "benchmark prepare": """\
+Examples:
+  openreading benchmark prepare parsebench --preset smoke
+  openreading benchmark prepare parsebench --preset full
+  openreading benchmark prepare parsebench --cache-dir ./bench-cache
+  openreading benchmark prepare parsebench --force    # replace the cache
+
+This runs the publisher's own downloader and writes under the benchmark cache
+directory unless --cache-dir says otherwise. Nothing is scored and no backend
+is called, so this costs network and disk only. An ordinary rerun reuses what
+is already there. --force asks the publisher downloader to replace its cache.
+A runnable profile needs the install extra that `benchmark show` names.
+
+Then:
+  openreading benchmark run parsebench --target backend:pymupdf
+
+Exits: 0 prepared. 2 an unknown or cataloged profile, a bad preset, a missing
+package, a terms acknowledgement you have not given, or a failed download.
+
+More: openreading help benchmark""",
+    "benchmark estimate": """\
+Examples:
+  openreading benchmark estimate parsebench --target backend:pymupdf
+  openreading benchmark estimate parsebench --preset full \\
+    --target backend:pymupdf --target backend:tesseract
+
+You get the published scale and the call count each target implies, with no
+inference and no download. Repeat --target to price several pipelines in one
+pass. This refuses a cataloged profile, because printing its published scale
+would read as a run you could start. The real page count and dollar range come
+from `benchmark run`, which prints them before it spends.
+
+Then:
+  openreading benchmark prepare parsebench --preset smoke
+  openreading benchmark run parsebench --target backend:pymupdf
+
+Exits: 0 ok. 2 an unknown or cataloged profile, a bad target or preset, or a
+terms acknowledgement you have not given.
+
+More: openreading help benchmark, openreading help cost""",
+    "benchmark report": """\
+Examples:
+  openreading benchmark report                        # ./benchmark-results
+  openreading benchmark report --output-dir ./runs/nightly
+  openreading benchmark report --format json | jq .   # for a script
+
+This reprints the comparison a finished run already produced, ranked by the
+publisher's own numbers, and it re-runs nothing and calls nothing. It computes
+no score of its own: it reads the publisher's evaluation report back, so this
+terminal and the publisher's dashboard cannot disagree. openreading-run.json
+beside the artifacts says which pipeline was which target. The run directory
+is named by --output-dir, not by a positional.
+
+Then:
+  openreading benchmark run parsebench --target backend:pymupdf --force
+
+Exits: 0 ok. 2 the artifact directory is missing, unreadable, or holds no
+finished run.
+
+More: openreading help benchmark""",
+    "benchmark run": """\
+Examples:
+  openreading benchmark run parsebench --target backend:pymupdf   # 2 docs
+  openreading benchmark run parsebench --target backend:pymupdf --limit 20
+  openreading benchmark run parsebench --target strategy:main --limit 0 --yes
+  openreading benchmark run parsebench --target backend:pymupdf --force
+
+Two documents run unless you say otherwise, because this spends your money on
+someone else's API. --limit N runs N, --limit 0 runs everything, --doc NAME
+runs the ones you name, and a repeated --target ranks two pipelines in one
+run. Documents are picked round-robin across categories in a stable order, so
+a rerun resumes instead of re-billing. Pages and a dollar range print first.
+Anything unpriced or over a dollar asks, so CI needs --yes.
+
+Then:
+  openreading benchmark report          # the same table, later
+
+Exits: 0 complete. 1 the publisher recorded a failed document, or scoring
+failed. 2 a bad profile, target, preset, --jobs or --doc, a missing package,
+or a run stopped at the prompt. 3 a fault outside the publisher's boundary.
+
+More: openreading help benchmark, openreading help cost""",
+    "rules": """\
+Examples:
+  openreading rules src/openreading/evals/sample   # print what it would add
+  openreading rules mydata --write     # edit the case.json files in place
+  openreading rules mydata --write --force   # replace rules already there
+
+Each string under text_contains becomes a present rule, passed through
+untouched. Each table cell becomes a table rule carrying its right neighbour
+and its column heading, which is what makes it structural rather than a second
+presence check. text, markdown and typed_fields generate nothing, because a
+whole-document string is a similarity measure. Printing is the default,
+because --write rewrites files a person hand-labeled.
+
+Then:
+  openreading leaderboard mydata --backends pymupdf,tesseract
+
+Exits: 0 ok. 3 a dataset directory with no <case>/case.json, or a case.json
+that will not parse.
+
+More: openreading help rules, openreading help datasets""",
+    "help": """\
+Examples:
+  openreading help                # every chapter, grouped by what you want
+  openreading help batch          # folders, globs, and many files at once
+  openreading help chaining       # which verb's output feeds which verb
+  openreading help exit-codes | grep 143     # it is text, so grep it
+
+A chapter is a section of this package's own reference, printed as written.
+Aliases reach the same chapter, so `help folder` and `help glob` both open
+the batch chapter. There is no pager, on purpose: pipe it to one when you
+want one.
+
+Then:
+  openreading COMMAND --help      examples and exit codes for one command
+  python -m pydoc openreading.cli   all of it, in source order
+
+Exits: 0 the index or a chapter. 2 an unknown topic, which prints the index
+on stderr with a suggestion when available. 3 python -OO discarded the manual.
+
+More: openreading help quickstart""",
+    "leaderboard": """\
+Examples:
+  openreading leaderboard src/openreading/evals/sample \\
+    --backends pymupdf,tesseract           # two local backends, no key
+  openreading leaderboard mydata --all-ready       # every ready backend
+  openreading leaderboard mydata --backends a,b --format json > rank.json
+  openreading leaderboard mydata --backends a,b --policy phi.json
+
+Pass one of --backends or --all-ready, and rank at least two. This takes a
+LABELED dataset of <case>/case.json, not a folder of documents, and it runs
+the backends itself. The table prints the dataset's own path and case names
+above the ranking, so a screenshot never reads as a universal verdict. Every
+backend makes a real call per case, so --all-ready over a large dataset is
+cases times backends in billable calls.
+
+Then:
+  openreading compare a.json b.json --format diffs  # why one of them lost
+
+Exits: 0 ok. 2 fewer than two backends, or an unknown id in --backends. 3 an
+unreadable policy, an empty or unresolvable dataset, or a cannot-run fault.
+
+More: openreading help leaderboard, openreading help datasets""",
+}
+
+# argparse renders the description before the subcommand list and the epilog after it. The
+# quickstart goes in the description on purpose: a first-time reader must reach something they
+# can paste inside the first screen, and a thirteen-verb listing pushes an epilog past the fold.
+TOP_DESCRIPTION = """\
+One JSON shape from every document parser, so switching or comparing parsers
+never changes your code.
+
+QUICKSTART. No key or account. Install dependencies first (see the README).
+
+  openreading backends                        # what already runs here
+  F=examples/john_smith_1000_2026_01.pdf
+  openreading parse $F --backend pymupdf > out.json     # one document
+  openreading parse examples/ --backend pymupdf > all.json    # a folder
+  openreading compare $F --backends pymupdf,tesseract --format table
+  # comparison needs the tesseract executable on PATH"""
+
+TOP_EPILOG = """\
+I WANT TO ...                          RUN
+  see what works here, with no keys    openreading backends
+  read one document                    openreading parse FILE --backend SLUG
+  read a folder, a glob, or a list     openreading parse DIR/ --backend SLUG
+  let OpenReading pick the backend     openreading parse FILE --no-strategy
+  follow a plan I wrote down           openreading parse FILE --strategy NAME
+  know which backends a policy allows  openreading route FILE --policy P.json
+  see where two backends disagree      openreading compare A.json B.json
+  know why a run chose what it chose   openreading explain RUN.json
+  rank backends on my labeled dataset  openreading leaderboard DIR --all-ready
+  explore published benchmarks         openreading benchmark list
+  pick a run back up after a stop      openreading resume RUN_ID
+  call this from another language      openreading serve
+
+FOLDERS AND GLOBS, NOT ONLY FILES. Every parse source may be a file, a URL, a
+folder or a quoted glob, and you may pass several at once. One file prints one
+response. Anything else prints one batch-result over every document, with
+--jobs to run them at once and --save-dir to keep each one's own JSON.
+Read `openreading help batch` before you point this at a corpus.
+
+THINGS CHAIN.
+  parse > out.json  ->  compare > report.json  ->  explain report.json
+  route --policy P.json --run  ->  jq .result  ->  compare
+  parse --strategy  ->  explain, replay;  calibrate  ->  strategy validate
+
+LEARN MORE
+  openreading COMMAND --help   # examples and exit codes for one command
+  openreading help             # the manual's topic index
+  openreading help batch       # one chapter of it"""
+
+
+class _HelpFormatter(argparse.HelpFormatter):
+    """Wrap a description, print an epilog exactly as written.
+
+    argparse ships wrap-both (`HelpFormatter`) or raw-both (`RawDescriptionHelpFormatter`), and
+    this CLI needs one of each: a description is a sentence that should reflow to the reader's
+    terminal, and an epilog is a block of commands they are meant to paste, which reflowing
+    destroys. Both arrive through `_fill_text`, so the text itself decides. A block that already
+    carries its own line breaks was laid out on purpose; a single run of words was not.
+    """
+
+    def _fill_text(self, text: str, width: int, indent: str) -> str:
+        if "\n" in text.strip():
+            return "".join(indent + line for line in text.splitlines(keepends=True))
+        return super()._fill_text(text, width, indent)
+
+
+def _attach_epilogs(parser: argparse.ArgumentParser, path: str = "") -> None:
+    """Hang the epilogs on the tree after it is built, so `build_parser` stays a shape and not a
+    wall of prose. `RawDescriptionHelpFormatter` goes on with them: argparse otherwise reflows an
+    example into a paragraph, which turns a command you can paste into a sentence you cannot."""
+    for action in parser._actions:
+        if not isinstance(action, argparse._SubParsersAction):
+            continue
+        for name, sub_parser in action.choices.items():
+            key = f"{path} {name}".strip()
+            if key in EPILOGS:
+                sub_parser.epilog = EPILOGS[key]
+                sub_parser.formatter_class = _HelpFormatter
+            _attach_epilogs(sub_parser, key)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """The argparse tree for every subcommand. `--version` is declared before the required
     subcommand so it answers without one."""
     p = argparse.ArgumentParser(
         prog="openreading",
-        description="OpenReading: one JSON shape from every document parser, so switching or "
-        "comparing parsers never changes your code.",
+        description=TOP_DESCRIPTION,
+        epilog=TOP_EPILOG,
+        formatter_class=_HelpFormatter,
     )
     # Declared before the required subcommand so `openreading --version` answers instead of failing
     # the "command is required" check: step zero of every incident is "what is deployed?", and the
@@ -1965,12 +2680,30 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument(
         "--env-file", default=None, help="path to a .env file (default: ./.env if present)"
     )
-    sub = p.add_subparsers(dest="command", required=True)
+    # A metavar keeps the thirteen verb names out of the usage line, where they pushed the
+    # English off the screen. The choices still gate the value and still print in full on a
+    # bad one.
+    sub = p.add_subparsers(dest="command", required=True, metavar="COMMAND")
+
+    help_p = sub.add_parser(
+        "help",
+        parents=[common],
+        help="print one chapter of the manual, or list the chapters",
+        description="Print the long-form manual on stdout: the topic index with no argument, "
+        "one chapter with a topic name.",
+    )
+    help_p.add_argument(
+        "topic",
+        nargs="?",
+        metavar="TOPIC",
+        help="a topic name (`openreading help` with no topic lists them)",
+    )
+    help_p.set_defaults(func=cmd_help)
 
     parse = sub.add_parser(
         "parse",
         parents=[common],
-        help="parse a document (or a whole directory/glob) with a backend",
+        help="read one document, a folder, a glob, or a list of them",
         description="Read one document, or a folder or glob of them, with one backend or one "
         "strategy, and print JSON on stdout.",
     )
@@ -1978,39 +2711,57 @@ def build_parser() -> argparse.ArgumentParser:
         "files",
         nargs="+",
         metavar="FILE",
-        help="path, http(s):// URL, directory, or glob. A directory, a glob, or two or more "
-        "arguments turns on batch mode, which prints one batch-result JSON over many "
-        "documents. A single file or URL prints one response.",
+        # Lead with the consequence, not with the accepted forms: the reader wants to know which
+        # envelope they get back, and the folder case is the one nobody discovers on their own.
+        help="one file or URL prints one response; a directory, a glob, or two or more "
+        "arguments print one batch-result holding a response per document. A directory "
+        "expands recursively, and a directory holding one file is still a batch-result. "
+        "See `openreading help batch`.",
     )
-    parse.add_argument(
+    # The three selectors are checked at runtime rather than by a mutually exclusive group:
+    # argparse's message names only the pair it caught, and the runtime one names all three.
+    choose = parse.add_argument_group("choosing what runs (exactly one of the first three)")
+    choose.add_argument(
         "--backend",
         default=None,
         choices=sorted(BUILTIN_ADAPTERS),
         # The choices still gate the value and still print in full on an invalid one; the metavar
         # only keeps fifteen slugs out of the usage line, where they buried the English.
         metavar="SLUG",
-        help="run one named backend, exactly one of --backend, --strategy or --no-strategy "
-        "(`openreading backends` lists the ids)",
+        help="run one named backend (`openreading backends` lists the ids)",
     )
-    parse.add_argument(
+    choose.add_argument(
         "--strategy",
         default=None,
+        metavar="NAME",
         help="run a strategy from openreading.yaml, or a built-in preset "
         "(`openreading strategy list` prints both)",
     )
-    parse.add_argument(
+    choose.add_argument(
         "--no-strategy",
         action="store_true",
         help="force the router's auto choice, ignoring defaults.strategy",
     )
-    parse.add_argument("--config", default=None, help="path to an openreading.yaml")
-    parse.add_argument(
-        "--operation", default=None, help="backend sub-operation (e.g. AnalyzeLending)"
+    choose.add_argument(
+        "--config", default=None, metavar="PATH", help="path to an openreading.yaml"
     )
-    parse.add_argument(
-        "--pages", type=_page_number, nargs="*", default=None, help="1-based page numbers"
+    ask = parse.add_argument_group("what to ask the backend for")
+    ask.add_argument(
+        "--pages",
+        type=_page_number,
+        nargs="*",
+        default=None,
+        metavar="N",
+        help="1-based page numbers. This takes a variable number of values, so name FILE "
+        "before it or close the list with --",
     )
-    parse.add_argument(
+    ask.add_argument(
+        "--operation",
+        default=None,
+        metavar="OP",
+        help="backend sub-operation (e.g. AnalyzeLending)",
+    )
+    ask.add_argument(
         "--extract",
         nargs="?",
         const="",
@@ -2018,48 +2769,67 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="INSTRUCTIONS",
         help="request schema-driven field extraction. A named backend that cannot do it "
         "refuses the run and exits 3 (unsupported_feature, nothing on stdout) rather than "
-        "silently dropping the ask",
+        "silently dropping the ask. Takes an optional value, so name FILE before it",
     )
-    parse.add_argument(
-        "--keep-candidates",
-        action="store_true",
-        help="retain every strategy branch's output under orchestration.candidates[] "
-        "(for `compare --from`); off by default, no effect on a direct backend run",
+    # The group title names the input FORM that switches modes, because a reader with one file
+    # needs to know at a glance that this whole block is not about their run.
+    many = parse.add_argument_group(
+        "many documents (a directory, a glob, or two or more FILE arguments)"
     )
-    parse.add_argument(
-        "--jobs", type=int, default=1, help="batch: concurrent workers (default 1, serial)"
+    many.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        metavar="N",
+        help="run this many documents at once. Default 1, which is serial, deterministic and "
+        "safe against a vendor rate limit. Concurrency changes how long a folder takes and "
+        "never what it costs",
     )
-    parse.add_argument(
+    many.add_argument(
         "--max-jobs",
         type=int,
         default=MAX_BATCH_JOBS,
         dest="max_jobs",
-        help=f"batch: ceiling on --jobs (default {MAX_BATCH_JOBS}); non-positive --jobs clamps "
-        "to 1, above this exits 2",
+        metavar="N",
+        help=f"ceiling on --jobs (default {MAX_BATCH_JOBS}); a non-positive --jobs clamps to 1, "
+        "and one above this ceiling exits 2",
     )
-    parse.add_argument(
+    many.add_argument(
         "--max-items",
         type=int,
         default=DEFAULT_MAX_ITEMS,
         dest="max_items",
-        help=f"batch: hard cap on expanded files (default {DEFAULT_MAX_ITEMS})",
+        metavar="N",
+        help=f"hard cap on expanded files (default {DEFAULT_MAX_ITEMS}); exceeding it exits 2 "
+        "before anything runs",
     )
-    parse.add_argument(
+    many.add_argument(
+        "--save-dir",
+        default=None,
+        dest="save_dir",
+        metavar="DIR",
+        help="also write each succeeded item's own response to DIR/<relpath>.json, which is "
+        "what `compare` reads",
+    )
+    budget = parse.add_argument_group("time and payload")
+    budget.add_argument(
         "--deadline",
         type=float,
         default=None,
         dest="deadline_s",
+        metavar="SECONDS",
         help="absolute time budget override, in seconds. It applies to a single document "
         "run with --backend NAME, and to a batch a backend runs natively. It has no "
         "effect on `auto` or `--strategy` dispatch, which manage their own time budget. "
-        "A value of 0 or less means fail fast, so nothing waits. See `uv run python -m "
-        "pydoc openreading.cli` for the per-dispatch defaults.",
+        "A value of 0 or less means fail fast, so nothing waits. `openreading help parse` "
+        "has the per-dispatch defaults",
     )
-    parse.add_argument(
-        "--save-dir",
-        default=None,
-        dest="save_dir",
-        help="batch: also write each succeeded item's response to <dir>/<relpath>.json",
+    budget.add_argument(
+        "--keep-candidates",
+        action="store_true",
+        help="retain completed parallel alternatives under orchestration.candidates[] for "
+        "`compare --from`. Sequential steps retain none. A race can cancel its alternatives. "
+        "Off by default, and no effect on a direct backend run",
     )
     parse.set_defaults(func=cmd_parse)
 
@@ -2067,7 +2837,7 @@ def build_parser() -> argparse.ArgumentParser:
         "resume",
         parents=[common],
         help="resume an interrupted/failed run from its ledger journal "
-        "(see `uv run python -m pydoc openreading.ledger`)",
+        "(`openreading help resume` explains the journal)",
         description="Continue an interrupted run from its ledger journal, skipping the steps "
         "that already finished.",
     )
@@ -2091,8 +2861,8 @@ def build_parser() -> argparse.ArgumentParser:
     route.add_argument(
         "--policy",
         required=True,
-        help="path to a policy.json of compliance constraints. The same keys go under "
-        "`compliance` in an HTTP request body and under `policy=` in openreading.run.",
+        help="path to a policy.json of compliance constraints and deployment confirmations. "
+        "See `openreading help compliance` for the keys and their meaning.",
     )
     route.add_argument(
         "--run",
@@ -2125,30 +2895,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     backends.set_defaults(func=cmd_backends)
 
-    # The epilog names the auth mechanism because this is the last page an operator reads before
-    # a key-holding process starts listening. Help text that mentions authentication nowhere reads
-    # as a server that has none, and the operator binds it wide open.
-    serve_epilog = (
-        "Authentication is OFF by default. With no OPENREADING_API_KEYS set, anyone who can\n"
-        "reach this server spends your vendor credits, which is why the default bind is\n"
-        "127.0.0.1 and a --host outside loopback warns.\n"
-        "\n"
-        "A request may not name a local file by path unless OPENREADING_SERVER_PATH_ROOT\n"
-        "is set to a directory. With it set, document.path may resolve beneath that\n"
-        "directory and nowhere else. Without it, send bytes_base64 or url.\n"
-        "\n"
-        "Set OPENREADING_API_KEYS to a comma-separated list of bearer tokens to turn auth on.\n"
-        "Every endpoint but GET /healthz and POST /v1/webhooks/{backend_id} then requires an\n"
-        "Authorization: Bearer <token> header and answers 401 without one. Mint a token with\n"
-        "python -c 'import secrets; print(secrets.token_urlsafe(32))'.\n"
-        "\n"
-        "OPENREADING_API_KEY_SCOPES (token=backend1|backend2, comma-separated) narrows one\n"
-        "token to an allow-list of backends. A token absent from it is unscoped and reaches\n"
-        "every backend. Both variables are environment only and are read once at startup, so\n"
-        "rotating a token means restarting the server.\n"
-        "\n"
-        "Full guide: uv run python -m pydoc openreading.server"
-    )
     serve = sub.add_parser(
         "serve",
         parents=[common],
@@ -2157,8 +2903,6 @@ def build_parser() -> argparse.ArgumentParser:
             "Run the HTTP API on your own machine, so a client in another language gets\n"
             "the same shapes the CLI prints."
         ),
-        epilog=serve_epilog,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     serve.add_argument("--host", default="127.0.0.1", help="bind address (default 127.0.0.1)")
     serve.add_argument("--port", type=int, default=8787, help="port (default 8787)")
@@ -2187,37 +2931,20 @@ def build_parser() -> argparse.ArgumentParser:
         "  (disagree is compare-only).  auto = the best remaining backend, usable as a try rung\n"
         "  or a then: target."
     )
-    strategy_epilog = (
-        "Examples:\n"
-        "  openreading strategy validate                    # check + explain every strategy\n"
-        "  openreading strategy list                        # presets + your strategies\n"
-        "  openreading strategy show contracts --longhand   # the full tree Plain compiles to\n"
-        "  openreading parse doc.pdf --strategy contracts   # run a document through one\n"
-        "\n"
-        "A minimal openreading.yaml:\n"
-        "  version: 1\n"
-        "  strategies:\n"
-        "    main:\n"
-        "      try: [pymupdf, docling, reducto]\n"
-        "      escalate_when: looks_bad\n"
-        "    contracts:\n"
-        "      compare: [docling, aws-textract]\n"
-        "      then: reducto\n"
-        "\n"
-        "Commands find ./openreading.yaml automatically; use --config PATH to point elsewhere.\n"
-        "Full guide: uv run python -m pydoc openreading.strategies.plain"
-    )
     strategy = sub.add_parser(
         "strategy",
         parents=[common],
         help="inspect openreading.yaml strategies",
         description=strategy_desc,
-        epilog=strategy_epilog,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     strat_sub = strategy.add_subparsers(dest="strategy_command", required=True)
 
-    st_show = strat_sub.add_parser("show", help="dump a strategy or preset (body as written)")
+    st_show = strat_sub.add_parser(
+        "show",
+        help="dump a strategy or preset (body as written)",
+        description="Print one strategy's body exactly as it is written, or the canonical "
+        "longhand tree the engine compiles it to.",
+    )
     st_show.add_argument("name", help="strategy or built-in preset name")
     st_show.add_argument("--config", default=None, help="path to an openreading.yaml")
     st_show.add_argument(
@@ -2225,12 +2952,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     st_show.set_defaults(func=cmd_strategy_show)
 
-    st_list = strat_sub.add_parser("list", help="list built-in presets and configured strategies")
+    st_list = strat_sub.add_parser(
+        "list",
+        help="list built-in presets and configured strategies",
+        description="List the presets that ship inside the package, then the strategies your "
+        "openreading.yaml defines, with the path they came from.",
+    )
     st_list.add_argument("--config", default=None, help="path to an openreading.yaml")
     st_list.set_defaults(func=cmd_strategy_list)
 
     st_val = strat_sub.add_parser(
-        "validate", help="check + explain every strategy in plain English"
+        "validate",
+        help="check + explain every strategy in plain English",
+        description="Check every strategy in the config against the grammar and against the "
+        "world it runs in, then explain each one in plain English.",
     )
     st_val.add_argument("--config", default=None, help="path to an openreading.yaml")
     st_val.add_argument(
@@ -2240,11 +2975,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     st_val.set_defaults(func=cmd_strategy_validate)
 
-    st_norm = strat_sub.add_parser("normalize", help="print the config's strategies as longhand")
+    st_norm = strat_sub.add_parser(
+        "normalize",
+        help="print the config's strategies as longhand",
+        description="Print every strategy in the config as the canonical full-grammar YAML the "
+        "engine compiles it to, so two files that behave the same look the same.",
+    )
     st_norm.add_argument("--config", default=None, help="path to an openreading.yaml")
     st_norm.set_defaults(func=cmd_strategy_normalize)
 
-    st_plan = strat_sub.add_parser("plan", help="pruned tree for a document (no execution)")
+    st_plan = strat_sub.add_parser(
+        "plan",
+        help="pruned tree for a document (no execution)",
+        description="Print the pruned tree this document would walk under this policy, and "
+        "execute none of it.",
+    )
     st_plan.add_argument("file", help="path or http(s):// URL")
     st_plan.add_argument("--strategy", required=True, help="strategy or preset name")
     st_plan.add_argument("--config", default=None, help="path to an openreading.yaml")
@@ -2264,55 +3009,74 @@ def build_parser() -> argparse.ArgumentParser:
         "inputs",
         nargs="*",
         default=[],
-        help="two or more response JSON files, or one document with --backends (omit with --from)",
+        metavar="SUBJECT",
+        help="two or more response or batch-result JSON files, or one document with --backends. "
+        "Omit with --from",
     )
-    compare.add_argument(
+    pick = compare.add_argument_group("picking the subjects (files, or one of these)")
+    pick.add_argument(
+        "--backends",
+        default=None,
+        metavar="A,B",
+        help="comma-separated backend ids to fan out over one document. Fan-out is serial, so "
+        "it cannot stampede a rate limit, and each backend is a full billed run",
+    )
+    pick.add_argument("--all-ready", action="store_true", help="fan out over every ready backend")
+    pick.add_argument(
         "--from",
         dest="from_response",
         default=None,
+        metavar="RUN.json",
         help="a saved strategy response (run parse with --keep-candidates): compare its winner "
-        "against the retained orchestration.candidates[]",
+        "against completed parallel alternatives in orchestration.candidates[]. Sequential "
+        "steps retain none. A race can cancel its alternatives. For a batch, pass one item's "
+        "response written by parse --save-dir",
     )
-    compare.add_argument(
-        "--backends", default=None, help="comma-separated backend ids to fan out over one document"
-    )
-    compare.add_argument(
-        "--all-ready", action="store_true", help="fan out over every ready backend"
-    )
-    compare.add_argument(
-        "--save-dir", default=None, help="write each fan-out response into this directory"
-    )
-    compare.add_argument(
-        "--format",
-        choices=["json", "table", "diff", "diffs", "md"],
-        default="json",
-        help="json | table | diff (2-way git-style text diff) | diffs (N-way content deltas "
-        "plus payload diff) | md. default: json",
-    )
-    compare.add_argument(
-        "--show-agreements",
-        action="store_true",
-        help="in human formats, also list agreeing fields (hidden by default)",
-    )
-    compare.add_argument(
-        "--baseline",
+    pick.add_argument(
+        "--save-dir",
         default=None,
-        help="sign deltas against this subject (a label, or a response JSON added as a subject)",
+        metavar="DIR",
+        help="write each fan-out response into this directory, one file per backend",
     )
-    compare.add_argument(
-        "--truth",
-        default=None,
-        help="score each subject against a golden.json (evals `expected` shape)",
-    )
-    compare.add_argument(
+    pick.add_argument(
         "--deadline",
         type=float,
         default=None,
         dest="deadline_s",
+        metavar="SECONDS",
         help="absolute time budget override, in seconds, applied to every fanned-out backend. "
         "Raise it for a long-running hosted async job. Default, when omitted, is "
         "the generic 120s single-document deadline. A non-positive value (0 or negative) means "
         "fail fast: do not wait at all",
+    )
+    show = compare.add_argument_group("how it prints")
+    show.add_argument(
+        "--format",
+        choices=["json", "table", "diff", "diffs", "md"],
+        default="json",
+        help="json (default) | table | diff (a 2-way git-style text diff, exactly 2 subjects) | "
+        "diffs (content, tables, types and block counts, any number of subjects) | md",
+    )
+    show.add_argument(
+        "--show-agreements",
+        action="store_true",
+        help="also list agreeing fields in table/md formats (hidden by default). "
+        "Single-response subjects only; refused for corpus comparisons",
+    )
+    show.add_argument(
+        "--baseline",
+        default=None,
+        metavar="SUBJECT",
+        help="sign deltas against a subjects[].label (normally backend.id), or add a response "
+        "JSON as a new baseline subject. Single-response subjects only; refused for corpus",
+    )
+    score = compare.add_argument_group("scoring against a golden")
+    score.add_argument(
+        "--truth",
+        default=None,
+        metavar="GOLDEN.json",
+        help="score each subject against a golden.json containing the evals expected object. "
+        "Single-response subjects only; refused for corpus. See `openreading help datasets`",
     )
     compare.set_defaults(func=cmd_compare)
 
@@ -2323,7 +3087,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="Print what a saved strategy run did, gate by gate, or render a saved "
         "comparison report.",
     )
-    explain.add_argument("response", help="path to a saved response or comparison-report JSON")
+    explain.add_argument(
+        "response",
+        help="path to a saved response, batch-result or comparison-report JSON. "
+        "Corpus comparison reports are not supported",
+    )
     explain.set_defaults(func=cmd_explain)
 
     replay = sub.add_parser(
@@ -2382,12 +3150,18 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_sub = benchmark.add_subparsers(dest="benchmark_command", required=True)
 
     benchmark_list = benchmark_sub.add_parser(
-        "list", help="list supported and cataloged public benchmarks without network access"
+        "list",
+        help="list supported and cataloged public benchmarks without network access",
+        description="List every benchmark profile this package knows, and say which ones it can "
+        "actually run. Touches no network.",
     )
     benchmark_list.set_defaults(func=cmd_benchmark_list)
 
     benchmark_show = benchmark_sub.add_parser(
-        "show", help="show source links, terms, scale, dimensions, and installation needs"
+        "show",
+        help="show source links, terms, scale, dimensions, and installation needs",
+        description="Show one benchmark's publisher links, licenses and terms, pinned scorer "
+        "revision, metric dimensions, published scale, and the install extra it needs.",
     )
     benchmark_show.add_argument("benchmark", help="benchmark identifier from `benchmark list`")
     benchmark_show.set_defaults(func=cmd_benchmark_show)
@@ -2419,7 +3193,10 @@ def build_parser() -> argparse.ArgumentParser:
         )
 
     benchmark_prepare = benchmark_sub.add_parser(
-        "prepare", help="download a runnable dataset through its publisher package"
+        "prepare",
+        help="download a runnable dataset through its publisher package",
+        description="Download one benchmark's dataset through the publisher's own downloader. "
+        "Nothing is scored and no backend is called.",
     )
     add_benchmark_selection(benchmark_prepare)
     benchmark_prepare.add_argument(
@@ -2434,13 +3211,19 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_prepare.set_defaults(func=cmd_benchmark_prepare)
 
     benchmark_estimate = benchmark_sub.add_parser(
-        "estimate", help="show published scale and target-call counts without inference"
+        "estimate",
+        help="show published scale and target-call counts without inference",
+        description="Show the published scale and the number of calls each target implies, with "
+        "no download and no inference.",
     )
     add_benchmark_selection(benchmark_estimate, targets=True)
     benchmark_estimate.set_defaults(func=cmd_benchmark_estimate)
 
     benchmark_report = benchmark_sub.add_parser(
-        "report", help="print the comparison from a finished run, without re-running it"
+        "report",
+        help="print the comparison from a finished run, without re-running it",
+        description="Reprint the comparison a finished run already produced, reading the "
+        "publisher's own evaluation report back. Re-runs nothing and computes no score.",
     )
     benchmark_report.add_argument(
         "--output-dir",
@@ -2454,7 +3237,11 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_report.set_defaults(func=cmd_benchmark_report)
 
     benchmark_run = benchmark_sub.add_parser(
-        "run", help="prepare, run OpenReading targets, and invoke the official scorer"
+        "run",
+        help="prepare, run OpenReading targets, and invoke the official scorer",
+        description="Prepare the dataset, run each target over it, and score the results with "
+        "the publisher's official scorer. This spends money, so it runs two documents by "
+        "default and prints pages and a dollar range before it starts.",
     )
     add_benchmark_selection(benchmark_run, targets=True)
     benchmark_run.add_argument(
@@ -2475,7 +3262,8 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_run.add_argument(
         "--yes",
         action="store_true",
-        help="skip the spending confirmation. Required when no terminal is attached.",
+        help="skip the spending confirmation for unpriced or over-$1 runs. "
+        "Those runs require this flag when no terminal is attached.",
     )
     benchmark_run.add_argument("--config", default=None, help="strategy openreading.yaml path")
     benchmark_run.add_argument(
@@ -2529,18 +3317,34 @@ def build_parser() -> argparse.ArgumentParser:
         "produced each score.",
     )
     leaderboard.add_argument(
-        "dataset", help="a dataset dir of */case.json documents (evals.dataset shape)"
+        "dataset",
+        metavar="DATASET",
+        # Naming the shape here is what stops a reader pointing this at the folder of documents
+        # they just parsed. It takes labels; `compare` is the verb that needs none.
+        help="a LABELED dataset dir of <case>/case.json documents (evals.dataset shape), not a "
+        "folder of documents",
     )
-    leaderboard.add_argument(
-        "--backends", default=None, help="comma-separated backend ids to rank (>=2)"
+    # `required=True` on a mutually exclusive group would state the choice rule and lose the
+    # arity rule, and "rank at least two" is the half people get wrong.
+    which = leaderboard.add_argument_group("which backends to rank (one of these is required)")
+    which.add_argument(
+        "--backends",
+        default=None,
+        metavar="A,B",
+        help="comma-separated backend ids to rank, at least two. Every backend makes a real call "
+        "per case, so this is cases times backends in billable calls",
     )
-    leaderboard.add_argument(
+    which.add_argument(
         "--all-ready", action="store_true", help="rank every backend the environment is ready for"
     )
-    leaderboard.add_argument(
-        "--policy", default=None, help="path to a policy.json of compliance constraints"
+    how = leaderboard.add_argument_group("how it runs and prints")
+    how.add_argument(
+        "--policy",
+        default=None,
+        metavar="PATH",
+        help="path to a policy.json of compliance constraints",
     )
-    leaderboard.add_argument(
+    how.add_argument(
         "--format",
         choices=["table", "json"],
         default="table",
@@ -2548,6 +3352,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     leaderboard.set_defaults(func=cmd_leaderboard)
 
+    _attach_epilogs(p)
     return p
 
 

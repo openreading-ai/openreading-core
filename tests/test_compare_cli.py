@@ -201,3 +201,51 @@ def test_explain_renders_comparison_report(tmp_path, capsys) -> None:
     rc = main(["explain", str(rpath)])
     assert rc == 0
     assert "COMPARE" in capsys.readouterr().out
+
+
+def test_compare_fanout_over_a_directory_is_usage_not_an_errno(tmp_path, capsys):
+    """`parse <folder>` works, so a reader tries `compare <folder> --backends a,b` next. It used
+    to reach the adapter and come back as a raw IsADirectoryError at exit 1, naming an errno
+    rather than the way through."""
+    (tmp_path / "docs").mkdir()
+    rc = main(["compare", str(tmp_path / "docs"), "--backends", "pymupdf,tesseract"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "is a directory" in err
+    assert "openreading compare a.json b.json" in err  # the way through, not just the refusal
+
+
+def test_compare_fanout_on_a_missing_document_is_usage_not_an_errno(tmp_path, capsys):
+    """`parse` refuses a mistyped filename at exit 2 with a sentence, and the reason is in a
+    comment there: `str(e)` on an OSError leads with an `[Errno 2]` the reader cannot use. Fan-out
+    never got that handler, so the same typo came back as a raw SourceNotFoundError at exit 1."""
+    rc = main(["compare", str(tmp_path / "nope.pdf"), "--backends", "pymupdf,tesseract"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "nope.pdf" in err
+    assert "Errno" not in err
+    assert "no such file or directory" in err
+
+
+def test_compare_from_cancelled_race_explains_missing_candidates(tmp_path, capsys):
+    response = make_envelope("pymupdf")
+    response["orchestration"] = {
+        "strategy": "fast",
+        "attempts": [
+            {"backend": "pymupdf", "category": "succeeded"},
+            {"backend": "tesseract", "category": "raced_lost", "detail": "cancelled"},
+        ],
+    }
+    path = tmp_path / "run.json"
+    path.write_text(json.dumps(response))
+    assert main(["compare", "--from", str(path)]) == 5
+    err = capsys.readouterr().err
+    assert "cancel" in err and "completed" in err and "openreading help chaining" in err
+
+
+def test_compare_from_batch_points_to_saved_item_responses(tmp_path, capsys):
+    path = tmp_path / "batch.json"
+    path.write_text(json.dumps({"items": [], "summary": {}, "status": {"state": "failed"}}))
+    assert main(["compare", "--from", str(path)]) == 5
+    err = capsys.readouterr().err
+    assert "batch-result" in err and "--save-dir" in err
