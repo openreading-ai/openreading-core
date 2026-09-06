@@ -91,7 +91,8 @@ on the direct path (`credentials_ref` indirection only). Any key matching a cred
 a `strategy validate` error (`validate._scan_secrets`) — the schema's open sub-trees (`policy`,
 `with.*`) do not lock it down, so such a file still parses (§9). Under `with.*` it then runs;
 under `policy:` it does not, because a secret-looking key is also an unknown policy key and
-`prune._validated_policy` refuses the whole block before any of it becomes a constraint.
+`openreading.config` refuses the whole block where the file is read, before any of it becomes a
+constraint.
 
 1.2 Discovery order (first hit wins; sources are never merged)
 --------------------------------------------------------------
@@ -140,7 +141,7 @@ on regions, and the request is the more specific choice); deployment keys map to
 (`allow_unverified_compliance` ORs; `train_optout_confirmed` / `baa_tier_confirmed` union). The
 effective compliance is what prunes the tree AND what the route `compliance` facts read.
 
-The block is refused whole (`api.PolicyError`, via `prune._validated_policy`) if it names a key
+The block is refused whole (`ConfigError`, from `openreading.config.load`) if it names a key
 outside `api.POLICY_KEYS` or gives one the wrong type. The schema declares this sub-object
 `additionalProperties: true`, so that check is the only thing standing between a typo and a run
 with no constraint: `require_locall` used to be dropped in silence, and a quoted

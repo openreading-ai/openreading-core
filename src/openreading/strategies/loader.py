@@ -1,44 +1,23 @@
-"""Discover, parse, and validate an `openreading.yaml` strategy file.
+"""Turn one loaded `openreading.yaml` into the `StrategyConfig` the engine walks.
 
-Discovery order (first hit wins; sources are NEVER merged):
-  1. an explicit path — CLI `--config PATH`, Python `openreading.run(config=...)`;
-  2. the `OPENREADING_CONFIG` environment variable;
-  3. `./openreading.yaml` (or `./openreading.yml`) in the working directory — CLI and Python
-     API only.
+Discovery, reading, schema validation and the `policy:` block belong to `openreading.config`,
+which every surface calls whether or not a strategy is involved. This module owns what is left:
+the Plain-dialect desugar, the model build, and the provenance a trace carries. `load_config()`
+is the one-call spelling for callers that want both halves, and it returns `None` when
+`openreading.config.load()` finds no file — the caller then takes exactly the legacy code path
+and the strategy layer never engages. A found-but-broken file raises `ConfigError`, re-exported
+here so existing imports hold.
 
-`discover()` takes `allow_cwd`; the server (`openreading serve`) passes `False` and MUST NOT sniff
-its working directory — a stray file could otherwise change a long-running service — which makes
-`OPENREADING_CONFIG` the only non-flag way to load a strategy file under the server (same posture
-as the env-only `RouterConfig`). When nothing is found anywhere, `load_config()` returns `None`,
-the caller takes exactly the legacy code path, and the strategy layer never engages ("no file ⇒
-no change"; `openreading.api` imports this module lazily and only for `auto` / `strategy:`
-requests, so a named-backend run never imports the strategy package at all). A found-but-broken
-file — an explicit path that does not exist, an env var that does not point at a file, malformed
-YAML, an empty or non-mapping document, a grammar violation, a Plain-dialect desugar error —
-raises `ConfigError`: an explicitly requested config that cannot load is an error, never a silent
-fall-through to the old behaviour.
+Desugar (`openreading.strategies.plain`) rewrites the Plain dialect to the canonical five-node
+longhand, so everything downstream sees one tree. Errors locate by node path
+(`strategies.cheap.steps[0].escalate_if`), not line number: `yaml.safe_load` discards source
+marks, and a mark-preserving loader was judged not worth it (D-v3-8).
 
-Environment:
-- `OPENREADING_CONFIG` — explicit path to the strategy file (precedence step 2). Unset — or
-  set to the EMPTY string, which `discover()` treats as unset (`if env:`): fall through to the
-  cwd probe where allowed, else no config and no strategy layer. Set non-empty but not a file:
-  `ConfigError`.
-
-Parsing (`parse_config_raw`) uses `yaml.safe_load` only (D-v3-1), so a config file can never
-construct arbitrary Python objects, and a `!!python/object/apply` tag raises `ConfigError`.
-`pyyaml` (MIT) is imported lazily, so the no-config path never pays for the import.
-The raw mapping is then validated against the vendored `strategy-config` JSON Schema
-(`openreading.schemas`, the strict grammar authority — it also rejects retry knobs, which the
-strategy layer must never grow), desugared from the Plain dialect to the canonical five-node
-longhand (`openreading.strategies.plain`) so everything downstream sees one tree, and built into
-a `StrategyConfig` (`openreading.strategies.model`). Errors locate by node path
-(`strategies.cheap.steps[0].escalate_if`), not line number: `safe_load` discards source marks,
-and a mark-preserving loader was judged not worth it (D-v3-8).
-
-`LoadedConfig` carries provenance: `path`, `source_hash` (sha256 of the file TEXT — distinct
-from the compliance-aware normalized-tree `config_hash` the engine stamps on
-`orchestration.config_hash`), the schema-valid `raw` dict (validate scans it for secrets), and
-`plain_info` (per-strategy Plain classification for `explain`).
+`LoadedConfig` carries provenance: `path` (`None` for a dict passed to `config.load`),
+`source_hash` (sha256 of the file TEXT — distinct from the compliance-aware normalized-tree
+`config_hash` the engine stamps on `orchestration.config_hash`), the schema-valid `raw` dict
+(validate scans it for secrets), and `plain_info` (per-strategy Plain classification for
+`explain`).
 
 Wire prefix (D-v3-2): `backend.id: "strategy:<name>"` is a documented reserved prefix of the
 free-string `backend.id` — no request-schema bump. `strip_strategy_prefix` is the recognizer
@@ -63,24 +42,28 @@ Execution semantics of a loaded tree live in `openreading.strategies.engine`.
 
 from __future__ import annotations
 
-import hashlib
-import io
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from openreading import schemas
+from openreading.config import ConfigError, LoadedFile, load, parse
 from openreading.strategies.model import RawNode, StrategyConfig
 
 STRATEGY_PREFIX = "strategy:"
-_ENV_VAR = "OPENREADING_CONFIG"
-_DEFAULT_FILENAME = "openreading.yaml"
-_ALT_FILENAME = "openreading.yml"
 
-
-class ConfigError(ValueError):
-    """A strategy file that cannot be loaded: not found (explicit path), unparseable, or invalid
-    against the grammar. Carries a human-readable message that locates the problem."""
+# Re-exported so `from openreading.strategies.loader import ConfigError` keeps working; the class
+# itself lives in `openreading.config`, which raises it.
+__all__ = [
+    "STRATEGY_PREFIX",
+    "ConfigError",
+    "LoadedConfig",
+    "build_config",
+    "load_config",
+    "parse_config",
+    "parse_config_raw",
+    "resolve_strategy",
+    "strip_strategy_prefix",
+]
 
 
 @dataclass(frozen=True)
@@ -88,36 +71,12 @@ class LoadedConfig:
     """A successfully loaded config plus provenance for the trace/debug surfaces."""
 
     config: StrategyConfig
-    path: Path
+    path: Path | None  # None when the caller passed a dict rather than a path
     source_hash: str  # sha256 of the file text; the NORMALIZED-tree config_hash arrives in 11.2
     raw: dict  # the schema-valid dict, before model construction (validate scans it for secrets)
     # per-strategy Plain-dialect classification + gate provenance (internal/design/simple-strategies.md
     # §9). Empty for files with no `strategies:`; every strategy is classified otherwise.
     plain_info: dict = field(default_factory=dict)
-
-
-def discover(
-    explicit: str | os.PathLike[str] | None = None, *, allow_cwd: bool = True
-) -> Path | None:
-    """Return the config path per the discovery order, or None. `allow_cwd=False` (the server)
-    skips the working-directory probe so a stray file can never change a long-running service."""
-    if explicit is not None:
-        p = Path(explicit)
-        if not p.is_file():
-            raise ConfigError(f"config file not found: {p}")
-        return p
-    env = os.environ.get(_ENV_VAR)
-    if env:
-        p = Path(env)
-        if not p.is_file():
-            raise ConfigError(f"{_ENV_VAR}={env} does not point at a file")
-        return p
-    if allow_cwd:
-        for name in (_DEFAULT_FILENAME, _ALT_FILENAME):
-            p = Path.cwd() / name
-            if p.is_file():
-                return p
-    return None
 
 
 def parse_config_raw(text: str, *, source: str = "<string>") -> tuple[StrategyConfig, dict, dict]:
@@ -127,28 +86,12 @@ def parse_config_raw(text: str, *, source: str = "<string>") -> tuple[StrategyCo
     grammar — internal/design/simple-strategies.md §7), so everything downstream sees one tree.
     Raises ConfigError on any parse, grammar, or desugar failure, locating `source`.
     """
-    import yaml  # lazy — only when a config is actually loaded
+    return _desugar_and_build(parse(text, source=source), source=source)
 
+
+def _desugar_and_build(raw: dict, *, source: str) -> tuple[StrategyConfig, dict, dict]:
+    """Desugar one schema-valid mapping to canonical longhand and build the model from it."""
     from openreading.strategies.plain import desugar_config  # lazy: avoids loader<->plain cycle
-
-    # A named stream, not the bare string: PyYAML's Reader labels a `str` input
-    # `<unicode string>`, so a syntax error's own location contradicted the filename this
-    # message already printed.
-    stream = io.StringIO(text)
-    stream.name = source
-    try:
-        raw = yaml.safe_load(stream)
-    except yaml.YAMLError as exc:  # malformed YAML
-        raise ConfigError(f"{source}: invalid YAML. {exc}") from exc
-    if raw is None:
-        raise ConfigError(f"{source}: empty config file")
-    if not isinstance(raw, dict):
-        raise ConfigError(f"{source}: top level must be a mapping, got {type(raw).__name__}")
-
-    try:
-        schemas.validate_strategy_config(raw)
-    except Exception as exc:  # jsonschema.ValidationError (or a schema error)
-        raise ConfigError(f"{source}: {_format_schema_error(exc)}") from exc
 
     try:
         raw, plain_info = desugar_config(raw)  # Plain -> canonical longhand (or a strict no-op)
@@ -164,19 +107,31 @@ def parse_config(text: str, *, source: str = "<string>") -> StrategyConfig:
 
 
 def load_config(
-    explicit: str | os.PathLike[str] | None = None, *, allow_cwd: bool = True
+    explicit: str | os.PathLike[str] | dict | None = None, *, allow_cwd: bool = True
 ) -> LoadedConfig | None:
     """Discover + load the strategy config, or None when no file is found (the legacy path).
     A found-but-broken file raises ConfigError — an explicitly requested config that cannot load
     is an error, never a silent fall-through to today's behavior."""
-    path = discover(explicit, allow_cwd=allow_cwd)
-    if path is None:
+    return build_config(load(explicit, allow_cwd=allow_cwd))
+
+
+def build_config(loaded: LoadedFile | None) -> LoadedConfig | None:
+    """Build the strategy half of an already-loaded file, or None when there was no file.
+
+    `openreading.api` calls `openreading.config.load` once, on every path, and reaches here only
+    when a strategy is actually engaged. Splitting the read from the build is what lets a
+    named-backend run see the file's `policy:` block without importing this package (law P6).
+    """
+    if loaded is None:
         return None
-    text = path.read_text(encoding="utf-8")
-    config, raw, plain_info = parse_config_raw(text, source=str(path))
-    source_hash = "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+    source = str(loaded.path) if loaded.path is not None else "<dict>"
+    config, raw, plain_info = _desugar_and_build(loaded.raw, source=source)
     return LoadedConfig(
-        config=config, path=path, source_hash=source_hash, raw=raw, plain_info=plain_info
+        config=config,
+        path=loaded.path,
+        source_hash=loaded.source_hash,
+        raw=raw,
+        plain_info=plain_info,
     )
 
 
@@ -196,13 +151,3 @@ def resolve_strategy(config: StrategyConfig, name: str) -> RawNode:
         known = ", ".join(config.strategy_names()) or "(none)"
         raise ConfigError(f"unknown strategy {name!r}; defined strategies: {known}")
     return config.strategies[name]
-
-
-def _format_schema_error(exc: Exception) -> str:
-    """Render a jsonschema ValidationError with its instance path, else str()."""
-    path = getattr(exc, "absolute_path", None)
-    message = getattr(exc, "message", None) or str(exc)
-    if path:
-        loc = "/".join(str(p) for p in path)
-        return f"invalid config at '{loc}': {message}"
-    return f"invalid config: {message}"

@@ -1,8 +1,9 @@
 """Milestone 11.1 — the strategy config spine: vendored schema + models + loader.
 
 Covers: the schema is valid JSON Schema; the complete v0.1 grammar accepts the shorthand and
-longhand forms and rejects malformed ones; the loader's discovery order (explicit > env > cwd >
-None); safe_load refuses non-safe tags; provenance hash is deterministic; typed top-level access.
+longhand forms and rejects malformed ones; safe_load refuses non-safe tags; the provenance hash
+is deterministic; typed top-level access. Discovery order lives in `tests/test_config.py` with the
+module that owns it.
 """
 
 from __future__ import annotations
@@ -14,12 +15,7 @@ import pytest
 
 from openreading import schemas
 from openreading.strategies import StrategyConfig, load_config, resolve_strategy
-from openreading.strategies.loader import (
-    ConfigError,
-    discover,
-    parse_config,
-    strip_strategy_prefix,
-)
+from openreading.strategies.loader import ConfigError, parse_config, strip_strategy_prefix
 
 SCHEMA_FILE = (
     Path(__file__).resolve().parents[1]
@@ -383,36 +379,6 @@ def test_safe_load_refuses_arbitrary_tags():
     text = "version: 1\nstrategies:\n  x: !!python/object/apply:os.system ['echo hi']\n"
     with pytest.raises(ConfigError):
         parse_config(text)
-
-
-def test_discovery_explicit_env_cwd_none(tmp_path, monkeypatch):
-    monkeypatch.delenv("OPENREADING_CONFIG", raising=False)
-    monkeypatch.chdir(tmp_path)
-
-    # nothing anywhere → None
-    assert discover() is None
-
-    # cwd file (CLI/Python only)
-    cwd_file = tmp_path / "openreading.yaml"
-    cwd_file.write_text("version: 1\nstrategies: {}\n")
-    assert discover() == cwd_file
-    # server posture: allow_cwd=False never sees the cwd file
-    assert discover(allow_cwd=False) is None
-
-    # env var beats cwd
-    env_file = tmp_path / "elsewhere.yaml"
-    env_file.write_text("version: 1\nstrategies: {}\n")
-    monkeypatch.setenv("OPENREADING_CONFIG", str(env_file))
-    assert discover() == env_file
-
-    # explicit beats env
-    explicit = tmp_path / "explicit.yaml"
-    explicit.write_text("version: 1\nstrategies: {}\n")
-    assert discover(str(explicit)) == explicit
-
-    # explicit-but-missing is an error, never a silent fall-through
-    with pytest.raises(ConfigError):
-        discover(str(tmp_path / "nope.yaml"))
 
 
 def test_load_config_returns_none_when_absent(tmp_path, monkeypatch):

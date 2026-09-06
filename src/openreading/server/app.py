@@ -1270,8 +1270,8 @@ def create_app(*, cors_origins: list[str] | None = None):
         except KeyError as e:
             return _unknown_backend(e)
         except api.PolicyError as e:
-            # The OPERATOR's `openreading.yaml` `policy:` block, refused at the compile boundary
-            # (strategies/prune._validated_policy). Deliberately not an _ADAPTER_ERRORS member —
+            # The OPERATOR's `openreading.yaml` `policy:` block, refused where the file is read
+            # (openreading.config.load). Deliberately not an _ADAPTER_ERRORS member —
             # it is a server misconfiguration, not a backend outcome, so it takes the table's
             # "500 anything else" rung rather than a 4xx that would blame the caller's request.
             # Routed through _error_response so it still answers with the documented envelope

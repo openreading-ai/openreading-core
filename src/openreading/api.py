@@ -251,6 +251,9 @@ from openreading.adapters._http import error_for_status
 from openreading.adapters.registry import build_registry, make_adapter
 from openreading.batch.runner import MAX_BATCH_JOBS
 from openreading.batch.sources import DEFAULT_MAX_ITEMS
+from openreading.config import apply as apply_config
+from openreading.config import load as load_config_file
+from openreading.config import router_config
 from openreading.credentials import (
     DEFAULT_NATIVE_BATCH_DEADLINE_MS,
     EnvCredentialBroker,
@@ -429,34 +432,6 @@ def _document_dict(source: str | bytes, mime_type: str | None) -> dict[str, Any]
     }
 
 
-def _apply_policy(body: dict[str, Any], policy: dict | None) -> None:
-    # Validate the WHOLE policy first, then split. Splitting first made the split a silent
-    # whitelist: whatever it did not recognize never reached a validator (see validate_policy).
-    policy = validate_policy(policy)
-    if not policy:
-        return
-    compliance = {k: policy[k] for k in COMPLIANCE_POLICY_KEYS if k in policy}
-    if compliance:
-        body["compliance"] = compliance
-    routing = {k: policy[k] for k in ROUTING_POLICY_KEYS if k in policy}
-    if routing:
-        body["routing"] = routing
-
-
-def router_config(policy: dict | None) -> RouterConfig:
-    """The three deployment-level policy keys as a `RouterConfig` (D7/D7a).
-
-    It validates the whole policy first, because a `route()`-shaped call reaches this with a
-    policy that never passed through `build_request`.
-    """
-    policy = validate_policy(policy) or {}
-    return RouterConfig(
-        allow_unverified_compliance=bool(policy.get("allow_unverified_compliance", False)),
-        train_optout_confirmed=frozenset(policy.get("train_optout_confirmed", [])),
-        baa_tier_confirmed=frozenset(policy.get("baa_tier_confirmed", [])),
-    )
-
-
 def build_request(
     source: str | bytes,
     backend: str = "auto",
@@ -492,11 +467,11 @@ def build_request(
         body["backend"]["type"] = make_adapter(backend).descriptor.type.value
     if operation:
         body["backend"]["operation"] = operation
-    _apply_policy(body, policy)
     for k, v in overrides.items():
         if v is not None:
             body[k] = v
-    return OpenReadingRequest.model_validate(body)
+    req = OpenReadingRequest.model_validate(body)
+    return apply_config(req, policy, RouterConfig())[0]
 
 
 def _assert_public_http_url(url: str) -> str:
@@ -626,13 +601,18 @@ def materialize_document(req: OpenReadingRequest, descriptor=None, *, transport=
 def route(
     source: str | bytes,
     *,
+    config: str | os.PathLike[str] | dict | None = None,
     policy: dict | None = None,
     operation: str | None = None,
     mime_type: str | None = None,
 ) -> RoutePlan:
-    """The compliance-first routing plan for a document (no execution)."""
+    """The compliance-first routing plan for a document (no execution). `config` points at an
+    openreading.yaml, and without it `./openreading.yaml` is discovered; its `policy:` block gates
+    the plan."""
+    loaded = load_config_file(config)
     req = build_request(source, "auto", operation=operation, mime_type=mime_type, policy=policy)
-    return Router(build_registry(), router_config(policy)).route(req)
+    req, cfg = apply_config(req, loaded.policy if loaded else None, router_config(policy))
+    return Router(build_registry(), cfg).route(req)
 
 
 def _arm_ledger(*args, **kwargs) -> Executor | None:
@@ -1165,7 +1145,7 @@ def run(
     backend: str = "auto",
     *,
     strategy: str | None = None,
-    config: str | None = None,
+    config: str | os.PathLike[str] | dict | None = None,
     operation: str | None = None,
     policy: dict | None = None,
     env_file: str | None = None,
@@ -1202,14 +1182,16 @@ def run(
         load_dotenv(env_file)
     if strategy is not None:
         backend = f"strategy:{strategy}"
-    # Discover the openreading.yaml ONLY when it could matter — an `auto` request (defaults.strategy)
-    # or a `strategy:` id. A plain named backend never engages a strategy, so the strategy package is
-    # not imported at all (guardrail T10: no file / no strategy ⇒ no strategy-module import).
-    loaded = None
+    # The openreading.yaml is read on EVERY path, because its `policy:` block gates a named
+    # backend exactly as it gates a strategy. The STRATEGY half of the file is built only when a
+    # strategy could engage — an `auto` request (defaults.strategy) or a `strategy:` id — so a
+    # plain named-backend run still never imports the strategy package (law P6, guardrail T10).
+    loaded = load_config_file(config)  # CLI/Python discover cwd; None → legacy path
+    strategy_file = None
     if backend == "auto" or backend.startswith(_STRATEGY_PREFIX):
-        from openreading.strategies.loader import load_config
+        from openreading.strategies.loader import build_config
 
-        loaded = load_config(config)  # CLI/Python discover cwd; None → legacy path
+        strategy_file = build_config(loaded)
     req = build_request(
         source,
         backend,
@@ -1218,13 +1200,14 @@ def run(
         policy=policy,
         **request_overrides,
     )
+    req, cfg = apply_config(req, loaded.policy if loaded else None, router_config(policy))
     return run_request(
         req,
         broker=broker,
-        config=router_config(policy),
+        config=cfg,
         transport=transport,
-        strategy_config=loaded.config if loaded else None,
-        plain_info=loaded.plain_info if loaded else None,
+        strategy_config=strategy_file.config if strategy_file else None,
+        plain_info=strategy_file.plain_info if strategy_file else None,
         keep_candidates=keep_candidates,
         deadline_ms=deadline_ms,
         on_run_armed=on_run_armed,
@@ -1289,18 +1272,20 @@ def resume_run(run_id: str) -> dict[str, Any]:
         raise LookupError(f"no recorded run {run_id!r} under {ledger_root}")
 
     from openreading.strategies import compile_strategy, run_strategy
-    from openreading.strategies.loader import load_config
+    from openreading.strategies.loader import build_config
     from openreading.strategies.model import StrategyConfig
 
     keys = LocalFsKeyStore(ledger_root / "keys")
     blobs = LocalFsBlobStore(ledger_root / "blobs", keys)
     req = _request_from_header(header, blobs)
 
-    loaded = load_config(None)
-    strategy_config = loaded.config if loaded else StrategyConfig(version=1)
+    loaded = load_config_file(None)
+    strategy_file = build_config(loaded)
+    strategy_config = strategy_file.config if strategy_file else StrategyConfig(version=1)
     registry = build_registry()
     broker = EnvCredentialBroker()
-    config = router_config(None)  # §10: "no other flags" — a resume never takes its own --policy
+    # §10: "no other flags" — a resume takes every option from the ledger and the live file.
+    req, config = apply_config(req, loaded.policy if loaded else None, RouterConfig())
     compiled = compile_strategy(req, header.strategy_name, strategy_config, registry, config)
     clock = RealClock()
     executor = _arm_ledger(
@@ -1355,7 +1340,7 @@ def run_batch(
     backend: str = "auto",
     *,
     strategy: str | None = None,
-    config: str | None = None,
+    config: str | os.PathLike[str] | dict | None = None,
     jobs: int = 1,
     max_jobs: int = MAX_BATCH_JOBS,
     max_items: int = DEFAULT_MAX_ITEMS,
@@ -1406,12 +1391,13 @@ def run_batch(
     from openreading.types.batch import BatchRequestEcho
 
     jobs = _batch_runner.bound_jobs(jobs, max_jobs=max_jobs)
-    # Like `jobs`, `policy` is an argument about the WHOLE batch, so it is checked before intake
-    # rather than per item. On the platform path a per-item failure is isolated into that item's
-    # `error` and never raised (M6) — correct for a document that could not be read, wrong for a
-    # policy the caller mistyped, which would otherwise come back as N identical item errors and a
-    # zero exit instead of one refusal.
+    # Like `jobs`, the policy is an argument about the WHOLE batch, so the file is read and the
+    # block checked before intake rather than per item. On the platform path a per-item failure is
+    # isolated into that item's `error` and never raised (M6) — correct for a document that could
+    # not be read, wrong for a policy the operator mistyped, which would otherwise come back as N
+    # identical item errors and a zero exit instead of one refusal.
     validate_policy(policy)
+    loaded = load_config_file(config)
 
     if env_file:
         load_dotenv(env_file)
@@ -1454,6 +1440,7 @@ def run_batch(
             request_echo=echo,
             on_progress=on_progress,
             policy=policy,
+            config_file=loaded,
             deadline_ms=deadline_ms,
             **request_overrides,
         )
@@ -1518,6 +1505,7 @@ def _run_native(
     request_echo,
     on_progress,
     policy: dict | None = None,
+    config_file=None,
     deadline_ms: int | None = None,
     **request_overrides: Any,
 ) -> dict[str, Any]:
@@ -1551,17 +1539,20 @@ def _run_native(
 
     started = time.perf_counter()
     live = [r for r in resolved if r.skip_reason is None]
+    file_block = config_file.policy if config_file is not None else None
+    cfg = router_config(policy)
     reqs = []
     for src in live:
         source = src.ref.path or src.ref.url
         idem = item_idempotency_key(idempotency_key, src.ref.sha256)
         overrides = {k: v for k, v in request_overrides.items() if v is not None}
         req = build_request(source, backend, idempotency_key=idem, policy=policy, **overrides)
+        req, cfg = apply_config(req, file_block, cfg)
         req = materialize_document(req, adapter.descriptor, transport=transport)
         reqs.append(req)
 
     if reqs[0].compliance is not None:
-        Router(build_registry(), router_config(policy)).check_eligible(reqs[0], backend)
+        Router(build_registry(), cfg).check_eligible(reqs[0], backend)
 
     ctx = build_run_context(
         reqs[0],

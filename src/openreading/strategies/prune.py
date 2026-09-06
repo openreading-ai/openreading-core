@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field, fields, replace
+from dataclasses import dataclass, field, fields
 from typing import Any
 
 from openreading.adapters.registry import BUILTIN_ADAPTERS
+from openreading.config import union_compliance
 from openreading.router.compliance import DropReason
 from openreading.router.registry import Registry
 from openreading.router.router import RoutePlan, Router, RouterConfig
@@ -31,9 +32,6 @@ from openreading.types.descriptor import AdapterDescriptor
 from openreading.types.errors import ComplianceRefused, ScopeRefused
 from openreading.types.request import Compliance, OpenReadingRequest
 
-# compliance keys the file `policy:` block can add to the request's effective compliance.
-_COMPLIANCE_BOOL = ("require_baa", "no_train_on_data", "require_local")
-_COMPLIANCE_STR = ("data_region", "max_retention")
 _DURATION_UNITS = {"ms": 1, "s": 1000, "m": 60_000, "h": 3_600_000}
 
 # The caller allow-list drop. Stage 0, not 1 or 2: it is neither the compliance filter nor the
@@ -119,13 +117,11 @@ def compile_strategy(
     info = plain_info.get(name) if plain_info else None
     plain_sourced = bool(info and getattr(info, "dialect", None) == "plain")
 
-    # (0) union the file `policy:` block into the effective compliance + RouterConfig (spec §1.3:
-    # constraints only ADD — compliance is never widened). This feeds BOTH the prune and the
-    # route compliance facts. Both folds refuse a malformed block first (`_validated_policy`):
-    # the schema leaves this sub-object open, so a typo or a quoted boolean would otherwise
-    # change the compliance posture here in silence. Raises api.PolicyError.
-    effective_compliance = _union_compliance(req.compliance, config.policy)
-    router_config = _merge_router_config(router_config, config.policy)
+    # (0) the request arrives already unioned with the file `policy:` block: `openreading.config`
+    # runs that fold once, before dispatch, on every path (law P4), and hands this function the
+    # `RouterConfig` it produced. Reading the compliance off the request here rather than folding
+    # it again is what makes a second fold a no-op instead of a second chance to disagree.
+    effective_compliance = union_compliance(req.compliance, None)
 
     # (1) build the effective request: unioned compliance + stripped routing.fallback (so auto
     # leaves see pure stage-3 order).
@@ -301,69 +297,6 @@ def _descriptor_for(registry: Registry, backend_id: str) -> AdapterDescriptor:
 
 def _hash_json(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
-
-
-def _validated_policy(policy: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Refuse a malformed file `policy:` block before any key of it becomes a constraint.
-
-    The schema declares this sub-object `additionalProperties: true` on purpose (model.py §1.1),
-    so it is the one policy surface a JSON-Schema check cannot close, and both failures it lets
-    through are silent. A misspelled `require_locall` was dropped without a word, leaving the run
-    with no locality constraint at all — the hosted rung stayed eligible and died later on
-    credentials. A quoted `allow_unverified_compliance: "false"` is truthy to `bool()`, so a value
-    whose plain-English intent is *off* switched the fail-closed tolerance ON and admitted a
-    `trains_on_customer_data: unverified` backend that the same policy written with a real boolean
-    keeps out. `api.validate_policy` is the same function `--policy` and `route()`/`run()` already
-    call, so two spellings of one policy cannot disagree about what it means.
-
-    The guard sits in the two functions that turn the raw dict into a constraint rather than in
-    their callers, because wiring it caller-by-caller is exactly what left this reader uncovered:
-    `calibrate.calibrate_strategy` folds the same block by calling these two directly, never
-    through `compile_strategy`.
-    """
-    # lazy: `api` is the layer above `strategies` (it imports compile_strategy inside its own
-    # functions for the same reason) — a module-level import here would invert the arrow.
-    from openreading.api import PolicyError, validate_policy
-
-    try:
-        return validate_policy(policy)
-    except PolicyError as e:
-        raise PolicyError(f"invalid policy in the strategy config: {e}") from e
-
-
-def _union_compliance(req_compliance, policy: dict[str, Any] | None) -> dict[str, Any]:
-    """Effective compliance = request ∪ file `policy:` compliance keys, most-restrictive-wins
-    (booleans OR to True; region/retention: request wins if set, else the file adds it).
-    Constraints only ever ADD — this can never widen the request's compliance."""
-    policy = _validated_policy(policy)
-    eff: dict[str, Any] = {}
-    base = req_compliance.model_dump() if req_compliance else {}
-    for k in _COMPLIANCE_BOOL:
-        eff[k] = bool(base.get(k)) or bool(policy and policy.get(k))
-    for k in _COMPLIANCE_STR:
-        val = base.get(k) or (policy.get(k) if policy else None)
-        if val is not None:
-            eff[k] = val
-    return eff
-
-
-def _merge_router_config(base: RouterConfig, policy: dict[str, Any] | None) -> RouterConfig:
-    """Fold the file policy's deployment keys into the RouterConfig (allow_unverified_compliance
-    OR-s to True; train_optout_confirmed / baa_tier_confirmed union). `replace` rather than a fresh
-    RouterConfig, so a field this fold does not name carries forward instead of silently resetting
-    to its default."""
-    policy = _validated_policy(policy)
-    if not policy:
-        return base
-    allow = base.allow_unverified_compliance or bool(policy.get("allow_unverified_compliance"))
-    optout = set(base.train_optout_confirmed) | set(policy.get("train_optout_confirmed", []))
-    baa_tier = set(base.baa_tier_confirmed) | set(policy.get("baa_tier_confirmed", []))
-    return replace(
-        base,
-        allow_unverified_compliance=allow,
-        train_optout_confirmed=frozenset(optout),
-        baa_tier_confirmed=frozenset(baa_tier),
-    )
 
 
 def _duration_ms(value: Any) -> int | None:

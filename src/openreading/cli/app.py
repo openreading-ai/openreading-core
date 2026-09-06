@@ -329,10 +329,10 @@ def cmd_parse(args) -> int:
         # OSError leads with an "[Errno 2]" the reader who mistyped a filename cannot use.
         print(f"[{label}] cannot read {args.files[0]}: {_describe_read_error(e)}", file=sys.stderr)
         return 2
-    except api.PolicyError as e:
+    except (api.PolicyError, ConfigError) as e:
         # A `--policy` file is already refused by _load_policy before we get here; this is the
-        # strategy config's own `policy:` block, refused at the compile boundary. Exit 3 either
-        # way — the caller should not have to know which of the two files carried the bad key.
+        # openreading.yaml, refused where it is read. Exit 3 either way — the caller should not
+        # have to know which of the two files carried the bad key.
         print(f"[{label}] {e}", file=sys.stderr)
         return 3
     except Exception as e:  # noqa: BLE001
@@ -960,10 +960,9 @@ def cmd_strategy_plan(args) -> int:
         compiled = compile_strategy(
             req, args.strategy, loaded.config, build_registry(), api.router_config(policy)
         )
-    # PolicyError: the config's own `policy:` block, refused at the compile boundary
-    # (strategies/prune._validated_policy) rather than at load, since the schema leaves that
-    # sub-object open. Same rung as a malformed `--policy` file — a policy that is wrong is wrong
-    # before the document is opened.
+    # PolicyError: the file's own `policy:` block, refused where the file is read
+    # (openreading.config.load). Same rung as any other unloadable file — a policy that is wrong is
+    # wrong before the document is opened.
     except (NormalizeError, ComplianceRefused, api.PolicyError) as e:
         print(f"[strategy plan] {e}", file=sys.stderr)
         return 3

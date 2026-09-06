@@ -62,6 +62,36 @@ def test_named_backend_run_never_imports_the_strategy_package(tmp_path):
     assert out.returncode == 0 and "OK" in out.stdout, out.stderr
 
 
+def test_a_policy_only_file_gates_a_named_backend_without_importing_the_engine(tmp_path):
+    """Guardrail T10, second case (law P6). The file's `policy:` block now gates a named-backend
+    run, and reading it must still leave the strategy package out of `sys.modules`. Before the
+    file was read on every path the refusal below never happened: `parse --backend reducto` ran
+    under a `require_local` file as though no file existed."""
+    doc = tmp_path / "s.pdf"
+    doc.write_bytes(build_sample_pdf())
+    (tmp_path / "openreading.yaml").write_text("version: 1\npolicy: {require_baa: true}\n")
+    script = textwrap.dedent(f"""
+        import sys, os, contextlib, io
+        os.chdir({str(tmp_path)!r})
+        import openreading.api as api
+        from openreading.types.errors import ComplianceRefused
+        with contextlib.redirect_stdout(io.StringIO()):  # swallow the pymupdf advisory
+            api.run({str(doc)!r}, backend="pymupdf")     # local: the policy admits it
+        open("openreading.yaml", "w").write("version: 1\\npolicy: {{require_local: true}}\\n")
+        try:
+            api.run({str(doc)!r}, backend="reducto")
+        except ComplianceRefused as e:
+            assert "require_local" in str(e), e
+        else:
+            raise AssertionError("a require_local file did not gate a named hosted backend")
+        leaked = [m for m in sys.modules if m.startswith("openreading.strategies")]
+        assert not leaked, f"reading the policy block imported: {{leaked}}"
+        print("OK")
+    """)
+    out = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
+    assert out.returncode == 0 and "OK" in out.stdout, out.stderr
+
+
 def test_auto_without_defaults_strategy_unchanged(_clean_cwd):
     doc = str(_clean_cwd / "s.pdf")
     without = api.run(doc, backend="auto")

@@ -217,12 +217,13 @@ def calibrate_strategy(
 
     Compliance (BL-112): the strategy file's own `policy:` block is folded into effective
     compliance and RouterConfig exactly the way `compile_strategy` does for every other
-    strategy-engaged surface (`prune._union_compliance`/`_merge_router_config`, reused not
+    strategy-engaged surface (`config.union_compliance`/`merge_router_config`, reused not
     reimplemented), and the rung-1 backend is gated PER CASE, before `adapter.submit()`, via
     `Router.check_eligible` — never gated once for the whole sample, since each case is loaded
     from its own independent file and can carry its own `compliance` block."""
     import base64
 
+    from openreading.config import merge_router_config, union_compliance
     from openreading.credentials import build_run_context
     from openreading.evals import scorers
     from openreading.evals.dataset import load_dataset
@@ -232,7 +233,6 @@ def calibrate_strategy(
     from openreading.router.driver import run_to_completion
     from openreading.router.router import Router, RouterConfig
     from openreading.strategies.normalize import normalize_strategy
-    from openreading.strategies.prune import _merge_router_config, _union_compliance
     from openreading.strategies.signals import probe
     from openreading.types.errors import AdapterError, TerminalError
     from openreading.types.request import Compliance, OpenReadingRequest
@@ -274,14 +274,14 @@ def calibrate_strategy(
     # load_dataset can yield a distinct `compliance` block per case once evals/dataset.py's
     # load_case forwards case.json's own `compliance` key.
     config_policy = getattr(config, "policy", None)
-    merged_router_config = _merge_router_config(router_config or RouterConfig(), config_policy)
+    merged_router_config = merge_router_config(router_config or RouterConfig(), config_policy)
     router = Router(registry, merged_router_config)
 
     observations: list[Observation] = []
     cases = load_dataset(dataset_dir, backend_id=rung1_backend)
     for i, case in enumerate(cases):
         req = OpenReadingRequest.model_validate(case.request_body)
-        effective_compliance = _union_compliance(req.compliance, config_policy)
+        effective_compliance = union_compliance(req.compliance, config_policy)
         if effective_compliance:
             req = req.model_copy(update={"compliance": Compliance(**effective_compliance)})
         clock = RealClock()
