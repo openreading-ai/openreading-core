@@ -425,7 +425,8 @@ Five rules shape the router, and each one exists to avoid a specific failure.
 | No key means skip; a rejected key names its variable, never its value. | A crash mid-chain, or a secret echoed from a vendor body. | `router/executor.py`, `readiness.py` |
 | Configured and reachable are different columns. | A dead URL rendered as a green "ready". | `readiness.py`, `liveness.py` |
 
-The next table lists every policy key and where each lands. Source: `src/openreading/config.py`
+The next table lists all nine policy keys and where each lands. `doc_type_hint` is not one of
+them: it is a request field, and none of the three stages reads it. Source: `src/openreading/config.py`
 (`apply`, `router_config`). Live truth: `uv run python -m pydoc openreading.cli` → `route` (the
 `policy:` keys paragraph).
 
@@ -437,7 +438,6 @@ The next table lists every policy key and where each lands. Source: `src/openrea
 | `require_local` | request compliance | Only `runs_fully_local` backends survive. |
 | `max_retention` | request compliance | `"0"`, `"zero"`, `"48h"`; backend retention must be known and not higher. |
 | `optimize_for` | request routing | `accuracy`, `cost`, `latency`, `offline`: stage-3 weights only. |
-| `doc_type_hint` | request routing | Carried on the request; none of the three stages reads it. |
 | `allow_unverified_compliance` | router config | Admits `*_unverified` drops. Never a stated "no", never `retention_unparseable`. |
 | `train_optout_confirmed` | router config | Backend ids whose training opt-out you applied. |
 | `baa_tier_confirmed` | router config | Backend ids whose tier-gated BAA you signed. |

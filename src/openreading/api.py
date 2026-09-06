@@ -74,8 +74,7 @@ constraints, on the single, native-batch, or server path alike.
 
 The `policy:` block of that file is where a compliance policy is written, and it is the only
 place. Compliance keys `require_baa`, `no_train_on_data`, `data_region`, `require_local`,
-`max_retention` become `request.compliance`; `optimize_for` and `doc_type_hint` become
-`request.routing`; `allow_unverified_compliance` (default False = fail closed),
+`max_retention` become `request.compliance`; `optimize_for` becomes `request.routing`; `allow_unverified_compliance` (default False = fail closed),
 `train_optout_confirmed` and `baa_tier_confirmed` (lists of backend ids) become the
 deployment-level `RouterConfig` (D7/D7a: the request schema is `extra="forbid"` and these assert
 an account-level fact — an opt-out applied, a tier-gated BAA signed — not a property of one

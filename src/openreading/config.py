@@ -88,9 +88,11 @@ _ALT_FILENAME = "openreading.yml"
 # value first. Both tuples are read by `union_compliance` and by nothing else.
 _COMPLIANCE_BOOL = ("require_baa", "no_train_on_data", "require_local")
 _COMPLIANCE_STR = ("data_region", "max_retention")
-# A deliberate SUBSET of Routing: `fallback` is a request field (chain order), not a constraint,
-# so a policy can never reorder someone's chain by naming backends. See law P3.
-_ROUTING_KEYS = ("doc_type_hint", "optimize_for")
+# A deliberate SUBSET of Routing. `fallback` is a request field (chain order), not a constraint,
+# so a policy can never reorder someone's chain by naming backends (law P3). `doc_type_hint` left
+# the policy grammar with `strategy-config` v0.3: no routing stage reads it, and a key that does
+# nothing in a file that gates compliance is one a reader will try to rely on.
+_ROUTING_KEYS = ("optimize_for",)
 
 
 class ConfigError(ValueError):
