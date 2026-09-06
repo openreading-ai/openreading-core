@@ -1,13 +1,18 @@
-# OpenReading: one JSON over every document parser
+# OpenReading: an intelligent, policy-aware router for document processing
 
 [![CI](https://github.com/multiversal-ventures/openreading-core/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/multiversal-ventures/openreading-core/actions/workflows/ci.yml)
 [![coverage](https://img.shields.io/badge/coverage-%E2%89%A591%25-brightgreen)](#status-and-versioning)
 [![python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-OpenReading hands your document to a backend and gives you back one JSON whose shape does not
-depend on the backend. A backend is the parser that does the reading, such as PyMuPDF on your
-machine or Reducto's hosted API.
+OpenReading reads your documents with the backends your rules allow, and returns one JSON whose
+shape does not depend on which backend did the work. A backend is the thing that does the reading,
+such as PyMuPDF on your machine or Reducto's hosted API. Policy-aware means you write those rules
+once instead of choosing a backend for each document. A policy is a short JSON file naming what a
+backend must guarantee before it may run, and no fallback relaxes it. Intelligent means a strategy
+acts on what a run reveals, so a local backend that returns almost no text escalates to a stronger
+one. One command takes a single document or a whole folder, and a folder comes back as one envelope
+holding one response per document.
 
 OpenReading is a library and a command you run on your own machine. It is not a hosted service, a
 user interface, or a model. If you call one parser and want its native output, call that parser
@@ -23,17 +28,17 @@ verified](#how-this-repo-is-built-and-verified) names each check and the failure
 
 ## What it does
 
-Whichever backend reads your document, you get one shape that you can read, compare, or use to
+Whichever backends read your documents, you get one shape that you can read, compare, or use to
 replay the run.
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif","fontSize":"14px","lineColor":"#94a3b8","textColor":"#334155","primaryTextColor":"#0f172a","edgeLabelBackground":"#eef2f7","clusterBkg":"#f8fafc","clusterBorder":"#cbd5e1","titleColor":"#334155"},"flowchart":{"curve":"basis","nodeSpacing":36,"rankSpacing":44,"padding":8,"useMaxWidth":true}}}%%
 flowchart TD
-  D[/"your document"/]:::src --> B["choose a backend<br>yourself, by policy, or by strategy"]:::gate
-  B --> P["the backend reads it"]:::work
-  P --> J(["one JSON<br>same shape every time"]):::hero
+  D[/"your documents<br>a file, a folder, or a glob"/]:::src --> B["your rules choose the backend<br>a name you pass, a policy, or a strategy"]:::gate
+  B --> P["the chosen backend reads each one"]:::work
+  P --> J(["one JSON per document<br>plus one envelope over the run"]):::hero
   J --> T["read the text<br>and tables"]:::out
-  J --> C["compare two backends"]:::out
+  J --> C["compare backends<br>across your corpus"]:::out
   J --> E["explain or replay a run"]:::out
   classDef src fill:#eef2ff,stroke:#6366f1,stroke-width:1.5px,color:#1e1b4b;
   classDef work fill:#e0f2fe,stroke:#0284c7,stroke-width:1.5px,color:#082f49;
@@ -53,8 +58,9 @@ is the envelope, and it has the same shape for every backend, so code written ag
 works against all of them. A backend that cannot fill a field leaves it out rather than inventing
 a value. You can ask for four things.
 
-- **[parse](src/openreading/cli/README.md)**: you have a document and want its text, its tables,
-  and where each block sits on the page. One command returns one JSON.
+- **[parse](src/openreading/cli/README.md)**: you have documents and want their text, their
+  tables, and where each block sits on the page. One command takes a file, a folder or a glob, and
+  returns one JSON.
 - **[compare](src/openreading/comparison/README.md)**: you have two backends and want to know where
   their readings of your documents differ. You get a one-word verdict, `equivalent`, `mixed`, or
   `divergent`, and a list of findings naming each difference, for example a table one backend lost.
@@ -63,17 +69,17 @@ a value. You can ask for four things.
   expected values beside each one. `benchmark run` also measures backends and strategies with
   publisher-owned public scorers ([Evals](src/openreading/evals/README.md)).
 - **[route](src/openreading/router/README.md)**: some documents may only go to vendors that meet
-  a policy. A policy is a short JSON file that lists what a backend must guarantee before it may
-  run. The router applies it and drops every failing backend before anything runs.
+  a policy. The router applies the policy you name and drops every failing backend before anything
+  runs.
 - **[strategy](src/openreading/strategies/README.md)**: you want a cheap backend first and a
   stronger one only when the first result falls short. A strategy is a named plan that decides
   for you. Each run leaves a trace of which backends ran and why. `explain` prints that trace, and
   `replay` re-runs its decisions against the same document and config.
 
-**What you need.** Bring a backend and a document it can read. Each backend declares its formats,
+**What you need.** Bring a backend and documents it can read. Each backend declares its formats,
 such as PDF, images, office files, HTML and EPUB.
 [The adapter catalog](src/openreading/adapters/README.md) lists the formats per backend. An adapter
-is the package that wraps one backend. The router skips a backend that cannot read your file and
+is the package that wraps one backend. The router skips a backend that cannot read your files and
 records the drop as `unsupported_format`. PyMuPDF and Tesseract run locally with no key, while a
 hosted backend needs your vendor key. If you have no document to hand, two synthetic ones ship in
 [`examples/`](examples/README.md) and every parse on this page runs against them.
@@ -124,7 +130,7 @@ tesseract                      oss_library        no          tesseract binary (
 
 ## Your first parse
 
-Your first JSON is one command away, because the document is already in the clone.
+Your first JSON is one command away, because the documents are already in the clone.
 [`examples/`](examples/README.md) holds two synthetic one-page bank statements, with an invented
 name, an invented bank and invented balances. Each has a header, an account block, a balance
 summary and a dated transaction table. Parse the January one with PyMuPDF:
@@ -219,7 +225,8 @@ goes deeper.
 
 ## Compare, route, strategy
 
-**Compare.** Compare shows where two backends disagree on a document and names each difference.
+**Compare.** Compare shows where two backends disagree on your documents and names each
+difference.
 You have both readings of the January statement already. Now ask what differs between them:
 
 ```bash
@@ -277,8 +284,8 @@ comes from the backend's descriptor, its static self-description of formats, var
 compliance posture. That is a vendor's advertised offer read on a date, not an agreement you hold,
 so `require_baa` narrows the field without finishing the job. Confirm your own signed paperwork
 before real data moves, and see [the catalog](src/openreading/adapters/README.md#catalog) for where
-each claim came from. A BAA is a HIPAA control, and this example uses a bank statement because that
-is the document this clone ships. A policy gates five things: the BAA, training on your data, the
+each claim came from. A BAA is a HIPAA control, and this example uses a bank statement because those
+are the documents this clone ships. A policy gates five things: the BAA, training on your data, the
 data region, retention, and local-only execution. Descriptors also record `soc2`, `gdpr` and `pci`,
 which no policy key reads
 ([Backend adapters](src/openreading/adapters/README.md#where-those-compliance-claims-come-from)).

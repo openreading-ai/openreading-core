@@ -1,7 +1,7 @@
 # Example documents
 
 You can parse these two documents the moment the clone finishes. Your first run needs no key, no
-vendor account, and no document of your own. A backend is one document parser. Both of the parsers
+vendor account, and no documents of your own. A backend is one document parser. Both of the parsers
 that run locally with no key read these files. PyMuPDF reads the text layer. Tesseract rasterizes
 the page and runs OCR over the pixels. The root [README](../README.md) walks through them. This
 page says what they are and where they came from.
