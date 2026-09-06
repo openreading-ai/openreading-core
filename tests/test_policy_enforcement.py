@@ -567,3 +567,67 @@ def test_a_registered_provider_holds_the_config_it_was_named_under(tmp_path, mon
         f"the provider held {type(held).__name__}, not a snapshot"
     )
     assert held.policy == {"require_local": True}
+
+
+def test_a_registered_extract_provider_holds_the_config_it_was_named_under(tmp_path, monkeypatch):
+    """The ExtractBench half of the same guarantee. It was missed because the bulk edit that
+    fixed ParseBench matched on the argument that FOLLOWS `config=`, and the extract call has one
+    more, so the replacement silently did nothing and only the parse side was checked."""
+    pytest.importorskip("extract_bench", reason="publisher bridge not installed")
+    from extract_bench.inference.pipelines import get_pipeline
+    from extract_bench.inference.providers.registry import create_provider
+    from extract_bench.schemas.pipeline_io import InferenceRequest
+
+    from openreading.evals import extractbench
+    from openreading.evals.targets import BenchmarkTarget
+
+    doc = tmp_path / "s.pdf"
+    doc.write_bytes(build_sample_pdf())
+    path = tmp_path / "p.yaml"
+    path.write_text("version: 1\npolicy:\n  require_local: true\n")
+
+    try:
+        name = extractbench._register(BenchmarkTarget.parse("backend:pymupdf"), config=str(path))
+    except extractbench.BenchmarkDependencyError as exc:
+        pytest.skip(str(exc))
+
+    captured: list = []
+    monkeypatch.setattr(
+        extractbench,
+        "execute_target",
+        lambda *a, **k: (
+            captured.append(k["config"])
+            or {"status": {"state": "succeeded"}, "document": {"text": "x", "blocks": []}}
+        ),
+    )
+    path.write_text("version: 1\npolicy: {require_locall: true}\n")
+
+    provider = create_provider(get_pipeline(name))
+    provider.run_inference(
+        get_pipeline(name),
+        InferenceRequest(
+            example_id="ex1",
+            source_file_path=str(doc),
+            product_type="extract",
+            schema_override={"type": "object", "properties": {"a": {"type": "string"}}},
+        ),
+    )
+    assert captured, "the provider never called execute_target"
+    held = captured[0]
+    assert isinstance(held, config.LoadedFile), f"the provider held {type(held).__name__}"
+    assert held.policy == {"require_local": True}
+
+
+@pytest.mark.parametrize("bridge", ["parsebench", "extractbench"])
+def test_no_publisher_bridge_passes_the_raw_config_path_to_execution(bridge):
+    """The structural half, which is what would have caught the asymmetry without either
+    publisher installed. A bridge that hands `config` rather than `snapshot` to `execute_target`
+    reads the file a second time, and the second read can differ from the one its name was built
+    from."""
+    import inspect
+
+    from openreading.evals import extractbench, parsebench
+
+    source = inspect.getsource({"parsebench": parsebench, "extractbench": extractbench}[bridge])
+    assert "config=snapshot," in source, f"{bridge} does not execute its snapshot"
+    assert "config=config," not in source, f"{bridge} still passes the raw path to execution"

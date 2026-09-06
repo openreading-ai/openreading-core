@@ -100,7 +100,7 @@ def _register(target: BenchmarkTarget, *, config: str | None) -> str:
                 request.source_file_path,
                 target,
                 product="extract",
-                config=config,
+                config=snapshot,
                 extraction_schema=request.schema_override,
             )
             completed = datetime.now(UTC)
