@@ -2575,15 +2575,22 @@ unreadable policy, an empty or unresolvable dataset, or a cannot-run fault.
 More: openreading help leaderboard, openreading help cost""",
 }
 
-TOP_EPILOG = """\
+# argparse renders the description before the subcommand list and the epilog after it. The
+# quickstart goes in the description on purpose: a first-time reader must reach something they
+# can paste inside the first screen, and a thirteen-verb listing pushes an epilog past the fold.
+TOP_DESCRIPTION = """\
+One JSON shape from every document parser, so switching or comparing parsers
+never changes your code.
+
 QUICKSTART. No key, no account, straight from a fresh clone.
 
   openreading backends                        # what already runs here
   F=examples/john_smith_1000_2026_01.pdf
   openreading parse $F --backend pymupdf > out.json     # one document
   openreading parse examples/ --backend pymupdf > all.json    # a folder
-  openreading compare $F --backends pymupdf,tesseract --format table
+  openreading compare $F --backends pymupdf,tesseract --format table"""
 
+TOP_EPILOG = """\
 I WANT TO ...                          RUN
   see what works here, with no keys    openreading backends
   read one document                    openreading parse FILE --backend SLUG
@@ -2649,8 +2656,7 @@ def build_parser() -> argparse.ArgumentParser:
     subcommand so it answers without one."""
     p = argparse.ArgumentParser(
         prog="openreading",
-        description="OpenReading: one JSON shape from every document parser, so switching or "
-        "comparing parsers never changes your code.",
+        description=TOP_DESCRIPTION,
         epilog=TOP_EPILOG,
         formatter_class=_HelpFormatter,
     )

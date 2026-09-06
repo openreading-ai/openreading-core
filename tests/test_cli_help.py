@@ -224,3 +224,14 @@ def test_the_front_door_names_folders_and_chaining():
     assert "FOLDERS AND GLOBS" in page
     assert "THINGS CHAIN." in page
     assert "openreading help" in page
+
+
+def test_the_quickstart_is_above_the_verb_list():
+    """argparse renders description, then subcommands, then epilog. A thirteen-verb listing
+    pushes an epilog past the fold of an ordinary terminal, so the four commands a first-time
+    reader can paste have to sit in the description."""
+    page = build_parser().format_help().splitlines()
+    quickstart = next(i for i, line in enumerate(page) if line.startswith("QUICKSTART"))
+    verbs = next(i for i, line in enumerate(page) if line.startswith("positional arguments"))
+    assert quickstart < verbs
+    assert quickstart < 24, f"the quickstart starts at line {quickstart + 1}, below the fold"
