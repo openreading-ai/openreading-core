@@ -68,6 +68,41 @@ them.
 
 ### Changed
 
+**File and request constraints intersect, and neither can weaken the other.** The union took the
+request's value for `data_region` and `max_retention` whenever it had one, which read as "the
+caller is more specific" and behaved as "the caller may relax the deployment": a file requiring
+`max_retention: zero` and a request asking for `48h` produced `48h`, so a backend retaining data
+for 24 hours survived a policy that forbade retention outright. Retention now keeps the lower
+ceiling. Two different regions refuse with `region_conflict`, because regions have no ordering and
+no value means both. `optimize_for` still takes the request's value, because it orders the
+survivors and never changes the set.
+
+**A policy is enforced at every public entry point, not only through `openreading.run`.**
+`compile_strategy` assumed some earlier surface had folded the block in, so a caller who built a
+`StrategyConfig` and compiled it got no policy at all; it now applies the block itself, which is
+idempotent. `config.apply`, `config.router_config` and `StrategyConfig` validate a mapping into a
+typed `Policy` before reading a field, so the two shapes that used to buy permission instead of
+raising (`allow_unverified_compliance: "false"`, which is truthy, and a bare
+`train_optout_confirmed: "aws-textract"`, which became a set of characters) are refused from
+Python exactly as the schema refuses them from a file.
+
+**`leaderboard` applies the file's compliance to every case.** It passed only the three
+attestations through, so the keys that widen the eligible set applied while the five requirements
+they qualify did not. A hosted backend could be ranked under `require_local: true`.
+
+**One batch reads the file once.** A two-item batch parsed it three times, so items from one
+returned envelope could run under different policies.
+
+**Resume compares the policy as written.** The ledger stores the request after the file was folded
+into it, so removing a constraint left the stored request carrying it and the run identity
+unchanged: the resume ran under a policy the file no longer asked for and said nothing. The block
+as written now takes part in `config_hash`, so adding and removing both refuse. Runs armed before
+this change cannot be resumed and report a header mismatch.
+
+**Publisher pipeline identity follows the file's content.** It hashed the path, so editing the
+policy left the artifact directory and resume identity unchanged and a rerun reused results
+measured under the previous policy. Reformatting or reordering keys still resumes.
+
 **A policy is written once, in `openreading.yaml`.** The `policy:` block of that file is now the
 only place a compliance policy is spelled, and every command, every Python call and the server
 find that file the same way and read the same block. `route` and `leaderboard` gain `--config`,

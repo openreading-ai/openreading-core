@@ -78,6 +78,20 @@ class BenchmarkTarget:
         return f"{self.kind}:{self.name}"
 
 
+def _config_identity(config: str | None) -> str | None:
+    """A canonical digest of the configuration at `config`, or the raw value when there is none
+    to read. Formatting and key order do not change it; any meaningful content change does."""
+    if not config:
+        return None
+    from openreading import config as config_module
+
+    try:
+        loaded = config_module.load(config)
+    except ValueError:
+        return config
+    return loaded.content_hash if loaded is not None else config
+
+
 def pipeline_name(
     benchmark_id: str,
     target: BenchmarkTarget,
@@ -100,7 +114,12 @@ def pipeline_name(
         {
             "benchmark": benchmark_id,
             "target": target.reference,
-            "config": config,
+            # The file's CONTENT, never its path. The publisher keys its artifact directory and
+            # its resume on this name, so hashing the path let an edited policy reuse results
+            # measured under the previous one while labelling them as the current run. A file that
+            # will not load contributes its path, because refusing to name a pipeline is not this
+            # function's job — the loader raises for the caller a moment later.
+            "config": _config_identity(config),
         },
         sort_keys=True,
     )

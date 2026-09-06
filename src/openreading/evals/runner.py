@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from openreading.config import apply as apply_policy
 from openreading.credentials import build_run_context
 from openreading.evals import scorers
 from openreading.evals.dataset import EvalCase, load_dataset
@@ -79,6 +80,7 @@ def run_case(
     ctx: RunContext | None = None,
     *,
     deadline_ms: float = 60_000,
+    policy=None,
     router_config: RouterConfig | None = None,
 ) -> CaseResult:
     """Run one case against `adapter` and score the normalized response.
@@ -89,6 +91,12 @@ def run_case(
     names no recognized dimension scores `overall=None`, which means unscored."""
     try:
         req = OpenReadingRequest.model_validate(case.request_body)
+        # The operator's `policy:` block gates a measurement exactly as it gates a run (law PF6).
+        # Passing only the three attestations, as this path used to, applies the keys that WIDEN
+        # the eligible set while dropping the five requirements they qualify — the one combination
+        # that is always wrong. `config.apply` folds both halves together, so a leaderboard cannot
+        # rank a backend the same file would refuse to run.
+        req, router_config = apply_policy(req, policy, router_config or RouterConfig())
         run_ctx = ctx or build_run_context(req, adapter.descriptor)
         clock = RealClock()
         # Compliance gate (BL-121), mirroring calibrate_strategy's identical BL-112 fix: run_case
@@ -117,6 +125,7 @@ def run_dataset(
     dataset_dir,
     ctx: RunContext | None = None,
     *,
+    policy=None,
     router_config: RouterConfig | None = None,
 ) -> DatasetReport:
     """Load every `*/case.json` under `dataset_dir` for this adapter and score each one. Returns
@@ -124,5 +133,7 @@ def run_dataset(
     cases = load_dataset(dataset_dir, backend_id=adapter.descriptor.id)
     return DatasetReport(
         backend_id=adapter.descriptor.id,
-        results=[run_case(adapter, c, ctx, router_config=router_config) for c in cases],
+        results=[
+            run_case(adapter, c, ctx, policy=policy, router_config=router_config) for c in cases
+        ],
     )

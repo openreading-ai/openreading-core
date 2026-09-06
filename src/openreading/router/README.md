@@ -487,6 +487,18 @@ them: it is a request field, and none of the three stages reads it. Source: `src
 | `train_optout_confirmed` | router config | Backend ids whose training opt-out you applied. |
 | `baa_tier_confirmed` | router config | Backend ids whose tier-gated BAA you signed. |
 
+### When a request also carries constraints
+
+An HTTP caller may send `compliance` and `routing` on the request, and the two sources intersect:
+neither can weaken the other. The three booleans OR to true. `max_retention` keeps the lower of
+the two ceilings, so a request asking for `48h` under a file requiring `zero` still gets `zero`.
+`data_region` has no ordering and a request cannot name two regions at once, so a file requiring
+`eu` and a request asking for `us` refuse with `region_conflict` rather than one of them winning.
+
+`optimize_for` is the exception, and the reason is worth stating: it orders the survivors and
+never changes the set. It is a preference, so the more specific caller value wins. Every other key
+names something a backend must satisfy, and a constraint the caller can relax is not a constraint.
+
 Your policy is the only thing that sets the eligible set, and exactly three of its keys widen that
 set. Each of the three is an attestation, which means you are telling the router about paperwork it
 cannot see. `allow_unverified_compliance` admits the backends that stayed silent on a fact instead
@@ -510,6 +522,7 @@ the Step column means no step in this guide triggers the code.
 | `trains_unverified` | 1 | `no_train_on_data`; backend says `unverified` | 3 |
 | `region_mismatch` | 1 | `data_region` not in the declared list | 2 |
 | `region_unverified` | 1 | `data_region` set; backend declares no regions | 2 |
+| `region_conflict` | 1 | the request and the file each name a different region | - |
 | `retention_exceeds` | 1 | backend retains longer than `max_retention` | 2 |
 | `retention_unverified` | 1 | `max_retention` set; backend retention unknown | 2 |
 | `retention_unparseable` | 1 | `max_retention` does not parse | 2, failure note |

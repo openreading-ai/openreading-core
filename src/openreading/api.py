@@ -251,6 +251,7 @@ from openreading.adapters._http import error_for_status
 from openreading.adapters.registry import build_registry, make_adapter
 from openreading.batch.runner import MAX_BATCH_JOBS
 from openreading.batch.sources import DEFAULT_MAX_ITEMS
+from openreading.config import LoadedFile
 from openreading.config import apply as apply_config
 from openreading.config import load as load_config_file
 from openreading.credentials import (
@@ -1076,7 +1077,7 @@ def run(
     backend: str = "auto",
     *,
     strategy: str | None = None,
-    config: str | os.PathLike[str] | dict | None = None,
+    config: str | os.PathLike[str] | dict | LoadedFile | None = None,
     operation: str | None = None,
     env_file: str | None = None,
     mime_type: str | None = None,
@@ -1090,7 +1091,9 @@ def run(
     """Run one document through a named backend, the compliance-first router (`backend="auto"`),
     or a strategy, and return a `response.v0.3` envelope. `strategy="<name>"` is sugar for
     `backend="strategy:<name>"`. `source` is a path, an http(s) URL, or raw bytes. `config` points
-    at an openreading.yaml, and without it `./openreading.yaml` is discovered.
+    at an openreading.yaml, and without it `./openreading.yaml` is discovered. It also accepts a
+    `LoadedFile` already read by `openreading.config.load`, which is how `run_batch` gives every
+    item of one batch the same snapshot.
 
     This is a thin wrapper over `run_request` (via `build_request`) and propagates whatever that
     raises, `RetryableError` included. Every exception type this call can raise, and what each one
@@ -1270,7 +1273,7 @@ def run_batch(
     backend: str = "auto",
     *,
     strategy: str | None = None,
-    config: str | os.PathLike[str] | dict | None = None,
+    config: str | os.PathLike[str] | dict | LoadedFile | None = None,
     jobs: int = 1,
     max_jobs: int = MAX_BATCH_JOBS,
     max_items: int = DEFAULT_MAX_ITEMS,
@@ -1377,8 +1380,10 @@ def run_batch(
         source = src.ref.path or src.ref.url
         return run(
             source,
+            # The snapshot, not the path: `run` hands a LoadedFile straight back out of
+            # `config.load`, so no item re-reads or re-validates the file (law PF4).
             backend=backend,
-            config=config,
+            config=loaded,
             broker=broker,
             transport=transport,
             idempotency_key=idem,

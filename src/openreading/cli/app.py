@@ -1297,7 +1297,7 @@ def cmd_leaderboard(args) -> int:
                 args.dataset,
                 ids,
                 build_registry(),
-                router_config=config.router_config(loaded.policy if loaded else None),
+                policy=loaded.policy if loaded else None,
             )
     # Mirrors cmd_calibrate's own except tuple for the identical dataset-driven shape: a per-case
     # backend fault never reaches here (run_case/run_dataset are unchanged and always return a

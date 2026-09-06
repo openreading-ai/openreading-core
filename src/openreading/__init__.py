@@ -519,11 +519,7 @@ is a code-level guarantee only; `status.error` is never populated on a single-do
 projection. What one invocation actually did (backends eligible, attempted, dispatched; every
 switch and its reason; time and cost with honest unknowns) is spread across `warnings[]` prose,
 strategy `orchestration`, the batch summary and an armed ledger, with no common carrier
-(design record: `design/run-stats-analytics.md`); policy enforcement and evaluation still have
-scalar-union, public-compilation, resume-provenance, batch-snapshot, leaderboard, and
-publisher-identity gaps (design records:
-`design/policy-enforcement-follow-up.md`,
-`product/specs/policy-enforcement-follow-up.product-spec.md`).
+(design record: `design/run-stats-analytics.md`).
 
 Extending it (agent-executable)
 ===============================

@@ -72,6 +72,7 @@ def run_leaderboard(
     backend_ids: list[str],
     registry: Registry,
     *,
+    policy=None,
     router_config: RouterConfig | None = None,
 ) -> BenchmarkReport:
     """Run every case in `dataset_dir` against every named backend through the unchanged
@@ -103,7 +104,7 @@ def run_leaderboard(
         if adapter is None:
             raise ValueError(f"backend {bid!r} is not registered")
         adapters[bid] = adapter
-        reports[bid] = run_dataset(adapter, dataset_dir, router_config=router_config)
+        reports[bid] = run_dataset(adapter, dataset_dir, policy=policy, router_config=router_config)
 
     # Dataset identity (AC-5) from the first backend's own case list: evals.dataset.load_case
     # bakes `backend_id` into request_body.backend.id, but name/expected/input never vary by

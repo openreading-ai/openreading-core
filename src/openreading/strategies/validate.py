@@ -228,9 +228,9 @@ def _checked_policy(
     read it, because `validate_config` takes a `StrategyConfig` and a caller embedding this
     package can build one without going through a file at all.
     """
-    block = dict(config.policy) if config.policy else None
-    if block is None:
+    if config.policy is None:
         return None, None
+    block = config.policy.model_dump(exclude_none=True)
     try:
         schemas.validate_strategy_config({"version": 1, "policy": block})
     except Exception as e:  # noqa: BLE001 — jsonschema.ValidationError, or a schema error

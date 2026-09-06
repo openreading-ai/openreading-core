@@ -7,6 +7,7 @@ message locates (file + node path), explains, and suggests a fix.
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from openreading.cli.app import main
 from openreading.strategies import StrategyConfig, validate_config
@@ -117,12 +118,15 @@ def test_decide_candidates_colliding_on_one_label():
     assert _has(_errors(cfg), "strategies.x", "both resolve to the candidate label 'parallel'")
 
 
-def test_secret_pattern_key_in_open_subtree():
-    # the policy block is an open superset; a secret hiding there is caught
-    errs = _errors(
-        {"version": 1, "policy": {"api_key": "sk-xxx"}, "strategies": {"x": ["pymupdf"]}}
-    )
-    assert _has(errs, "policy.api_key", "looks like a secret")
+def test_a_secret_in_the_policy_block_is_refused_outright():
+    """`policy:` was an open subtree, so a secret hiding there could only be WARNED about by the
+    secret scan. v0.3 closed the block, so `api_key` is now simply not a policy key and the
+    config will not build at all. Refusing beats warning: nothing downstream can read it."""
+    with pytest.raises(ValidationError) as exc:
+        StrategyConfig.model_validate(
+            {"version": 1, "policy": {"api_key": "sk-xxx"}, "strategies": {"x": ["pymupdf"]}}
+        )
+    assert "api_key" in str(exc.value)
 
 
 def test_with_allowlist_secret_also_caught():

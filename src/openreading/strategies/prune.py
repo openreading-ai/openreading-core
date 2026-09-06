@@ -20,6 +20,7 @@ from dataclasses import dataclass, field, fields
 from typing import Any
 
 from openreading.adapters.registry import BUILTIN_ADAPTERS
+from openreading.config import apply as apply_policy
 from openreading.config import union_compliance
 from openreading.router.compliance import DropReason
 from openreading.router.registry import Registry
@@ -117,10 +118,14 @@ def compile_strategy(
     info = plain_info.get(name) if plain_info else None
     plain_sourced = bool(info and getattr(info, "dialect", None) == "plain")
 
-    # (0) the request arrives already unioned with the file `policy:` block: `openreading.config`
-    # runs that fold once, before dispatch, on every path (law P4), and hands this function the
-    # `RouterConfig` it produced. Reading the compliance off the request here rather than folding
-    # it again is what makes a second fold a no-op instead of a second chance to disagree.
+    # (0) fold the file `policy:` block in, defensively (law PF2). `openreading.api` already ran
+    # this fold once before dispatch, and the fold is an intersection, so running it again over
+    # the same block changes nothing. It is repeated here because `compile_strategy` and
+    # `StrategyConfig` are public exports: a caller who builds the config itself and compiles it
+    # reaches no other surface, and without this line their `policy:` block was advisory. The
+    # first version of this change removed the fold from here on the grounds that `api` had done
+    # it, which is true of every caller inside this package and of none outside it.
+    req, router_config = apply_policy(req, config.policy, router_config)
     effective_compliance = union_compliance(req.compliance, None)
 
     # (1) build the effective request: unioned compliance + stripped routing.fallback (so auto
@@ -184,7 +189,9 @@ def compile_strategy(
             constraint="no_compliant_backend",
         )
 
-    config_hash = _compute_config_hash(root, effective_compliance, router_config, registry, plan)
+    config_hash = _compute_config_hash(
+        root, effective_compliance, router_config, registry, plan, config.policy
+    )
 
     warnings: list[tuple[str, str]] = []
     if overrides_fallback:
@@ -227,6 +234,7 @@ def _compute_config_hash(
     router_config: RouterConfig,
     registry: Registry,
     plan: RoutePlan,
+    file_policy=None,
 ) -> str:
     """BL-163: `config_hash` must change whenever the COMPLIANCE POSTURE changes eligibility, not
     only when the pruned tree's shape happens to change. Hashing `root` alone let three mutually
@@ -238,8 +246,17 @@ def _compute_config_hash(
     NOT changed here — that per-decision fallback is documented behavior, out of this item's
     scope; this closes the WHOLE-TRACE mismatch at load time instead, in `cli/app.py`).
 
-    Folds `root`, `effective_compliance`, `router_config`, and a descriptor digest per backend the
-    router actually classified (`eligible` + `dropped` — together every registered backend, since
+    `file_policy` is the `policy:` block AS WRITTEN, and it is folded in beside the effect it had
+    (law PF3). The effect alone is not enough for a resume. The ledger stores the request after
+    the block was folded into it, so REMOVING a constraint from the file left the stored request
+    still carrying it, the recomputed effective compliance identical, and the digest unchanged:
+    the resume ran under a policy the file no longer asked for and reported no mismatch. Adding a
+    constraint was always caught, because it changes the effect. Hashing the source catches both
+    directions. It is the parsed block rather than the file's bytes, so reindenting or reordering
+    keys is not a different run.
+
+    Folds `root`, `effective_compliance`, `router_config`, the file policy, and a descriptor
+    digest per backend the router actually classified (`eligible` + `dropped` — together every registered backend, since
     `Router.route` classifies each one or the other) into ONE JSON structure before hashing, rather
     than concatenating pre-hashed pieces with a delimiter — this sidesteps any "is `AB`+`C` distinct
     from `A`+`BC`" ambiguity a delimiter-based scheme would need to get right, while still changing
@@ -256,7 +273,8 @@ def _compute_config_hash(
         f"{bid}:{_hash_json(_descriptor_for(registry, bid).to_schema_dict())}"
         for bid in participating_ids
     )
-    payload = [root, effective_compliance, router_config_canonical, descriptor_digests]
+    written = file_policy.model_dump(exclude_none=True) if file_policy is not None else None
+    payload = [root, effective_compliance, router_config_canonical, descriptor_digests, written]
     return "sha256:" + _hash_json(payload)
 
 

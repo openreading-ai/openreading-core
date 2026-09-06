@@ -45,11 +45,24 @@ P4 to P6 by this one.
   attestation keys are the deliberate exception, and each one asserts a fact about paperwork
   rather than a preference about a vendor.
 - **P4. The union never widens.** Request constraints and file constraints combine
-  most-restrictive-wins, in `apply()`, once per request, on every path. Booleans OR to true. A
-  region or a retention ceiling the request names wins, and the file supplies one only when the
-  request named none. The three attestation keys union into the `RouterConfig`. Failure prevented:
-  a path that forgot to union. The server's non-strategy path was that path, so a request naming a
-  backend by name reached it carrying none of the operator's constraints.
+  most-restrictive-wins, in `apply()`, once per request, on every path. It is an INTERSECTION, so
+  neither source can weaken the other. Booleans OR to true. `max_retention` keeps the lower of the
+  two ceilings. `data_region` has no ordering and a request cannot name two regions, so two
+  different values refuse rather than pick a winner. The three attestation keys union into the
+  `RouterConfig`. Failure prevented: a path that forgot to union. The server's non-strategy path
+  was that path, so a request naming a backend by name reached it carrying none of the operator's
+  constraints. A precedence rule where the request simply won was the same failure wearing a
+  reasonable face: a file demanding `max_retention: zero` and a request asking for `48h` produced
+  `48h`, so the deployment's ceiling was whatever the caller last said.
+- **PF2. A public call is safe on its own.** `apply()`, `router_config()` and
+  `strategies.compile_strategy` enforce the policy they are handed without relying on an earlier
+  loader call, and validate a mapping into `openreading.types.policy.Policy` before reading a
+  field. The schema guards file text; only this guards a dict a caller built in Python, where
+  `bool("false")` is `True` and `frozenset("aws-textract")` is a set of characters.
+- **PF3. Resume compares the policy as written, not only its effect.** The ledger stores the
+  request after this fold, so removing a file constraint used to leave the stored request carrying
+  it and the run identity unchanged. `prune._compute_config_hash` folds in the block as written,
+  so both adding and removing a constraint refuse the resume.
 - **P5. No file is byte-identical to today.** A directory with no `openreading.yaml` and no
   `OPENREADING_CONFIG` routes exactly as it did before this module existed, because `load()`
   returns `None` and `apply()` hands the request straight back. Failure prevented: a silent change
@@ -77,17 +90,18 @@ from pathlib import Path
 from typing import Any
 
 from openreading import schemas
-from openreading.router.compliance import RouterConfig
+from openreading.router.compliance import RouterConfig, parse_retention_hours
+from openreading.types.errors import ComplianceRefused
+from openreading.types.policy import Policy, coerce_policy
 from openreading.types.request import Compliance, OpenReadingRequest, Routing
 
 _ENV_VAR = "OPENREADING_CONFIG"
 _DEFAULT_FILENAME = "openreading.yaml"
 _ALT_FILENAME = "openreading.yml"
 
-# The `policy:` keys that become `request.compliance`. Booleans OR; strings take the request's
-# value first. Both tuples are read by `union_compliance` and by nothing else.
+# The `policy:` keys that become `request.compliance`. The three booleans OR; the two strings
+# each have their own rule, because neither is a boolean and they do not share a domain.
 _COMPLIANCE_BOOL = ("require_baa", "no_train_on_data", "require_local")
-_COMPLIANCE_STR = ("data_region", "max_retention")
 # A deliberate SUBSET of Routing. `fallback` is a request field (chain order), not a constraint,
 # so a policy can never reorder someone's chain by naming backends (law P3). `doc_type_hint` left
 # the policy grammar with `strategy-config` v0.3: no routing stage reads it, and a key that does
@@ -115,6 +129,15 @@ class LoadedFile:
     policy: dict | None
     path: Path | None
     source_hash: str
+
+    @property
+    def content_hash(self) -> str:
+        """sha256 over the CANONICAL parsed mapping, so reordering keys or changing indentation
+        does not change it. `source_hash` is the file's bytes and answers "is this the same
+        text"; this answers "is this the same configuration", which is what an artifact identity
+        or a resume comparison actually means."""
+        canonical = json.dumps(self.raw, sort_keys=True, separators=(",", ":"), default=str)
+        return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def discover(
@@ -179,15 +202,21 @@ def _validated_mapping(raw: Any, *, source: str) -> dict:
 
 
 def load(
-    config: str | os.PathLike[str] | dict | None = None, *, allow_cwd: bool = True
+    config: str | os.PathLike[str] | dict | LoadedFile | None = None, *, allow_cwd: bool = True
 ) -> LoadedFile | None:
     """Discover, read and validate `openreading.yaml`, or return None when there is no file.
 
-    `config` is a path, a dict of the file's own shape, or None to run the discovery order. A dict
+    `config` is a path, a dict of the file's own shape, an already-loaded snapshot, or None to run
+    the discovery order. A dict
     is validated exactly as file text is, under the source name `<dict>`, so a shape refused from
     a file is refused from Python. Raises `ConfigError` for a file that will not parse or fails
     the schema, a `policy:` block that is not a policy included.
     """
+    if isinstance(config, LoadedFile):
+        # A snapshot handed back in. `run_batch` reads the file once, before intake, and passes
+        # the result to every item, so a file edited while a batch runs cannot make one document
+        # travel under a policy its siblings never saw (law PF4).
+        return config
     if config is not None and not isinstance(config, str | os.PathLike | dict):
         # Without this the value reaches `Path()`, which raises a bare TypeError naming neither
         # the argument nor what it should have been.
@@ -219,16 +248,19 @@ def load(
 
 
 def apply(
-    req: OpenReadingRequest, policy: dict | None, base: RouterConfig
+    req: OpenReadingRequest, policy: Policy | dict | None, base: RouterConfig
 ) -> tuple[OpenReadingRequest, RouterConfig]:
     """Union the file's `policy:` block into one request and one router configuration (law P4).
 
     Called once per request, before dispatch, on every path. Idempotent, so a request that already
     carries the file's values is unchanged by a second call. Returns the request untouched and the
     base configuration unchanged when there is no policy, which is what keeps a directory with no
-    file byte-identical to every release before this one (law P5).
+    file byte-identical to every release before this one (law P5). A mapping is validated into a
+    `Policy` first, so a caller who never went through a file gets the same refusals a file gets
+    (law PF2).
     """
-    if not policy:
+    policy = coerce_policy(policy)
+    if policy is None:
         return req, base
     config = merge_router_config(base, policy)
     updates: dict[str, Any] = {}
@@ -238,7 +270,7 @@ def apply(
     # would then differ for a file whose block changes no backend's eligibility.
     if req.compliance is not None or any(v for v in effective.values()):
         updates["compliance"] = Compliance(**effective)
-    routing = {k: policy[k] for k in _ROUTING_KEYS if k in policy}
+    routing = {k: v for k in _ROUTING_KEYS if (v := policy.get(k)) is not None}
     if routing:
         # The request wins key by key, and the file fills in only what the request left unsaid.
         # `exclude_none` so a field the caller never set does not mask the file's value.
@@ -247,45 +279,107 @@ def apply(
     return req.model_copy(update=updates), config
 
 
-def router_config(policy: dict | None) -> RouterConfig:
+def router_config(policy: Policy | dict | None) -> RouterConfig:
     """The three deployment-level policy keys as a `RouterConfig` (D7/D7a).
 
-    It validates the whole policy first, because a `route()`-shaped call reaches this with a
-    policy that never passed through `build_request`.
+    A mapping is validated into a `Policy` first (law PF2). These are the only three keys that
+    widen the eligible set, so an unchecked dict here is the one place a wrong type buys
+    permission instead of raising: `bool("false")` is `True`, and `frozenset("aws-textract")` is a
+    set of characters that confirms no backend while looking like it confirmed one.
     """
-    policy = policy or {}
+    policy = coerce_policy(policy)
+    if policy is None:
+        return RouterConfig()
     return RouterConfig(
-        allow_unverified_compliance=bool(policy.get("allow_unverified_compliance", False)),
-        train_optout_confirmed=frozenset(policy.get("train_optout_confirmed", [])),
-        baa_tier_confirmed=frozenset(policy.get("baa_tier_confirmed", [])),
+        allow_unverified_compliance=bool(policy.allow_unverified_compliance),
+        train_optout_confirmed=frozenset(policy.train_optout_confirmed or []),
+        baa_tier_confirmed=frozenset(policy.baa_tier_confirmed or []),
     )
 
 
-def union_compliance(req_compliance, policy: dict[str, Any] | None) -> dict[str, Any]:
-    """Effective compliance = request ∪ file `policy:` compliance keys, most-restrictive-wins
-    (booleans OR to True; region/retention: request wins if set, else the file adds it).
-    Constraints only ever ADD — this can never widen the request's compliance."""
+def union_compliance(req_compliance, policy: Policy | dict | None) -> dict[str, Any]:
+    """Effective compliance = request ∩ file `policy:`, most-restrictive-wins (law PF1).
+
+    Neither source may weaken the other, so this is an intersection and not a precedence rule.
+    Booleans OR to True. `max_retention` keeps the LOWER of the two ceilings, because retention is
+    ordered in hours and the lower number is the stricter promise. `data_region` has no ordering
+    and a request cannot name two regions at once, so two different values are a refusal rather
+    than a winner.
+
+    The precedence rule this replaced took the request's value whenever it had one, which read as
+    "the caller is more specific" and behaved as "the caller may relax the deployment". A file
+    demanding `max_retention: zero` and a request asking for `48h` produced `48h`, so a backend
+    retaining data for 24 hours survived a policy that forbade retention outright.
+    """
+    policy = coerce_policy(policy)
     eff: dict[str, Any] = {}
     base = req_compliance.model_dump() if req_compliance else {}
     for k in _COMPLIANCE_BOOL:
         eff[k] = bool(base.get(k)) or bool(policy and policy.get(k))
-    for k in _COMPLIANCE_STR:
-        val = base.get(k) or (policy.get(k) if policy else None)
-        if val is not None:
-            eff[k] = val
+    retention = _stricter_retention(
+        base.get("max_retention"), policy.max_retention if policy else None
+    )
+    if retention is not None:
+        eff["max_retention"] = retention
+    region = _one_region(base.get("data_region"), policy.data_region if policy else None)
+    if region is not None:
+        eff["data_region"] = region
     return eff
 
 
-def merge_router_config(base: RouterConfig, policy: dict[str, Any] | None) -> RouterConfig:
+def _stricter_retention(request: str | None, file: str | None) -> str | None:
+    """The lower of two retention ceilings, keeping the spelling its author wrote.
+
+    `openreading.router.compliance.parse_retention_hours` is the meaning authority and is reused
+    rather than re-implemented, so the value this comparison calls stricter is the same value the
+    gate later calls satisfied. A non-empty ceiling that will not parse fails closed here rather
+    than at the gate: it cannot be compared, and picking a winner between a number and a word is
+    how a ceiling silently disappears.
+    """
+    if request is None or file is None:
+        return request if file is None else file
+    hours = {}
+    for label, value in (("request", request), ("openreading.yaml", file)):
+        parsed = parse_retention_hours(value)
+        if parsed is None:
+            raise ComplianceRefused(
+                f"max_retention {value!r} (from the {label}) is not a duration this router can "
+                "compare; write 'zero', '24' or '48h'",
+                constraint="retention_unparseable",
+            )
+        hours[value] = parsed
+    return request if hours[request] <= hours[file] else file
+
+
+def _one_region(request: str | None, file: str | None) -> str | None:
+    """The single region both sources agree on, or a refusal naming both.
+
+    Regions are names rather than quantities, so there is no stricter one to pick and no value
+    that means "both". Fabricating one would teach the router a region no backend declares; taking
+    either side would let that side overrule the other. A refusal is the honest intersection.
+    """
+    if request is None or file is None:
+        return request if file is None else file
+    if request.strip().lower() == file.strip().lower():
+        return request
+    raise ComplianceRefused(
+        f"data_region conflict: the request asks for {request!r} and openreading.yaml requires "
+        f"{file!r}, and no backend can satisfy both",
+        constraint="region_conflict",
+    )
+
+
+def merge_router_config(base: RouterConfig, policy: Policy | dict | None) -> RouterConfig:
     """Fold the file policy's deployment keys into the RouterConfig (allow_unverified_compliance
     OR-s to True; train_optout_confirmed / baa_tier_confirmed union). `replace` rather than a fresh
     RouterConfig, so a field this fold does not name carries forward instead of silently resetting
     to its default."""
-    if not policy:
+    policy = coerce_policy(policy)
+    if policy is None:
         return base
-    allow = base.allow_unverified_compliance or bool(policy.get("allow_unverified_compliance"))
-    optout = set(base.train_optout_confirmed) | set(policy.get("train_optout_confirmed", []))
-    baa_tier = set(base.baa_tier_confirmed) | set(policy.get("baa_tier_confirmed", []))
+    allow = base.allow_unverified_compliance or bool(policy.allow_unverified_compliance)
+    optout = set(base.train_optout_confirmed) | set(policy.train_optout_confirmed or [])
+    baa_tier = set(base.baa_tier_confirmed) | set(policy.baa_tier_confirmed or [])
     return replace(
         base,
         allow_unverified_compliance=allow,

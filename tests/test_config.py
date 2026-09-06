@@ -248,10 +248,15 @@ def test_apply_never_widens_a_request_constraint(clean_cwd):
     assert out.compliance.require_baa is True
 
 
-def test_apply_keeps_the_request_region_when_the_file_names_another(clean_cwd):
+def test_two_different_regions_refuse_rather_than_pick_a_winner(clean_cwd):
+    """Law PF1. This used to keep the request's region, which let a caller overrule the
+    deployment. Regions have no ordering, so neither side can be called stricter and no value
+    means both. `tests/test_policy_enforcement.py` carries the rest of the algebra."""
+    from openreading.types.errors import ComplianceRefused
+
     req = _request(compliance={"data_region": "us"})
-    out, _ = config.apply(req, {"data_region": "eu"}, RouterConfig())
-    assert out.compliance is not None and out.compliance.data_region == "us"
+    with pytest.raises(ComplianceRefused):
+        config.apply(req, {"data_region": "eu"}, RouterConfig())
 
 
 def test_apply_adds_the_file_region_when_the_request_names_none(clean_cwd):

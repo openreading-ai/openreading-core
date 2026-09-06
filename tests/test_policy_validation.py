@@ -33,6 +33,7 @@ from openreading.config import ConfigError
 from openreading.router.compliance import RouterConfig
 from openreading.testing.sample_pdf import build_sample_pdf
 from openreading.types.errors import ComplianceRefused
+from openreading.types.request import Compliance, Routing
 
 pytest.importorskip("fitz", reason="pymupdf not installed")
 
@@ -103,6 +104,29 @@ def test_the_policy_block_is_closed_and_holds_exactly_nine_keys():
         "latency",
         "offline",
     ]
+
+
+def test_the_typed_model_and_the_schema_hold_the_same_nine_keys():
+    """Two doors into one grammar: the schema guards file text, the model guards a Python object.
+    A key added to one and not the other means a policy that loads from a file and is refused
+    from Python, or the reverse, which is the drift this whole change exists to end."""
+    from openreading.types.policy import Policy
+
+    schema_keys = set(schemas.strategy_config_schema()["properties"]["policy"]["properties"])
+    assert set(Policy.model_fields) == schema_keys
+
+
+def test_the_models_the_policy_keys_feed_still_carry_them():
+    """The five compliance keys must be fields of `Compliance`, the attestations fields of
+    `RouterConfig`. A key that types cleanly and lands nowhere is a constraint that does nothing.
+    """
+    from openreading.types.policy import ATTESTATION_FIELDS, COMPLIANCE_FIELDS, ROUTING_FIELDS
+
+    assert set(COMPLIANCE_FIELDS) == set(Compliance.model_fields)
+    assert set(ROUTING_FIELDS) <= set(Routing.model_fields)
+    assert set(ATTESTATION_FIELDS) == set(RouterConfig.__dataclass_fields__)
+    # `fallback` is chain order, not a constraint. Pinned so widening the grammar is deliberate.
+    assert "fallback" not in set(COMPLIANCE_FIELDS) | set(ROUTING_FIELDS)
 
 
 def test_doc_type_hint_is_not_a_policy_key(sample_pdf):

@@ -133,13 +133,16 @@ so the no-file path never imports this package (the no-change law — package do
 
 Precedence, highest first: **request wire fields → CLI flags → config `defaults:` → built-ins.**
 Compliance is outside precedence: constraints from the request and the file's
-`policy:` block are **unioned, most-restrictive-wins** — constraints only ever add. D-v3-12 fixes
-the union (done in `prune.compile_strategy`): the boolean PHI constraints `require_baa` /
-`no_train_on_data` / `require_local` OR to True; `data_region` / `max_retention` take the
-request's value if set, else the file adds it (request-wins-else-file — there is no total order
-on regions, and the request is the more specific choice); deployment keys map to `RouterConfig`
+`policy:` block are **intersected, most-restrictive-wins** — neither source can weaken the other.
+D-v3-12 fixes the union (`openreading.config.apply`, applied before dispatch and again defensively
+in `prune.compile_strategy`): the boolean PHI constraints `require_baa` / `no_train_on_data` /
+`require_local` OR to True; `max_retention` keeps the LOWER of the two ceilings; `data_region` has
+no ordering and a request cannot name two regions at once, so two different values refuse with
+`region_conflict` rather than pick a winner; deployment keys map to `RouterConfig`
 (`allow_unverified_compliance` ORs; `train_optout_confirmed` / `baa_tier_confirmed` union). The
 effective compliance is what prunes the tree AND what the route `compliance` facts read.
+`optimize_for` is the one key where the request wins outright, because it orders the survivors and
+never changes the set: it is a preference, and a preference is not a constraint.
 
 The block is refused whole (`ConfigError`, from `openreading.config.load`) if it names a key
 outside those nine or gives one the wrong type. `strategy-config` v0.3 declares this sub-object
@@ -993,7 +996,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from openreading.types.policy import Policy, coerce_policy
 
 # A raw strategy node exactly as it appears in the file after schema validation: a bare string
 # (backend id / "auto" / "strategy:<name>"), a list (cascade shorthand), or a map form. The typed
@@ -1051,9 +1056,17 @@ class StrategyConfig(BaseModel):
 
     version: int
     # `policy` carries the compliance and RouterConfig keys, typed and closed by
-    # `strategy-config` v0.3. Kept as a plain dict rather than a model because
-    # `openreading.config` folds it by flat key and nothing here reads an individual one.
-    policy: dict[str, Any] | None = None
+    # `strategy-config` v0.3 for a file and by `openreading.types.policy.Policy` for a config a
+    # caller builds in Python. The validator below is STRICT where pydantic's default is lax: a
+    # lax bool accepts the string "true", which is the widening the schema refuses on the file
+    # path, and a config built with `model_validate` reaches no schema at all.
+    policy: Policy | None = None
+
+    @field_validator("policy", mode="before")
+    @classmethod
+    def _strict_policy(cls, value: Any) -> Any:
+        return coerce_policy(value)
+
     limits: Limits | None = None
     decider: DeciderConfig | None = None
     defaults: Defaults | None = None
