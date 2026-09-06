@@ -19,6 +19,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from openreading import schemas
 from openreading.adapters.registry import BUILTIN_ADAPTERS, make_adapter
 from openreading.router import compliance as comp
 from openreading.router.compliance import RouterConfig
@@ -218,20 +219,23 @@ def _checked_policy(
 ) -> tuple[dict[str, Any] | None, ValidationIssue | None]:
     """The file's `policy:` block, or `(None, issue)` when it is not a well-formed policy object.
 
-    Reported as an ERROR, not a warning: `openreading.config.load` refuses the identical block on
-    the run path, so a file this returns an issue for cannot run at all. `strategy validate` saying
-    OK about a config that `strategy plan` refuses would be the worse half of the same defect.
+    Reported as an ERROR, not a warning: `openreading.schemas` refuses the identical block where
+    the file is read, so a file this returns an issue for cannot run at all. `strategy validate`
+    saying OK about a config that `strategy plan` refuses would be the worse half of the same
+    defect.
 
-    This surface still checks the block itself, rather than trusting the loader that read it,
-    because `validate_config` takes a `StrategyConfig` and a caller embedding this package can
-    build one without going through a file at all.
+    This surface checks the block against the same schema rather than trusting the loader that
+    read it, because `validate_config` takes a `StrategyConfig` and a caller embedding this
+    package can build one without going through a file at all.
     """
-    from openreading.api import PolicyError, validate_policy  # lazy: api is the layer above
-
+    block = dict(config.policy) if config.policy else None
+    if block is None:
+        return None, None
     try:
-        return validate_policy(dict(config.policy) if config.policy else None), None
-    except PolicyError as e:
-        return None, ValidationIssue("error", "policy", str(e))
+        schemas.validate_strategy_config({"version": 1, "policy": block})
+    except Exception as e:  # noqa: BLE001 — jsonschema.ValidationError, or a schema error
+        return None, ValidationIssue("error", "policy", getattr(e, "message", None) or str(e))
+    return block, None
 
 
 def _descriptor(slug: str):

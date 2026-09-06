@@ -30,9 +30,20 @@ Environment variables this module reads
 
 Laws
 ----
-Each law names the failure it prevents. `design/policy-one-yaml.md` carries P1 to P3, which the
-surfaces above this module hold.
+Each law names the failure it prevents. P1 to P3 are held by the surfaces above this module, and
+P4 to P6 by this one.
 
+- **P1. One file.** `openreading.yaml` is the only file a person writes, and its `policy:` block
+  is the only place a policy is spelled. Failure prevented: two documents describing one grammar
+  in two syntaxes, and a reader concluding one of them is wrong.
+- **P2. No hand-written JSON input.** JSON remains as output, as the wire, and as the schema
+  language. Nothing a person authors is JSON. Failure prevented: a policy file with no schema
+  behind it, which is what the removed `--policy` flag took.
+- **P3. A policy never names a backend.** It names a requirement, and the descriptor meets it or
+  does not. A strategy names backends and runs inside the survivors. Failure prevented: a
+  per-backend exception that widens the set by naming its way around a constraint. The three
+  attestation keys are the deliberate exception, and each one asserts a fact about paperwork
+  rather than a preference about a vendor.
 - **P4. The union never widens.** Request constraints and file constraints combine
   most-restrictive-wins, in `apply()`, once per request, on every path. Booleans OR to true. A
   region or a retention ceiling the request names wins, and the file supplies one only when the
@@ -173,7 +184,7 @@ def load(
     `config` is a path, a dict of the file's own shape, or None to run the discovery order. A dict
     is validated exactly as file text is, under the source name `<dict>`, so a shape refused from
     a file is refused from Python. Raises `ConfigError` for a file that will not parse or fails
-    the schema, and `openreading.api.PolicyError` for a `policy:` block that is not a policy.
+    the schema, a `policy:` block that is not a policy included.
     """
     if config is not None and not isinstance(config, str | os.PathLike | dict):
         # Without this the value reaches `Path()`, which raises a bare TypeError naming neither
@@ -202,17 +213,7 @@ def load(
             raise ConfigError(f"cannot read config file {path}: {exc.strerror or exc}") from exc
         raw = parse(text, source=str(path))
         source_hash = "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
-    # The schema still declares `policy` an open object, so this stands in for it until
-    # `strategy-config` v0.3 closes the block. Reported as a `ConfigError` and not as the
-    # `PolicyError` the guard itself raises, because to every reader this is one thing: a file
-    # that will not load. That is the rung the surfaces already map to exit 3, and it is the rung
-    # the schema will raise from once the block is closed.
-    source = str(path) if path is not None else "<dict>"
-    try:
-        policy = _validated_policy(raw.get("policy"))
-    except ValueError as exc:
-        raise ConfigError(f"{source}: invalid policy: {exc}") from exc
-    return LoadedFile(raw=raw, policy=policy, path=path, source_hash=source_hash)
+    return LoadedFile(raw=raw, policy=raw.get("policy"), path=path, source_hash=source_hash)
 
 
 def apply(
@@ -225,7 +226,6 @@ def apply(
     base configuration unchanged when there is no policy, which is what keeps a directory with no
     file byte-identical to every release before this one (law P5).
     """
-    policy = _validated_policy(policy)
     if not policy:
         return req, base
     config = merge_router_config(base, policy)
@@ -251,7 +251,7 @@ def router_config(policy: dict | None) -> RouterConfig:
     It validates the whole policy first, because a `route()`-shaped call reaches this with a
     policy that never passed through `build_request`.
     """
-    policy = _validated_policy(policy) or {}
+    policy = policy or {}
     return RouterConfig(
         allow_unverified_compliance=bool(policy.get("allow_unverified_compliance", False)),
         train_optout_confirmed=frozenset(policy.get("train_optout_confirmed", [])),
@@ -263,7 +263,6 @@ def union_compliance(req_compliance, policy: dict[str, Any] | None) -> dict[str,
     """Effective compliance = request ∪ file `policy:` compliance keys, most-restrictive-wins
     (booleans OR to True; region/retention: request wins if set, else the file adds it).
     Constraints only ever ADD — this can never widen the request's compliance."""
-    policy = _validated_policy(policy)
     eff: dict[str, Any] = {}
     base = req_compliance.model_dump() if req_compliance else {}
     for k in _COMPLIANCE_BOOL:
@@ -280,7 +279,6 @@ def merge_router_config(base: RouterConfig, policy: dict[str, Any] | None) -> Ro
     OR-s to True; train_optout_confirmed / baa_tier_confirmed union). `replace` rather than a fresh
     RouterConfig, so a field this fold does not name carries forward instead of silently resetting
     to its default."""
-    policy = _validated_policy(policy)
     if not policy:
         return base
     allow = base.allow_unverified_compliance or bool(policy.get("allow_unverified_compliance"))
@@ -292,30 +290,6 @@ def merge_router_config(base: RouterConfig, policy: dict[str, Any] | None) -> Ro
         train_optout_confirmed=frozenset(optout),
         baa_tier_confirmed=frozenset(baa_tier),
     )
-
-
-def _validated_policy(policy: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Refuse a malformed `policy:` block before any key of it becomes a constraint.
-
-    The `strategy-config` schema declares this sub-object `additionalProperties: true` for now, so
-    it is the one policy surface a JSON-Schema check cannot close, and both failures it lets
-    through are silent. A misspelled `require_locall` is dropped without a word, leaving the run
-    with no locality constraint at all, so the hosted rung stays eligible and dies later on
-    credentials. A quoted `allow_unverified_compliance: "false"` is truthy to `bool()`, so a value
-    whose plain-English intent is *off* switches the fail-closed tolerance ON and admits a
-    `trains_on_customer_data: unverified` backend that the same policy written with a real boolean
-    keeps out. `strategy-config` v0.3 closes the block and this guard goes away with it.
-
-    The guard sits in `load` and in the two functions that turn the raw dict into a constraint,
-    rather than in their callers, because wiring it caller-by-caller is exactly what left this
-    reader uncovered: `strategies.calibrate.calibrate_strategy` folds the same block by calling
-    those two directly, never through `load`.
-    """
-    # lazy: `api` is the layer above this module (it imports `load` inside its own functions for
-    # the same reason) — a module-level import here would invert the arrow.
-    from openreading.api import validate_policy
-
-    return validate_policy(policy)
 
 
 def _format_schema_error(exc: Exception) -> str:

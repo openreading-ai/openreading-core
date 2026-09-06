@@ -142,8 +142,8 @@ on regions, and the request is the more specific choice); deployment keys map to
 effective compliance is what prunes the tree AND what the route `compliance` facts read.
 
 The block is refused whole (`ConfigError`, from `openreading.config.load`) if it names a key
-outside `api.POLICY_KEYS` or gives one the wrong type. The schema declares this sub-object
-`additionalProperties: true`, so that check is the only thing standing between a typo and a run
+outside those nine or gives one the wrong type. `strategy-config` v0.3 declares this sub-object
+`additionalProperties: false` with every key typed, which is what stands between a typo and a run
 with no constraint: `require_locall` used to be dropped in silence, and a quoted
 `allow_unverified_compliance: "false"` was truthy enough to switch the fail-closed tolerance ON.
 
@@ -1050,9 +1050,9 @@ class StrategyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     version: int
-    # `policy` carries the compliance and RouterConfig keys. It is still open in the schema
-    # (additionalProperties: true), so `openreading.config` refuses an unknown key where the file
-    # is read; v0.3 closes the block and that guard goes away with it.
+    # `policy` carries the compliance and RouterConfig keys, typed and closed by
+    # `strategy-config` v0.3. Kept as a plain dict rather than a model because
+    # `openreading.config` folds it by flat key and nothing here reads an individual one.
     policy: dict[str, Any] | None = None
     limits: Limits | None = None
     decider: DeciderConfig | None = None

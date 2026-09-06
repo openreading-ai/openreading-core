@@ -1247,14 +1247,6 @@ def create_app(*, cors_origins: list[str] | None = None):
             )
         except KeyError as e:
             return _unknown_backend(e)
-        except api.PolicyError as e:
-            # The OPERATOR's `openreading.yaml` `policy:` block, refused where the file is read
-            # (openreading.config.load). Deliberately not an _ADAPTER_ERRORS member —
-            # it is a server misconfiguration, not a backend outcome, so it takes the table's
-            # "500 anything else" rung rather than a 4xx that would blame the caller's request.
-            # Routed through _error_response so it still answers with the documented envelope
-            # instead of an unhandled 500 with no body.
-            return _error_response(e)
         except _ADAPTER_ERRORS as e:
             return _error_response(e)
         schemas.validate_response(result)  # never emit a non-conforming response
@@ -1589,8 +1581,6 @@ def create_app(*, cors_origins: list[str] | None = None):
                 )
             except KeyError as e:
                 return _unknown_backend(e)
-            except api.PolicyError as e:  # operator config — /v1/parse's sibling above
-                return _error_response(e)
             except _ADAPTER_ERRORS as e:
                 # UnknownStrategyError is a TerminalError, so this catches it too;
                 # _error_response maps it to its own 400 before the generic terminal branch.

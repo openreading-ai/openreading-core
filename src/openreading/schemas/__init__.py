@@ -422,6 +422,7 @@ The labels below are milestone names, not released package versions: ``pyproject
 - 0.5.0 "Canon": response v0.3, adapter-descriptor v0.3, comparison-report v0.2.
 - 0.6.0 "Manifest": batch-result v0.1, corpus-report v0.1, adapter-descriptor v0.4.
 - 0.7.0 "Pulse" / "Plain": liveness-report v0.1, adapter-descriptor v0.5, strategy-config v0.2.
+- "One file": strategy-config v0.3 (the closed `policy` block).
 - Ledger: adapter-descriptor v0.6 and v0.7, step v0.1, journal v0.1, leaderboard-report v0.1.
 - Security review (M12): request v0.2.
 
@@ -521,7 +522,13 @@ DESCRIPTOR_SCHEMA_FILE = "adapter-descriptor.v0.7.json"
 # v0.2 (Plain, v0.7): the simple dialect's body grammar (plain_try/race/compare_body) + the
 # disagreement_over gate predicate — additive over v0.1 (config `version` const stays 1). Cut as
 # a new file because v0.1 is byte-frozen (schema-evolution §8); v0.1 remains the frozen artifact.
-STRATEGY_CONFIG_SCHEMA_FILE = "strategy-config.v0.2.json"
+# v0.3 (One file): `policy` becomes a CLOSED, typed object — the nine keys, the five compliance
+# ones carrying `request.compliance`'s own descriptions verbatim. It was `additionalProperties:
+# true` while a hand-written JSON policy file was the primary spelling and the block its superset.
+# With the file the only spelling, a typo and a quoted boolean are refused here rather than by a
+# validator standing in for the schema. No file that was valid and meaningful becomes invalid: a
+# key outside this set was already refused, one rung later. The config `version` const stays 1.
+STRATEGY_CONFIG_SCHEMA_FILE = "strategy-config.v0.3.json"
 # v0.4 (Compare): the read-only cross-backend comparison report (the openreading.comparison
 # docstring).
 # v0.5 (Canon): the `structure` finding code + content-first `headline`; finding-

@@ -64,7 +64,7 @@ consumer gets. The adapter-descriptor family validates a descriptor.
 | request | `request.v0.2.json` | `REQUEST_SCHEMA_FILE` | `validate_request` | optional `schema_version` const `"0.2"` |
 | response | `response.v0.3.json` | `RESPONSE_SCHEMA_FILE` | `validate_response` | required `schema_version` const `"0.3"` |
 | adapter-descriptor | `adapter-descriptor.v0.7.json` | `DESCRIPTOR_SCHEMA_FILE` | `validate_descriptor` | none, filename and `$id` only |
-| strategy-config | `strategy-config.v0.2.json` | `STRATEGY_CONFIG_SCHEMA_FILE` | `validate_strategy_config` | required integer `version` const `1` |
+| strategy-config | `strategy-config.v0.3.json` | `STRATEGY_CONFIG_SCHEMA_FILE` | `validate_strategy_config` | required integer `version` const `1` |
 | comparison-report | `comparison-report.v0.2.json` | `COMPARISON_REPORT_SCHEMA_FILE` | `validate_comparison_report` | required `schema_version` const `"0.2"` |
 | batch-result | `batch-result.v0.1.json` | `BATCH_RESULT_SCHEMA_FILE` | `validate_batch_result` | required `schema_version` const `"0.1"` |
 | corpus-report | `corpus-report.v0.1.json` | `CORPUS_REPORT_SCHEMA_FILE` | `validate_corpus_report` | required `schema_version` const `"0.1"` |

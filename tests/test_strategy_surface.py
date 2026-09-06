@@ -220,7 +220,7 @@ def test_cli_strategy_plan_malformed_policy_block_exits_3_without_a_traceback(_c
     assert rc == 3
     err = capsys.readouterr().err
     assert err.startswith("[strategy plan] ")
-    assert "did you mean 'require_local'" in err
+    assert "require_locall" in err
     assert len(err.splitlines()) == 1
 
 

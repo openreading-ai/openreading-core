@@ -296,7 +296,7 @@ def cmd_parse(args) -> int:
         # OSError leads with an "[Errno 2]" the reader who mistyped a filename cannot use.
         print(f"[{label}] cannot read {args.files[0]}: {_describe_read_error(e)}", file=sys.stderr)
         return 2
-    except (api.PolicyError, ConfigError) as e:
+    except ConfigError as e:
         # The openreading.yaml, refused where it is read: a grammar error, or a `policy:` block
         # that is not a policy. Exit 3, the rung a caller-side mistake takes, and named before the
         # document is opened.
@@ -917,10 +917,7 @@ def cmd_strategy_plan(args) -> int:
         compiled = compile_strategy(
             req, args.strategy, loaded.config, build_registry(), router_config
         )
-    # PolicyError: the file's own `policy:` block, refused where the file is read
-    # (openreading.config.load). Same rung as any other unloadable file — a policy that is wrong is
-    # wrong before the document is opened.
-    except (NormalizeError, ComplianceRefused, api.PolicyError) as e:
+    except (NormalizeError, ComplianceRefused) as e:
         print(f"[strategy plan] {e}", file=sys.stderr)
         return 3
     out = {
@@ -1104,7 +1101,7 @@ def cmd_replay(args) -> int:
                 clock=RealClock(),
                 replay=decisions,
             )
-    except (NormalizeError, ComplianceRefused, api.PolicyError) as e:
+    except (NormalizeError, ComplianceRefused) as e:
         print(f"[replay] {e}", file=sys.stderr)
         return 3
     except PlanExhaustedError as e:

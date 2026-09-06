@@ -438,7 +438,7 @@ def test_replay_malformed_policy_block_exits_3_without_a_traceback(sample_pdf, t
     assert rc == 3
     err = capsys.readouterr().err
     assert err.startswith("[replay] ")
-    assert "did you mean 'require_local'" in err
+    assert "require_locall" in err
     assert len(err.splitlines()) == 1
 
 
@@ -449,7 +449,7 @@ def test_calibrate_malformed_policy_block_exits_3_without_a_traceback(tmp_path, 
     assert rc == 3
     err = capsys.readouterr().err
     assert err.startswith("[calibrate] ")
-    assert "did you mean 'require_local'" in err
+    assert "require_locall" in err
     assert len(err.splitlines()) == 1
 
 

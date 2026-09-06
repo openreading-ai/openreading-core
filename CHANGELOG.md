@@ -26,6 +26,15 @@ them.
 
 ### Added
 
+- **`strategy-config` v0.3.** The `policy:` block is a closed, typed object: the five compliance
+  keys carrying `request.compliance`'s own descriptions verbatim, `optimize_for` as its enum, and
+  the three attestation keys as `boolean` and `array` of `string`. A quoted `"false"` and a bare
+  `reducto` where a list belongs are refused by the schema now rather than by a hand-written
+  validator standing in for it, and `validate_policy`, `POLICY_KEYS` and `PolicyError` are gone
+  with it. `doc_type_hint` leaves the policy grammar and stays a request field, because no routing
+  stage reads it and a key that does nothing in a file that gates compliance is one a reader will
+  try to rely on. The config `version` const stays `1`: no file that was valid and meaningful
+  becomes invalid.
 - **`openreading help [TOPIC]`.** The CLI now carries its own manual. `openreading help` prints a
   topic index grouped by what you are trying to do, and `openreading help batch` prints one
   chapter. The chapters are sections of the `openreading.cli` package docstring, located by

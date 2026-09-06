@@ -420,7 +420,7 @@ def test_cli_validate_a_policy_block_that_is_not_a_policy_exits_3(_clean_cwd, ca
     rc = main(["strategy", "validate", "--config", str(f)])
     assert rc == 3
     err = capsys.readouterr().err
-    assert "did you mean 'require_local'" in err
+    assert "require_locall" in err
     assert "Traceback" not in err
 
 

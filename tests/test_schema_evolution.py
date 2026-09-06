@@ -126,6 +126,8 @@ _UNRELEASED = {
     "corpus-report.v0.1.json",
     # Plain v0.7 — new/in-progress this milestone (freeze at milestone end):
     "strategy-config.v0.2.json",
+    # One file — `policy` closed to its nine typed keys (freeze at milestone end):
+    "strategy-config.v0.3.json",
     # Leaderboard (BL-160) — brand-new family this milestone (not yet byte-frozen):
     "leaderboard-report.v0.1.json",
     # Pulse (internal/design/liveness.md) — brand-new family + the additive descriptor bump that

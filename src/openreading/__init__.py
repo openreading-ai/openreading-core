@@ -381,15 +381,17 @@ prose. Branch on:
   for them in output. Per surface:
     * Python raises a typed exception, and the type IS the branch: `RetryableError` (retry with
       backoff), `TerminalError` (do not retry), `UnsupportedFeatureError`, `ComplianceRefused`,
-      `MissingCredentialsError`, `PlanExhaustedError`, `UnknownStrategyError`, `PolicyError`,
+      `MissingCredentialsError`, `PlanExhaustedError`, `UnknownStrategyError`,
       `SourceNotFoundError`. This is the only surface that separates every condition, so prefer it
-      when an agent must branch. ALL NINE import from the top level:
+      when an agent must branch. ALL EIGHT import from the top level:
 
           from openreading import ComplianceRefused, RetryableError, TerminalError
 
-      Their home modules are `openreading.types.errors` (all but `PolicyError`) and
-      `openreading.api` (`PolicyError`, raised by policy parsing, not by a backend); importing
-      from either still works. THREE of them SUBCLASS `TerminalError` -- `MissingCredentialsError`,
+      Their home module is `openreading.types.errors`, and importing from there still works. An
+      `openreading.yaml` that will not load, a `policy:` block that is not a policy included,
+      raises `openreading.config.ConfigError` instead, because it is a file the caller wrote
+      rather than a backend outcome. THREE of them SUBCLASS `TerminalError` --
+      `MissingCredentialsError`,
       `PlanExhaustedError` and `UnknownStrategyError` -- so catch those first or a broad
       `except TerminalError` swallows all three. Handling them as `TerminalError` is not WRONG
       (none is retryable), it just loses which one happened.
@@ -507,10 +509,7 @@ Known gaps: no MCP surface (integrate via CLI/JSON, Python dicts, or HTTP; desig
 `design/agentic.md`, `product/specs/agentic.product-spec.md`); no shipped `DeciderPort` executor
 (design records: `design/decider-executor.md`, `product/specs/decider.product-spec.md`); no
 intent schema or its routing mechanics (design records: `design/intent.md`,
-`product/specs/intent.product-spec.md`); the `policy:` block is still open in the
-`strategy-config` schema, so a hand validator stands in for the closed grammar until v0.3 lands
-(design records: `design/policy-one-yaml.md`,
-`product/specs/policy-one-yaml.product-spec.md`); no translation
+`product/specs/intent.product-spec.md`); no translation
 stage or profile grammar, which has no design record anywhere; `warnings[]` has no closed
 registry (the `openreading.schemas` docstring lists today's known codes, which is a list to read
 rather than an enum to validate against); the
@@ -561,8 +560,8 @@ at `src/openreading/README.md`. Those are files in this repo that a reader can o
 
 from __future__ import annotations
 
-from openreading.api import PolicyError, route, run, run_batch
 from openreading.api import resume_run as resume
+from openreading.api import route, run, run_batch
 from openreading.comparison import compare
 
 # The triage above tells an agent to branch on the exception TYPE, because Python is the only
@@ -570,8 +569,7 @@ from openreading.comparison import compare
 # be imported, and every one of these classes used to live two packages down, so the import an
 # agent actually writes -- `from openreading import ComplianceRefused` -- raised ImportError on the
 # very surface the briefing recommends. They are re-exported here and their home is unchanged:
-# `openreading.types.errors` defines all but `PolicyError`, which `openreading.api` defines
-# because it is raised by policy parsing rather than by a backend.
+# `openreading.types.errors` is the home of every one of them.
 from openreading.types.errors import (
     ComplianceRefused,
     MissingCredentialsError,
@@ -597,7 +595,6 @@ __all__ = [
     "ComplianceRefused",
     "MissingCredentialsError",
     "PlanExhaustedError",
-    "PolicyError",
     "RetryableError",
     "SourceNotFoundError",
     "TerminalError",

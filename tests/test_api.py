@@ -79,7 +79,7 @@ def test_a_dict_that_is_not_a_policy_is_refused_from_python_too(pdf_path):
     with pytest.raises(ConfigError) as exc:
         openreading.run(pdf_path, backend="pymupdf", config=_policy({"require_locall": True}))
     assert "<dict>" in str(exc.value)
-    assert "did you mean 'require_local'" in str(exc.value)
+    assert "require_locall" in str(exc.value)
 
 
 @pytest.mark.parametrize("call", ["run", "route", "run_batch"])

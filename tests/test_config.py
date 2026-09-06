@@ -211,7 +211,7 @@ def test_an_unknown_policy_key_is_refused_by_name(clean_cwd):
     (clean_cwd / "openreading.yaml").write_text("version: 1\npolicy: {require_locall: true}\n")
     with pytest.raises(config.ConfigError) as exc:
         config.load(None)
-    assert "did you mean 'require_local'" in str(exc.value)
+    assert "require_locall" in str(exc.value)
     assert "openreading.yaml" in str(exc.value)
 
 
@@ -221,7 +221,7 @@ def test_a_quoted_boolean_cannot_flip_the_fail_closed_switch(clean_cwd):
     )
     with pytest.raises(config.ConfigError) as exc:
         config.load(None)
-    assert "allow_unverified_compliance must be true or false" in str(exc.value)
+    assert "policy/allow_unverified_compliance" in str(exc.value)
 
 
 # --- apply: the union --------------------------------------------------------------------------

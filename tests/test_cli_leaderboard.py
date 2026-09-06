@@ -102,7 +102,7 @@ def test_leaderboard_cli_malformed_policy_block_exits_3_without_a_traceback(caps
     assert rc == 3
     err = capsys.readouterr().err
     assert "[leaderboard]" in err
-    assert "did you mean 'require_local'" in err
+    assert "require_locall" in err
     assert "Traceback" not in err
 
 
