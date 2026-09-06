@@ -325,9 +325,11 @@ class TesseractAdapter(BackendAdapter):
             img = Image.open(BytesIO(data)).convert("RGB")
             return [RasterPage(img, img.width, img.height, self._dpi, source_page=1)]
 
-        # PDF → rasterize each page with PyMuPDF (lazy; a real rasterizer dep)
+        # PDF → rasterize each page with PyMuPDF (lazy; a real rasterizer dep). The import is
+        # `pymupdf`, never the `fitz` alias: that alias prints a deprecation warning to stdout,
+        # and stdout carries only the JSON envelope.
         try:
-            import fitz
+            import pymupdf as fitz
         except ImportError as e:  # pragma: no cover
             raise TerminalError(
                 "PDF OCR needs a rasterizer (pip install pymupdf)", backend_code="no_rasterizer"

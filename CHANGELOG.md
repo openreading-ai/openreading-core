@@ -334,6 +334,12 @@ and `tests/test_schema_evolution.py` pins every released file byte for byte.
   recorded under its bare filename, so two files named `invoice.pdf` under different parents
   collapsed into one `--save-dir` file and paired wrongly in a corpus compare. `relpath` is now
   measured from the pattern's fixed root, which is the identity the batch-result schema promises.
+- **stdout carries only the envelope again on the paths that touch PyMuPDF.** Four modules
+  imported the `fitz` alias, which prints a deprecation warning to stdout the first time any
+  process imports it. `openreading compare DOC --all-ready --format json` therefore wrote a line
+  of English in front of the JSON and stopped parsing at all. Every site now imports `pymupdf`,
+  the same package under the name that stays quiet, and a test refuses the alias tree-wide. The
+  `pymupdf` floor moves to 1.24.3, the release that introduced that name.
 
 ### Security
 
