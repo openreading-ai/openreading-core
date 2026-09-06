@@ -13,6 +13,14 @@ OpenReading is a library and a command you run on your own machine. It is not a 
 user interface, or a model. If you call one parser and want its native output, call that parser
 directly. OpenReading earns its place when you switch, compare, or route between parsers.
 
+Most of this codebase is written by AI agents, under rules that assume an agent wrote it. An agent
+produces a confident sentence as easily as a true one, so the checks here aim at the claims the
+code makes rather than at its style. The JSON Schemas are pinned byte for byte. The strategy
+examples in the documentation are executed rather than proofread. The whole gate runs offline,
+with no key and no network. A human reviews every change and tests what a test cannot reach, such
+as a real vendor API reading a real document. [How this repo is built and
+verified](#how-this-repo-is-built-and-verified) names each check and the failure it catches.
+
 ## What it does
 
 Whichever backend reads your document, you get one shape that you can read, compare, or use to
@@ -410,6 +418,68 @@ Five numbers travel with this project, and only one of them is the code you inst
 
 Pin a commit SHA. None of the five numbers is a pin, because there are no git tags and no PyPI
 release. A SHA is the only way to name the exact code you tested.
+
+## How this repo is built and verified
+
+Agents will write a large share of the software that gets written. The open question is what makes
+any of it trustworthy. The bet this repository makes is that agents verify it too, and that a
+human is spent where machine checking runs out. An agent that reviews a diff, writes the failing
+test first, or tries to break a fix costs little enough to run on every change. Human attention
+does not, so it goes to the places no check can reach.
+
+An agent is good at producing work that looks right. A passing suite and a clean formatter do not
+catch that on their own. Each check below therefore takes aim at one claim the code makes about
+itself, and the middle column names the failure the check exists to prevent.
+
+### The gate
+
+`make verify` is the finish line for a change, and CI runs that same target on Python 3.11 through
+3.14. It runs offline. It reads no credential and opens no socket, so a green result never depends
+on a vendor being reachable or on the person running it holding an account. `uv run lefthook
+install` adds local hooks that run ruff and the documentation policy before a commit, and the whole
+gate before a push. Those hooks are a convenience, and CI is the gate. Coverage carries a floor
+inside that target. The floor ratchets up and never down, and the README badge is pinned to the
+number the Makefile enforces.
+
+| What is checked | The failure it prevents | Where it lives |
+|---|---|---|
+| schema evolution | a released schema file changes under a caller, or a newer version stops validating an older response | `tests/test_schema_evolution.py` |
+| documented examples | a YAML strategy example that the real grammar rejects, because the example was written instead of run | `tests/test_docs_truth.py` |
+| where documentation lives | a new markdown file, a relative link to something that moved, or a coverage badge claiming more than the gate enforces | `tests/test_docs_policy.py` |
+| numbers quoted in prose | a document citing a coverage floor the Makefile no longer sets | `tests/test_docs_freshness.py` |
+| the CLI manual | a subcommand with no help topic, a help page taller than one screen, or a page naming a path a reader cannot open | `tests/test_cli_help.py` |
+| adapter conformance | a backend that fabricates a channel it cannot produce, or that omits the warning it owes | `tests/test_conformance.py`, [`openreading.testing`](src/openreading/testing/) |
+| unfinished scaffolding | a generated adapter merged with the generator's placeholder values still in it | `tests/test_scaffold_sentinel.py` |
+| install extras | an adapter that every test exercises and that `pip install openreading[<slug>]` ships nothing for | `scripts/check_extras_parity.py` |
+| hosted backends | broken normalization or error mapping, proven against intercepted HTTP calls plus injected faults, with no key | `tests/test_<slug>_faults.py`, `tests/test_<slug>_http.py` |
+| invariants, not examples | a bounding-box conversion that holds for the glyphs someone pinned and fails on everything else | `tests/test_geometry_properties.py` |
+| determinism | a strategy run that replays into a different journal than the one it recorded | `tests/test_strategy_determinism.py` |
+| output purity | an import whose side effect prints a line in front of the JSON envelope | `tests/test_stdout_purity_imports.py` |
+
+Two rules shape how those tests get written. The failing test comes first, before the change that
+makes it pass. When the change is a bug fix, break the fix again and watch the test go red, then
+restore it, because a test written afterwards often passes for a reason unrelated to the bug. No
+document here quotes a test count, since that number moves with every commit that adds one. Read
+it live with `uv run pytest -m "not live" --collect-only -q`.
+
+### Where a human is spent
+
+Four things resist automation, and they are where review time goes.
+
+A rationale comment states the failure a decision avoids, and that failure is invisible in the code
+the decision produced. No test reads English, so a reviewer is the only thing keeping such a
+comment true. The same holds for a design record under `design/`, which has to be deleted in the
+pull request that ships its feature, its durable facts moved into the module docstrings.
+
+A mock proves this project's own normalization and error handling. It never proves that the
+vendor's API behaves the way the mock claims. `make verify-live` runs the keyed lane against the
+real APIs, and it skips cleanly for every backend whose keys are absent. A person reads those runs,
+along with the output of `make serve-smoke` and of the four smokes inside the gate, which drive the
+real CLI over a deterministic sample document.
+
+Scope is the fourth. Whether an addition belongs in this repository at all is a judgement about
+what an open engine owes its users, and [`AGENTS.md`](AGENTS.md) is where that judgement is
+written down for agents and humans alike.
 
 ## Where the docs are
 
