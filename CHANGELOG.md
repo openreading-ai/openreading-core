@@ -326,6 +326,14 @@ and `tests/test_schema_evolution.py` pins every released file byte for byte.
 - The polling driver caps each sleep at the caller's deadline, and the fault streak resets on a
   healthy poll.
 - A resumed run replays the step error's message, not only its class name.
+- **`**` in a `parse` glob now matches every depth.** Python reads `**` as a plain `*` unless the
+  caller asks for recursion, so `parse 'scans/**/*.png'`, the pattern the CLI reference itself
+  printed, matched one directory level and reported success over a fraction of the corpus. It now
+  walks the whole tree.
+- **A glob keeps the directories it walked in each document's `relpath`.** A match used to be
+  recorded under its bare filename, so two files named `invoice.pdf` under different parents
+  collapsed into one `--save-dir` file and paired wrongly in a corpus compare. `relpath` is now
+  measured from the pattern's fixed root, which is the identity the batch-result schema promises.
 
 ### Security
 

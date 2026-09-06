@@ -16,6 +16,7 @@ from __future__ import annotations
 import errno
 import glob as _glob
 import hashlib
+import itertools
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -152,23 +153,44 @@ def _expand_dir(root: Path) -> list[tuple[Path, str]]:
     return out
 
 
+def _glob_root(pattern: str) -> Path:
+    """The fixed directory a glob is anchored at: every leading component before the first one
+    carrying a wildcard. `a/b/*/x.pdf` → `a/b`, `*.pdf` → `.`. It is what a match's `relpath` is
+    measured from, so the directories the pattern itself wrote down do not reappear in every
+    record while the ones it matched are kept."""
+    parts = Path(pattern).parts
+    fixed = list(itertools.takewhile(lambda part: not _is_glob(part), parts))
+    return Path(*fixed) if fixed else Path(".")
+
+
 def _expand_arg(arg: str) -> list[_RawRef]:
     if is_url(arg):
         return [(None, arg, None, _url_filename(arg))]
     if _is_glob(arg):
-        matches = sorted(_glob.glob(arg))
+        # `recursive=True` is what gives `**` its meaning. Without it Python silently reads `**`
+        # as a plain `*`, so a pattern over a nested corpus matches one level and the run reports
+        # success over a fraction of the documents, with nothing on stderr to say so.
+        matches = sorted(_glob.glob(arg, recursive=True))
         if not matches:
             # BL-141: errno-style OSError.__init__(errno, strerror, filename) construction — see
             # the identical note at the other SourceNotFoundError raise site below.
             # BL-143: `errno.ENOENT`, not `None` — see the identical note at the other raise site.
             raise SourceNotFoundError(errno.ENOENT, "glob matched no files", arg)
+        # `relpath` is the cross-run pairing key (batch-result.v0.1.json) and the `--save-dir`
+        # layout, so it has to stay unique per document. Measuring it from the pattern's fixed
+        # root keeps the directories the wildcard walked; a bare basename would collapse
+        # `x/invoice.pdf` and `y/invoice.pdf` into one record and one saved file.
+        root = _glob_root(arg)
         raws: list[_RawRef] = []
         for m in matches:
             p = Path(m)
             if p.is_dir():
-                raws += [(str(fp), None, rel, fp.name) for fp, rel in _expand_dir(p)]
+                raws += [
+                    (str(fp), None, f"{p.relative_to(root).as_posix()}/{rel}", fp.name)
+                    for fp, rel in _expand_dir(p)
+                ]
             elif p.is_file():
-                raws.append((str(p), None, p.name, p.name))
+                raws.append((str(p), None, p.relative_to(root).as_posix(), p.name))
         return raws
     p = Path(arg)
     if p.is_dir():

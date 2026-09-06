@@ -208,7 +208,9 @@ def test_glob_matching_a_directory_recurses_into_it(tmp_path):
     _mk(tmp_path / "d1" / "a.pdf")
     _mk(tmp_path / "d2" / "c.pdf")
     got = [r.ref.relpath for r in resolve_intake([str(tmp_path / "d*")])]
-    assert got == ["a.pdf", "b.pdf", "c.pdf"]  # each matched dir expanded recursively, sorted
+    # Each matched directory is expanded recursively and sorted, and its own name stays in the
+    # relpath: the wildcard walked those directories, so they are part of a document's identity.
+    assert got == ["d1/a.pdf", "d1/b.pdf", "d2/c.pdf"]
 
 
 def test_glob_with_no_matches_raises(tmp_path):
@@ -218,3 +220,35 @@ def test_glob_with_no_matches_raises(tmp_path):
 
 def test_resolved_source_is_the_dataclass():
     assert ResolvedSource.__annotations__.keys() >= {"ref", "skip_reason"}
+
+
+# --- glob depth and identity (BL-cli-help) ------------------------------------------------
+
+
+def test_recursive_glob_matches_every_depth(tmp_path):
+    # `**` is the pattern a reader reaches for over a nested corpus. Without `recursive=True`
+    # Python treats it as a plain `*`, so it matches one level and drops the rest at exit 0.
+    _mk(tmp_path / "top.pdf")
+    _mk(tmp_path / "a" / "one.pdf")
+    _mk(tmp_path / "a" / "b" / "two.pdf")
+    _mk(tmp_path / "a" / "b" / "c" / "three.pdf")
+    got = [r.ref.relpath for r in resolve_intake([str(tmp_path / "**" / "*.pdf")])]
+    assert got == ["a/b/c/three.pdf", "a/b/two.pdf", "a/one.pdf", "top.pdf"]
+
+
+def test_glob_relpath_keeps_the_directories_below_the_pattern(tmp_path):
+    # relpath is the cross-run pairing key (batch-result.v0.1.json) and the --save-dir layout.
+    # Two same-named files under different parents must stay two distinct records.
+    _mk(tmp_path / "coll" / "x" / "invoice.pdf")
+    _mk(tmp_path / "coll" / "y" / "invoice.pdf")
+    got = [r.ref.relpath for r in resolve_intake([str(tmp_path / "coll" / "*" / "invoice.pdf")])]
+    assert got == ["x/invoice.pdf", "y/invoice.pdf"]
+
+
+def test_glob_matching_directories_keeps_each_match_distinct(tmp_path):
+    # A glob that matches directories expands each one, and the matched directory's own name
+    # stays in the relpath, so two dirs holding the same filename do not collapse.
+    _mk(tmp_path / "d1" / "same.pdf")
+    _mk(tmp_path / "d2" / "same.pdf")
+    got = [r.ref.relpath for r in resolve_intake([str(tmp_path / "d*")])]
+    assert got == ["d1/same.pdf", "d2/same.pdf"]
