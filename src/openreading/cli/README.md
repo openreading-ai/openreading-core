@@ -427,6 +427,19 @@ that fills mid-run was not measured.
   `openreading.cli` docstring, "Invariants shared by every subcommand", which says "surfaces as an
   uncaught traceback, not a coded exit".
 
+Four inconsistencies between verbs are known and unfixed. Each is safe once you know it, and
+each would be a breaking change to correct, so read the flag's own `--help` rather than assuming
+a sibling's rule carries over.
+
+- `--format` names different value sets. `compare` takes `json|table|diff|diffs|md`, `leaderboard`
+  takes `table|json`, and `benchmark report` takes `text|json`, so `benchmark report
+  --format table` exits 2.
+- `--jobs 0` clamps to 1 on `parse` and exits 2 on `benchmark run`. `parse` also has a ceiling
+  (`--max-jobs`) and `benchmark run` does not.
+- An unknown backend id exits 2 from `compare` and `leaderboard`, and 3 from `backends --check`.
+- On `strategy` and `benchmark`, `--env-file` belongs before the sub-verb, and passing it after
+  prints the top-level usage line, which names neither the flag nor the sub-verbs.
+
 ## See also
 
 - [Docs home](../README.md)
