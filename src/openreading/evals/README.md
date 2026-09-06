@@ -15,7 +15,7 @@ commands are not interchangeable, and picking the wrong one is the usual way to 
 |---|---|---|
 | The documents | a publisher's public corpus | yours |
 | The expected answers | the publisher's, shipped with the corpus | you write one `case.json` per document |
-| Who grades it | the publisher's own scoring code | `openreading.evals.scorers`, in this repo |
+| Who grades it | the publisher's own scoring code | `openreading.evals.scorers`, plus the publisher's rule engine on any case that declares `rules` |
 | Work before the first run | install one extra | label every document by hand |
 | What it settles | which backend is better on documents anyone can check | whether that holds on your traffic |
 
@@ -31,11 +31,14 @@ response is the one JSON envelope every backend returns.
 Labeled datasets never land in this repo. The repo ships one synthetic case so the labeled path
 proves itself offline, and both walkthroughs below run with no key and no bill.
 
-One limit belongs up here rather than in a footnote. The scorers in this repo mostly ask whether
-the content you expected is present. They do not ask whether the backend added anything you did
-not expect, so a response with an invented total still scores 1.0. A public benchmark's scorer
-does ask, which is a second reason to start there. Path two's walkthrough step 1 proves the gap on
-the shipped sample and names the three dimensions that cover it.
+One limit belongs up here rather than in a footnote, along with how to close it. Four of the five
+scorers in this repo ask whether the content you expected is present. They do not ask whether the
+backend added anything you did not expect, so a response with an invented total scores 1.0 on
+them. That matters because four backends in the catalog write text rather than read it.
+
+The fifth closes it on your own documents. Add a `rules` key to a case and the publisher's own
+rule engine scores it, including assertions like `absent` that fail on invented content. See
+[Assert what must NOT be there](#assert-what-must-not-be-there).
 
 ## Path one: a public benchmark (`openreading benchmark`)
 
@@ -427,6 +430,124 @@ sample size you should copy.
 8. **Ship, and keep the dataset.** Rerun the leaderboard when a backend releases a new version.
    That rerun is the whole reason to have written the labels down.
 
+### Assert what must NOT be there
+
+The four scorers above count what you asked for. None of them can see what a backend ADDED, which
+is the failure mode that matters most for the four backends in the catalog that write text rather
+than read it. A `rules` key closes that, on your own documents.
+
+A rule is one named assertion, written in ParseBench's own vocabulary and scored by ParseBench's
+own engine. You are not adopting their corpus, only their grader, and only for the cases where you
+ask for it.
+
+**Start with `text_absent`.** It is a plain list of strings that must not appear, it needs no
+publisher JSON, and it is the assertion that catches invented content. Everything else on this
+page is refinement.
+
+```json
+{ "name": "invoice",
+  "input": {"path": "input.pdf"},
+  "expected": {
+    "text_contains": ["OpenReading Test Document"],
+    "text_absent": ["Total due: 9999999.00"],
+    "rules": [
+      {"type": "present", "id": "has_title", "text": "OpenReading Test Document"},
+      {"type": "absent",  "id": "no_invented_total", "text": "Total due: 9999999.00"},
+      {"type": "table",   "id": "north_units", "cell": "North", "right": "120", "top_heading": "Region"}
+    ] } }
+```
+
+```bash
+pip install 'openreading[parsebench]'
+uv run openreading leaderboard mydata --backends pymupdf,tesseract
+```
+```text
+dataset: mydata  (1 case(s): invoice)
+
+rank  backend                        mean  scored   cost/doc  errors  dimensions
+   1  pymupdf                       1.000     1/1     0.0000       0  text_contains=1.00 rule_pass_rate=1.00
+   2  tesseract                     0.833     1/1     0.0000       0  text_contains=1.00 rule_pass_rate=0.67
+
+per-case result:
+  invoice: winner=pymupdf  (pymupdf=1.00, tesseract=0.83)
+```
+
+**You should see** `rule_pass_rate` beside the dimensions you already had, and the two backends
+separated by it. Both find the title, so `text_contains` cannot tell them apart. OCR loses the
+table's structure, so the `table` rule can. That is the same `leaderboard` command over the same
+dataset directory, because rules are a dimension rather than a second harness.
+
+You do not have to write the first ones by hand. `openreading rules` turns the labels a case
+already carries into rules, prints them, and edits the files only when you say so:
+
+```bash
+uv run openreading rules mydata            # print what it would add
+uv run openreading rules mydata --write    # apply it
+```
+```text
+invoice: 4 rule(s) would be added
+[
+  {"type": "present", "id": "contains_0", "text": "OpenReading Test Document"},
+  {"type": "table", "id": "table0_r1_c0", "cell": "North", "right": "120", "top_heading": "Region"}
+]
+
+nothing written. Re-run with --write to apply.
+```
+
+It generates what your labels already assert and nothing more, so it can never make a backend look
+better than the labels justify. It also cannot generate the rule worth having most. Nothing in a
+case says what must NOT appear, so every `absent` rule is yours to write, and the command says so
+when it finishes.
+
+Three rule types cover most of what a person wants to assert, all verified against ParseBench
+1.0.2 on the shipped sample:
+
+| Rule | Asserts |
+|---|---|
+| `{"type": "present", "text": "..."}` | the string appears |
+| `{"type": "absent", "text": "..."}` | the string does NOT appear, which is the whole point |
+| `{"type": "table", "cell": "North", "right": "120", "top_heading": "Region"}` | a cell, its neighbour and its column heading |
+
+Matching folds case and collapses whitespace. It does not strip punctuation, so a trailing period
+your document lacks fails the rule.
+
+**Those three are what the generator writes, not what the scorer accepts.** Anything you put in
+`rules` goes to the publisher's engine untouched, so the whole 78-type vocabulary is available by
+hand. Run `uv run python -m pydoc parse_bench.test_cases.parse_rule_schemas` once the extra is
+installed. Verified working on ordinary markdown: `order` (this text before that one), `is_bold`,
+`is_italic`, `is_title`, `is_not_bold` and `missing_specific_word`, alongside the three above.
+
+Two families need more than markdown, and a rule that cannot see what it needs fails rather than
+saying so, which reads as a broken backend:
+
+| Family | Needs | What happens without it |
+|---|---|---|
+| `table_adjacent_up/down/left/right`, and the other cell-relationship rules | an HTML `<table>` in the markdown | always fails, even when the table is correct |
+| `unexpected_word`, `missing_word`, `too_many_word_occurence` and the sentence equivalents | a `bag_of_word` built with the publisher's own tokenizer | the bag is wrong, so the verdict is noise |
+
+The first one bites in practice. `pymupdf` writes GFM pipe tables, so cell-relationship rules can
+never pass against it, while the plain `table` rule works on both shapes. Ask a backend for HTML
+tables (`outputs.tables = "html"`) before relying on the relationship rules, and prefer `table`
+when you do not know what your backend emits.
+
+For the bag rules, build the bag with the publisher's own function rather than splitting on
+spaces, because its tokenizer lowercases, strips markdown, drops one-character tokens and folds
+accents:
+
+```python
+from parse_bench.evaluation.metrics.parse.rules_bag import WordBagRule
+bag = dict(WordBagRule._extract_normalized_words_static(expected_text, include_table_cells=True))
+```
+
+One rule to avoid: `tables_num_rows` cannot pass. It reads an `actual_num_rows` field that nothing
+in ParseBench 1.0.2 ever writes, so it reports "Row count not populated" whatever your table looks
+like. `tables_num_cols` is built the same way. Use the `table` rule for structure instead.
+
+Two behaviours worth knowing before you rely on this. A case that declares `rules` without the
+extra installed raises and names the install command, rather than scoring zero, because a silent
+zero reads as a failing backend. And `overall` is the unweighted mean across every dimension a
+case names, rules included, so a case asserting both kinds gets one mean over both.
+
 ### Recipes
 
 **Rank under a compliance policy.**
@@ -519,10 +640,16 @@ print(run_dataset(make_adapter("tesseract"), "mydata").summary())   # backend=te
 - A mean is reported, and a sample size is not judged. The harness accepts one case as readily as
   five hundred, warns at neither, and reports no spread or interval. Deciding that a gap is real
   rather than one document's opinion is your job, and step 4 is the order to do it in.
-- Most dimensions measure presence, not absence. `text_contains` and the table scorer count what
-  you asked for and cannot see what the backend added. A leaderboard alone will therefore miss a
-  backend that invents content, which a public benchmark's own scorer does catch. Path two's
-  walkthrough step 1 names the three dimensions that will catch one here.
+- Absence is opt in, and its verdict is the publisher's. `text_contains` and the table scorer
+  count what you asked for and cannot see what the backend added, so a case that declares no
+  `rules` still cannot catch invented content. A case that declares them hands them to
+  ParseBench's own engine, unchanged, because a rule this repo reimplemented could disagree with
+  the same rule under `benchmark run`. See `openreading.evals.rules`.
+- Rules are a dimension, not a second path. They are scored inside the same `score` call as every
+  other dimension, gated on one key, so `leaderboard` and `calibrate` reach them through the one
+  `run_case` they already use. Without that, two harnesses could disagree about one document. A
+  case with no ParseBench installed raises rather than scoring zero, because a silent zero reads
+  as a failing backend and a silent omission reads as passing rules.
 - A public benchmark result is read back, never recomputed. `benchmark run` and `benchmark report`
   print the publisher's own numbers out of its own report files, so the terminal table and the
   publisher's dashboard cannot disagree about a document. The one thing added is the join from a
@@ -565,10 +692,13 @@ print(run_dataset(make_adapter("tesseract"), "mydata").summary())   # backend=te
   (`openreading.evals.leaderboard` docstring).
 - A labeled corpus, which never lands here by rule (`tests/test_evals_benchmark_only.py`) and is
   not a gap to file.
-- Scoring your own documents for invented content. The five dimensions here mostly measure
-  presence, and ParseBench's rule vocabulary reaches only ParseBench's own corpus. Proposed in
-  [design/benchmark-rule-vocabulary.md](../../../design/benchmark-rule-vocabulary.md), which also
-  prices the cheaper alternative of writing two such scorers natively.
+- Detecting content you did NOT predict. `text_absent` and an `absent` rule catch a string you
+  named; nothing yet catches arbitrary invention, which needs the publisher's bag rules and an
+  explicit claim that a labeled `text` is the whole document. Increment 2 of
+  [the product spec](../../../product/specs/hallucination-detection.product-spec.md).
+- Publisher-comparable numbers over your own corpus, which is increment 3 of the same spec and
+  may never be worth building. Its open question is whether anyone needs comparability rather
+  than absence detection.
 
 ## See also
 

@@ -29,6 +29,11 @@ from typing import Any
 
 MANIFEST = "openreading-run.json"
 
+# The category name used when the publisher reported no per-category breakdown, which is what
+# a single-category corpus produces. Named rather than left blank so a reader can tell "one
+# undivided run" from "a category the publisher happened to call nothing".
+ALL_DOCUMENTS = "all documents"
+
 # Checked in order. The first one a publisher's aggregate block carries becomes that row's
 # headline, and its name is printed, so no row ever shows one metric under another's heading.
 _HEADLINE_METRICS = (
@@ -89,23 +94,33 @@ def _read_json(path: Path) -> dict[str, Any]:
         return {}
 
 
+def _score(report: Path, name: str) -> CategoryScore:
+    payload = _read_json(report)
+    aggregate = payload.get("aggregate_metrics") or {}
+    metric = next((key for key in _HEADLINE_METRICS if key in aggregate), "")
+    raw = aggregate.get(metric) if metric else None
+    return CategoryScore(
+        name=name,
+        metric=metric.removeprefix("avg_") if metric else "none reported",
+        score=float(raw) if isinstance(raw, (int, float)) else None,
+        passed=aggregate.get("total_rule_pass_rate_passed"),
+        evaluated=aggregate.get("total_rule_pass_rate_evaluated"),
+        examples=int(payload.get("total_examples") or 0),
+    )
+
+
 def _categories(pipeline_dir: Path) -> tuple[CategoryScore, ...]:
-    scores: list[CategoryScore] = []
-    for report in sorted(pipeline_dir.glob("*/_evaluation_report.json")):
-        payload = _read_json(report)
-        aggregate = payload.get("aggregate_metrics") or {}
-        metric = next((key for key in _HEADLINE_METRICS if key in aggregate), "")
-        raw = aggregate.get(metric) if metric else None
-        scores.append(
-            CategoryScore(
-                name=report.parent.name,
-                metric=metric.removeprefix("avg_") if metric else "none reported",
-                score=float(raw) if isinstance(raw, (int, float)) else None,
-                passed=aggregate.get("total_rule_pass_rate_passed"),
-                evaluated=aggregate.get("total_rule_pass_rate_evaluated"),
-                examples=int(payload.get("total_examples") or 0),
-            )
-        )
+    scores = [
+        _score(report, report.parent.name)
+        for report in sorted(pipeline_dir.glob("*/_evaluation_report.json"))
+    ]
+    # A corpus with ONE category writes its report at the pipeline root rather than under a
+    # category directory, which the glob above cannot see. Measured against ParseBench 1.0.2: a
+    # multi-category run writes only per-category reports, so reading the root as well adds a row
+    # exactly when there would otherwise be none, and never double counts.
+    root_report = pipeline_dir / "_evaluation_report.json"
+    if not scores and root_report.is_file():
+        scores.append(_score(root_report, ALL_DOCUMENTS))
     return tuple(scores)
 
 

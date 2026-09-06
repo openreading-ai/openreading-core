@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from openreading.evals.report import (
+    ALL_DOCUMENTS,
     MANIFEST,
     ReportError,
     read_run,
@@ -146,3 +147,47 @@ def test_reading_a_directory_with_no_run_is_an_error(tmp_path) -> None:
 
     with pytest.raises(ReportError, match="not a directory"):
         read_run(tmp_path / "missing")
+
+
+def test_a_single_category_run_reports_its_root_level_report(tmp_path) -> None:
+    """A one-category corpus writes its report at the pipeline root, not under a category.
+
+    Measured against ParseBench 1.0.2. The per-category glob cannot see it, so a run over a
+    corpus of your own documents reported no categories at all before this.
+    """
+    directory = tmp_path / "pipe"
+    directory.mkdir(parents=True)
+    (directory / "_metadata.json").write_text(
+        json.dumps({"summary": {"total": 1, "successful": 1, "failed": 0}})
+    )
+    (directory / "_evaluation_report.json").write_text(
+        json.dumps(
+            {
+                "total_examples": 1,
+                "aggregate_metrics": {
+                    "avg_rule_pass_rate": 1.0,
+                    "total_rule_pass_rate_passed": 2.0,
+                    "total_rule_pass_rate_evaluated": 2.0,
+                },
+            }
+        )
+    )
+
+    categories = read_run(tmp_path)[0].categories
+
+    assert [c.name for c in categories] == [ALL_DOCUMENTS]
+    assert categories[0].score == 1.0
+    assert categories[0].evaluated == 2.0
+
+
+def test_a_root_report_never_double_counts_a_categorised_run(tmp_path) -> None:
+    """A multi-category run writes no root report, but guard the sum anyway."""
+    _publisher_run(tmp_path, "pipe", categories={"text": {"avg_rule_pass_rate": 0.5}})
+    (tmp_path / "pipe" / "_evaluation_report.json").write_text(
+        json.dumps({"total_examples": 9, "aggregate_metrics": {"avg_rule_pass_rate": 0.9}})
+    )
+
+    categories = read_run(tmp_path)[0].categories
+
+    # The per-category rows win; the root is a fallback for when there are none.
+    assert [c.name for c in categories] == ["text"]

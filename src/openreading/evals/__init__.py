@@ -22,10 +22,17 @@ The public bridge downloads nothing until ``benchmark prepare`` or ``benchmark r
 Its default cache stays outside the repository. Research-only and unverified terms use
 different acknowledgement flags, so one flag cannot authorize the other accidentally.
 
-Known gaps: scoring your OWN documents for content a backend invented is not built. Most
-dimensions here measure presence, and the publisher rule vocabulary that does measure absence
-reaches only the publisher's corpus. ``design/benchmark-rule-vocabulary.md`` proposes both the
-coupled and the native answer, and is not started.
+A case may also declare ``expected.rules``, which are ParseBench's own rule objects scored by
+ParseBench's own engine over your document (``openreading.evals.rules``). That is the one
+dimension here that sees content a backend INVENTED rather than merely missed, because the other
+four ask only whether what you expected is present. It stays a dimension inside ``score`` rather
+than a second harness, so ``leaderboard`` and ``calibrate`` reach it through the same
+``run_case``. ``expected.text_absent`` is the plain-strings spelling, scored by the same engine.
+
+Known gaps: catching content the user did not PREDICT needs the publisher's bag rules and an
+explicit claim that a labeled ``text`` is the whole document, and publisher-comparable numbers
+over a private corpus are not built. Both are scoped in
+``product/specs/hallucination-detection.product-spec.md``.
 
 One synthetic sample ships at ``src/openreading/evals/sample/loan_page1/case.json``. Labeled
 data over real documents never lands in this repository, and

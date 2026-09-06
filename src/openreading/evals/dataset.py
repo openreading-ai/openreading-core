@@ -6,8 +6,19 @@
       "input": {"builtin_sample": true, "pages": [1]},   // or "path", "bytes_base64", or "url"
       "backend": {"operation": "..."},                    // optional per-case backend overrides
       "compliance": {"require_local": true},              // optional per-case compliance (BL-112)
-      "expected": { "text_contains": [...], "tables": [[...]], "typed_fields": {...} }
+      "expected": { "text_contains": [...], "tables": [[...]], "typed_fields": {...},
+                    "text_absent": ["..."], "rules": [{"type": "absent", "text": "..."}] }
     }
+
+`expected.text_absent` lists strings that must NOT appear. It is the plain spelling of the one
+assertion no other label can imply, and it is scored by the same engine `rules` uses rather than
+by a native substring check, so there is one absence verdict rather than two that could disagree.
+
+`expected.rules` are ParseBench's own rule objects, scored by ParseBench's own engine
+(`openreading.evals.rules`). They are the only expectation here that can fail because a backend
+ADDED something, so they are how a case asserts what must NOT appear. They need the
+`openreading[parsebench]` extra and Python 3.12 or newer; a case that declares them without it
+raises rather than scoring zero.
 
 `input` takes exactly one of four forms. `builtin_sample` resolves to the generated 2-page test
 PDF (openreading.testing.sample_pdf), so a committed dataset needs no binary. `path` names a file
