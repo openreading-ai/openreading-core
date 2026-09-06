@@ -217,13 +217,14 @@ def calibrate_strategy(
 
     Compliance (BL-112): the strategy file's own `policy:` block is folded into effective
     compliance and RouterConfig exactly the way `compile_strategy` does for every other
-    strategy-engaged surface (`config.union_compliance`/`merge_router_config`, reused not
+    strategy-engaged surface (`config.apply`/`merge_router_config`, reused not
     reimplemented), and the rung-1 backend is gated PER CASE, before `adapter.submit()`, via
     `Router.check_eligible` — never gated once for the whole sample, since each case is loaded
     from its own independent file and can carry its own `compliance` block."""
     import base64
 
-    from openreading.config import merge_router_config, union_compliance
+    from openreading.config import apply as apply_policy
+    from openreading.config import merge_router_config
     from openreading.credentials import build_run_context
     from openreading.evals import scorers
     from openreading.evals.dataset import load_dataset
@@ -235,7 +236,7 @@ def calibrate_strategy(
     from openreading.strategies.normalize import normalize_strategy
     from openreading.strategies.signals import probe
     from openreading.types.errors import AdapterError, TerminalError
-    from openreading.types.request import Compliance, OpenReadingRequest
+    from openreading.types.request import OpenReadingRequest
 
     tree = normalize_strategy(strategy_name, config)
     steps = tree.get("steps") if isinstance(tree, dict) else None
@@ -281,9 +282,11 @@ def calibrate_strategy(
     cases = load_dataset(dataset_dir, backend_id=rung1_backend)
     for i, case in enumerate(cases):
         req = OpenReadingRequest.model_validate(case.request_body)
-        effective_compliance = union_compliance(req.compliance, config_policy)
-        if effective_compliance:
-            req = req.model_copy(update={"compliance": Compliance(**effective_compliance)})
+        # The shared fold, not a local rebuild of it. Assembling the compliance half by hand here
+        # meant the file's `optimize_for` reached every other surface and not this one, and any
+        # key added later would have reached this one last. `merged_router_config` above already
+        # carries the attestations, so this call is idempotent over them.
+        req, _ = apply_policy(req, config_policy, merged_router_config)
         clock = RealClock()
         # Per-case isolation (BL-107): this block used to have no fault handling at all — a
         # RetryableError (rate-limit exhaustion, or the hard-coded 60s per-case deadline tripping,

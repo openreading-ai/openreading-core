@@ -407,3 +407,35 @@ def test_adding_a_file_constraint_also_refuses_the_resume(tmp_path, monkeypatch)
     )
     with pytest.raises(HeaderMismatch):
         api.resume_run(run_id)
+
+
+# --- PF2, the remaining reimplementation ---------------------------------------------------------
+
+
+def test_calibrate_folds_the_whole_block_not_only_its_compliance_half(tmp_path, monkeypatch):
+    """`calibrate_strategy` assembled the fold by hand out of the two halves it needed, so the
+    file's `optimize_for` reached every other surface and not this one. A surface that rebuilds
+    `config.apply` gets whatever that surface's author remembered."""
+    import inspect
+
+    from openreading.strategies import calibrate
+
+    source = inspect.getsource(calibrate.calibrate_strategy)
+    assert "apply_policy(" in source, "calibrate must call the shared fold, not rebuild it"
+
+
+def test_native_and_platform_batches_agree_on_the_verdict(tmp_path, monkeypatch):
+    """Two dispatch shapes, one snapshot, one answer. The native path builds its requests itself,
+    so a policy applied on only one of them is a batch whose verdict depends on which adapter
+    happened to declare `batch.native`."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "corpus").mkdir()
+    (tmp_path / "corpus" / "a.pdf").write_bytes(build_sample_pdf())
+    (tmp_path / "openreading.yaml").write_text("version: 1\npolicy:\n  require_local: true\n")
+
+    platform = api.run_batch(["corpus/"], backend="pymupdf", config="openreading.yaml")
+    assert platform["summary"]["succeeded"] == 1  # pymupdf is local, so the policy admits it
+
+    refused = api.run_batch(["corpus/"], backend="reducto", config="openreading.yaml")
+    assert refused["summary"]["failed"] == 1
+    assert "require_local" in refused["items"][0]["error"]["message"]

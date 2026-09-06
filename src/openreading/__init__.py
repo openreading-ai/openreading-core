@@ -519,7 +519,9 @@ is a code-level guarantee only; `status.error` is never populated on a single-do
 projection. What one invocation actually did (backends eligible, attempted, dispatched; every
 switch and its reason; time and cost with honest unknowns) is spread across `warnings[]` prose,
 strategy `orchestration`, the batch summary and an armed ledger, with no common carrier
-(design record: `design/run-stats-analytics.md`).
+(design record: `design/run-stats-analytics.md`); a resume's identity does not fold in the
+effective `optimize_for`, so a preference supplied by the file for one run and by the caller for
+the other is not detected (design record: `design/resume-identity-inputs.md`).
 
 Extending it (agent-executable)
 ===============================
