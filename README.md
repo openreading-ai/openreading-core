@@ -408,7 +408,7 @@ command.
 | how to resume an interrupted run, replay one offline, or erase what it recorded | [The run ledger](src/openreading/ledger/README.md) |
 | how to put the same engine behind an HTTP API on your own machine | [The HTTP server](src/openreading/server/README.md) |
 | how to run public benchmarks or rank backends on documents you labeled | [Evals](src/openreading/evals/README.md) |
-| every command, its flags, and the exit code your script branches on | [The command line](src/openreading/cli/README.md) |
+| every command, its flags, and the exit code your script branches on | `uv run openreading help` for the manual's topic index, `uv run openreading help <topic>` for one chapter, and [The command line](src/openreading/cli/README.md) for the walkthrough |
 | why a response leaves a field out instead of inventing it | [The channel contract](src/openreading/derive/README.md) |
 | the Python API, every reference section, and how to add a backend | `uv run python -m pydoc openreading`, then the same command with `.<module>` appended. For a new backend, `uv run python -m pydoc openreading.adapters`, then `scripts/new_adapter.py` |
 | the checks a change must pass | `make verify` runs lint, types, pytest at a 91% coverage floor, and the schema and smoke checks. `uv run pytest -m "not live" --collect-only` prints the offline test count. |

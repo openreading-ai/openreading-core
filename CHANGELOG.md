@@ -26,6 +26,22 @@ them.
 
 ### Added
 
+- **`openreading help [TOPIC]`.** The CLI now carries its own manual. `openreading help` prints a
+  topic index grouped by what you are trying to do, and `openreading help batch` prints one
+  chapter. The chapters are sections of the `openreading.cli` package docstring, located by
+  heading and printed verbatim, so there is one source and `help`, `pydoc` and the reference
+  cannot disagree. Aliases reach the same chapter, so `help folder` and `help glob` both open the
+  batch chapter.
+- **Every command carries a worked epilog.** `openreading <cmd> --help` now shows runnable
+  examples, the verb that consumes this one's output, the exit codes that command can actually
+  return, and a pointer to its chapter. Eleven commands previously had no description at all.
+- **`openreading --help` has a front door**: a quickstart that runs from a fresh clone with no
+  key, a task map from what you want to what you type, the folder and glob rule stated where
+  everyone sees it, and the chain picture.
+- **`parse`, `compare` and `leaderboard` group their flags.** The `parse` group title states the
+  rule that decides which envelope you get back: "many documents (a directory, a glob, or two or
+  more FILE arguments)".
+
 - `openreading benchmark` discovers public corpora and runs backends or strategies through the
   official ParseBench and ExtractBench scorers. Static catalog entries keep source and dataset
   terms visible for additional research corpora without downloading or claiming support.

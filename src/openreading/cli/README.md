@@ -79,8 +79,9 @@ strategy label. A usage error and an interrupt carry `[parse]`. The batch layer 
 Your script can branch on the exit code alone, without reading stdout.
 
 Source: `src/openreading/cli/__init__.py` ("Exit codes", and the "Signals" paragraph under it).
-Live truth: `uv run python -m pydoc openreading.cli` → "Exit codes". If this table and that text
-disagree, the text is right. Fix the table.
+Live truth: `uv run openreading help exit-codes`. This table adds the two columns a script
+needs, whose fault a code is and whether retrying helps, plus a command that produces each one.
+If the table and that chapter disagree, the chapter is right. Fix the table.
 
 | Code | Means | Whose fault | Safe to retry | Triggered here by |
 |---|---|---|---|---|
@@ -404,9 +405,12 @@ that fills mid-run was not measured.
 
 ## Reference
 
-- `uv run openreading --help`, then `uv run openreading <verb> --help` for every flag.
-- `uv run python -m pydoc openreading.cli` → "Invariants shared by every subcommand" and
-  "Exit codes".
+- `uv run openreading help` lists the manual's chapters; `uv run openreading help <topic>` prints
+  one. Start with `quickstart`, `batch` and `chaining`.
+- `uv run openreading --help` for the task map, then `uv run openreading <verb> --help` for one
+  command's flags, examples and exit codes.
+- `uv run python -m pydoc openreading.cli` for the whole reference in source order, which is what
+  to grep when you do not know the topic's name.
 - `uv run python -m pydoc openreading.credentials` → env-file precedence, per-backend variables.
 - What stdout carries: [JSON Schemas](../schemas/README.md).
 
