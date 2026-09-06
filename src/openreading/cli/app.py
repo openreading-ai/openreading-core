@@ -66,6 +66,7 @@ from openreading.batch.sources import (
     looks_batch,
     normalize_input_format,
 )
+from openreading.cli.help import cmd_help
 from openreading.credentials import EnvCredentialBroker, load_dotenv
 from openreading.ledger.header import HeaderMismatch
 from openreading.ledger.ports import PayloadExpired
@@ -1965,7 +1966,25 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument(
         "--env-file", default=None, help="path to a .env file (default: ./.env if present)"
     )
-    sub = p.add_subparsers(dest="command", required=True)
+    # A metavar keeps the thirteen verb names out of the usage line, where they pushed the
+    # English off the screen. The choices still gate the value and still print in full on a
+    # bad one.
+    sub = p.add_subparsers(dest="command", required=True, metavar="COMMAND")
+
+    help_p = sub.add_parser(
+        "help",
+        parents=[common],
+        help="print one chapter of the manual, or list the chapters",
+        description="Print the long-form manual on stdout: the topic index with no argument, "
+        "one chapter with a topic name.",
+    )
+    help_p.add_argument(
+        "topic",
+        nargs="?",
+        metavar="TOPIC",
+        help="a topic name (`openreading help` with no topic lists them)",
+    )
+    help_p.set_defaults(func=cmd_help)
 
     parse = sub.add_parser(
         "parse",
