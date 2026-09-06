@@ -48,23 +48,21 @@ from tests.fakes import ScriptedBackend, scripted_registry
 pytest.importorskip("fitz", reason="pymupdf not installed")
 
 
-class _DelayedScriptedBackend(ScriptedBackend):
-    """A `ScriptedBackend` whose `submit()` takes real wall-clock time — a genuine, threaded
-    delay, unlike the engine's own per-branch `test_latency_ms` (which sleeps BEFORE `ctx.exec()`
-    is ever reached and so can't exercise `InlineExecutor`'s own `CancelledError` handling around
-    `asyncio.to_thread(run)`, §4.3a's own fix). Needed so an `on_win: cancel` race/require test has
-    a branch still genuinely in flight — inside `run()` — when its sibling wins.
+class _GatedScriptedBackend(ScriptedBackend):
+    """A `ScriptedBackend` whose `submit()` blocks in its real worker thread until a
+    `threading.Event` is set, so two racing branches are ordered by a happens-before rather than
+    by a wager on wall-clock timing.
 
-    `signal`/`wait_for` order two branches against each other WITHOUT relying on their delays
-    racing. A bare `delay_s` says only "this branch takes 100ms longer to start finishing", which
-    is not the same claim as "this branch finishes second": on a contended runner the sibling's
-    own dispatch can be preempted for longer than the delay, and it then journals first and wins
-    the race for real (`_drive_race` judges by `journal_seq`, the true completion order). That is
-    a correct engine and a test asserting timing it cannot guarantee — observed as a 3.13-only CI
-    failure on an otherwise-green commit. A branch given `wait_for` blocks until the branch given
-    the matching `signal` has returned from `submit()`, so the ordering is a happens-before rather
-    than a wager, and `delay_s` on top is then a margin for the winner's journal append (an
-    already-runnable event-loop callback) rather than the whole ordering guarantee.
+    A race test that wants branch "b" to win needs "b" to reach the JOURNAL first, because
+    `_drive_race` breaks ties on `journal_seq`, the true completion order. Racing the two branches
+    on their delays does not deliver that, and neither does gating "a" on "b"'s return from
+    `submit()` with a fixed head start on top. "b" wins on its `ok` record, which lands later
+    still: the worker thread has to return, the event loop has to resume that branch, the payload
+    is encrypted into the blob store, and `JsonlJournal.append` fsyncs the line. Any stall inside
+    that tail, such as a contended CI runner descheduling the thread or a slow fsync, spends the
+    head start and lets the sibling journal first and win for real. That was observed twice as a
+    3.13-only CI failure on an otherwise green commit. Gating the sibling on the winner's own
+    journal write costs no wall-clock margin and cannot be outrun.
 
     `gate_timeout_s` bounds the wait so that an engine change which stopped running branches
     concurrently fails this test on its assertion, the way it does today, instead of hanging."""
@@ -72,27 +70,17 @@ class _DelayedScriptedBackend(ScriptedBackend):
     def __init__(
         self,
         *args,
-        delay_s: float = 0.0,
-        signal: threading.Event | None = None,
-        wait_for: threading.Event | None = None,
+        wait_for: threading.Event,
         gate_timeout_s: float = 5.0,
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
-        self._delay_s = delay_s
-        self._signal = signal
         self._wait_for = wait_for
         self._gate_timeout_s = gate_timeout_s
 
     def submit(self, req, ctx):
-        if self._wait_for is not None:
-            self._wait_for.wait(timeout=self._gate_timeout_s)
-        if self._delay_s:
-            time.sleep(self._delay_s)
-        job = super().submit(req, ctx)
-        if self._signal is not None:
-            self._signal.set()
-        return job
+        self._wait_for.wait(timeout=self._gate_timeout_s)
+        return super().submit(req, ctx)
 
 
 def _req(doc_bytes: bytes = b"fake pdf bytes for ledger replay tests") -> OpenReadingRequest:
@@ -359,13 +347,23 @@ def test_resume_picks_the_same_race_winner_via_journal_seq_not_scheduling_order(
     the fix actually reads `journal_seq`, not merely that it compiles."""
     monkeypatch.setenv("OPENREADING_LEDGER", str(tmp_path / "ledger"))
     ledger_root = tmp_path / "ledger"
-    # "b" finishes first BY CONSTRUCTION, not by winning a 100ms race: "a" cannot enter its own
-    # delay until "b" has returned from submit(). See _DelayedScriptedBackend for why the delay
-    # alone was not a guarantee.
-    b_submitted = threading.Event()
+    # "b" finishes first BY CONSTRUCTION, not by winning a race: "a" cannot enter its own submit()
+    # until "b"'s own terminal record is in the journal, which is the exact event `_drive_race`
+    # orders by. See _GatedScriptedBackend for why gating on "b"'s return from submit(), plus a
+    # fixed head start, was not a guarantee.
+    b_journaled = threading.Event()
+    real_append = JsonlJournal.append
+
+    def release_a_once_b_is_journaled(self, result: StepResult) -> StepResult:
+        stamped = real_append(self, result)
+        if stamped.status == "ok" and stamped.step_path.endswith("parallel[1]"):
+            b_journaled.set()
+        return stamped
+
+    monkeypatch.setattr(JsonlJournal, "append", release_a_once_b_is_journaled)
     reg = scripted_registry(
-        _DelayedScriptedBackend("a", local=True, text="from-a", delay_s=0.2, wait_for=b_submitted),
-        _DelayedScriptedBackend("b", local=True, text="from-b", signal=b_submitted),
+        _GatedScriptedBackend("a", local=True, text="from-a", wait_for=b_journaled),
+        ScriptedBackend("b", local=True, text="from-b"),
     )
     cfg = _cfg(
         [{"parallel": [{"backend": "a"}, {"backend": "b"}], "pick": "fastest", "on_win": "drain"}]
