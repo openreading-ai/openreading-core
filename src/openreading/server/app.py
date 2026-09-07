@@ -1233,11 +1233,12 @@ def create_app(*, cors_origins: list[str] | None = None):
         # vendor credential — for both a directly-named backend outside the key's allow-list and
         # an "auto" request the router would otherwise have picked one for.
         scope = getattr(request.state, "api_key_scope", None)
-        if scope is not None:
-            denied = _out_of_scope_backend(req, scope, app.state.strategy_config, router_config)
-            if denied is not None:
-                return _scope_denied_response(denied)
         try:
+            # The scope check routes auto requests, so endpoint and alias refusals can start here.
+            if scope is not None:
+                denied = _out_of_scope_backend(req, scope, app.state.strategy_config, router_config)
+                if denied is not None:
+                    return _scope_denied_response(denied)
             # run_request is sync and drives the job loop via asyncio.run internally, which cannot
             # nest inside this endpoint's event loop → run it in a worker thread.
             result = await run_in_threadpool(
@@ -1267,9 +1268,13 @@ def create_app(*, cors_origins: list[str] | None = None):
             return _bad_request(_validation_message(e))
         try:
             req, router_config = config.apply(req, app.state.policy, app.state.router_config)
+            # Routing belongs inside this block because it raises too: stage 1 resolves each
+            # backend's endpoint through the credential broker, so a body carrying
+            # `runtime.endpoint` or an unapproved `credentials_ref` alias is refused here rather
+            # than at execution. Both are documented 502s, and only a caught one is a 502.
+            plan = Router(build_registry(), router_config).route(req)
         except _ADAPTER_ERRORS as e:  # a body/file compliance conflict — 403, never a 500
             return _error_response(e)
-        plan = Router(build_registry(), router_config).route(req)
         return {
             "chosen": plan.chosen.descriptor.id if plan.chosen else None,
             "fallbacks": [a.descriptor.id for a in plan.fallbacks],

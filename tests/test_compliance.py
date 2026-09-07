@@ -109,3 +109,205 @@ def test_an_in_process_library_has_no_endpoint_to_misconfigure(monkeypatch) -> N
     monkeypatch.setenv("DOCLING_SERVE_URL", "http://docling.example.internal:5001")  # unrelated
     desc = make_adapter("pymupdf").descriptor
     assert evaluate(Compliance(require_local=True), desc) is None
+
+
+@pytest.mark.parametrize(
+    "constraint,code", [("require_local", "not_local"), ("require_baa", "no_baa")]
+)
+def test_remote_alias_cannot_use_local_compliance_exemption(monkeypatch, constraint, code):
+    """An approved credential alias selects configuration as well as credentials."""
+    from openreading.credentials import build_run_context
+    from openreading.router import Registry, Router
+    from openreading.types.errors import ComplianceRefused
+    from openreading.types.request import OpenReadingRequest
+
+    monkeypatch.setenv("OPENREADING_CREDENTIALS_REF_ALIASES", "REMOTE")
+    monkeypatch.setenv("REMOTE_ENDPOINT", "https://offbox.example")
+    monkeypatch.setenv("DOCLING_SERVE_URL", "http://localhost:5001")
+    adapter = make_adapter("docling")
+    req = OpenReadingRequest.model_validate(
+        {
+            "document": {"bytes_base64": "eA=="},
+            "backend": {"id": "docling", "credentials_ref": "env:REMOTE"},
+            "compliance": {constraint: True},
+        }
+    )
+    assert (
+        build_run_context(req, adapter.descriptor).runtime["endpoint"] == "https://offbox.example"
+    )
+    registry = Registry()
+    registry.register(adapter)
+    router = Router(registry)
+    plan = router.route(req)
+    assert plan.chosen is None
+    assert plan.dropped["docling"].code == code
+    with pytest.raises(ComplianceRefused):
+        router.check_eligible(req, "docling")
+
+
+@pytest.mark.parametrize(
+    "endpoint,refused", [("https://offbox.example", True), ("http://localhost:5001", False)]
+)
+def test_strategy_compliance_uses_injected_broker(monkeypatch, endpoint, refused):
+    """Compilation checks the endpoint the execution broker selects for an approved alias."""
+    from openreading.credentials import EnvCredentialBroker
+    from openreading.router import Registry
+    from openreading.strategies.model import StrategyConfig
+    from openreading.strategies.prune import compile_strategy
+    from openreading.types.errors import ComplianceRefused
+    from openreading.types.request import OpenReadingRequest
+
+    monkeypatch.setenv("DOCLING_SERVE_URL", "http://localhost:5001")
+    broker = EnvCredentialBroker(
+        {
+            "OPENREADING_CREDENTIALS_REF_ALIASES": "REMOTE",
+            "REMOTE_ENDPOINT": endpoint,
+        }
+    )
+    req = OpenReadingRequest.model_validate(
+        {
+            "document": {"bytes_base64": "eA=="},
+            "backend": {"id": "strategy:demo", "credentials_ref": "env:REMOTE"},
+            "compliance": {"require_local": True},
+        }
+    )
+    registry = Registry()
+    registry.register(make_adapter("docling"))
+    config = StrategyConfig.model_validate(
+        {"version": 1, "strategies": {"demo": {"backend": "docling"}}}
+    )
+    if refused:
+        with pytest.raises(ComplianceRefused):
+            compile_strategy(req, "demo", config, registry, broker=broker)
+    else:
+        assert compile_strategy(req, "demo", config, registry, broker=broker).eligible == [
+            "docling"
+        ]
+
+
+@pytest.mark.parametrize("backend", ["docling", "auto", "strategy:demo"])
+def test_execution_refuses_remote_alias_before_dispatch(monkeypatch, backend):
+    from openreading import api
+    from openreading.credentials import EnvCredentialBroker
+    from openreading.router import Registry
+    from openreading.strategies.model import StrategyConfig
+    from openreading.types.errors import ComplianceRefused
+    from openreading.types.request import OpenReadingRequest
+
+    broker = EnvCredentialBroker(
+        {
+            "OPENREADING_CREDENTIALS_REF_ALIASES": "REMOTE",
+            "REMOTE_ENDPOINT": "https://offbox.example",
+        }
+    )
+    monkeypatch.setenv("DOCLING_SERVE_URL", "http://localhost:5001")
+    registry = Registry()
+    registry.register(make_adapter("docling"))
+    monkeypatch.setattr(api, "build_registry", lambda: registry)
+    req = OpenReadingRequest.model_validate(
+        {
+            "document": {"bytes_base64": "eA=="},
+            "backend": {"id": backend, "credentials_ref": "env:REMOTE"},
+            "compliance": {"require_local": True},
+        }
+    )
+    config = StrategyConfig.model_validate(
+        {"version": 1, "strategies": {"demo": {"backend": "docling"}}}
+    )
+    with pytest.raises(ComplianceRefused):
+        api.run_request(req, broker=broker, strategy_config=config)
+
+
+# One non-default value per Compliance field, so the parity test below stays a real check when a
+# sixth field is added: a field with no entry here fails the test rather than passing silently.
+_NON_DEFAULT_CONSTRAINTS = {
+    "require_baa": True,
+    "no_train_on_data": True,
+    "data_region": "eu",
+    "require_local": True,
+    "max_retention": "1h",
+}
+
+
+def _recording_broker(endpoint: str):
+    """A broker that counts endpoint resolutions, so a test can assert stage 1 consulted it."""
+    from openreading.credentials import EnvCredentialBroker
+
+    class _Recorder(EnvCredentialBroker):
+        calls = 0
+
+        def resolve_config(self, descriptor, req):
+            type(self).calls += 1
+            return super().resolve_config(descriptor, req)
+
+    return _Recorder({"DOCLING_SERVE_URL": endpoint})
+
+
+@pytest.mark.parametrize("field", sorted(Compliance.model_fields))
+def test_every_constraint_resolves_the_backend_endpoint(field: str) -> None:
+    """A set constraint always resolves the endpoint, whichever field carries it. The all-default
+    shortcut below skips that work, so a new Compliance field added without a matching branch
+    would otherwise reach the shortcut and route as if nothing were asked for."""
+    from openreading.types.request import OpenReadingRequest
+
+    broker = _recording_broker("http://localhost:5001")
+    req = OpenReadingRequest.model_validate(
+        {
+            "document": {"bytes_base64": "eA=="},
+            "backend": {"id": "docling"},
+            "compliance": {field: _NON_DEFAULT_CONSTRAINTS[field]},
+        }
+    )
+    evaluate(req.compliance, make_adapter("docling").descriptor, request=req, broker=broker)
+    assert type(broker).calls == 1
+
+
+def test_a_compliance_block_asking_for_nothing_is_the_same_as_none() -> None:
+    """`compliance: {}` states no constraint, so no backend is dropped and no endpoint is read."""
+    from openreading.types.request import OpenReadingRequest
+
+    broker = _recording_broker("https://offbox.example")
+    req = OpenReadingRequest.model_validate(
+        {"document": {"bytes_base64": "eA=="}, "backend": {"id": "docling"}, "compliance": {}}
+    )
+    desc = make_adapter("docling").descriptor
+    assert evaluate(req.compliance, desc, request=req, broker=broker) is None
+    assert type(broker).calls == 0
+
+
+@pytest.mark.parametrize(
+    "endpoint,reason", [("https://offbox.example", "compliance"), ("http://localhost:5001", None)]
+)
+def test_the_decider_gate_uses_the_walk_broker(endpoint, reason) -> None:
+    """The decider/judge gate runs inside a walk that holds its own broker, so it resolves the
+    endpoint that walk would dispatch to, not whatever the ambient environment names."""
+    from openreading.credentials import EnvCredentialBroker
+    from openreading.router import Registry
+    from openreading.router.compliance import RouterConfig
+    from openreading.strategies.decider import resolve_decider_status
+    from openreading.strategies.model import DeciderLLM
+    from openreading.types.request import OpenReadingRequest
+
+    broker = EnvCredentialBroker(
+        {"OPENREADING_CREDENTIALS_REF_ALIASES": "REMOTE", "REMOTE_ENDPOINT": endpoint}
+    )
+    registry = Registry()
+    registry.register(make_adapter("docling"))
+    req = OpenReadingRequest.model_validate(
+        {
+            "document": {"bytes_base64": "eA=="},
+            "backend": {"id": "strategy:demo", "credentials_ref": "env:REMOTE"},
+        }
+    )
+    status = resolve_decider_status(
+        decider=DeciderLLM(backend="docling"),
+        req=req,
+        registry=registry,
+        effective_compliance={"require_local": True},
+        router_config=RouterConfig(),
+        env={"OPENREADING_LLM_DECIDER": "1"},
+        port=None,
+        broker=broker,
+    )
+    # `unavailable` is the no-executor-wired outcome, which is what eligible looks like today.
+    assert status.reason == (reason or "unavailable")

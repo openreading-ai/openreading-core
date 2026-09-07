@@ -19,6 +19,7 @@ import mimetypes
 from dataclasses import dataclass, field, replace
 
 from openreading.adapters.base import BackendAdapter
+from openreading.credentials import EnvCredentialBroker
 from openreading.router import compliance as comp
 from openreading.router.compliance import DropReason, RouterConfig
 from openreading.router.registry import Registry
@@ -146,7 +147,14 @@ class Router:
     """The 3-stage router. `route()` turns a request into a `RoutePlan` using nothing but the
     registry's descriptors, and `check_eligible()` applies stage 1 to one named backend."""
 
-    def __init__(self, registry: Registry, config: RouterConfig | None = None) -> None:
+    def __init__(
+        self,
+        registry: Registry,
+        config: RouterConfig | None = None,
+        *,
+        broker: EnvCredentialBroker | None = None,
+    ) -> None:
+        self.broker = broker
         self.registry = registry
         self.config = config or RouterConfig()
 
@@ -154,7 +162,7 @@ class Router:
     def _compliance_drop(
         self, req: OpenReadingRequest, desc: AdapterDescriptor
     ) -> DropReason | None:
-        return comp.evaluate(req.compliance, desc, self.config)
+        return comp.evaluate(req.compliance, desc, self.config, request=req, broker=self.broker)
 
     # ---- stage 2 -------------------------------------------------------------
     def _capability_drop(
@@ -212,7 +220,9 @@ class Router:
                 dropped[desc.id] = dr
             else:
                 survivors.append(adapter)
-                note = comp.baa_tier_confirmation(req.compliance, desc, self.config)
+                note = comp.baa_tier_confirmation(
+                    req.compliance, desc, self.config, request=req, broker=self.broker
+                )
                 if note is not None:
                     notes[desc.id] = note
 

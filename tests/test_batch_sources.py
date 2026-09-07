@@ -98,6 +98,19 @@ def test_symlinks_not_followed(tmp_path):
     assert got == ["real.pdf"]  # the symlink is not followed
 
 
+@pytest.mark.parametrize("pattern", ["*", "**/*.pdf", "*/*.pdf"])
+def test_globs_do_not_ingest_symlink_targets(tmp_path, pattern):
+    corpus = tmp_path / "corpus"
+    _mk(corpus / "kept" / "real.pdf")
+    outside = _mk(tmp_path / "private" / "secret.pdf")
+    (corpus / "file.pdf").symlink_to(outside)
+    (corpus / "linked").symlink_to(outside.parent, target_is_directory=True)
+
+    got = resolve_intake([str(corpus / pattern)])
+
+    assert [item.ref.relpath for item in got] == ["kept/real.pdf"]
+
+
 def test_explicit_hidden_file_arg_is_processed(tmp_path):
     # hidden-skip applies to DIRECTORY expansion, not to an explicitly named file
     f = _mk(tmp_path / ".secret.pdf")

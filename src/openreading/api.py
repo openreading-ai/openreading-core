@@ -806,6 +806,7 @@ def _run_strategy_request(
         config,
         plain_info=plain_info,
         backend_allowlist=backend_allowlist,
+        broker=broker,
     )
     # materialize a URL to bytes if any eligible backend can't ingest URLs (mirrors the auto arm)
     if any(
@@ -883,7 +884,7 @@ def prepare_named_backend(
     # A directly-named backend is still subject to the request's compliance constraints — raise
     # ComplianceRefused (→ 403) rather than silently ignoring them.
     if req.compliance is not None:
-        Router(build_registry(), config).check_eligible(req, backend)
+        Router(build_registry(), config, broker=broker).check_eligible(req, backend)
     req = materialize_document(req, adapter.descriptor, transport=transport)
     ctx = build_run_context(req, adapter.descriptor, broker=broker, deadline_ms=deadline_ms)
     missing = missing_required(adapter.descriptor, ctx)
@@ -987,7 +988,7 @@ def run_request(
         )
 
     if backend == "auto":
-        plan = Router(build_registry(), config).route(req)
+        plan = Router(build_registry(), config, broker=broker).route(req)
         if plan.chosen is None:
             # the router eliminated every backend on compliance/capability → refused, NOT a
             # runtime failure (PlanExhaustedError is for a non-empty plan whose backends all fail).
@@ -1054,7 +1055,9 @@ def run_request(
             resp = apply_cost_report(
                 adapter, job, adapter.normalize(job, ctx, slim_req), ctx.credentials
             )
-            note = baa_tier_confirmation(req.compliance, adapter.descriptor, config)
+            note = baa_tier_confirmation(
+                req.compliance, adapter.descriptor, config, request=req, broker=broker
+            )
             if note is not None:
                 resp.add_warning(BAA_TIER_CONFIRMED_WARNING, note, adapter.descriptor.id)
             return resp.to_schema_dict()
@@ -1484,7 +1487,7 @@ def _run_native(
         reqs.append(req)
 
     if reqs[0].compliance is not None:
-        Router(build_registry(), cfg).check_eligible(reqs[0], backend)
+        Router(build_registry(), cfg, broker=broker).check_eligible(reqs[0], backend)
 
     ctx = build_run_context(
         reqs[0],

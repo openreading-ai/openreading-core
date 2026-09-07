@@ -17,9 +17,10 @@ fields (max_retention_hours, train_opt_out_precondition, zdr_flag, phi_path_cons
 third-party network call), not a promise about a specific deployment's configuration. A backend
 whose descriptor declares a `config_spec` field named `endpoint` (docling, qwen-vl: containers
 the OPERATOR points somewhere) is only trusted as local if that endpoint actually resolves to
-loopback right now — read the same way the credential broker reads it, override env first, the
-descriptor's own `env` list second. An adapter with no such field (pymupdf, tesseract: in-process
-libraries with nothing to point anywhere) is trusted on the static claim alone. This closes a real
+loopback right now. Request aliases take precedence over backend environment variables, exactly
+as they do in `openreading.credentials.EnvCredentialBroker`. An adapter with no such field
+(pymupdf, tesseract: in-process libraries with nothing to point anywhere) is trusted on the
+static claim alone. This closes a real
 gap: pointing `DOCLING_SERVE_URL` at a remote host previously still passed `require_local`, and
 every OTHER stage-1 check this module skips for a "local" backend (BAA, training, region,
 retention) skipped right along with it.
@@ -33,9 +34,9 @@ import re
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
-from openreading.credentials import _slug_env
+from openreading.credentials import EnvCredentialBroker, _slug_env
 from openreading.types.descriptor import AdapterDescriptor
-from openreading.types.request import Compliance
+from openreading.types.request import Compliance, OpenReadingRequest
 
 _BAA_OK = frozenset({"yes"})
 # hipaa_baa='tier_gated' means the vendor offers a BAA on a higher plan — NOT a BAA in force for
@@ -102,7 +103,11 @@ def _endpoint_config_field(desc: AdapterDescriptor):
     return next((f for f in desc.config_spec if f.key == "endpoint"), None)
 
 
-def _resolves_to_loopback(desc: AdapterDescriptor) -> bool:
+def _resolves_to_loopback(
+    desc: AdapterDescriptor,
+    request: OpenReadingRequest | None = None,
+    broker: EnvCredentialBroker | None = None,
+) -> bool:
     """Whether a backend claiming runs_fully_local, and whose descriptor names an operator-set
     `endpoint` config field, is actually configured to reach one right now. True when: the backend
     has no such field (an in-process library has nothing to point anywhere); the field is unset
@@ -112,12 +117,16 @@ def _resolves_to_loopback(desc: AdapterDescriptor) -> bool:
     field = _endpoint_config_field(desc)
     if field is None:
         return True
-    value = os.environ.get(_slug_env(desc.id, field.key))
-    if not value:
-        for name in field.env:
-            value = os.environ.get(name)
-            if value:
-                break
+    if request is not None:
+        # An approved alias can select a remote endpoint despite a local global default.
+        value = (broker or EnvCredentialBroker()).resolve_config(desc, request).get("endpoint")
+    else:
+        value = os.environ.get(_slug_env(desc.id, field.key))
+        if not value:
+            for name in field.env:
+                value = os.environ.get(name)
+                if value:
+                    break
     if not value:
         return True
     host = urlsplit(value).hostname
@@ -125,14 +134,23 @@ def _resolves_to_loopback(desc: AdapterDescriptor) -> bool:
 
 
 def evaluate(
-    req: Compliance | None, desc: AdapterDescriptor, config: RouterConfig | None = None
+    req: Compliance | None,
+    desc: AdapterDescriptor,
+    config: RouterConfig | None = None,
+    *,
+    request: OpenReadingRequest | None = None,
+    broker: EnvCredentialBroker | None = None,
 ) -> DropReason | None:
     """Return None if the backend survives the compliance filter, else the DropReason."""
     cfg = config or RouterConfig()
-    if req is None:
+    # A block asking for nothing is the same as no block: every check below is gated on a field, so
+    # the outcome is identical, and returning here skips resolving an endpoint nobody constrained.
+    # Read from the model rather than naming the five fields, so a sixth constraint added later
+    # cannot land on the skip path by being forgotten in an enumeration here.
+    if req is None or not req.model_dump(exclude_defaults=True):
         return None
     c = desc.compliance
-    local = bool(c.runs_fully_local) and _resolves_to_loopback(desc)
+    local = bool(c.runs_fully_local) and _resolves_to_loopback(desc, request, broker)
     allow_unverified = cfg.allow_unverified_compliance
 
     # offline / local-only: data may never leave the caller's environment.
@@ -215,14 +233,23 @@ def _no_baa_detail(desc: AdapterDescriptor) -> str:
 
 
 def baa_tier_confirmation(
-    req: Compliance | None, desc: AdapterDescriptor, config: RouterConfig | None = None
+    req: Compliance | None,
+    desc: AdapterDescriptor,
+    config: RouterConfig | None = None,
+    *,
+    request: OpenReadingRequest | None = None,
+    broker: EnvCredentialBroker | None = None,
 ) -> str | None:
     """The message for a require_baa that only the operator's tier-gate confirmation satisfies,
     else None. Callers surface it as a `BAA_TIER_CONFIRMED_WARNING` on the response so a PHI run
     never silently rests on a BAA nobody signed."""
     cfg = config or RouterConfig()
     c = desc.compliance
-    if req is None or not req.require_baa or (c.runs_fully_local and _resolves_to_loopback(desc)):
+    if (
+        req is None
+        or not req.require_baa
+        or (c.runs_fully_local and _resolves_to_loopback(desc, request, broker))
+    ):
         return None
     if c.hipaa_baa != _BAA_TIER_GATED or desc.id not in cfg.baa_tier_confirmed:
         return None

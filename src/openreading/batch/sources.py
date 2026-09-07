@@ -12,6 +12,8 @@ files, directories, globs, http(s) URLs — into an ordered list of `ResolvedSou
 
 A glob selects each file once, even when recursive matches overlap with expanded directories.
 Separate source arguments preserve deliberate repeats, such as naming the same document twice.
+Glob matches reached through symlinks are excluded, so a linked directory cannot add
+unrelated documents to a batch. A symlink you name yourself is still read.
 """
 
 from __future__ import annotations
@@ -189,6 +191,15 @@ def _expand_arg(arg: str) -> list[_RawRef]:
         paths: set[Path] = set()
         for m in matches:
             p = Path(m)
+            # glob follows directory links while matching, so checking only the leaf would still
+            # ingest files outside the selected tree through a matched symlinked ancestor.
+            relative = p.relative_to(root)
+            if any(
+                (root / part).is_symlink()
+                for part in (relative, *relative.parents)
+                if part != Path(".")
+            ):
+                continue
             if p.is_dir():
                 paths.update(fp for fp, _ in _expand_dir(p))
             elif p.is_file():

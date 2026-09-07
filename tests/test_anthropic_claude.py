@@ -132,6 +132,38 @@ def test_parse_markdown_is_native_and_text_is_a_plain_projection():
     assert resp.channel_provenance["text"] == "derived"
 
 
+@pytest.mark.parametrize("suffix,media_type", [("png", "image/png"), ("jpg", "image/jpeg")])
+@pytest.mark.parametrize("extract", [False, True])
+@pytest.mark.parametrize("native_batch", [False, True])
+def test_image_inputs_use_image_blocks(tmp_path, suffix, media_type, extract, native_batch):
+    from openreading.api import build_request
+
+    class ImageClient(FakeClaudeClient):
+        def create_batch(self, requests):
+            self.last_call = requests[0]["params"]
+            return {"id": "image-batch"}
+
+    path = tmp_path / f"scan.{suffix}"
+    path.write_bytes(b"synthetic image payload")
+    overrides = {"extraction_schema": {"json_schema": {"type": "object"}}} if extract else {}
+    req = build_request(str(path), "anthropic-claude", **overrides)
+    client = ImageClient()
+    adapter = AnthropicClaudeAdapter(client=client)
+    if native_batch:
+        adapter.submit_many([req], RunContext())
+    else:
+        adapter.submit(req, RunContext())
+    block = client.last_call["messages"][0]["content"][0]
+    assert block == {
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": media_type,
+            "data": req.document.bytes_base64,
+        },
+    }
+
+
 def test_blocks_derived_from_markdown_in_synthetic_page_no_geometry():
     resp = _run(AnthropicClaudeAdapter(client=FakeClaudeClient(fixture="parse")), _req())
     # §4.3 container rule: markdown-derived blocks live in ONE synthetic Page(page_number=1)
@@ -364,3 +396,12 @@ def test_live_liveness_probe():  # pragma: no cover
     report = check_liveness(AnthropicClaudeAdapter())
     assert report.measured is True
     assert report.status is LivenessStatus.LIVE, report.detail
+
+
+def test_every_declared_input_format_has_a_media_type():
+    """A format the descriptor claims but the media-type table omits would be sent as a PDF, which
+    the API accepts and reads as garbage rather than refusing."""
+    from openreading.adapters.anthropic_claude.adapter import _MEDIA_TYPES
+
+    formats = AnthropicClaudeAdapter().descriptor.capabilities.input_formats
+    assert set(_MEDIA_TYPES) == set(formats)

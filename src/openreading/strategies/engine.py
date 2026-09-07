@@ -794,6 +794,7 @@ def run_strategy(
         env=os.environ if env is None else env,
         port=decider_llm,
         backend_allowlist=compiled.backend_allowlist,
+        broker=broker,
     )
 
     ctx = _WalkCtx(
@@ -1656,6 +1657,7 @@ async def _select_best(
         env=ctx.env,
         port=ctx.judge_llm,
         backend_allowlist=ctx.backend_allowlist,
+        broker=ctx.broker,
     )
     downgraded = status.reason
     if status.mode == "engine":
