@@ -62,7 +62,8 @@ taken.
 - `compare`'s `cost_outlier` finding, its cost column (`comparison/render.py:41`, `:102`) and the
   cost row of the facts scoreboard.
 - `leaderboard`'s `cost_per_doc` and `calibrate._descriptor_cost`.
-- `evals/preflight.py`'s dollar estimates.
+- `evals/preflight.py`'s dollar estimates and `_backend_target_cost`, its only descriptor
+  reader. What remains becomes a scope preflight (see below).
 - The cookbook entries in `strategies/presets.py` built on cost, and `optimize_for: cost`, which
   [`explicit-backends.md`](explicit-backends.md) already deletes with the scorer.
 
@@ -76,14 +77,72 @@ of which this repository can see.
 That is also the honest answer to "why does the open engine not tell me what this cost". Because
 the number it could produce would be wrong for most callers, and confidently formatted.
 
-## The one thing worth replacing rather than deleting
+## `evals/preflight.py` becomes a scope preflight
 
-`evals/preflight.py` exists to stop someone accidentally spending money on a benchmark sweep. That
-is a real protection and deleting it outright makes the tool more dangerous, not more honest.
+This is the one part of the change that is a rewrite rather than a deletion, and it is worth being
+precise about, because "keep the preflight" reads as "keep estimating cost". **It does not. No
+price data survives, and there is nothing left to maintain.**
 
-Replace the dollars with counts. A preflight that says *"this run will send 240 pages to 3 hosted
-backends, billed to your own account"* is entirely verifiable, needs no price table, and protects
-the same person just as well. Keep `--yes` and keep requiring it with no terminal attached.
+The module is 210 lines, 44 of which mention a price, and they come out in one cut.
+`_backend_target_cost` is the only function in the file that opens a descriptor at all, and it
+goes whole. What survives counts the caller's own files.
+
+Today it prints four lines, three of which read `usd_per_page_equiv_*`:
+
+```
+estimate: 12 document(s), 240 page(s), 3 target(s)
+  aws-textract: $0.36 to $0.60                             <- deleted
+  reducto: not priced (publishes no per-page rate)         <- deleted
+  total (priced targets): $0.36 to $0.60                   <- deleted
+  a range from each backend's declared per-page rates      <- deleted
+```
+
+### What it says instead
+
+Every fact below is computable from the caller's files, their command and their `.env`:
+
+| fact | source | why it is honest |
+|---|---|---|
+| documents, and how many of the prepared corpus is being run | counting their files | their disk |
+| pages | `derive.pages.pdf_page_count` (pymupdf), images count as 1 | reads their bytes |
+| documents whose page count could not be read | the same pass | stated, not guessed |
+| targets, and their names | the list they typed | their command |
+| `hosted_api` vs `oss_library` per target | `descriptor.type` | structural fact about this repository's own adapter code, not a claim about a vendor |
+| configured or not, and which variable is missing | `readiness` | reads their environment |
+| **total calls = unique documents x targets** | arithmetic on the rows above | the multiplication nobody does in their head |
+
+```
+preflight: 12 of 40 prepared documents, 240 pages, 3 targets
+  36 calls total (12 documents x 3 targets)
+  aws-textract    hosted_api   configured
+  reducto         hosted_api   NOT configured (REDUCTO_API_KEY)
+  pymupdf         oss_library  configured, runs on this machine
+
+  2 documents whose page count could not be read
+  hosted calls are billed to your own account
+Continue? [y/N]
+```
+
+The last line is a plain fact about the BYO-key posture, not an estimate of anything.
+
+The call-count row is the one that actually protects somebody. A corpus multiplied by a target
+list is what turns "I meant to smoke-test two files" into a thousand hosted calls, and it is
+arithmetic on the caller's own inputs rather than a claim about anyone else.
+
+### What carries over unchanged
+
+- **The document dedupe** (`preflight.py:126`). ParseBench shares inference between
+  `text_content` and `text_formatting`, so one PDF appears as two documents and is parsed once.
+  Its comment says counting it twice "would overstate the bill"; after this change it would
+  overstate the call count, which is the same reason to keep it.
+- `--yes`, and still requiring it when no terminal is attached.
+
+### Rename it
+
+The module docstring opens *"What a benchmark run will cost, in the unit the vendor actually
+bills"*, which is precisely what is leaving. It is a scope preflight: how many documents, how many
+pages, how many calls, to which backends, and which of those are configured. Name it that, or the
+next reader will restore the pricing to match the title.
 
 ## Schema changes
 
@@ -104,7 +163,8 @@ descriptor a week apart.
   against the current tree first, where every one of them does.
 - A test that `usage.input_tokens` and `usage.pages_processed` still round-trip from a fake
   adapter's `CostReport`, so the pass-through is proven to survive the deletion.
-- A test that preflight's output names a page count and a backend count and contains no `$`.
+- A test that preflight's output names a document count, a page count, a call count and a
+  per-target configured/not-configured state, and contains no `$`.
 - `grep -rn "usd" src/openreading/adapters/` returns nothing, which is safe here as a string
   search because no adapter has a legitimate reason to name a currency.
 
