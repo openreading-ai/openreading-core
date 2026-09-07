@@ -1,7 +1,7 @@
 # OpenReading: an intelligent, policy-aware router for document processing
 
 [![CI](https://github.com/multiversal-ventures/openreading-core/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/multiversal-ventures/openreading-core/actions/workflows/ci.yml)
-[![coverage](https://img.shields.io/badge/coverage-%E2%89%A591%25-brightgreen)](#status-and-versioning)
+[![coverage](https://img.shields.io/badge/coverage-%E2%89%A594%25-brightgreen)](#status-and-versioning)
 [![python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
@@ -510,7 +510,7 @@ command.
 | every command, its flags, and the exit code your script branches on | `uv run openreading help` for the manual's topic index, `uv run openreading help <topic>` for one chapter, and [The command line](src/openreading/cli/README.md) for the walkthrough |
 | why a response leaves a field out instead of inventing it | [The channel contract](src/openreading/derive/README.md) |
 | the Python API, every reference section, and how to add a backend | `uv run python -m pydoc openreading`, then the same command with `.<module>` appended. For a new backend, `uv run python -m pydoc openreading.adapters`, then `scripts/new_adapter.py` |
-| the checks a change must pass | `make verify` runs lint, types, pytest at a 91% coverage floor, and the schema and smoke checks. `uv run pytest -m "not live" --collect-only` prints the offline test count. |
+| the checks a change must pass | `make verify` runs lint, types, pytest at a 94% coverage floor, and the schema and smoke checks. `uv run pytest -m "not live" --collect-only` prints the offline test count. |
 
 ## Contributing · Security · License
 

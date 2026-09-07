@@ -129,7 +129,7 @@ them. A guide demonstrates, never restates.
 
 ## Golden rules
 
-- **`make verify` green is the finish line.** Lint + typecheck + tests at a 91% coverage floor
+- **`make verify` green is the finish line.** Lint + typecheck + tests at a 94% coverage floor
   (`uv run pytest -m "not live" --collect-only` for the offline count) + schema-validate +
   extras-parity + CLI/strategy/compare/leaderboard smoke. Offline: no keys, no network.
 - **`make sync` before anything else.** That target runs `uv sync --all-extras --dev`. A venv

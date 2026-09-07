@@ -577,7 +577,7 @@ captures the first time someone runs `make verify-live` with the key set and
 - One `@pytest.mark.live` test using `tests/live_helpers.py` (`skip_unless_creds(slug)` +
   `run_live(...)`) -- skips cleanly without the key.
 
-`tests/test_<pkg>_faults.py` (branch coverage -- the 91% coverage floor is a gate). Cover every
+`tests/test_<pkg>_faults.py` (branch coverage -- the 94% coverage floor is a gate). Cover every
 branch the happy path skips. The standard set:
 - input variants: each accepted intake + each rejected one
   (`backend_code == "unsupported_input"`)
@@ -605,7 +605,7 @@ mocking libraries, no respx; plain classes implementing the Protocol.
 ------------------------------
     uv run pytest tests/test_<pkg>.py tests/test_<pkg>_faults.py -p no:cov
     uv run pytest tests/test_descriptor_specs.py tests/test_server.py -p no:cov
-    make verify            # ruff (check + format!), pyright, full suite w/ 91% coverage floor,
+    make verify            # ruff (check + format!), pyright, full suite w/ 94% coverage floor,
                            # schema-validate, CLI smoke, strategy smoke
     uv run python -m openreading.cli backends   # slug listed with the right MISSING env hint
 
@@ -614,7 +614,7 @@ coverage dip (add fault tests, never lower the floor), a descriptor schema viola
 
 6. Definition of done
 ---------------------
-- [ ] `make verify` green (includes the conformance call and the 91% coverage floor)
+- [ ] `make verify` green (includes the conformance call and the 94% coverage floor)
 - [ ] `protocol_version=2` declared, and `adapter_factory=` (R1/R2/R3) actually run green --
       not assumed from the shape of the code
 - [ ] every file in the §2 checklist created/edited

@@ -193,7 +193,7 @@ def test_route_run_normalize_crash_is_a_clean_error_not_a_traceback(
 # malformed JSON (json.JSONDecodeError). Nothing in the suite ever triggered a real OS-level
 # PermissionError, and the same-shaped IsADirectoryError gap (a caller pointing --config/--trace/
 # --response at a directory) was never covered either. The line itself is coverage-covered by the
-# tested cases (shared branch), so --cov-fail-under=91 can't see this gap — these tests close it
+# tested cases (shared branch), so --cov-fail-under=94 cannot see this gap — these tests close it
 # directly, without relying on line coverage as a proxy for fault-class coverage.
 
 
