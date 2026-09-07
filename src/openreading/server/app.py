@@ -1233,11 +1233,12 @@ def create_app(*, cors_origins: list[str] | None = None):
         # vendor credential — for both a directly-named backend outside the key's allow-list and
         # an "auto" request the router would otherwise have picked one for.
         scope = getattr(request.state, "api_key_scope", None)
-        if scope is not None:
-            denied = _out_of_scope_backend(req, scope, app.state.strategy_config, router_config)
-            if denied is not None:
-                return _scope_denied_response(denied)
         try:
+            # The scope check routes auto requests, so endpoint and alias refusals can start here.
+            if scope is not None:
+                denied = _out_of_scope_backend(req, scope, app.state.strategy_config, router_config)
+                if denied is not None:
+                    return _scope_denied_response(denied)
             # run_request is sync and drives the job loop via asyncio.run internally, which cannot
             # nest inside this endpoint's event loop → run it in a worker thread.
             result = await run_in_threadpool(

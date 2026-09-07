@@ -466,6 +466,9 @@ and `tests/test_schema_evolution.py` pins every released file byte for byte.
   `runtime.endpoint` or naming an unapproved `credentials_ref` alias reaches the refusal during
   routing now that stage 1 resolves endpoints. The handler returns the documented 502 with its
   `backend_code`, the same answer `POST /v1/parse` gives.
+- **Scoped parse requests preserve routing refusals.** A scoped API key triggers routing during
+  its access check, before execution begins. Endpoint overrides and unapproved aliases return
+  the documented 502 with their error code, including requests that select `strategy:none`.
 - **The source distribution carries the source.** Local agent scratch and its dependency caches
   were packaged into `sdist`, which built at 259 MB. It is 8.4 MB.
 

@@ -523,6 +523,34 @@ def test_route_refuses_a_request_set_endpoint_the_way_parse_does(client):
     assert r.json()["error"]["backend_code"] == "endpoint_not_request_configurable"
 
 
+@pytest.mark.parametrize("backend", ["auto", "strategy:none"])
+@pytest.mark.parametrize(
+    "extra,code",
+    [
+        (
+            {"runtime": {"endpoint": "https://elsewhere.example"}},
+            "endpoint_not_request_configurable",
+        ),
+        ({"credentials_ref": "env:UNAPPROVED"}, "credentials_ref_alias_not_allowed"),
+    ],
+)
+def test_scoped_parse_catches_routing_refusals(monkeypatch, backend, extra, code):
+    monkeypatch.setenv("OPENREADING_API_KEYS", "review-scoped-token")
+    monkeypatch.setenv("OPENREADING_API_KEY_SCOPES", "review-scoped-token=pymupdf")
+    monkeypatch.delenv("OPENREADING_CREDENTIALS_REF_ALIASES", raising=False)
+    client = TestClient(create_app(), raise_server_exceptions=False)
+    body = _pdf_body(backend)
+    body["backend"].update(extra)
+    body["compliance"] = {"require_local": True}
+
+    response = client.post(
+        "/v1/parse", json=body, headers={"Authorization": "Bearer review-scoped-token"}
+    )
+
+    assert response.status_code == 502
+    assert response.json()["error"]["backend_code"] == code
+
+
 def _policy_server(tmp_path, monkeypatch, policy: dict, strategies: str = ""):
     """A server started the way an operator starts one: OPENREADING_CONFIG at a file whose
     `policy:` block is the deployment's compliance posture."""
