@@ -38,6 +38,8 @@ htmlcov/
 # scratch
 *.tmp
 scratch/
+# Agent working files include dependency caches that must never enter source distributions.
+/.superpowers/
 # Claude Code writes one per-user settings file, and this repository ships CLAUDE.md.
 .claude/settings.local.json
 
