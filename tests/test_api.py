@@ -309,19 +309,33 @@ def test_download_allows_private_when_opted_in(monkeypatch):
 
 
 def test_mime_inference_by_extension(tmp_path):
+    """`_document_dict` resolves through `openreading.derive.mime` now, so the nine-entry table
+    and its PDF default are gone. An extension Python knows resolves correctly, and one nobody
+    knows resolves to None rather than being called a PDF."""
     ooxml = "application/vnd.openxmlformats-officedocument"
     for ext, expected in (
         (".png", "image/png"),
         (".pdf", "application/pdf"),
-        (".xyz", "application/pdf"),
         (".docx", f"{ooxml}.wordprocessingml.document"),
         (".xlsx", f"{ooxml}.spreadsheetml.sheet"),
         (".pptx", f"{ooxml}.presentationml.presentation"),
+        # Formats the old table did not list, every one of which used to arrive as a PDF.
+        (".svg", "image/svg+xml"),
+        (".html", "text/html"),
+        (".epub", "application/epub+zip"),
     ):
         f = tmp_path / f"doc{ext}"
         f.write_bytes(b"x")
-        assert api._document_dict(str(f), None)["mime_type"] == expected  # inferred from extension
-    assert api._document_dict(b"raw", None)["mime_type"] == "application/pdf"  # bytes default
+        assert api._document_dict(str(f), None)["mime_type"] == expected
+    # An extension nothing recognises is unknown, not PDF. `.qqq` rather than `.xyz`, because
+    # stdlib mimetypes knows `.xyz` as `chemical/x-xyz`: it recognises far more than the
+    # nine-entry table this replaced, which is the argument for deleting that table.
+    unknown = tmp_path / "doc.qqq"
+    unknown.write_bytes(b"x")
+    assert api._document_dict(str(unknown), None)["mime_type"] is None
+    # Bytes with no name and no signature are unknown too. This supersedes D-v2-9's PDF default:
+    # it was the case core knew least about, and so the least defensible place to invent a type.
+    assert api._document_dict(b"raw", None)["mime_type"] is None
     assert (
         api._document_dict(b"raw", "image/tiff")["mime_type"] == "image/tiff"
     )  # explicit override

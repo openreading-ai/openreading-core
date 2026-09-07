@@ -160,7 +160,6 @@ import contextlib
 import hashlib
 import hmac
 import json
-import mimetypes
 import os
 import secrets
 import stat
@@ -186,6 +185,7 @@ from openreading.credentials import (
     EnvCredentialBroker,
     build_run_context,
 )
+from openreading.derive.mime import resolve_mime_type
 from openreading.ledger.header import slim_request
 from openreading.liveness import check_liveness, probe_kind
 from openreading.readiness import (
@@ -540,7 +540,9 @@ def _gate_document_path(req: OpenReadingRequest) -> tuple[str | None, OpenReadin
         update={
             "path": None,
             "bytes_base64": base64.b64encode(data).decode(),
-            "mime_type": req.document.mime_type or mimetypes.guess_type(target.name)[0],
+            "mime_type": resolve_mime_type(
+                mime_type=req.document.mime_type, filename=target.name, data=data
+            ),
         }
     )
     return None, req.model_copy(update={"document": doc})

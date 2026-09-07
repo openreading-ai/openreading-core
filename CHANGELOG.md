@@ -456,6 +456,21 @@ and `tests/test_schema_evolution.py` pins every released file byte for byte.
 - **`compare <missing.pdf> --backends a,b` is usage, not an errno.** `parse` refused a mistyped
   filename at exit 2 with a sentence; fan-out returned a raw `SourceNotFoundError: [Errno 2]` at
   exit 1.
+- **One MIME resolver, and it never guesses PDF.** Core carried six extension-to-MIME tables and
+  five defaulted an unrecognised input to `application/pdf`, so seventeen of the twenty-six
+  extensions the batch layer already knew about, `.svg`, `.html`, `.epub`, `.txt` and more,
+  reached a backend labelled as PDFs. That is worse than misjudging a capability: the vendor
+  accepts the bytes and returns confident output, so nothing raises and no fallback fires.
+  `openreading.derive.mime.resolve_mime_type` is the one decision point now, taking the caller's
+  explicit type, else the bytes by signature, else the filename, else **`None`**. Content beats
+  filename because a name is a claim and bytes are a fact: a PDF saved as `scan.txt` now resolves
+  to `application/pdf`. Adds `puremagic>=1.30,<2` (MIT, pure Python, no system package).
+- **A document core cannot identify is refused, not relabelled.** `anthropic-claude`,
+  `google-gemini`, `google-document-ai` and `mistral-ocr` each guessed their own media type and
+  fell back to PDF. They now read the resolved type and raise `unsupported_input` when it is
+  absent, naming `document.mime_type` as the fix. This supersedes D-v2-9's rule that bytes with no
+  `mime_type` are a PDF: unnamed bytes are the case core knows least about, which made it the
+  least defensible place to invent a type.
 - **`granularity: page` re-parses only the failing pages, on the backends that can.**
   `_supports_page_ranges` read `page_range_selection` through `getattr` on `Capabilities`, which
   is `extra="allow"`, and no shipped descriptor declared it. The lookup could not raise, so it

@@ -123,6 +123,14 @@ fabricated as "row 0".
 
 Function contracts (each: what it guarantees / the defect class it retires)
 ---------------------------------------------------------------------------
+- ``resolve_mime_type(mime_type=, filename=, data=)`` — the ONE place a document's media type is
+  decided (``openreading.derive.mime``). Caller's explicit type, else the bytes by signature
+  (``puremagic``), else the filename (``mimetypes``), else ``None``. Content beats filename
+  because a name is a claim and bytes are a fact. Retires six extension tables, five of which
+  turned an unrecognised input into ``application/pdf``: seventeen of the twenty-six extensions
+  ``openreading.batch.sources`` knew about resolved to PDF, so an ``.svg`` reached a backend
+  labelled as one. ``None`` is a real answer meaning "core does not know", and an adapter that
+  needs a media type on the wire refuses rather than inventing one.
 - ``md_to_text(md)`` — GFM -> plain. Emphasis stripped only in matched delimiter pairs (never
   blanket character deletion, which broke ``snake_case`` and ``3*4``); fence content exempt from
   every transform; bullets/quotes/link+image syntax removed; pipe tables -> tab-joined rows.

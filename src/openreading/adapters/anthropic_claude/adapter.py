@@ -24,7 +24,6 @@ Only PDF document blocks enable citations, because image blocks do not accept th
 from __future__ import annotations
 
 import base64
-from pathlib import PurePath
 from typing import Any, Protocol
 
 from openreading.adapters.base import BackendAdapter
@@ -75,13 +74,6 @@ N = ChannelGrade.NATIVE
 D = ChannelGrade.DERIVABLE
 
 _DEFAULT_MODEL = "claude-opus-4-8"
-# One media type per format the descriptor's `input_formats` claims, keyed by that format's name.
-# A format the descriptor claims and this table omits falls back to PDF, which the API accepts and
-# reads as garbage instead of refusing, so `test_every_declared_input_format_has_a_media_type`
-# holds the two lists in step. Add a format to both, or to neither.
-_MEDIA_TYPES = {"pdf": "application/pdf", "png": "image/png", "jpg": "image/jpeg"}
-# File suffixes that name a format under a different spelling than `input_formats` uses.
-_FORMAT_ALIASES = {"jpeg": "jpg"}
 # $/1M tokens (input, output) for cost derivation, from Anthropic's published pricing page
 # (accessed 2026-06-24).
 _MODEL_PRICE: dict[str, tuple[float, float]] = {
@@ -428,9 +420,16 @@ class AnthropicClaudeAdapter(BackendAdapter):
         model = req.backend.version or (ctx.runtime or {}).get("model") or _DEFAULT_MODEL
         mode = "extract" if req.extraction_schema else "parse"
         document = req.document
-        suffix = PurePath(document.filename or document.path or "").suffix.lower().lstrip(".")
-        fmt = _FORMAT_ALIASES.get(suffix, suffix)
-        media_type = document.mime_type or _MEDIA_TYPES.get(fmt, _MEDIA_TYPES["pdf"])
+        # `openreading.derive.mime` resolved this before the request was built, so there is no
+        # table here and no PDF default. An unidentified input is refused below rather than
+        # relabelled: sending unknown bytes as a PDF is how an image became a document block.
+        media_type = document.mime_type
+        if not media_type:
+            raise TerminalError(
+                "Claude needs a media type and core could not identify this document; "
+                "pass document.mime_type explicitly",
+                backend_code="unsupported_input",
+            )
         is_image = media_type.startswith("image/")
         cite = mode == "parse" and not is_image
 

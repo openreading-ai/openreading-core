@@ -49,7 +49,6 @@ from __future__ import annotations
 import base64
 import contextlib
 import json
-import mimetypes
 from typing import Any, Protocol
 
 from openreading.adapters._http import error_for_status
@@ -335,15 +334,6 @@ class MistralOCRAdapter(BackendAdapter):
             return mime_type.lower().startswith("image/")
         return any(_bare_name(name).endswith(suffix) for suffix in _IMAGE_MIME_TYPES)
 
-    @staticmethod
-    def _guess_mime_type(name: str | None) -> str:
-        bare = _bare_name(name)
-        for suffix, mime_type in _IMAGE_MIME_TYPES.items():
-            if bare.endswith(suffix):
-                return mime_type
-        guessed, _ = mimetypes.guess_type(bare)
-        return guessed or "application/pdf"
-
     def _document_arg(self, req: OpenReadingRequest) -> dict[str, str]:
         document = req.document
         name = document.filename or document.url
@@ -359,7 +349,16 @@ class MistralOCRAdapter(BackendAdapter):
                     "Mistral OCR inline input must contain valid base64 document bytes",
                     backend_code="unsupported_input",
                 ) from exc
-            mime_type = document.mime_type or self._guess_mime_type(name)
+            # `openreading.derive.mime` resolved this before the request was built. A private
+            # guesser here was a sixth extension table with its own PDF default, which is how an
+            # unidentified input reached the vendor labelled as a document.
+            mime_type = document.mime_type
+            if not mime_type:
+                raise TerminalError(
+                    "Mistral OCR needs a media type and core could not identify this document; "
+                    "pass document.mime_type explicitly",
+                    backend_code="unsupported_input",
+                )
             return {
                 "type": chunk_type,
                 chunk_type: f"data:{mime_type};base64,{document.bytes_base64}",

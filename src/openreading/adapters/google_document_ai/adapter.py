@@ -300,7 +300,13 @@ class GoogleDocumentAIAdapter(BackendAdapter):
                 "Document AI sync needs document bytes/path", backend_code="unsupported_input"
             )
         try:
-            raw = client.process(name, content, d.mime_type or "application/pdf")
+            if not d.mime_type:
+                raise TerminalError(
+                    "Document AI needs a media type and core could not identify this document; "
+                    "pass document.mime_type explicitly",
+                    backend_code="unsupported_input",
+                )
+            raw = client.process(name, content, d.mime_type)
         except (RetryableError, TerminalError):
             raise
         except Exception as e:  # noqa: BLE001

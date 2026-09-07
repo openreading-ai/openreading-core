@@ -396,12 +396,3 @@ def test_live_liveness_probe():  # pragma: no cover
     report = check_liveness(AnthropicClaudeAdapter())
     assert report.measured is True
     assert report.status is LivenessStatus.LIVE, report.detail
-
-
-def test_every_declared_input_format_has_a_media_type():
-    """A format the descriptor claims but the media-type table omits would be sent as a PDF, which
-    the API accepts and reads as garbage rather than refusing."""
-    from openreading.adapters.anthropic_claude.adapter import _MEDIA_TYPES
-
-    formats = AnthropicClaudeAdapter().descriptor.capabilities.input_formats
-    assert set(_MEDIA_TYPES) == set(formats)

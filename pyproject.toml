@@ -34,6 +34,9 @@ dependencies = [
     "cryptography>=50.0",  # Apache-2.0/BSD, AES-256-GCM for ledger blobs (localfs.py, M6).
                            # The ledger is core rather than an extra, so this is a base dep,
                            # not a [server] or [http] one.
+    "puremagic>=1.30,<2",  # MIT, pure Python — content sniffing for openreading.derive.mime.
+                           # <2 because puremagic 2.x requires Python 3.12 and this package
+                           # supports 3.11; lift the cap when requires-python moves.
 ]
 
 [project.urls]

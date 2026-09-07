@@ -43,7 +43,8 @@ this module calls `load()` once per call and `apply()` once per request, before 
 
 `source` is a path, an http(s):// URL, or raw bytes — never a request dict. A path's MIME type is
 inferred from its extension (pdf/png/jpg/jpeg/tif/tiff/docx/xlsx/pptx), default
-`application/pdf`; bytes default to PDF unless `mime_type=` says otherwise (D-v2-9). A missing
+`application/pdf`; an unidentified input resolves to no mime_type at all rather than to PDF
+(`openreading.derive.mime`, superseding D-v2-9's bytes default). A missing
 path raises `SourceNotFoundError` (an `OSError` with errno ENOENT, so callers format it like a
 real `FileNotFoundError`). URL inputs pass through untouched to backends that ingest URLs
 natively (`descriptor.accepts_url`) and are downloaded to bytes for the rest
@@ -261,6 +262,7 @@ from openreading.credentials import (
     load_dotenv,
     secret_values,
 )
+from openreading.derive.mime import resolve_mime_type
 from openreading.ledger.header import (
     DOCUMENT_URL_MEDIA_TYPE,
     JOURNAL_VERSION,
@@ -308,17 +310,6 @@ from openreading.types.request import OpenReadingRequest
 # Inlined here so a plain named-backend run never imports the strategy package (guardrail T10).
 _STRATEGY_PREFIX = "strategy:"
 
-_MIME_BY_EXT = {
-    ".pdf": "application/pdf",
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".tif": "image/tiff",
-    ".tiff": "image/tiff",
-    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-}
 _MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
 # Removed keywords that `**request_overrides` would otherwise swallow. `policy=` is the one that
 # matters: it was a real parameter until the file became the only container, and left unguarded it
@@ -338,16 +329,19 @@ def _refuse_removed_kwargs(overrides: dict[str, Any]) -> None:
 
 def _document_dict(source: str | bytes, mime_type: str | None) -> dict[str, Any]:
     if isinstance(source, bytes | bytearray):
-        # bytes with no explicit mime default to PDF (documented; D-v2-9).
+        # D-v2-9 defaulted these to PDF. Superseded: bytes with no name are the case core knows
+        # LEAST about, so inventing a type here was the least defensible of the six guesses it
+        # used to make. Sniff them, and answer None when the signature is unknown.
+        raw = bytes(source)
         return {
-            "bytes_base64": base64.b64encode(bytes(source)).decode(),
-            "mime_type": mime_type or "application/pdf",
+            "bytes_base64": base64.b64encode(raw).decode(),
+            "mime_type": resolve_mime_type(mime_type=mime_type, data=raw),
         }
     s = str(source)
     if s.startswith(("http://", "https://")):
-        # Preserve the caller's explicit mime_type (None is valid on DocumentInput) instead of
-        # dropping it here -- materialize_document's own `d.mime_type or "application/pdf"`
-        # fallback is what supplies the PDF default when the caller gave none (L1).
+        # Preserve the caller's explicit mime_type (None is valid on DocumentInput). There are no
+        # bytes to sniff until `materialize_document` downloads them, and that is where the type
+        # is resolved for a URL.
         return {"url": s, "mime_type": mime_type}
     p = Path(s)
     if not p.exists():
@@ -358,10 +352,10 @@ def _document_dict(source: str | bytes, mime_type: str | None) -> dict[str, Any]
         # BL-143). `cli/app.py`'s `_describe_read_error` relies on that, and so do the two sites in
         # cmd_parse and _cmd_parse_batch that format the exception with a bare `str(e)`.
         raise SourceNotFoundError(errno.ENOENT, "no such file or directory", s)
-    mime = mime_type or _MIME_BY_EXT.get(p.suffix.lower(), "application/pdf")
+    raw = p.read_bytes()
     return {
-        "bytes_base64": base64.b64encode(p.read_bytes()).decode(),
-        "mime_type": mime,
+        "bytes_base64": base64.b64encode(raw).decode(),
+        "mime_type": resolve_mime_type(mime_type=mime_type, filename=p.name, data=raw),
         "filename": p.name,
     }
 
@@ -525,7 +519,7 @@ def materialize_document(req: OpenReadingRequest, descriptor=None, *, transport=
         update={
             "url": None,
             "bytes_base64": base64.b64encode(data).decode(),
-            "mime_type": d.mime_type or "application/pdf",
+            "mime_type": resolve_mime_type(mime_type=d.mime_type, filename=d.filename, data=data),
         }
     )
     return req.model_copy(update={"document": new_doc})

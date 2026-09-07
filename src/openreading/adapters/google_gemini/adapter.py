@@ -305,7 +305,15 @@ class GoogleGeminiAdapter(BackendAdapter):
     def _document_input(self, req: OpenReadingRequest) -> tuple[dict[str, Any], int | None]:
         """The Interactions document part plus the PDF page count (None when unknowable)."""
         document = req.document
-        mime_type = document.mime_type or "application/pdf"
+        # No PDF default: `openreading.derive.mime` already answered, and if it answered None
+        # then core does not know what these bytes are and must not tell Gemini they are a PDF.
+        mime_type = document.mime_type
+        if not mime_type:
+            raise TerminalError(
+                "Gemini needs a media type and core could not identify this document; "
+                "pass document.mime_type explicitly",
+                backend_code="unsupported_input",
+            )
         # The Interactions `document` part understands PDF natively and accepts text types as
         # plain text; an image or Office file posted as a document part is a vendor 400 that
         # would surface as an opaque `http_400`, so refuse it here in the adapter's own taxonomy.
