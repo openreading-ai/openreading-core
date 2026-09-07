@@ -232,7 +232,7 @@ be restated here lives with the rest, in ``openreading.derive``. The invariants 
 guarantees at the Canon milestone, the ``0.5.0`` row of the manifest below. ``0.5.0`` there is a
 milestone label rather than a package version. The shipped package version is ``0.3.0``.
 
-Adapter descriptor (``adapter-descriptor.v0.7.json``)
+Adapter descriptor (``adapter-descriptor.v0.8.json``)
 -----------------------------------------------------
 A static, machine-readable declaration per adapter — the reason the router NEVER branches on
 backend type: eligibility, ranking, credential resolution and the readiness UI read descriptor

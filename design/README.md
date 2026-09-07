@@ -26,11 +26,21 @@ reader-facing account of every one, including the schema cuts and the two behavi
 outlive the argument (tie-breaks resolve on written order; the benchmark prompt fires on pages and
 on an unbounded call count rather than on a dollar total).
 
-## Still proposed
+## Nothing is proposed right now
 
-- [`unverifiable-claims-sweep.md`](unverifiable-claims-sweep.md) **section B**: twelve descriptor
-  fields read at zero sites. Mechanical, no behaviour change, lands alone as a schema cleanup. The
-  rest of that record shipped and is trimmed to a pointer.
+The last open item was `unverifiable-claims-sweep.md` section B, which proposed deleting the
+descriptor fields nothing reads. It is resolved differently, and the record is gone with it
+(Akshay, 2026-09-07): **the descriptor keeps its vendor claims as documentation, and core never
+branches on one.** Deleting them would have thrown away something a person choosing a backend
+actually reads. Behaving on them is what core has no business doing, because a claim about a
+company this project does not control goes stale without notice and nothing here can detect it.
+That is the enterprise product's problem, not this one's.
+
+The rule is mechanized rather than remembered. `openreading.types.descriptor` states which fields
+are load-bearing (facts about this machine, verified every run) and which are documentation, and
+`tests/test_descriptor_is_documentation.py` asserts every vendor claim is read at zero sites, so a
+change that starts branching on one fails `make verify` and has to argue for it. The refresh
+procedure for keeping the claims current lives in the `openreading.adapters` runbook.
 
 ## Older records
 

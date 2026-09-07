@@ -193,6 +193,23 @@ Client: a `Protocol` + a real httpx class.
   `api_key`; `byo_mode` is a coarse hint, `credentials_spec` is the per-key truth.
 - `signup_url` (mandatory for `hosted_api`), `accepts_url` (True only for native URL intake),
   `live_gate_env` (the vars gating the live test), `sources` (with access dates).
+- **A vendor claim is documentation, and core never branches on one.** `capabilities.*`,
+  `runtime.*`, `input_formats`, `max_pages_per_request`, `languages`, `idempotency_supported`,
+  `cancel_supported` and `router.normalization_difficulty` describe a company this project does
+  not control. `tests/test_descriptor_is_documentation.py` asserts each is read at zero sites, so
+  a change that starts branching on one fails `make verify` and has to argue for it. Fill them in
+  HONESTLY anyway: a person choosing a backend reads them, and a wrong entry misinforms that
+  person even though it cannot mis-route a document. See `openreading.types.descriptor` for which
+  fields ARE load-bearing and why those are safe to be.
+- **Keeping a claim current.** Every one carries its evidence in `sources`: `{url, accessed,
+  supports}`, the page a maintainer read, the day they read it, and what it established. Refresh a
+  backend by re-reading the pages its `sources` names, updating the cells the pages moved, and
+  setting `accessed` to today in the same commit -- never bump the date without re-reading, which
+  turns a citation into a claim about a claim. Print one backend's citations with
+  `uv run python -c "from openreading.adapters.registry import make_adapter; [print(s) for s in
+  make_adapter('reducto').descriptor.to_schema_dict()['sources']]"`. The `accessed` date is the
+  whole mechanism: it lets a reader judge staleness themselves rather than trusting the cell, and
+  it is why a stale descriptor is a documentation defect here and not a correctness one.
 - `protocol_version`: required, no default, and `2` is the ONLY value a new built-in may declare.
   Every `BUILTIN_ADAPTERS` entry is checked unconditionally
   (`tests/test_protocol_version_guard.py`, no hardcoded allow-list), so an adapter registered at

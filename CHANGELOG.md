@@ -602,6 +602,21 @@ and `tests/test_schema_evolution.py` pins every released file byte for byte.
   per-case `compliance` block into `request_body`, which the request schema now rejects outright;
   the `compliance` route fact, which matched on a posture core computed from that same table; and
   the `strategy validate` unreachable-step warning, whose evaluator row 4 deleted underneath it.
+- **A descriptor's vendor claims are documentation, and core never branches on one.** The removal
+  set deleted three features that read a per-vendor table and decided with it: the compliance
+  filter, the capability gate and the cost scorer. That left the fields themselves, read at zero
+  sites, and a proposal to delete them too. They stay instead. A maintainer's dated reading of a
+  vendor's own documentation is useful to a person choosing a backend; what core has no business
+  doing is BEHAVING on it, because a claim about a company this project does not control goes
+  stale without notice and nothing here can detect that. `openreading.types.descriptor` now states
+  which fields are load-bearing (`id`, `type`, `wait_modes`, `protocol_version`,
+  `credentials_spec`, and the rest of what core verifies every run) and which are claims, and
+  `tests/test_descriptor_is_documentation.py` asserts all 28 claim fields are read at zero sites.
+  A change that starts branching on `capabilities.ocr` or `max_pages_per_request` now fails
+  `make verify` and has to say what happens when the vendor revises it. Keeping the claims current
+  is a documentation job with its own procedure in the `openreading.adapters` runbook: re-read the
+  pages a backend's `sources` names, update the cells that moved, and set `accessed` in the same
+  commit.
 - **Every page that described the removed machinery is rewritten**, not annotated: the `router`,
   `config`, `api`, `schemas`, `batch`, `server`, `strategies` and `openreading` package docstrings,
   the adapters catalog (its compliance table is replaced by where each backend runs, its license

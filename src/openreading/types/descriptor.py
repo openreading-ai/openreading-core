@@ -1,9 +1,37 @@
 """AdapterDescriptor: the static, machine-readable record each adapter ships.
 
-The router reads it to check eligibility, rank candidates, and
-build the capability matrix — which is what keeps the router from ever branching on backend
-type. Mirrors the file `openreading.schemas.DESCRIPTOR_SCHEMA_FILE` names, currently
-`src/openreading/schemas/adapter-descriptor.v0.7.json`. Bump the constant and this line
+Two kinds of field live here, and only one of them is allowed to change what core does.
+
+**Facts about this machine and this process.** `id`, `type`, `wait_modes`, `protocol_version`,
+`credentials_spec`, `config_spec`, `signup_url`, `accepts_url`, `batch`, `liveness`. Core verifies
+each of these every run: the id is what the registry resolves, the credentials either are in the
+environment or are not, the adapter either implements the protocol version it claims or fails
+registration. These are load-bearing, and they are safe to be load-bearing because being wrong
+about one produces an error rather than a quieter success.
+
+**Claims about a vendor.** `capabilities.*`, `runtime.*`, `input_formats`, `max_pages_per_request`,
+`languages`, `idempotency_supported`, `cancel_supported`, `router.normalization_difficulty`. Every
+one is a maintainer's reading of a docs page owned by a company this project does not control.
+**Core never branches on these.** They are documentation, and `tests/test_descriptor_is_documentation.py`
+holds them to it: each is asserted to be read at zero sites outside this module and the adapter
+that fills it in.
+
+The reason is not tidiness. Three features used to read exactly this kind of field and decide with
+it: the compliance filter, the capability gate, and the cost scorer. All three are gone. Each was
+wrong the same way. A vendor revises a page, nothing here detects the drift, and the failure is
+silent: the run succeeds having routed a document somewhere the operator believed was excluded, or
+having skipped a backend that would have worked. **A fact core cannot verify must not change what
+core does.** Being wrong must produce an error, not a quieter success.
+
+Keeping them current is a documentation job, not a correctness one, which is the point: a stale
+`languages` list misinforms a person reading the catalog and cannot mis-route a document. Every
+claim carries its evidence in `sources`, a list of `{url, accessed, supports}` — the URL a
+maintainer read, the day they read it, and what it established. That dated citation is the honest
+form for a fact about someone else, because it lets a reader judge staleness instead of trusting
+it. The refresh procedure lives in the `openreading.adapters` runbook.
+
+Mirrors the file `openreading.schemas.DESCRIPTOR_SCHEMA_FILE` names, currently
+`src/openreading/schemas/adapter-descriptor.v0.8.json`. Bump the constant and this line
 together.
 """
 
