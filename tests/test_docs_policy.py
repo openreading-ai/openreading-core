@@ -1,8 +1,8 @@
 """Documentation lives in code (AGENTS.md). This test is what makes that rule enforceable.
 
 Tracked markdown is limited to the root project files, the GitHub templates under `.github/`,
-one `README.md` per directory, and design records for work that is **not built yet** under
-`design/` and `product/specs/`. Everything else — reference docs, research packs, run logs —
+one `README.md` per directory, the one guided walkthrough at `examples/tutorial.md`, and design
+records for work that is **not built yet** under `design/` and `product/specs/`. Everything else — reference docs, research packs, run logs —
 belongs in a module docstring next to the code it describes, or in the private
 `openreading` company repo (which checks this repo out as `core/`). A separate
 markdown file that contradicts the code looks authoritative and is wrong, and nothing forces
@@ -47,6 +47,13 @@ ALLOWED_ROOT_MD = frozenset(
 # the code they propose to change, and deleted when that code lands (AGENTS.md).
 DESIGN_DIRS = frozenset({"design", "product"})
 
+# The one guided walkthrough, listed by exact path rather than by a pattern anyone could widen.
+# It teaches the CLI over the documents in `examples/`, so it lives beside them, and it
+# demonstrates rather than restates: every command it prints is one a reader pastes, and every
+# strategy block in it is executed by `tests/test_docs_truth.py`. A second file here would be the
+# shredded-docs failure the allowlist exists to prevent, so adding one takes a deliberate edit.
+ALLOWED_PATHS = frozenset({"examples/tutorial.md"})
+
 
 def _tracked(pathspec: str) -> list[str]:
     out = subprocess.run(
@@ -60,6 +67,8 @@ def _tracked(pathspec: str) -> list[str]:
 
 
 def _allowed(rel: str) -> bool:
+    if rel in ALLOWED_PATHS:
+        return True
     p = Path(rel)
     if p.parent == Path("."):
         return p.name in ALLOWED_ROOT_MD

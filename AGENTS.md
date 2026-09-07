@@ -16,9 +16,10 @@ methods.
 
 **Documentation lives in code.** Module docstrings, type annotations, inline comments at
 decision points. No standalone markdown files *describing code that exists*, beyond `README.md`
-in a directory and the root project files (this file, `CONTRIBUTING.md`, `SECURITY.md`,
-`CODE_OF_CONDUCT.md`, `CHANGELOG.md`). If something needs explaining, explain it where the code
-is. Keep the documentation in code and its README consistent, concise, and relevant.
+in a directory, `examples/tutorial.md`, and the root project files (this file, `CONTRIBUTING.md`,
+`SECURITY.md`, `CODE_OF_CONDUCT.md`, `CHANGELOG.md`). If something needs explaining, explain it
+where the code is. Keep the documentation in code and its README consistent, concise, and
+relevant.
 
 The reason is not tidiness. A separate document that contradicts the code looks authoritative
 and is wrong, and nothing forces anyone to notice. A module docstring that contradicts the
@@ -33,6 +34,14 @@ The rule exists because a document contradicting the code looks authoritative an
 a proposal has no code to contradict. The risk begins the day it ships. When the work lands, its
 durable facts move into the module docstrings and **the design file is deleted in the same PR**.
 Nothing mechanizes that. A reviewer has to.
+
+`examples/tutorial.md` is the one guided walkthrough, and it is a second exception with its own
+reason. A newcomer needs one ordered path from `uv sync` to a strategy, and no single module owns
+that path. It demonstrates rather than restates: every command in it is one a reader pastes
+against the documents in `examples/`, and every strategy block in it is executed by
+`tests/test_docs_truth.py` rather than proofread. `tests/test_docs_policy.py` lists it by exact
+path, so a second file there fails the gate. When a verb, flag or output it shows changes, re-run
+its commands from a fresh clone and paste the new output.
 
 `docs/` stays gitignored. It holds scratch, working notes and in-flight plans, nothing a reader
 depends on. Research packs, run logs and the decision log go to the private `openreading` company
@@ -108,6 +117,7 @@ error messages.
 | design record / "not built" note | the record in `design/` (plus `product/specs/` when it has product intent); one line in the owning package docstring's Known gaps list naming it | `tests/test_docs_policy.py` |
 | subsystem guide (`src/openreading/<pkg>/README.md`) | the same eight sections and nav line as the existing guides (the docs home, `src/openreading/README.md`, fixes the Prev/Next order); a row in the docs home map; the root README "Where the docs are" row for that need | `tests/test_docs_policy.py` (one README per directory); link and YAML-fence checks over guides: none yet |
 | a CLI verb, flag or Python kwarg that changes what a guide's walkthrough shows | re-run that guide's commands from a fresh clone; paste the new output; bump nothing else | none yet |
+| a CLI verb, flag, output or example document that `examples/tutorial.md` shows | re-run the tutorial's commands from a fresh clone; paste the new output; keep its index in step order | `tests/test_docs_truth.py` (every YAML block passes `strategy validate`), `tests/test_docs_policy.py` (it is allowlisted by exact path, and its links resolve) |
 | a "Not built yet" line becomes true | delete the line in the guide AND the docstring's "designed, not built" marker, in the same PR | reviewer |
 | a new law / invariant in a package docstring (L*, M*, C*) | one line under that guide's "How it decides" naming the failure it avoids; never the full text | reviewer |
 | a new package under `src/openreading/` | a docs-home map row (need → guide, or "reference only: pydoc") and a Layout line in this file | ruff `D104` (package docstring) |
