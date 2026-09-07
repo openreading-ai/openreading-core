@@ -66,10 +66,9 @@ so `runs_fully_local` no longer needs to survive for scoring. It leaves with the
 `ComplianceProfile` and `descriptor.router` is untouched. This supersedes the
 `runs_fully_local` move proposed in [`compliance-removal.md`](compliance-removal.md) section 3.
 
-**Open, and it is a real question:** with no scorer, what orders the chain? The answer should be
-`policy.backends` order first, then a documented deterministic fallback (registry order), never an
-incidental one. Nothing today guarantees registry order is stable across Python versions, so this
-needs a test whichever way it goes.
+**Closed (Akshay, 2026-09-07):** `auto` is deleted along with the scorer. Selection becomes a
+lookup: the backend the caller named, else `policy.backends` in written order, else `pymupdf`.
+See [`explicit-backends.md`](explicit-backends.md) section 1.
 
 ### A2. `Cost`
 
@@ -108,13 +107,10 @@ The `false` side is worse, because it is not a vendor claim at all. 102 of those
 entry, and a backend that can do a thing but whose descriptor says `false` is dropped with
 `missing_<cap>` and never tried. The caller sees a refusal caused by our spreadsheet.
 
-**Recommendation:** stop gating on it. Same reasoning as the format gate in
-[`format-agnostic-intake.md`](format-agnostic-intake.md): being wrong about capability produces a
-vendor error the chain already handles (`executor.py:219-236`), while being wrong in the `false`
-direction produces a silent exclusion that nothing recovers from. If a grade is kept for display,
-`claimed` and `verified` must render differently to a reader, or the distinction is decoration.
-
-This is the largest single item in the sweep and deserves its own record before anyone edits code.
+**Decided (Akshay, 2026-09-07): the gate is deleted.** `Capabilities` itself survives in reduced
+form, because `comparison/capabilities.py` needs two of its fields and already reads them the
+honest way. Full reasoning, plus the dead `page_range_selection` gate this turned up, in
+[`explicit-backends.md`](explicit-backends.md) section 2.
 
 ## B. Asserts something and nothing reads it
 

@@ -1,0 +1,87 @@
+# Design records
+
+Proposals for work this repository has not shipped. `AGENTS.md` keeps them here, next to the code
+they propose to change, so they are reviewed in the open. **A record is deleted in the pull
+request that finishes its work**, with its durable facts moved into the module docstrings. A
+record that outlives its feature is the authoritative-and-wrong document the whole rule exists to
+prevent.
+
+## The removal set (2026-09-07)
+
+Five records, one argument. They were written together and share a single test:
+
+> **A fact core cannot verify must not change what core does.** It may be documentation, clearly
+> marked and dated. It may not be a routing input, a gate, or a default.
+>
+> Two corollaries. Being wrong must produce an error, not a quieter success. And policy about the
+> caller's own machine is the caller's.
+
+[`unverifiable-claims-sweep.md`](unverifiable-claims-sweep.md) states the test, lists everything
+that fails it, and records four things checked and found honest so the next sweep does not
+re-litigate them.
+
+### Implementation order
+
+Each row is independently shippable and green on its own. Later rows assume earlier ones.
+
+| # | Record | What lands | Depends on |
+|---|---|---|---|
+| 0 | [`explicit-backends.md`](explicit-backends.md) §2 | the `page_range_selection` dead-gate fix, alone, as an ordinary bug fix | nothing |
+| 1 | [`format-agnostic-intake.md`](format-agnostic-intake.md) part 2 | one MIME resolver, `puremagic>=1.30,<2`, no PDF default | nothing |
+| 2 | [`format-agnostic-intake.md`](format-agnostic-intake.md) part 1 | delete the format gate, `batch-result` v0.2 | 1 |
+| 3 | [`ledger-policy-removal.md`](ledger-policy-removal.md) | delete retention, the reaper and encryption at rest; drop `cryptography` | nothing |
+| 4 | [`compliance-removal.md`](compliance-removal.md) + [`explicit-backends.md`](explicit-backends.md) | **one atomic change**: the compliance filter, `optimize_for` and the scorer, the capability gate, `auto`, and the `policy.backends` that replaces all of them | 3 |
+
+Row 4 is deliberately not split. Every intermediate state is a repository that lies in a new way:
+a half-removed filter, or a replacement that exists while the thing it replaces still runs. The
+reason to stage it was to avoid stranding callers, and shipping the replacement in the same commit
+removes that window entirely.
+
+Row 3 goes before row 4 because the ledger's retention ceiling and its `zdr` branch read
+`max_retention_hours` and `zdr_flag`, so it removes two of the compliance table's consumers first.
+
+### What row 4 deletes, in one place
+
+- The compliance filter, `ComplianceProfile` (180 vendor claims across 15 adapters), the request
+  `compliance` block, nine drop codes, `ComplianceRefused`, `compliance_refused`,
+  `BAA_TIER_CONFIRMED_WARNING`.
+- `optimize_for`, `_WEIGHTS`, `_QUALITY_BY_PRIORITY`, `integration_priority`, `priority_reason`,
+  and stage 3 entirely.
+- The capability gate, `_FEATURE_CAPABILITY`, `_truthy_cap`, the `missing_<cap>` drop codes.
+- `auto`, at 67 source sites, 3 schema properties and 132 test lines.
+- Added in the same commit: `policy.backends`, a flat list in preference order, reaching the
+  `backend_allowlist` machinery that only the server's API key scope can set today.
+
+Selection afterwards is a lookup with no inference in it: the backend the caller named, else
+`policy.backends` in written order, else `pymupdf`.
+
+### Schema versions this set moves
+
+| schema | from | to | why |
+|---|---|---|---|
+| `request` | v0.2 | v0.3 | remove `compliance`, `optimize_for`, `auto` |
+| `adapter-descriptor` | v0.7 | v0.8 | remove `compliance`, `integration_priority`, `priority_reason`, the unread fields |
+| `strategy-config` | v0.3 | v0.4 | `policy` drops eight keys and gains `backends`; `when` drops the `compliance` fact |
+| `batch-result` | v0.1 | v0.2 | remove `skip_reason`, `skipped` state, `summary.skipped` |
+
+Frozen historical files stay on disk byte for byte (`tests/test_schema_evolution.py`), so they
+still contain the removed properties. No acceptance check may be a blanket `grep` over `src/`.
+
+### Not decided yet
+
+- **`Cost`**: fifteen hand-copied price ranges whose own `basis` field admits most are estimates.
+  Recommendation is to keep what a vendor returns for a call and delete what we typed off a
+  pricing page, but `compare`, the leaderboard and the cookbook all read it, so it is its own
+  record. [`unverifiable-claims-sweep.md`](unverifiable-claims-sweep.md) section A2.
+- **`openreading route` and `POST /v1/route`**: with nothing dropped or scored they echo the
+  caller's own list back. Recommendation is to repoint them at readiness rather than delete them.
+- **Twelve descriptor fields read at zero sites**
+  ([`unverifiable-claims-sweep.md`](unverifiable-claims-sweep.md) section B). Mechanical, no
+  behaviour change, can ride along with any row above.
+
+## Older records
+
+[`agentic.md`](agentic.md), [`decider-executor.md`](decider-executor.md),
+[`intent.md`](intent.md), [`run-stats-analytics.md`](run-stats-analytics.md) propose features this
+repository has not built. They predate the removal set and describe a router with stages that
+these records delete, so read them against the code before implementing from them.

@@ -530,10 +530,11 @@ and the several extension-to-MIME tables collapse into one resolver that answers
 instead of guessing PDF (design record: `design/format-agnostic-intake.md`); the ledger stops
 holding any policy about the caller's own disk, so retention, the reaper and encryption at rest
 all leave, because a directory on your own machine is yours to keep or delete (design record:
-`design/ledger-policy-removal.md`); `optimize_for` and the stage-3 scorer go with them, because
-the "quality" they rank by is this project's own build priority and the `latency` value reads no
-latency figure at all (design record: `design/unverifiable-claims-sweep.md`, which also states the
-test all four records apply and lists what else fails it).
+`design/ledger-policy-removal.md`); `optimize_for`, the stage-3 scorer, the capability gate and
+`auto` itself go with them, so choosing a backend becomes a lookup rather than an inference, the
+one the caller wrote (design records: `design/explicit-backends.md`,
+`design/unverifiable-claims-sweep.md`). `design/README.md` states the test all five apply, the
+order they land in, and what each one deletes.
 
 Extending it (agent-executable)
 ===============================

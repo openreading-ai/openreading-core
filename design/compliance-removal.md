@@ -263,5 +263,9 @@ old code is still present.
    later without a break; the reverse cannot.
 2. Whether `openreading backends` keeps showing any compliance-ish column. It should not, but the
    command's output shape is user-visible and worth a separate look.
-3. With the scorer gone, what orders a chain when `policy.backends` does not say. It must be a
-   documented deterministic order, not an incidental one, and it needs a test either way.
+3. ~~What orders a chain when `policy.backends` does not say.~~ Settled: the named backend, else
+   `policy.backends` in order, else `pymupdf`, with `auto` deleted
+   ([`explicit-backends.md`](explicit-backends.md)).
+4. Whether `openreading route` and `POST /v1/route` survive. With nothing dropped and nothing
+   scored they echo the caller's own list back. Recommend repointing them at readiness rather than
+   deleting them; see [`explicit-backends.md`](explicit-backends.md) section 1.
