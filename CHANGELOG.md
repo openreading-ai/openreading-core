@@ -462,7 +462,10 @@ and `tests/test_schema_evolution.py` pins every released file byte for byte.
   answered `False` for all fifteen backends and every page-granularity rung silently ran document
   granularity, re-parsing whole documents. The field is declared now, and `pymupdf`, `tesseract`,
   `qwen-vl` and `mistral-ocr` set it, each having read `pages.ranges` all along. `open-ocr` does
-  not: `max_pages` is a ceiling, not a selection.
+  not: `max_pages` is a ceiling, not a selection. Editing those four descriptors changes
+  `config_hash`, which folds a digest per descriptor by design (BL-163), so a run journaled before
+  this release and resumed after it is refused with a hash mismatch. Finish in-flight runs before
+  upgrading, or re-run them.
 - **`--pages` explains the argparse trap it falls into.** `parse --pages 1 doc.pdf` feeds the
   file to `--pages`, and the error named a private function at the reader.
 - **`anthropic-claude` sends an image as an image.** A PNG or JPEG was labeled `application/pdf`
