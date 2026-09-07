@@ -15,11 +15,16 @@ block_bbox/block_confidence stay channel X. A `stop_reason=max_tokens` truncatio
 ResponseState.PARTIAL (C10). page_location citations feed page_count (or `pdf_page_count` from the
 PDF bytes) and, in extract mode, `TypedField.citations`. Model default claude-opus-4-8, which the
 caller may override.
+
+Images use image content blocks with their MIME type in both single requests and native batches.
+For example, a PNG stays an image/png source instead of being labeled as a PDF document.
+Only PDF document blocks enable citations, because image blocks do not accept that parameter.
 """
 
 from __future__ import annotations
 
 import base64
+from pathlib import PurePath
 from typing import Any, Protocol
 
 from openreading.adapters.base import BackendAdapter
@@ -415,13 +420,21 @@ class AnthropicClaudeAdapter(BackendAdapter):
         so both build byte-identical requests."""
         model = req.backend.version or (ctx.runtime or {}).get("model") or _DEFAULT_MODEL
         mode = "extract" if req.extraction_schema else "parse"
-        cite = mode == "parse" and req.extraction_schema is None
+        document = req.document
+        suffix = PurePath(document.filename or document.path or "").suffix.lower()
+        media_type = document.mime_type or {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+        }.get(suffix, "application/pdf")
+        is_image = media_type.startswith("image/")
+        cite = mode == "parse" and not is_image
 
         doc_block: dict[str, Any] = {
-            "type": "document",
+            "type": "image" if is_image else "document",
             "source": {
                 "type": "base64",
-                "media_type": "application/pdf",
+                "media_type": media_type,
                 "data": self._pdf_b64(req),
             },
         }
