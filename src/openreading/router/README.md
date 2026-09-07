@@ -30,11 +30,14 @@ Selection is a lookup with no inference in it. Three rules, in order:
 An empty list permits nothing and refuses with `scope_denied`. An absent list is not an empty one:
 absent means no restriction from that source.
 
-Two kinds of statement, and they differ in kind. `policy.backends` is the chain an unnamed request
-resolves to, and `routing.fallback` reorders within it and never adds to it. Naming a backend
-(`--backend reducto`, `backend.id`, a strategy step) is an explicit act by the caller and runs that
-backend, list or no list: on one machine the operator and the caller are the same person, and
-refusing what they just typed helps nobody.
+**`openreading.yaml` is not a gatekeeper.** It is where you write down the chain your strategies
+and your automation run, so a scheduled job and a colleague's clone reach the same backends in the
+same order without anyone passing a flag. It is a default, deliberately, not a wall.
+
+So `policy.backends` is the chain an unnamed request resolves to, and `routing.fallback` reorders
+within it and never adds to it. Naming a backend (`--backend reducto`, `backend.id`, a strategy
+step) is an explicit act by the caller and runs that backend, list or no list. On one machine the
+operator and the caller are the same person, and refusing what they just typed helps nobody.
 
 The enforcement boundary, where those are two different people, is the server's API-key scope. A
 scoped key refuses a backend outside its scope with `scope_denied` before any credential is

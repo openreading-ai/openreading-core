@@ -41,7 +41,11 @@ P4 to P6 by this one.
 - **P2. No hand-written JSON input.** JSON remains as output, as the wire, and as the schema
   language. Nothing a person authors is JSON. Failure prevented: a policy file with no schema
   behind it, which is what the removed `--policy` flag took.
-- **P3. A policy names the backends, and nothing else.** It used to name a requirement instead,
+- **P3. A policy names the backends, and it is not a gate.** The file is where the chain for a
+  deployment's strategies and automation is written down, so a scheduled run and a fresh clone
+  reach the same backends in the same order with no flag. A caller who names a backend explicitly
+  gets it, list or no list; the server's API-key scope is the boundary for the case where the
+  caller and the operator are two different people. It used to name a requirement instead,
   and the descriptor met it or did not. Every one of those requirements was a claim about a vendor
   core could not check, so being wrong excluded a backend the operator believed was included and
   the run succeeded anyway. A list of ids is a statement core can honour exactly, forever, with no
