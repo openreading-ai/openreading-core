@@ -527,7 +527,10 @@ per-vendor compliance table leave core entirely, because core cannot verify a cl
 vendor and must not appear to enforce one (design records: `design/compliance-removal.md`,
 `product/specs/compliance-removal.product-spec.md`); the stage-2 format gate goes the same way,
 and the several extension-to-MIME tables collapse into one resolver that answers "unknown"
-instead of guessing PDF (design record: `design/format-agnostic-intake.md`).
+instead of guessing PDF (design record: `design/format-agnostic-intake.md`); the ledger stops
+holding any policy about the caller's own disk, so retention, the reaper and encryption at rest
+all leave, because a directory on your own machine is yours to keep or delete (design record:
+`design/ledger-policy-removal.md`).
 
 Extending it (agent-executable)
 ===============================

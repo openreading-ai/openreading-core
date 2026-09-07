@@ -103,15 +103,14 @@ exactly as it is. It gains sources, not behaviour.
 
 ### 3.3 Needs a new source, not a deletion
 
-**The ledger's retention ceiling.** `ledger/retention.py:3` derives it from
-`min(max_retention_hours)` over hosted descriptors. That is the worst instance of the whole
-problem: an unverifiable vendor number decides how long the caller's own documents sit on the
-caller's own disk.
+**The ledger's retention ceiling and its `zdr` branch.** `ledger/retention.py:66` derives the
+ceiling from `min(max_retention_hours)` over hosted descriptors, and `inline.py:265` skips writing
+blobs entirely for a backend carrying `zdr_flag`. Both are vendor claims deciding what happens to
+files on the caller's own disk.
 
-This one is clean to fix, because the replacement already exists in the same file:
-`OPENREADING_LEDGER_RETENTION_HOURS` is already an override and `DEFAULT_RETENTION_HOURS = 24.0`
-is already there, marked `# placeholder`. Delete the descriptor-derived term, promote the env var
-to the only source, and make the default a documented decision rather than a placeholder.
+Neither gets a new source. Retention leaves core entirely, along with encryption at rest, per
+[`ledger-policy-removal.md`](ledger-policy-removal.md). Landing that record first removes two of
+this table's consumers before the table goes.
 
 **Per-case compliance in eval datasets.** `evals/dataset.py:94` forwards a case's own
 `compliance` key into the request body. Dataset files carrying that key become invalid. Since
@@ -134,10 +133,9 @@ valid document may carry today.
 and a `CHANGELOG.md` line. `tests/test_schema_evolution.py` pins every released file byte for
 byte, so the old files stay on disk and unmodified; only the default moves.
 
-**Open question for the reviewer, and the reason to check before deleting:** the descriptor is a
-published schema. A third-party adapter author, and the company repo, may read
-`descriptor.compliance` off the wire. Deleting the field rather than deprecating it is only safe
-once that is confirmed. The company repo is the one caller this repository cannot grep.
+The descriptor is a published schema, so the company repo may read `descriptor.compliance` off
+the wire. That is settled and is not a blocker: the field is deleted outright and the company repo
+is fixed afterwards (Akshay, 2026-09-07).
 
 ## 5. Documentation
 
@@ -162,7 +160,8 @@ Eight documents teach the feature and need rewriting, not deleting: `README.md`,
 
 ## 6. Plan
 
-Four pull requests. The first is a prerequisite, not a phase of the removal.
+Three pull requests, after [`ledger-policy-removal.md`](ledger-policy-removal.md) has taken two
+of the table's consumers away. The first is a prerequisite, not a phase of the removal.
 
 **PR 1. `policy.backends`, the allow-list the yaml cannot express today.** Add the key and wire it
 to the existing `backend_allowlist` parameter, expose it on `api.run()` and as a CLI flag. Restate
@@ -172,8 +171,8 @@ nothing has been taken away. This is independently useful and independently revi
 
 **PR 2. Remove the filter.** Delete `router/compliance.py`, stage 1, the request block, the
 descriptor profile, the eight policy keys, the nine drop codes, `ComplianceRefused`,
-`compliance_refused` and `BAA_TIER_CONFIRMED_WARNING`. Bump the three schemas. Give the ledger its
-env-sourced retention. Rewrite `AGENTS.md`'s rules and the eight documents. This is one commit's
+`compliance_refused` and `BAA_TIER_CONFIRMED_WARNING`. Bump the three schemas. Rewrite
+`AGENTS.md`'s rules and the eight documents. This is one commit's
 worth of intent and a large diff; it should not be split, because a half-removed filter is a
 filter that lies in a new way.
 
@@ -181,10 +180,9 @@ filter that lies in a new way.
 entries built on it. Separable from PR 2 only if the `strategy-config` bump is done once, in PR 2,
 with the fact removed at the same time. If that is awkward, fold this into PR 2.
 
-**PR 4. The deprecation window, if section 4's open question comes back "yes, something reads
-it".**
-Keep `descriptor.compliance` in the schema as an ignored, documented-as-deprecated field for one
-release rather than deleting it, and delete it in the release after.
+There is no deprecation window. `descriptor.compliance` is deleted outright: the company repo is
+the only caller that could read it off the wire, and it is fixed after this lands rather than
+before (Akshay, 2026-09-07).
 
 ## 7. Test strategy
 
@@ -195,20 +193,15 @@ old code is still present.
 - For each of the nine drop codes: a test asserting the code no longer appears in any plan, run
   against the current tree first, where it must fail.
 - For the request block: a test asserting `{"compliance": {...}}` is refused as an unknown field.
-- For the ledger: a test asserting the retention ceiling is unchanged by any descriptor, by
-  registering a fake adapter with an absurd `max_retention_hours` and asserting the TTL does not
-  move.
+- For the ledger: a test asserting an armed run's behaviour is identical for a backend that used
+  to carry `zdr_flag` and one that did not, since no descriptor may change what is written.
 - 842 test lines are deleted rather than migrated. The four dedicated test files go entirely. The
   coverage floor must not drop, and removing 64 files' worth of well-covered code will move the
   percentage; check the floor after PR 2 and raise it if the number goes up.
 
 ## 8. What this record does not decide
 
-1. Whether `descriptor.compliance` is deprecated for a release or deleted outright. Depends on the
-   company repo, which this record's author cannot read.
-2. The `policy.backends` grammar: a flat list, or per-operation. A flat list is enough for the
+1. The `policy.backends` grammar: a flat list, or per-operation. A flat list is enough for the
    stated need and is what PR 1 should ship.
-3. Whether `openreading backends` keeps showing any compliance-ish column. It should not, but the
+2. Whether `openreading backends` keeps showing any compliance-ish column. It should not, but the
    command's output shape is user-visible and worth a separate look.
-4. What the default `DEFAULT_RETENTION_HOURS` should be once it stops being a placeholder. 24 hours
-   is the current value and nobody has defended it.
