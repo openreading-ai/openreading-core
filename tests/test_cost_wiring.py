@@ -94,9 +94,7 @@ def _mock_reducto_http() -> None:
 
 def test_merge_projects_every_mappable_field():
     resp = _blank_response()
-    merge_cost_report(
-        resp, CostReport(native_unit="page", native_quantity=3.0, duration_ms=1234)
-    )
+    merge_cost_report(resp, CostReport(native_unit="page", native_quantity=3.0, duration_ms=1234))
     assert resp.usage is not None
     assert resp.usage.duration_ms == 1234
     assert resp.usage.pages_processed == 3
@@ -105,9 +103,7 @@ def test_merge_projects_every_mappable_field():
 def test_merge_fills_only_unset_fields():
     resp = _blank_response()
     resp.usage = Usage(pages_processed=7)
-    merge_cost_report(
-        resp, CostReport(native_unit="page", native_quantity=3.0, duration_ms=1234)
-    )
+    merge_cost_report(resp, CostReport(native_unit="page", native_quantity=3.0, duration_ms=1234))
     assert resp.usage.pages_processed == 7  # what normalize() reported wins
     assert resp.usage.duration_ms == 1234  # ...but an unset field is filled
 

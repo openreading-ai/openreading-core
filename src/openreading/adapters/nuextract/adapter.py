@@ -184,9 +184,7 @@ def _descriptor() -> AdapterDescriptor:
         protocol_version=2,
         adapter_impl="http",
         operations=["extract", "parse"],
-        provisioning=Provisioning(
-            byo_mode=["api_key"], auth="api_key"
-        ),
+        provisioning=Provisioning(byo_mode=["api_key"], auth="api_key"),
         wait_modes=[WaitMode.POLL],
         capabilities=Capabilities(
             ocr="claimed",  # VLM reads rasterized document pages (no separate OCR pass)

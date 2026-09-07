@@ -130,9 +130,7 @@ def _descriptor() -> AdapterDescriptor:
         protocol_version=2,
         adapter_impl="http",
         operations=["OCR", "FormParser", "LayoutParser", "CustomExtractor"],
-        provisioning=Provisioning(
-            byo_mode=["cloud_credential"], auth="gcp_adc"
-        ),
+        provisioning=Provisioning(byo_mode=["cloud_credential"], auth="gcp_adc"),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(
             ocr="verified",

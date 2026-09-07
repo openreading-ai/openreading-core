@@ -159,9 +159,7 @@ def _descriptor() -> AdapterDescriptor:
         protocol_version=2,
         adapter_impl="http",
         operations=["prebuilt-read", "prebuilt-layout", "prebuilt-invoice", "custom"],
-        provisioning=Provisioning(
-            byo_mode=["api_key"], auth="api_key"
-        ),
+        provisioning=Provisioning(byo_mode=["api_key"], auth="api_key"),
         wait_modes=[WaitMode.POLL],
         capabilities=Capabilities(
             ocr="verified",

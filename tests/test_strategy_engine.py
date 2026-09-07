@@ -133,9 +133,7 @@ def test_keep_best_when_all_escalate_and_final_errors():
     # pymupdf escalates (garbled), reducto (final, gated explicitly) errors -> keep pymupdf deficient
     reg = scripted_registry(
         ScriptedBackend("pymupdf", local=True, text=GARBLED),
-        ScriptedBackend(
-            "reducto", error=TerminalError("boom", backend_code="server")
-        ),
+        ScriptedBackend("reducto", error=TerminalError("boom", backend_code="server")),
     )
     res = _run(
         {
@@ -153,9 +151,7 @@ def test_keep_best_when_all_escalate_and_final_errors():
 def test_on_quality_exhausted_fail_raises():
     reg = scripted_registry(
         ScriptedBackend("pymupdf", local=True, text=GARBLED),
-        ScriptedBackend(
-            "reducto", error=TerminalError("boom", backend_code="server")
-        ),
+        ScriptedBackend("reducto", error=TerminalError("boom", backend_code="server")),
     )
     with pytest.raises(PlanExhaustedError):
         _run(
@@ -192,9 +188,7 @@ def test_invalid_input_fails_the_cascade_by_default():
 
 def test_transient_error_advances():
     reg = scripted_registry(
-        ScriptedBackend(
-            "reducto", error=TerminalError("5xx", backend_code="server")
-        ),
+        ScriptedBackend("reducto", error=TerminalError("5xx", backend_code="server")),
         ScriptedBackend("pymupdf", local=True, text=CLEAN),
     )
     res = _run({"version": 1, "strategies": {"s": {"steps": ["reducto", "pymupdf"]}}}, "s", reg)
@@ -204,9 +198,7 @@ def test_transient_error_advances():
 
 def test_on_error_fail_override_stops_chain():
     reg = scripted_registry(
-        ScriptedBackend(
-            "reducto", error=TerminalError("5xx", backend_code="server")
-        ),
+        ScriptedBackend("reducto", error=TerminalError("5xx", backend_code="server")),
         ScriptedBackend("pymupdf", local=True, text=CLEAN),
     )
     with pytest.raises(PlanExhaustedError):
@@ -224,9 +216,7 @@ def test_step_on_error_overrides_the_cascade_map_via_the_transient_alias():
     # the cascade advances on anything; the failing step stops on any transient class (§5.3). Proves
     # the step map is the most-specific argument at the leaf call site, not just at the unit level.
     reg = scripted_registry(
-        ScriptedBackend(
-            "reducto", error=TerminalError("5xx", backend_code="server")
-        ),
+        ScriptedBackend("reducto", error=TerminalError("5xx", backend_code="server")),
         ScriptedBackend("pymupdf", local=True, text=CLEAN),
     )
     cfg = {
@@ -308,9 +298,7 @@ def test_on_error_action_most_specific_map_decides_first():
 
 def test_missing_credentials_skips():
     reg = scripted_registry(
-        ScriptedBackend(
-            "reducto", required_env=["OPENREADING_TEST_NEVERSET_KEY"], text=CLEAN
-        ),
+        ScriptedBackend("reducto", required_env=["OPENREADING_TEST_NEVERSET_KEY"], text=CLEAN),
         ScriptedBackend("pymupdf", local=True, text=CLEAN),
     )
     res = _run({"version": 1, "strategies": {"s": {"steps": ["reducto", "pymupdf"]}}}, "s", reg)
@@ -507,9 +495,7 @@ def test_a_genuine_quality_exhaustion_still_says_quality_below_threshold():
     # the control: same keep-best ending, no deadline involved — the existing signal is unchanged
     reg = scripted_registry(
         ScriptedBackend("pymupdf", local=True, text=GARBLED),
-        ScriptedBackend(
-            "reducto", error=TerminalError("boom", backend_code="server")
-        ),
+        ScriptedBackend("reducto", error=TerminalError("boom", backend_code="server")),
     )
     res = _run(
         {

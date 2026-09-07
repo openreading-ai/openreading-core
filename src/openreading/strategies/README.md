@@ -663,8 +663,8 @@ not record. Each rule names the failure it avoids and where it is enforced.
   run made (`openreading.strategies.plain`, "Guardrails"). It used to also total them as
   `usage.cost_usd`, folding a `cost_basis` across rungs. Most of what that summed was a published
   rate this package had typed into its own source and applied to a page count, indistinguishable
-  once totalled from money someone was actually charged. Both are gone
- : count the attempts here, price them from your provider invoice.
+  once totalled from money someone was actually charged. Both are gone: count the attempts here,
+  and price them from your provider invoice.
 
 Every threshold this page prints has a written derivation, and they all live in one document. `uv
 run python -m pydoc openreading.strategies.signals` is that catalog. It gives each signal's formula,

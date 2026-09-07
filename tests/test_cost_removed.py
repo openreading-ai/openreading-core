@@ -1,12 +1,12 @@
 """Core counts what the vendor reported, and never converts it to money.
 
-. Cost was three things wearing one word.
+Cost was three things wearing one word.
 
 An **observation**: `pages_processed`, `credits`, `input_tokens`, `output_tokens` are counters the
 vendor returned for this call, and `duration_ms` comes from a clock this package owns. Those stay.
 
 An **assertion**: `descriptor.cost.usd_per_page_equiv_*` on fifteen adapters, plus private price
-tables in two of them, one dated `accessed 2026-06-24`. Someone read a pricing page and typed
+tables in four of them, one dated `accessed 2026-06-24`. Someone read a pricing page and typed
 numbers into Python.
 
 A **derivation** that launders the second into the first: `router/cost.py` turned those tables into

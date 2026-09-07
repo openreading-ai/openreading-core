@@ -95,9 +95,7 @@ def test_hedge_fires_when_primary_slow():
 def test_hedge_cancelled_when_primary_wins_fast():
     # primary latency 5ms, hedge start_after 100ms → primary wins before the hedge ever launches
     hedge = ScriptedBackend("aws-textract", text=CLEAN)
-    reg = scripted_registry(
-        ScriptedBackend("reducto", text=CLEAN, latency_ms=5), hedge
-    )
+    reg = scripted_registry(ScriptedBackend("reducto", text=CLEAN, latency_ms=5), hedge)
     res = _run(
         {
             "version": 1,

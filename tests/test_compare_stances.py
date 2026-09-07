@@ -253,5 +253,3 @@ def test_truth_all_correct_with_tables_expected_empty_scores_overall_one_not_hal
 
 
 # --- cost_outlier -----------------------------------------------------------------------
-
-

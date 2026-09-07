@@ -5,9 +5,10 @@ of a sample that would fall through to the next rung. Principle (signals.md §5,
 pick rates; tools derive thresholds.* This module used to report a `cost_per_doc` per operating
 point and accept a `--max-cost-per-doc` budget filter. Both multiplied the escalation rate by a
 price read off `descriptor.cost`, a number this package wrote down about someone else's rate card
-and could not verify, and the escalation rate it multiplied was the only measured half
-. The rate is what calibration now reports, and it is the figure a
-caller multiplies by their own invoice. This module runs the strategy's rung-1 backend over a labeled sample, scores each
+and could not verify, and the escalation rate it multiplied was the only measured half. The rate is
+what calibration now reports, and it is the figure a caller multiplies by their own invoice.
+
+This module runs the strategy's rung-1 backend over a labeled sample, scores each
 result with the EXISTING eval scorers (`openreading.evals.scorers` — no parallel scoring path),
 computes the engine's own signal probe per document, sweeps each gated threshold over its domain,
 and reports candidate operating points (threshold → predicted escalation rate, scorer agreement)

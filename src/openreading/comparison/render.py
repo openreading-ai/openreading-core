@@ -27,7 +27,9 @@ def render_table(report: dict[str, Any], *, show_agreements: bool = False) -> st
     lines.append("")
 
     # scoreboard
-    hdr = f"{'SUBJECT':<20}{'TYPE':<16}{'PAGES':>6}{'BLOCKS':>7}{'CHARS':>7}{'FIELDS':>7}{'TIME':>8}"
+    hdr = (
+        f"{'SUBJECT':<20}{'TYPE':<16}{'PAGES':>6}{'BLOCKS':>7}{'CHARS':>7}{'FIELDS':>7}{'TIME':>8}"
+    )
     lines.append(hdr)
     for s in subs:
         f = s["facts"]

@@ -265,9 +265,9 @@ def test_preflight_line_quotes_no_price_at_all(tmp_path, capsys, monkeypatch):
     """The line used to read `12 items → hosted backend reducto (~$0.015-$0.06/page-equiv each)`.
 
     Every number in it came from `descriptor.cost`, a rate card this package had written down and
-    could not verify, so the advisory presented a guess in the same breath as a real item count
-   . What it names now is what core knows before a byte is read: how
-    many calls leave this machine, to whom, and on whose key."""
+    could not verify, so the advisory presented a guess in the same breath as a real item count.
+    What it names now is what core knows before a byte is read: how many calls leave this machine,
+    to whom, and on whose key."""
     for var in ("REDUCTO_API_KEY", "OPENREADING_REDUCTO_API_KEY"):
         monkeypatch.delenv(var, raising=False)
     d = tmp_path / "c"

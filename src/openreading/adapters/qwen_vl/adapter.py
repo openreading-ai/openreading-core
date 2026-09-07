@@ -168,9 +168,7 @@ def _descriptor() -> AdapterDescriptor:
         # cached on self) — verified against the real R1/R2 conformance kit, not assumed.
         protocol_version=2,
         adapter_impl="http",
-        provisioning=Provisioning(
-            byo_mode=["weights", "endpoint"], auth="none"
-        ),
+        provisioning=Provisioning(byo_mode=["weights", "endpoint"], auth="none"),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(
             ocr="claimed",

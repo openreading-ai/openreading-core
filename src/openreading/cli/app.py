@@ -1167,8 +1167,7 @@ def _render_leaderboard_table(report: Any) -> str:
     lines = [
         f"dataset: {d.path}  ({d.case_count} case(s): {', '.join(d.case_names)})",
         "",
-        f"{'rank':>4}  {'backend':<28} {'mean':>6} {'scored':>7} "
-        f"{'errors':>7}  dimensions",
+        f"{'rank':>4}  {'backend':<28} {'mean':>6} {'scored':>7} {'errors':>7}  dimensions",
     ]
     for b in report.backends:
         dims = " ".join(f"{k}={v:.2f}" for k, v in b.dimensions.items())

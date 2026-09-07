@@ -1562,9 +1562,8 @@ def _pick_best(results: dict[int, _BranchOutcome], ctx: _WalkCtx, shadows: set[i
     """Highest composite quality among NON-SHADOW successes; ties → the first-listed branch.
 
     The tie-break used to consult a `_cost_midpoint` off `descriptor.cost`, so the cheaper backend
-    won a tie. That price was a number this package wrote down about someone else's rate card
-   , which made a tie resolve on an unverifiable fact rather than on
-    something the author wrote. Listed order is the author's own statement of preference, and it
+    won a tie. That price was a number this package wrote down about someone else's rate card, so
+    a tie resolved on an unverifiable fact rather than on something the author wrote. Listed order is the author's own statement of preference, and it
     is the whole rule now: put the backend you want to win a tie first."""
     succ = [
         r for r in results.values() if r.index not in shadows and r.status in ("ok", "composite_ok")
@@ -1963,8 +1962,8 @@ async def _eval_paged_cascade(node: dict[str, Any], path: str, ctx: _WalkCtx) ->
     page set forward (no keep-best rungs here — the page is simply re-parsed by a stronger backend).
 
     `base_resp` is frozen to whichever rung ran first, so its `usage` describes that rung and no
-    other. This used to also fold every later rung's dollar cost into it. The dollars are gone
-   , and the counters are not summed in their place: a page re-parsed by
+    other. This used to also fold every later rung's dollar cost into it. The dollars are gone,
+    and the counters are not summed in their place: a page re-parsed by
     a second rung would count twice, and a `pages_processed` that exceeds the document is a number
     nobody can act on. The trace names every rung that ran, which is where per-rung consumption
     belongs."""

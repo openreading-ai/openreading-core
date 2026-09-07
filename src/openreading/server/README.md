@@ -454,12 +454,12 @@ survives the process.
 There is no metrics or tracing surface here, and the "Not built yet" list says so. Three things are
 worth collecting instead. The stdout access log gives request counts and status codes. `uv run
 openreading backends --check <slug>` measures whether a backend answers and belongs on a schedule
-as a vendor-degradation canary ([Routing and keys](../router/README.md)). Each envelope carries `usage`, which reports
-what the backend consumed in the unit it meters in: `pages_processed`, `credits`,
-`input_tokens`/`output_tokens`, `duration_ms`. There is no spend figure. A dollar total needed a
-per-vendor rate this package could not verify, so `cost_usd` and `cost_basis` are gone
-; join these counters to your provider invoice instead. A counter a
-backend did not report is absent rather than zero, so read every field with a default.
+as a vendor-degradation canary ([Routing and keys](../router/README.md)). Each envelope carries
+`usage`, which reports what the backend consumed in the unit it meters in: `pages_processed`,
+`credits`, `input_tokens`/`output_tokens`, `duration_ms`. There is no spend figure. A dollar total
+needed a per-vendor rate this package could not verify, so `cost_usd` and `cost_basis` are gone.
+Join these counters to your provider invoice instead. A counter a backend did not report is absent
+rather than zero, so read every field with a default.
 
 ### Load and time budgets
 

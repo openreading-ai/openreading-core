@@ -470,8 +470,8 @@ Guardrails you get for free
 
 * Every attempt on the record. `orchestration.attempts[]` names every backend that ran, winners
   and losers alike, so you can count the calls a run made. It carries no price: the totals it used
-  to publish as `usage.cost_usd` were built from per-vendor rates core could not verify
- . `usage` reports what a backend consumed in its own unit.
+  to publish as `usage.cost_usd` were built from per-vendor rates core could not verify. `usage`
+  reports what a backend consumed in its own unit.
 * The backend list is untouchable. The file's `policy.backends` allow-list is the whole
   candidate set; no strategy can reach outside it.
 * Never silent. If everything gates, you get the best result kept so far with honest

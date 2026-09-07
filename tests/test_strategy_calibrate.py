@@ -49,9 +49,7 @@ def test_sweep_emits_operating_points_across_the_domain():
 def test_sweep_recommends_threshold_closest_to_target_escalation():
     # confidences 0.4/0.6/0.9/0.95 → target 0.25 (1 of 4 escalates) → threshold ~0.5 fires only 0.4
     obs = _obs([("a", 0.40, 0.3), ("b", 0.60, 0.9), ("c", 0.90, 0.95), ("d", 0.95, 0.97)])
-    sweep = sweep_predicate(
-        obs, "confidence_below", target_escalation=0.25
-    )
+    sweep = sweep_predicate(obs, "confidence_below", target_escalation=0.25)
     assert sweep.recommended is not None
     assert sweep.recommended.escalation_rate == 0.25  # exactly one of four
 
@@ -59,9 +57,7 @@ def test_sweep_recommends_threshold_closest_to_target_escalation():
 def test_sweep_agreement_tracks_the_scorer():
     # the two low-confidence docs are exactly the two low-scorer docs → a mid threshold agrees fully
     obs = _obs([("a", 0.30, 0.2), ("b", 0.40, 0.3), ("c", 0.90, 0.95), ("d", 0.95, 0.97)])
-    sweep = sweep_predicate(
-        obs, "confidence_below", quality_bar=0.8
-    )
+    sweep = sweep_predicate(obs, "confidence_below", quality_bar=0.8)
     best = max(sweep.points, key=lambda p: p.scorer_agreement)
     assert best.scorer_agreement == 1.0  # a threshold exists that fires iff the scorer says bad
 
@@ -82,9 +78,7 @@ def test_sweep_agreement_excludes_unscored_observations_not_false_agreement():
     obs = _obs([("a", 0.2, 0.1), ("b", 0.2, 0.2), ("c", 0.2, 0.05)]) + [
         Observation("unlabeled", {"doc_confidence": 0.2}, None)
     ]
-    sweep = sweep_predicate(
-        obs, "confidence_below", quality_bar=0.8
-    )
+    sweep = sweep_predicate(obs, "confidence_below", quality_bar=0.8)
     best = max(sweep.points, key=lambda p: p.scorer_agreement)
     assert best.scorer_agreement == 1.0
     # the unscored doc still counts toward escalation_rate/cost — those are signal-only, no label

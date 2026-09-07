@@ -186,9 +186,7 @@ def _descriptor() -> AdapterDescriptor:
         protocol_version=2,
         adapter_impl="http",
         operations=list(_OPERATIONS),
-        provisioning=Provisioning(
-            byo_mode=["cloud_credential"], auth="sigv4"
-        ),
+        provisioning=Provisioning(byo_mode=["cloud_credential"], auth="sigv4"),
         wait_modes=[WaitMode.INLINE, WaitMode.POLL],
         capabilities=Capabilities(
             ocr="verified",

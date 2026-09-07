@@ -1,7 +1,7 @@
 """The ledger keeps no policy about the caller's own disk.
 
-. Three things left core in this change, all for one reason: a
-directory on the operator's own machine is theirs.
+Three things left core in this change, all for one reason: a directory on the operator's own
+machine is theirs.
 
 **Retention.** A destructor whose only job was deleting the caller's data on a timer, defaulting
 to a number its own source marked `# placeholder`. Its ceiling came from `min(max_retention_hours)`

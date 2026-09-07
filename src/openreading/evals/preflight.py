@@ -153,9 +153,7 @@ def _backend_target_scope(reference: str, slug: str, documents: int) -> TargetSc
         return TargetScope(reference, hosted=False, calls=None, note=f"unknown backend {slug!r}")
     # `type` is the one fact here core owns: a hosted_api reaches someone else's endpoint with the
     # caller's key, an oss_library runs in this process. Nothing about the vendor's terms is read.
-    return TargetScope(
-        reference, hosted=descriptor.type.value == "hosted_api", calls=documents
-    )
+    return TargetScope(reference, hosted=descriptor.type.value == "hosted_api", calls=documents)
 
 
 def scope_run(plan: SubsetPlan, targets) -> RunScope:

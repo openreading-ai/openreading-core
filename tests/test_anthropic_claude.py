@@ -352,8 +352,7 @@ def test_model_override_via_backend_version():
 def test_report_cost_forwards_the_token_counts_anthropic_returned():
     """2400 input + 180 output, summed and left in tokens.
 
-    This used to multiply them by a per-model `_MODEL_PRICE` table and assert the dollars
-   ."""
+    This used to multiply them by a per-model `_MODEL_PRICE` table and assert the dollars."""
     adapter = AnthropicClaudeAdapter(client=FakeClaudeClient())
     job = adapter.submit(_req(), RunContext())
     cost = adapter.report_cost(job)

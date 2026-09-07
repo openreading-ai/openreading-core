@@ -249,9 +249,7 @@ def _descriptor() -> AdapterDescriptor:
         protocol_version=2,
         adapter_impl="http",
         operations=["parse", "extract", "split", "classify", "edit", "pipeline"],
-        provisioning=Provisioning(
-            byo_mode=["api_key"], auth="api_key"
-        ),
+        provisioning=Provisioning(byo_mode=["api_key"], auth="api_key"),
         wait_modes=[WaitMode.INLINE, WaitMode.WEBHOOK, WaitMode.POLL],
         capabilities=Capabilities(
             ocr="verified",

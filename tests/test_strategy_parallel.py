@@ -309,12 +309,8 @@ def test_cancel_dispatch_never_blocks_the_response_past_the_node_deadline():
 
 def test_all_branches_fail_composite_exhausted():
     reg = scripted_registry(
-        ScriptedBackend(
-            "reducto", error=TerminalError("5xx", backend_code="server")
-        ),
-        ScriptedBackend(
-            "aws-textract", error=TerminalError("5xx", backend_code="server")
-        ),
+        ScriptedBackend("reducto", error=TerminalError("5xx", backend_code="server")),
+        ScriptedBackend("aws-textract", error=TerminalError("5xx", backend_code="server")),
     )
     with pytest.raises(PlanExhaustedError):
         _run(
@@ -516,9 +512,7 @@ def test_gated_parallel_step_with_composite_winner_still_gates():
     # annotate (the `winner is None` path).
     reg = scripted_registry(
         ScriptedBackend("docling", text=GARBLED),
-        ScriptedBackend(
-            "aws-textract", error=TerminalError("5xx", backend_code="server")
-        ),
+        ScriptedBackend("aws-textract", error=TerminalError("5xx", backend_code="server")),
         ScriptedBackend("reducto", text=CLEAN),
     )
     cfg = {
@@ -737,9 +731,7 @@ def test_branch_missing_credentials_skips_and_the_race_still_resolves(monkeypatc
     # so it must not colour the composite error class (execution.md §3.2 / spec §5.1).
     outcomes = _branch_outcomes(monkeypatch)
     reg = scripted_registry(
-        ScriptedBackend(
-            "reducto", required_env=["OPENREADING_TEST_NEVERSET_KEY"], text=CLEAN
-        ),
+        ScriptedBackend("reducto", required_env=["OPENREADING_TEST_NEVERSET_KEY"], text=CLEAN),
         ScriptedBackend("pymupdf", local=True, text=CLEAN, latency_ms=20),
     )
     res = _run(
@@ -761,9 +753,7 @@ def test_every_branch_unresolvable_is_composite_exhausted(monkeypatch):
     # `exhausted` (Law 5) rather than hanging on a race that can never be won.
     outcomes = _branch_outcomes(monkeypatch)
     reg = scripted_registry(
-        ScriptedBackend(
-            "reducto", required_env=["OPENREADING_TEST_NEVERSET_KEY"], text=CLEAN
-        )
+        ScriptedBackend("reducto", required_env=["OPENREADING_TEST_NEVERSET_KEY"], text=CLEAN)
     )
     with pytest.raises(PlanExhaustedError):
         _run(
