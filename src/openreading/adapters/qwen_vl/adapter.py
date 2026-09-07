@@ -187,6 +187,7 @@ def _descriptor() -> AdapterDescriptor:
             custom_schema_extraction="claimed",
             vlm_based="verified",
             languages=["en", "zh", "and 30+ (Qwen3-VL)"],
+            page_range_selection=True,
             input_formats=["png", "jpg", "pdf (rasterized)"],
         ),
         cost=Cost(native_unit="gpu_second", basis="infra_only", usd_per_page_equiv_low=0.0),

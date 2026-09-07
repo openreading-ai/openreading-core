@@ -79,6 +79,12 @@ class Capabilities(BaseModel):
     human_in_the_loop: CapabilityValue = False
     languages: list[str] = Field(default_factory=list)
     input_formats: list[str] = Field(default_factory=list)
+    # §2.7: the backend can parse a NAMED SUBSET of pages, so a page-granularity cascade can
+    # re-run only the pages that failed a gate. A ceiling like `max_pages` is not selection and
+    # does not qualify. Declared rather than left to `extra="allow"`: `_supports_page_ranges`
+    # reads it through `getattr`, so while it was undeclared it returned False for every backend
+    # and the whole per-page path was unreachable outside the fakes in `tests/fakes.py`.
+    page_range_selection: bool = False
     max_pages_per_request: int | str | None = None
     max_file_size: str | None = None
 

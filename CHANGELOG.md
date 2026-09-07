@@ -456,6 +456,13 @@ and `tests/test_schema_evolution.py` pins every released file byte for byte.
 - **`compare <missing.pdf> --backends a,b` is usage, not an errno.** `parse` refused a mistyped
   filename at exit 2 with a sentence; fan-out returned a raw `SourceNotFoundError: [Errno 2]` at
   exit 1.
+- **`granularity: page` re-parses only the failing pages, on the backends that can.**
+  `_supports_page_ranges` read `page_range_selection` through `getattr` on `Capabilities`, which
+  is `extra="allow"`, and no shipped descriptor declared it. The lookup could not raise, so it
+  answered `False` for all fifteen backends and every page-granularity rung silently ran document
+  granularity, re-parsing whole documents. The field is declared now, and `pymupdf`, `tesseract`,
+  `qwen-vl` and `mistral-ocr` set it, each having read `pages.ranges` all along. `open-ocr` does
+  not: `max_pages` is a ceiling, not a selection.
 - **`--pages` explains the argparse trap it falls into.** `parse --pages 1 doc.pdf` feeds the
   file to `--pages`, and the error named a private function at the reader.
 - **`anthropic-claude` sends an image as an image.** A PNG or JPEG was labeled `application/pdf`

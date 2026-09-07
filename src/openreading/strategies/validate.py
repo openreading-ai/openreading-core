@@ -618,7 +618,7 @@ def _check_cascade(node: dict[str, Any], path: str, ctx: _Ctx, child_kw: dict) -
         # re-parses the WHOLE doc, not just the failing pages.
         if paged and i > 0 and isinstance(step, dict) and isinstance(step.get("backend"), str):
             desc = _descriptor(step["backend"])
-            if desc is not None and not getattr(desc.capabilities, "page_range_selection", False):
+            if desc is not None and not desc.capabilities.page_range_selection:
                 ctx.warn(
                     spath,
                     f"granularity: page but backend {step['backend']!r} lacks native page-range "

@@ -137,6 +137,7 @@ def _descriptor() -> AdapterDescriptor:
             reading_order="claimed",
             multi_column=False,
             languages=["eng", "and 100+ via traineddata"],
+            page_range_selection=True,
             input_formats=["png", "jpg", "tiff", "bmp", "pdf (rasterized)"],
         ),
         cost=Cost(native_unit="cpu_second", basis="infra_only", usd_per_page_equiv_low=0.0),

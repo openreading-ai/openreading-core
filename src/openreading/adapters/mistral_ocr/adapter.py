@@ -213,6 +213,7 @@ def _descriptor() -> AdapterDescriptor:
             figures_charts="claimed",
             custom_schema_extraction="claimed",
             vlm_based="claimed",
+            page_range_selection=True,
             input_formats=["pdf", "docx", "pptx", "png", "jpg", "jpeg", "avif"],
         ),
         cost=Cost(

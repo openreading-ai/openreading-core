@@ -99,6 +99,7 @@ def _descriptor() -> AdapterDescriptor:
             reading_order="verified",
             multi_column="claimed",
             figures_charts="verified",
+            page_range_selection=True,
             input_formats=["pdf", "xps", "epub", "mobi", "cbz", "svg"],
             max_pages_per_request="unbounded",
         ),

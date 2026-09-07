@@ -2233,9 +2233,13 @@ async def _eval_paged_cascade(node: dict[str, Any], path: str, ctx: _WalkCtx) ->
 
 
 def _supports_page_ranges(desc) -> bool:
-    """A backend advertises native page-range selection via the (extra-allowed) capability
-    `page_range_selection` (§2.7). Absent/false → the rung runs document granularity."""
-    return bool(getattr(desc.capabilities, "page_range_selection", False))
+    """A backend advertises native page-range selection via `capabilities.page_range_selection`
+    (§2.7). False → the rung runs document granularity and re-parses the whole document.
+
+    Read as a real attribute, not through `getattr`. While the field was undeclared on
+    `Capabilities`, which is `extra="allow"`, the lookup could not raise and simply answered False
+    for every shipped backend, so this branch was unreachable outside `tests/fakes.py`."""
+    return bool(desc.capabilities.page_range_selection)
 
 
 def _page_gate_fires(pg: Any, gate: dict[str, Any]) -> bool:

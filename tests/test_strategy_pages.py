@@ -397,3 +397,34 @@ def test_page_granularity_escalation_rung_plain_crash_keeps_the_cheap_pages_and_
     assert pages[2].text == "scrmbl"  # the un-escalated page keeps the cheap rung's honest output
     assert canary not in str(crash)
     assert "***" in str(crash)
+
+
+# ---- §2.7 page-range capability: declared, and true where it is true -----------------------------
+
+
+def test_page_range_selection_is_a_declared_capability():
+    """`_supports_page_ranges` reads this through `getattr` on an extra-allowed model, so an
+    undeclared field silently returns False for every backend forever. Declaring it makes the
+    typo-shaped access a real attribute."""
+    from openreading.types.descriptor import Capabilities
+
+    assert "page_range_selection" in Capabilities.model_fields
+
+
+@pytest.mark.parametrize("slug", ["pymupdf", "tesseract", "qwen-vl", "mistral-ocr"])
+def test_backends_that_select_pages_say_so(slug):
+    """Each of these reads `req.pages.ranges` and parses only those pages. Until they declared it,
+    every page-granularity cascade silently re-parsed whole documents at every rung."""
+    from openreading.adapters.registry import make_adapter
+    from openreading.strategies.engine import _supports_page_ranges
+
+    assert _supports_page_ranges(make_adapter(slug).descriptor)
+
+
+def test_a_backend_that_only_caps_page_count_does_not_claim_selection():
+    """open-ocr reads `pages.max_pages`, which is a ceiling rather than a selection: it cannot
+    fetch page 7 alone, so a page-granularity rung on it must stay at document granularity."""
+    from openreading.adapters.registry import make_adapter
+    from openreading.strategies.engine import _supports_page_ranges
+
+    assert not _supports_page_ranges(make_adapter("open-ocr").descriptor)
