@@ -12,7 +12,8 @@ files, directories, globs, http(s) URLs — into an ordered list of `ResolvedSou
 
 A glob selects each file once, even when recursive matches overlap with expanded directories.
 Separate source arguments preserve deliberate repeats, such as naming the same document twice.
-Glob matches reached through symlinks are excluded, so a linked directory cannot add unrelated documents to a batch.
+Glob matches reached through symlinks are excluded, so a linked directory cannot add
+unrelated documents to a batch. A symlink you name yourself is still read.
 """
 
 from __future__ import annotations

@@ -510,6 +510,19 @@ def test_route_returns_plan_shape(client):
     assert plan["dropped"]["aws-textract"]["code"] == "trains_on_data"  # unconfirmed opt-out
 
 
+def test_route_refuses_a_request_set_endpoint_the_way_parse_does(client):
+    # The router now resolves a backend's endpoint through the credential broker, so a body that
+    # sets `runtime.endpoint` reaches the same BL-162 refusal /v1/parse has always raised. It is a
+    # documented 502 with `endpoint_not_request_configurable`, never the 500 an uncaught raise
+    # inside the handler would produce.
+    payload = _pdf_body("auto")
+    payload["backend"]["runtime"] = {"endpoint": "https://elsewhere.example"}
+    payload["compliance"] = {"require_local": True}
+    r = client.post("/v1/route", json=payload)
+    assert r.status_code == 502
+    assert r.json()["error"]["backend_code"] == "endpoint_not_request_configurable"
+
+
 def _policy_server(tmp_path, monkeypatch, policy: dict, strategies: str = ""):
     """A server started the way an operator starts one: OPENREADING_CONFIG at a file whose
     `policy:` block is the deployment's compliance posture."""

@@ -143,13 +143,11 @@ def evaluate(
 ) -> DropReason | None:
     """Return None if the backend survives the compliance filter, else the DropReason."""
     cfg = config or RouterConfig()
-    if req is None or not (
-        req.require_local
-        or req.require_baa
-        or req.no_train_on_data
-        or req.data_region is not None
-        or req.max_retention is not None
-    ):
+    # A block asking for nothing is the same as no block: every check below is gated on a field, so
+    # the outcome is identical, and returning here skips resolving an endpoint nobody constrained.
+    # Read from the model rather than naming the five fields, so a sixth constraint added later
+    # cannot land on the skip path by being forgotten in an enumeration here.
+    if req is None or not req.model_dump(exclude_defaults=True):
         return None
     c = desc.compliance
     local = bool(c.runs_fully_local) and _resolves_to_loopback(desc, request, broker)

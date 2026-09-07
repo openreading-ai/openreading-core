@@ -458,6 +458,16 @@ and `tests/test_schema_evolution.py` pins every released file byte for byte.
   exit 1.
 - **`--pages` explains the argparse trap it falls into.** `parse --pages 1 doc.pdf` feeds the
   file to `--pages`, and the error named a private function at the reader.
+- **`anthropic-claude` sends an image as an image.** A PNG or JPEG was labeled `application/pdf`
+  in a document block, on the single request and the native batch alike. It now travels as an
+  image block carrying its own media type, and citations stay on the PDF path, which is the only
+  block type that accepts them.
+- **`POST /v1/route` answers 502, not 500, for a body it must refuse.** A body setting
+  `runtime.endpoint` or naming an unapproved `credentials_ref` alias reaches the refusal during
+  routing now that stage 1 resolves endpoints. The handler returns the documented 502 with its
+  `backend_code`, the same answer `POST /v1/parse` gives.
+- **The source distribution carries the source.** Local agent scratch and its dependency caches
+  were packaged into `sdist`, which built at 259 MB. It is 8.4 MB.
 
 ### Security
 
@@ -497,6 +507,17 @@ at startup. `cryptography>=50.0` is a base dependency.
 
 **`require_local` reads where a service backend points.** A `docling` or `qwen-vl` endpoint
 configured at a non-loopback address no longer passes `require_local`.
+
+**`require_local` reads the endpoint an approved alias selects.** A `credentials_ref` alias sets
+configuration as well as credentials, so `MYALIAS_ENDPOINT` overrides the operator's local default
+for the run. Compliance read only the default, so a request naming an approved alias passed
+`require_local` and `require_baa` and then dispatched off the machine. Stage 1 now resolves the
+endpoint through the same broker the run executes with.
+
+**A glob no longer reaches outside the tree it names.** `parse 'corpus/**/*.pdf'` followed a
+symlinked file or directory under `corpus/` and read documents from wherever it pointed. A match
+with a linked ancestor is skipped. A symlink you name yourself is still read, because naming it is
+a deliberate choice.
 
 **`pypdf>=6.15.0` is required.** It closes PYSEC-2026-3655 and PYSEC-2026-3656. `make audit` runs
 pip-audit against the resolved lock, and CI runs it on every push.

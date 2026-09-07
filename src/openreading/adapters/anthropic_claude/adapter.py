@@ -75,6 +75,13 @@ N = ChannelGrade.NATIVE
 D = ChannelGrade.DERIVABLE
 
 _DEFAULT_MODEL = "claude-opus-4-8"
+# One media type per format the descriptor's `input_formats` claims, keyed by that format's name.
+# A format the descriptor claims and this table omits falls back to PDF, which the API accepts and
+# reads as garbage instead of refusing, so `test_every_declared_input_format_has_a_media_type`
+# holds the two lists in step. Add a format to both, or to neither.
+_MEDIA_TYPES = {"pdf": "application/pdf", "png": "image/png", "jpg": "image/jpeg"}
+# File suffixes that name a format under a different spelling than `input_formats` uses.
+_FORMAT_ALIASES = {"jpeg": "jpg"}
 # $/1M tokens (input, output) for cost derivation, from Anthropic's published pricing page
 # (accessed 2026-06-24).
 _MODEL_PRICE: dict[str, tuple[float, float]] = {
@@ -403,7 +410,7 @@ class AnthropicClaudeAdapter(BackendAdapter):
             )
         return _RealAnthropicClient(api_key)  # pragma: no cover
 
-    def _pdf_b64(self, req: OpenReadingRequest) -> str:
+    def _document_b64(self, req: OpenReadingRequest) -> str:
         d = req.document
         if d.bytes_base64:
             return d.bytes_base64
@@ -411,7 +418,7 @@ class AnthropicClaudeAdapter(BackendAdapter):
             with open(d.path, "rb") as fh:
                 return base64.b64encode(fh.read()).decode()
         raise TerminalError(
-            "Claude needs document bytes/path (PDF)", backend_code="unsupported_input"
+            "Claude needs document bytes or a path", backend_code="unsupported_input"
         )
 
     def _build_params(self, req: OpenReadingRequest, ctx: RunContext) -> tuple[dict[str, Any], str]:
@@ -421,12 +428,9 @@ class AnthropicClaudeAdapter(BackendAdapter):
         model = req.backend.version or (ctx.runtime or {}).get("model") or _DEFAULT_MODEL
         mode = "extract" if req.extraction_schema else "parse"
         document = req.document
-        suffix = PurePath(document.filename or document.path or "").suffix.lower()
-        media_type = document.mime_type or {
-            ".png": "image/png",
-            ".jpg": "image/jpeg",
-            ".jpeg": "image/jpeg",
-        }.get(suffix, "application/pdf")
+        suffix = PurePath(document.filename or document.path or "").suffix.lower().lstrip(".")
+        fmt = _FORMAT_ALIASES.get(suffix, suffix)
+        media_type = document.mime_type or _MEDIA_TYPES.get(fmt, _MEDIA_TYPES["pdf"])
         is_image = media_type.startswith("image/")
         cite = mode == "parse" and not is_image
 
@@ -435,7 +439,7 @@ class AnthropicClaudeAdapter(BackendAdapter):
             "source": {
                 "type": "base64",
                 "media_type": media_type,
-                "data": self._pdf_b64(req),
+                "data": self._document_b64(req),
             },
         }
         if cite:
