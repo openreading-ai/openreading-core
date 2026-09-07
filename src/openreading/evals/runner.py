@@ -105,7 +105,7 @@ def run_case(
         # Gate BEFORE submit() (AGENTS.md: compliance is never relaxed by fallback); the raised
         # ComplianceRefused is an AdapterError, so the except clause below turns it into a scored,
         # honest CaseResult(error=...) exactly like any other adapter failure — no new control-flow.
-        dr = comp.evaluate(req.compliance, adapter.descriptor, router_config)
+        dr = comp.evaluate(req.compliance, adapter.descriptor, router_config, request=req)
         if dr is not None:
             raise ComplianceRefused(dr.detail, constraint=dr.code)
         with auth_hinted(adapter.descriptor, run_ctx.credentials):

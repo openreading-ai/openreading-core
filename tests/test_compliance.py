@@ -109,3 +109,110 @@ def test_an_in_process_library_has_no_endpoint_to_misconfigure(monkeypatch) -> N
     monkeypatch.setenv("DOCLING_SERVE_URL", "http://docling.example.internal:5001")  # unrelated
     desc = make_adapter("pymupdf").descriptor
     assert evaluate(Compliance(require_local=True), desc) is None
+
+
+@pytest.mark.parametrize(
+    "constraint,code", [("require_local", "not_local"), ("require_baa", "no_baa")]
+)
+def test_remote_alias_cannot_use_local_compliance_exemption(monkeypatch, constraint, code):
+    """An approved credential alias selects configuration as well as credentials."""
+    from openreading.credentials import build_run_context
+    from openreading.router import Registry, Router
+    from openreading.types.errors import ComplianceRefused
+    from openreading.types.request import OpenReadingRequest
+
+    monkeypatch.setenv("OPENREADING_CREDENTIALS_REF_ALIASES", "REMOTE")
+    monkeypatch.setenv("REMOTE_ENDPOINT", "https://offbox.example")
+    monkeypatch.setenv("DOCLING_SERVE_URL", "http://localhost:5001")
+    adapter = make_adapter("docling")
+    req = OpenReadingRequest.model_validate(
+        {
+            "document": {"bytes_base64": "eA=="},
+            "backend": {"id": "docling", "credentials_ref": "env:REMOTE"},
+            "compliance": {constraint: True},
+        }
+    )
+    assert (
+        build_run_context(req, adapter.descriptor).runtime["endpoint"] == "https://offbox.example"
+    )
+    registry = Registry()
+    registry.register(adapter)
+    router = Router(registry)
+    plan = router.route(req)
+    assert plan.chosen is None
+    assert plan.dropped["docling"].code == code
+    with pytest.raises(ComplianceRefused):
+        router.check_eligible(req, "docling")
+
+
+@pytest.mark.parametrize(
+    "endpoint,refused", [("https://offbox.example", True), ("http://localhost:5001", False)]
+)
+def test_strategy_compliance_uses_injected_broker(monkeypatch, endpoint, refused):
+    """Compilation checks the endpoint the execution broker selects for an approved alias."""
+    from openreading.credentials import EnvCredentialBroker
+    from openreading.router import Registry
+    from openreading.strategies.model import StrategyConfig
+    from openreading.strategies.prune import compile_strategy
+    from openreading.types.errors import ComplianceRefused
+    from openreading.types.request import OpenReadingRequest
+
+    monkeypatch.setenv("DOCLING_SERVE_URL", "http://localhost:5001")
+    broker = EnvCredentialBroker(
+        {
+            "OPENREADING_CREDENTIALS_REF_ALIASES": "REMOTE",
+            "REMOTE_ENDPOINT": endpoint,
+        }
+    )
+    req = OpenReadingRequest.model_validate(
+        {
+            "document": {"bytes_base64": "eA=="},
+            "backend": {"id": "strategy:demo", "credentials_ref": "env:REMOTE"},
+            "compliance": {"require_local": True},
+        }
+    )
+    registry = Registry()
+    registry.register(make_adapter("docling"))
+    config = StrategyConfig.model_validate(
+        {"version": 1, "strategies": {"demo": {"backend": "docling"}}}
+    )
+    if refused:
+        with pytest.raises(ComplianceRefused):
+            compile_strategy(req, "demo", config, registry, broker=broker)
+    else:
+        assert compile_strategy(req, "demo", config, registry, broker=broker).eligible == [
+            "docling"
+        ]
+
+
+@pytest.mark.parametrize("backend", ["docling", "auto", "strategy:demo"])
+def test_execution_refuses_remote_alias_before_dispatch(monkeypatch, backend):
+    from openreading import api
+    from openreading.credentials import EnvCredentialBroker
+    from openreading.router import Registry
+    from openreading.strategies.model import StrategyConfig
+    from openreading.types.errors import ComplianceRefused
+    from openreading.types.request import OpenReadingRequest
+
+    broker = EnvCredentialBroker(
+        {
+            "OPENREADING_CREDENTIALS_REF_ALIASES": "REMOTE",
+            "REMOTE_ENDPOINT": "https://offbox.example",
+        }
+    )
+    monkeypatch.setenv("DOCLING_SERVE_URL", "http://localhost:5001")
+    registry = Registry()
+    registry.register(make_adapter("docling"))
+    monkeypatch.setattr(api, "build_registry", lambda: registry)
+    req = OpenReadingRequest.model_validate(
+        {
+            "document": {"bytes_base64": "eA=="},
+            "backend": {"id": backend, "credentials_ref": "env:REMOTE"},
+            "compliance": {"require_local": True},
+        }
+    )
+    config = StrategyConfig.model_validate(
+        {"version": 1, "strategies": {"demo": {"backend": "docling"}}}
+    )
+    with pytest.raises(ComplianceRefused):
+        api.run_request(req, broker=broker, strategy_config=config)

@@ -22,6 +22,7 @@ from typing import Any
 from openreading.adapters.registry import BUILTIN_ADAPTERS
 from openreading.config import apply as apply_policy
 from openreading.config import union_compliance
+from openreading.credentials import EnvCredentialBroker
 from openreading.router.compliance import DropReason
 from openreading.router.registry import Registry
 from openreading.router.router import RoutePlan, Router, RouterConfig
@@ -88,6 +89,7 @@ def compile_strategy(
     router_config: RouterConfig | None = None,
     plain_info: dict[str, Any] | None = None,
     backend_allowlist: frozenset[str] | None = None,
+    broker: EnvCredentialBroker | None = None,
 ) -> CompiledPlan:
     """Compile `name` for `req`. Raises ComplianceRefused when the root prunes to nothing (the
     same terminal outcome the `auto` arm gives on an empty plan). `plain_info` (from the loader)
@@ -138,7 +140,7 @@ def compile_strategy(
         updates["routing"] = req.routing.model_copy(update={"fallback": None})
     route_req = req.model_copy(update=updates) if updates else req
 
-    plan = Router(registry, router_config).route(route_req)
+    plan = Router(registry, router_config, broker=broker).route(route_req)
     eligible = plan.eligible_ids  # chosen + fallbacks, in stage-3 order
     drop_reasons = plan.dropped  # id -> DropReason
 
