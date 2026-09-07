@@ -8,8 +8,8 @@ prevent.
 
 ## The removal set (2026-09-07)
 
-Six records, one argument, plus a seventh that is a checklist rather than an argument. They
-were written together and share a single test:
+Six records, one argument, plus two checklists. They were written together and share a single
+test:
 
 > **A fact core cannot verify must not change what core does.** It may be documentation, clearly
 > marked and dated. It may not be a routing input, a gate, or a default.
@@ -21,10 +21,16 @@ were written together and share a single test:
 that fails it, and records four things checked and found honest so the next sweep does not
 re-litigate them.
 
-[`documentation-surface.md`](documentation-surface.md) is the seventh: what every row owes the
-docs, which guards catch a stale document automatically and which do not. In a repository where
-the documentation is the code, a removal that leaves its chapter behind ships a manual describing
-a flag the binary rejects. **No row defers its documentation to a follow-up.**
+[`documentation-surface.md`](documentation-surface.md) is what every row owes the docs, and which
+guards catch a stale document automatically. In a repository where the documentation is the code,
+a removal that leaves its chapter behind ships a manual describing a flag the binary rejects.
+**No row defers its documentation to a follow-up.**
+
+[`test-surface.md`](test-surface.md) is the same question asked of the suite: 1,249 test lines
+across 69 of 162 files name something being deleted. It carries the one item with an ordering
+requirement, ahead of row 0. **Extend `tests/golden/` into a characterization suite before any
+code moves**, because the risk in six sweeping removals is not the behaviour anyone argued about,
+it is the coupling nobody thought to mention.
 
 ### Implementation order
 
@@ -32,6 +38,7 @@ Each row is independently shippable and green on its own. Later rows assume earl
 
 | # | Record | What lands | Depends on |
 |---|---|---|---|
+| pre | [`test-surface.md`](test-surface.md) §1 | the characterization suite: pinned envelopes per surface, local backends only | **must precede row 0** |
 | 0 | [`explicit-backends.md`](explicit-backends.md) §2 | the `page_range_selection` dead-gate fix, alone, as an ordinary bug fix | nothing |
 | 1 | [`format-agnostic-intake.md`](format-agnostic-intake.md) part 2 | one MIME resolver, `puremagic>=1.30,<2`, no PDF default | nothing |
 | 2 | [`format-agnostic-intake.md`](format-agnostic-intake.md) part 1 | delete the format gate, `batch-result` v0.2 | 1 |
