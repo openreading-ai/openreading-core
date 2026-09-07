@@ -1453,6 +1453,13 @@ def create_app(*, cors_origins: list[str] | None = None):
         except _ADAPTER_ERRORS as e:  # a body/file compliance conflict — 403, never a 500
             return _error_response(e)
         backend = req.backend.id
+        if backend is None:
+            # Refused BEFORE the strategy branch below, not after it. `strip_strategy_prefix(None)`
+            # is None, so the branch was already unreachable for a null id, and the guard sitting
+            # under it left `backend` typed `str | None` through code that hands it to `Job` and
+            # `JobRecord`, both of which require a `str`. This is the same 400, one step earlier,
+            # and it is what makes `backend` a plain `str` for the rest of the handler.
+            return _bad_request("async jobs require a named backend, not 'auto' or 'strategy:none'")
 
         # `strategy:<name>` — wrap the WHOLE strategy walk as one synthetic job (integration.md
         # §3.4). The walk runs via api.run_request (same as /v1/parse); for local/offline backends
@@ -1495,7 +1502,7 @@ def create_app(*, cors_origins: list[str] | None = None):
             jobs[sjob.id] = rec
             return _job_dict(rec)
 
-        if backend is None or strat == "none":  # strategy:none forces the legacy auto path
+        if strat == "none":  # strategy:none forces the legacy router path
             return _bad_request("async jobs require a named backend, not 'auto' or 'strategy:none'")
         # BL-159 AC-3: `backend` is guaranteed a literal named id by this point (both `auto`-
         # shaped cases already returned above) — scope-gate it before prepare_named_backend

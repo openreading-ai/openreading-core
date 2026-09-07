@@ -3061,3 +3061,18 @@ def test_caller_auth_scope_is_enforced_on_every_item_of_a_strategy_batch(tmp_pat
     assert all(i["state"] == "failed" for i in items)
     assert all("not scoped" in i["error"]["message"] for i in items)
     assert r.json()["summary"]["succeeded"] == 0
+
+
+def test_post_jobs_without_a_named_backend_is_a_400(client):
+    """`/v1/jobs` wraps ONE backend's async lifecycle, so it needs a name.
+
+    A body naming none is the caller asking the server to resolve a chain, which has no single job
+    handle to poll. It is refused at 400 rather than routed. The guard is uncovered otherwise, and
+    it is the reason `backend` is a plain `str` for the rest of that handler.
+    """
+    body = _pdf_body(None)
+
+    r = client.post("/v1/jobs", json=body)
+
+    assert r.status_code == 400
+    assert "async jobs require a named backend" in r.json()["error"]["message"]

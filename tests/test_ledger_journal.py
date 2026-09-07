@@ -880,3 +880,21 @@ def test_journal_timestamps_are_absolute_utc_epochs(tmp_path):
         assert value == wall_start, (
             "a journal timestamp must be the wall clock, not the process's uptime reading"
         )
+
+
+def test_inline_executor_descriptor_is_the_descriptor_not_a_bound_method(tmp_path):
+    """`Executor.descriptor` is a PROPERTY on the port, so every reader spells it without parens.
+
+    Row 3 deleted the `zdr_flag` helper immediately above it and took the `@property` decorator
+    with it, leaving `descriptor` a plain method. Nothing in `src/` reads it yet, so no test
+    failed; only pyright saw `InlineExecutor` stop satisfying its own protocol, at the two call
+    sites that hand one back as an `Executor`. A port that does not match its protocol is a
+    fabricated conformance, which is the one thing this package refuses to ship.
+    """
+    from openreading.ledger.descriptor import ExecutorDescriptor
+    from openreading.ledger.inline import InlineExecutor
+
+    ex = InlineExecutor(journal=NullJournal(), blobs=None, registry=None, clock=RealClock())
+
+    assert isinstance(ex.descriptor, ExecutorDescriptor)
+    assert ex.descriptor.id == "inline"

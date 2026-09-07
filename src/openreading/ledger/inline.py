@@ -151,6 +151,7 @@ class InlineExecutor:
         self._sanitizer = sanitizer or Sanitizer()
         self._ledger_root = ledger_root
 
+    @property
     def descriptor(self) -> ExecutorDescriptor:
         return ExecutorDescriptor(
             id="inline",
