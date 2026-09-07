@@ -90,16 +90,39 @@ In scope:
 - Delete `openreading.router.compliance` and the router's stage 1.
 - Delete `ComplianceProfile` from `AdapterDescriptor` and from all fifteen adapters.
 - Delete the `compliance` block from the request schema and `OpenReadingRequest`.
-- Reduce the `policy:` block from nine keys to one (`optimize_for`).
+- Reduce the `policy:` block from nine keys to two: `optimize_for`, and a new `backends`
+  allow-list (see below). The allow-list is part of this change, not an assumption of it.
 - Delete `ComplianceRefused`, `compliance_refused`, `BAA_TIER_CONFIRMED_WARNING` and the nine
   stage-1 drop codes.
-- Give the ledger's retention ceiling an operator-set source instead of a vendor-derived one.
+- Decide what replaces `compliance.runs_fully_local` in stage-3 scoring, which is a separate
+  question from the filter and is easy to miss. Today `router.py:196` reads it three ways: a local
+  backend is scored at zero cost, it earns a `+0.25` bonus under `optimize_for: cost` or
+  `offline`, and `optimize_for: offline` is a documented request enum whose whole meaning rests on
+  it. Deleting the field without a replacement silently changes routing for every caller and
+  quietly guts one of four `optimize_for` values.
+- Retention leaves core entirely, along with encryption at rest
+  (`design/ledger-policy-removal.md`).
 - Bump `request`, `adapter-descriptor` and `strategy-config` to new major-breaking versions.
+
+Also in scope, because the replacement does not exist yet:
+
+- A `policy.backends` allow-list in `openreading.yaml`, reaching the `backend_allowlist` machinery
+  that today only the server's API key scope can set. Without it, a CLI or Python caller loses the
+  constraint with nothing to replace it. See `design/compliance-removal.md` section 1.
+- The same allow-list on `api.run()` and as a CLI flag, so every public execution surface can
+  express it: `run`, `route`, `compare`, `batch`, `resume`, the strategy walk and all four server
+  endpoints that execute.
+
+**Semantics, stated once so they cannot drift.** Every source of an allow-list intersects; none
+widens. The effective set is the file's `policy.backends`, the caller's argument and the API key
+scope, intersected, in any combination. An explicitly empty list permits nothing and refuses with
+`scope_denied`, which is the same fail-closed direction compliance had. An absent list is not an
+empty one: absent means "no restriction from this source".
 
 Out of scope:
 
-- The backend allow-list and API key scopes. They stay exactly as they are; they are the
-  replacement, and they need no change to become it.
+- `ScopeRefused` and the 403 `scope_denied`. A caller-declared allow-list is a caller's law, so
+  the mechanism and its wire contract survive untouched.
 - `ScopeRefused` and the 403 `scope_denied`. A caller-declared allow-list is a caller's law, so it
   survives untouched.
 - Whether a container endpoint resolves to loopback. That check exists only to serve
@@ -117,7 +140,8 @@ policy:
   no_train_on_data: true
 ```
 
-After, the operator writes the conclusion that posture leads to, which only they can reach:
+After, the operator writes the conclusion that posture leads to, which only they can reach (the
+`backends` key this change adds):
 
 ```yaml
 policy:
@@ -130,25 +154,39 @@ doing; core was only pretending to do it for them.
 
 ## Acceptance Criteria
 
-1. `grep -rniE "hipaa|baa|trains_on_customer|data_region_options|max_retention_hours|require_local|
-   no_train_on_data|allow_unverified_compliance" src/` returns nothing.
-2. No adapter declares any compliance field, and `AdapterDescriptor` has no compliance member.
-3. The router has two stages, and no stage reads a vendor claim.
-4. A request carrying a `compliance` block is refused by the request schema as an unknown field,
-   not silently ignored.
-5. The ledger's retention ceiling comes from `OPENREADING_LEDGER_RETENTION_HOURS` and a documented
-   default, with no term derived from any descriptor.
-6. `backend_allowlist` remains enforced on every surface, with its existing tests unchanged.
-7. `make verify` is green, and the coverage floor does not drop.
+These are behavioural, not string searches. A blanket `grep` over `src/` cannot pass and must not
+be written: `src/openreading/schemas/` holds twelve **frozen historical** schema files that
+legitimately contain `compliance`, pinned byte for byte by `tests/test_schema_evolution.py`. The
+test is what the code does, not what words appear in it.
+
+1. No adapter declares a compliance field, and `AdapterDescriptor` has no compliance member.
+   Checked by constructing every registered descriptor and asserting the attribute is absent.
+2. None of the nine stage-1 drop codes can appear in a `RoutePlan`, for any request, against the
+   full registry.
+3. A request carrying a `compliance` block is refused by the current request schema as an unknown
+   field, not silently ignored. Frozen older request schemas still accept it, by design.
+4. `optimize_for: offline` still selects a different backend than `optimize_for: accuracy` on a
+   registry containing both local and hosted backends, proving the scoring replacement works
+   rather than that the enum still parses.
+5. The effective allow-list is the intersection of file, caller and API key on every public
+   execution surface, an empty list permits nothing, and an absent one restricts nothing. One test
+   per surface.
+6. The ledger writes no `retention/` and no `keys/` directory, and no descriptor field changes
+   what it writes (`design/ledger-policy-removal.md`).
+7. `make verify` is green and the coverage floor does not drop.
 8. `CHANGELOG.md` carries a `Removed` section naming every deleted key, code and error, with the
    one-line migration for each.
 
 ## Success Metrics
 
-- Source files touching compliance: 64 to 0.
-- `policy:` keys: 9 to 1.
-- Test lines asserting on vendor claims: 842 to 0.
-- Vendor facts this repository asserts and cannot verify: 180 (15 adapters x 12 fields) to 0.
+- Vendor facts this repository asserts and cannot verify: 180 (15 adapters x 12 fields) to **0**.
+  This is the metric that matters, and it is exactly achievable.
+- Live source files reading a vendor compliance claim: 64 to 0. Frozen historical schemas under
+  `src/openreading/schemas/` still contain the word and are excluded by definition, since changing
+  them is forbidden.
+- `policy:` keys: 9 to 2 (`optimize_for`, `backends`).
+- Test lines asserting on vendor claims: 842 to 0, while the duration-limit, malformed-config and
+  resume coverage living in the same files is kept.
 
 ## Risks
 

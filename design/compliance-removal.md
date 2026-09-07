@@ -6,7 +6,7 @@ Status: proposed, not built. Product intent:
 Every line number and count in this record was measured against `e27ad9d` on 2026-09-07. Verify
 each one with `grep` before editing, and find a moved line by its content rather than its number.
 
-## 1. The finding that sets the order of the work
+## 1. The finding that shapes the change
 
 **The replacement does not exist for the callers who would lose the feature.**
 
@@ -36,10 +36,11 @@ P3 because subtraction cannot reorder what survives. So P3 does not block a `pol
 allow-list. It does mean the law has to be restated in the same pull request, or the next reader
 will find a rule that appears to forbid the key sitting next to the key.
 
-**Consequence for sequencing:** deleting the compliance filter first would leave every non-server
-caller with no way to bound the backend set at all, for however long the follow-up takes. The
-allow-list has to land first. This is the one ordering constraint in the plan that is not
-negotiable.
+**Consequence:** the allow-list is part of this change, not a prerequisite for it. Deleting the
+filter in one change and adding the replacement in the next would leave every non-server caller
+unable to bound the backend set at all for the length of a review queue. Shipping both in one
+commit removes that window entirely, which is why section 6 keeps the compliance work atomic
+rather than staged.
 
 ## 2. Inventory
 
@@ -112,6 +113,33 @@ Neither gets a new source. Retention leaves core entirely, along with encryption
 [`ledger-policy-removal.md`](ledger-policy-removal.md). Landing that record first removes two of
 this table's consumers before the table goes.
 
+**Stage-3 scoring, which is not a filter and is easy to miss.** `router.py:196` reads
+`compliance.runs_fully_local` three times:
+
+```python
+local = bool(desc.compliance.runs_fully_local)
+if local:
+    cost = 0.0                                          # a local library has no per-page price
+...
+local_bonus = 0.25 if (local and opt in ("cost", "offline")) else 0.0
+```
+
+Delete the field with no replacement and three things change silently: every local backend starts
+being scored with the `0.05` unpriced penalty instead of zero, the bonus disappears, and
+`optimize_for: offline` becomes indistinguishable from `latency` while still being a documented
+enum value in `request.v0.2.json:144` and `types/request.py:146`.
+
+`runs_fully_local` is the one field in `ComplianceProfile` that is **not** a vendor claim. Nobody
+publishes it and nothing rots: pymupdf is an in-process library, tesseract is a subprocess, and
+whether an adapter opens a socket is a structural fact about this repository's own code. It is
+sitting in the wrong struct.
+
+Proposed: move it to `AdapterDescriptor.router` (or `cost`, whichever reads better next to
+`integration_priority`) as `runs_fully_local`, keep the scoring untouched, and let it die as a
+compliance concept while surviving as a cost one. `optimize_for: offline` then keeps meaning what
+it says. The alternative, inferring "local" from `cost.usd_per_page_equiv_low == 0`, conflates a
+free hosted tier with an offline one and should not be taken.
+
 **Per-case compliance in eval datasets.** `evals/dataset.py:94` forwards a case's own
 `compliance` key into the request body. Dataset files carrying that key become invalid. Since
 labeled datasets live outside this repository (`internal/data/`), this is a migration note for
@@ -160,25 +188,29 @@ Eight documents teach the feature and need rewriting, not deleting: `README.md`,
 
 ## 6. Plan
 
-Three pull requests, after [`ledger-policy-removal.md`](ledger-policy-removal.md) has taken two
-of the table's consumers away. The first is a prerequisite, not a phase of the removal.
+Three pull requests, and the compliance one is **atomic**. An earlier draft of this record split
+it into a prerequisite plus two follow-ups. That was wrong: a repository where the filter is half
+removed, or where the replacement exists but the filter still runs, is a repository that lies in a
+new way for the length of the review queue. The reason the prerequisite existed was to avoid
+stranding callers, and shipping the replacement inside the same change solves that completely.
 
-**PR 1. `policy.backends`, the allow-list the yaml cannot express today.** Add the key and wire it
-to the existing `backend_allowlist` parameter, expose it on `api.run()` and as a CLI flag. Restate
-law P3 to say what it actually protects (chain order, not membership). Ship with the compliance
-filter still in place and unchanged. After this, every caller has the replacement in hand, and
-nothing has been taken away. This is independently useful and independently reviewable.
+**PR A. The MIME resolver.** `design/format-agnostic-intake.md` part 2. Independent of everything
+here, fixes a live defect on its own, and makes PR B a smaller change by ending the
+everything-is-a-PDF labelling first.
 
-**PR 2. Remove the filter.** Delete `router/compliance.py`, stage 1, the request block, the
-descriptor profile, the eight policy keys, the nine drop codes, `ComplianceRefused`,
-`compliance_refused` and `BAA_TIER_CONFIRMED_WARNING`. Bump the three schemas. Rewrite
-`AGENTS.md`'s rules and the eight documents. This is one commit's
-worth of intent and a large diff; it should not be split, because a half-removed filter is a
-filter that lies in a new way.
+**PR B. Delete the format gate.** `design/format-agnostic-intake.md` part 1, including the
+`batch-result` v0.2 bump.
 
-**PR 3. The strategy grammar.** Remove the routable `compliance` fact and the eleven cookbook
-entries built on it. Separable from PR 2 only if the `strategy-config` bump is done once, in PR 2,
-with the fact removed at the same time. If that is awkward, fold this into PR 2.
+**PR C. Remove compliance, in one commit.** The filter, stage 1, the request block, the descriptor
+profile, the eight policy keys, the nine drop codes, `ComplianceRefused`, `compliance_refused`,
+`BAA_TIER_CONFIRMED_WARNING`, the routable `compliance` fact and the eleven cookbook entries built
+on it, **and** the `policy.backends` allow-list that replaces all of it, **and** the
+`runs_fully_local` move that keeps scoring honest. Three schema bumps. `AGENTS.md`'s rules and the
+eight documents. Large, and correct to keep whole: at no commit does a caller lack a way to bound
+the backend set.
+
+`design/ledger-policy-removal.md` lands before PR C, because it removes two of the compliance
+table's consumers (`max_retention_hours`, `zdr_flag`) and is otherwise independent.
 
 There is no deprecation window. `descriptor.compliance` is deleted outright: the company repo is
 the only caller that could read it off the wire, and it is fixed after this lands rather than
@@ -195,13 +227,37 @@ old code is still present.
 - For the request block: a test asserting `{"compliance": {...}}` is refused as an unknown field.
 - For the ledger: a test asserting an armed run's behaviour is identical for a backend that used
   to carry `zdr_flag` and one that did not, since no descriptor may change what is written.
-- 842 test lines are deleted rather than migrated. The four dedicated test files go entirely. The
-  coverage floor must not drop, and removing 64 files' worth of well-covered code will move the
-  percentage; check the floor after PR 2 and raise it if the number goes up.
+- **For scoring, the test this change would otherwise skip:** pin the current stage-3 chain order
+  for `optimize_for` in each of `accuracy`, `cost`, `latency`, `offline` over the full registry,
+  BEFORE touching anything. That snapshot is the proof the `runs_fully_local` move preserved
+  behaviour, and without it the regression is invisible: routing still returns a plan, just a
+  different one.
+- **For the allow-list, one test per public execution surface**, not one test of the machinery:
+  `run`, `route`, `compare`, `batch`, `resume`, a strategy walk, and the four server endpoints
+  that execute. Each asserts the file, caller and API-key sets intersect, that an empty list
+  refuses with `scope_denied`, and that an absent list restricts nothing.
+- **Delete assertions, not files.** Only `tests/test_compliance.py` goes whole (12 of its 15
+  tests are compliance by name, and the rest are the endpoint-resolution helpers that go with it).
+  The other three carry real coverage of things this change does not touch, and grepping them by
+  filename would throw it away:
+  - `test_strategy_policy_limits.py` (10 tests):
+    `test_file_level_zero_duration_ceiling_prunes_hedge`
+    and `test_file_level_nonzero_duration_ceiling_still_prunes_hedge` are duration-limit coverage,
+    plus `test_limits_does_not_touch_direct_named_requests`.
+  - `test_policy_validation.py` (28 tests, 1 compliance-named): almost all of it is
+    malformed-config behaviour, unknown-key refusal, the misspelling suggestion, and the
+    every-subcommand sweep. It needs the key count updated from nine to two, not deletion.
+  - `test_policy_enforcement.py` (36 tests, 8 compliance-named): snapshot consistency and resume
+    behaviour live here.
+- The coverage floor must not drop. Removing this much well-covered code moves the percentage;
+  check it after the change lands and raise the floor if the number goes up.
 
 ## 8. What this record does not decide
 
 1. The `policy.backends` grammar: a flat list, or per-operation. A flat list is enough for the
-   stated need and is what PR 1 should ship.
+   stated need and is what PR C should ship.
 2. Whether `openreading backends` keeps showing any compliance-ish column. It should not, but the
    command's output shape is user-visible and worth a separate look.
+3. Where `runs_fully_local` lands once it leaves `ComplianceProfile`: `descriptor.router` beside
+   `integration_priority`, or `descriptor.cost`. Section 3 argues it must survive somewhere; which
+   struct is a naming call for the reviewer.
