@@ -8,7 +8,8 @@ prevent.
 
 ## The removal set (2026-09-07)
 
-Six records, one argument. They were written together and share a single test:
+Six records, one argument, plus a seventh that is a checklist rather than an argument. They
+were written together and share a single test:
 
 > **A fact core cannot verify must not change what core does.** It may be documentation, clearly
 > marked and dated. It may not be a routing input, a gate, or a default.
@@ -19,6 +20,11 @@ Six records, one argument. They were written together and share a single test:
 [`unverifiable-claims-sweep.md`](unverifiable-claims-sweep.md) states the test, lists everything
 that fails it, and records four things checked and found honest so the next sweep does not
 re-litigate them.
+
+[`documentation-surface.md`](documentation-surface.md) is the seventh: what every row owes the
+docs, which guards catch a stale document automatically and which do not. In a repository where
+the documentation is the code, a removal that leaves its chapter behind ships a manual describing
+a flag the binary rejects. **No row defers its documentation to a follow-up.**
 
 ### Implementation order
 
@@ -40,6 +46,13 @@ removes that window entirely.
 
 Row 3 goes before row 4 because the ledger's retention ceiling and its `zdr` branch read
 `max_retention_hours` and `zdr_flag`, so it removes two of the compliance table's consumers first.
+
+Two guards make the documentation non-optional rather than merely expected.
+`tests/test_docs_truth.py` executes the YAML in `examples/tutorial.md`, so its step 8
+`policy: {require_local: true}` block fails the build the moment that key leaves the schema. And
+`tests/test_cli_help.py` holds `cli/help.py`'s `TOPICS` and the `openreading.cli` docstring to a
+bijection, so the doomed `compliance` and `cost` chapters cannot be left behind. Both break in
+row 4 and row 5 respectively, in the same commit as the code.
 
 ### What row 4 deletes, in one place
 
