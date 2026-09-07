@@ -1,6 +1,6 @@
 """One resolver, and it never guesses PDF.
 
-`design/format-agnostic-intake.md` part 2. Core had six extension-to-MIME tables and five of them
+part 2. Core had six extension-to-MIME tables and five of them
 defaulted an unknown input to `application/pdf`, so an `.svg`, an `.xml` and an `.epub` all
 reached a backend labelled as PDFs. A wrong label is worse than a wrong capability guess: the
 vendor accepts the bytes and returns confident output, nothing raises, no fallback fires, and the

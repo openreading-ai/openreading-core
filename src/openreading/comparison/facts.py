@@ -35,8 +35,6 @@ def subject_facts(subject: Subject) -> dict[str, Any]:
     return {
         "state": str((resp.get("status") or {}).get("state") or "unknown"),
         "duration_ms": usage.get("duration_ms"),
-        "cost_usd": usage.get("cost_usd"),
-        "cost_basis": usage.get("cost_basis"),
         "pages": page_count,
         "blocks": len(_blocks_of(resp)),
         "chars": _char_count(resp),

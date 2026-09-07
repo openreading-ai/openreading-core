@@ -37,7 +37,7 @@ def test_calibratable_predicates_only_numeric():
 
 def test_sweep_emits_operating_points_across_the_domain():
     obs = _obs([("a", 0.9, 0.95), ("b", 0.5, 0.40), ("c", 0.7, 0.85)])
-    sweep = sweep_predicate(obs, "confidence_below", rung1_cost=0.0, rung2_cost=0.10)
+    sweep = sweep_predicate(obs, "confidence_below")
     assert sweep.predicate == "confidence_below"
     assert [p.threshold for p in sweep.points] == [round(i / 20, 2) for i in range(21)]
     # escalation rate is monotonic non-decreasing in the threshold for a *_below predicate
@@ -50,27 +50,17 @@ def test_sweep_recommends_threshold_closest_to_target_escalation():
     # confidences 0.4/0.6/0.9/0.95 → target 0.25 (1 of 4 escalates) → threshold ~0.5 fires only 0.4
     obs = _obs([("a", 0.40, 0.3), ("b", 0.60, 0.9), ("c", 0.90, 0.95), ("d", 0.95, 0.97)])
     sweep = sweep_predicate(
-        obs, "confidence_below", rung1_cost=0.0, rung2_cost=0.10, target_escalation=0.25
+        obs, "confidence_below", target_escalation=0.25
     )
     assert sweep.recommended is not None
     assert sweep.recommended.escalation_rate == 0.25  # exactly one of four
-
-
-def test_sweep_budget_is_a_hard_filter():
-    obs = _obs([("a", 0.40, 0.3), ("b", 0.60, 0.4), ("c", 0.90, 0.95), ("d", 0.95, 0.97)])
-    # rung-2 is pricey; a tight budget forbids high escalation → recommend a low-escalation threshold
-    sweep = sweep_predicate(
-        obs, "confidence_below", rung1_cost=0.01, rung2_cost=1.0, max_cost_per_doc=0.30
-    )
-    assert sweep.recommended is not None
-    assert sweep.recommended.cost_per_doc <= 0.30 + 1e-9
 
 
 def test_sweep_agreement_tracks_the_scorer():
     # the two low-confidence docs are exactly the two low-scorer docs → a mid threshold agrees fully
     obs = _obs([("a", 0.30, 0.2), ("b", 0.40, 0.3), ("c", 0.90, 0.95), ("d", 0.95, 0.97)])
     sweep = sweep_predicate(
-        obs, "confidence_below", rung1_cost=0.0, rung2_cost=0.1, quality_bar=0.8
+        obs, "confidence_below", quality_bar=0.8
     )
     best = max(sweep.points, key=lambda p: p.scorer_agreement)
     assert best.scorer_agreement == 1.0  # a threshold exists that fires iff the scorer says bad
@@ -78,7 +68,7 @@ def test_sweep_agreement_tracks_the_scorer():
 
 def test_missing_signal_never_escalates():
     obs = [Observation("x", {"doc_confidence": None}, 0.2)]
-    sweep = sweep_predicate(obs, "confidence_below", rung1_cost=0.0, rung2_cost=0.1)
+    sweep = sweep_predicate(obs, "confidence_below")
     assert all(p.escalation_rate == 0.0 for p in sweep.points)  # unavailable → never fires (§6)
 
 
@@ -93,7 +83,7 @@ def test_sweep_agreement_excludes_unscored_observations_not_false_agreement():
         Observation("unlabeled", {"doc_confidence": 0.2}, None)
     ]
     sweep = sweep_predicate(
-        obs, "confidence_below", rung1_cost=0.0, rung2_cost=0.1, quality_bar=0.8
+        obs, "confidence_below", quality_bar=0.8
     )
     best = max(sweep.points, key=lambda p: p.scorer_agreement)
     assert best.scorer_agreement == 1.0
@@ -105,7 +95,7 @@ def test_sweep_agreement_excludes_unscored_observations_not_false_agreement():
 
 def test_sweep_is_deterministic():
     obs = _obs([("a", 0.4, 0.3), ("b", 0.9, 0.95)])
-    kw = dict(rung1_cost=0.0, rung2_cost=0.1, target_escalation=0.5)
+    kw = dict(target_escalation=0.5)
     a = sweep_predicate(obs, "confidence_below", **kw)
     b = sweep_predicate(obs, "confidence_below", **kw)
     assert [p.as_dict() for p in a.points] == [p.as_dict() for p in b.points]
@@ -214,7 +204,7 @@ def _registry():
 
     reg = Registry()
     reg.register(_VaryingBackend("cheap", [0.30, 0.50, 0.90, 0.95]))
-    reg.register(ConfigurableBackend(make_backend("premium", cost_low=0.05).descriptor))
+    reg.register(ConfigurableBackend(make_backend("premium").descriptor))
     return reg
 
 
@@ -280,7 +270,7 @@ def test_calibrate_strategy_scorer_agreement_ignores_unlabeled_cases(tmp_path):
 
     reg = Registry()
     reg.register(_VaryingBackend("cheap", [0.20]))  # constant low confidence for every case
-    reg.register(ConfigurableBackend(make_backend("premium", cost_low=0.05).descriptor))
+    reg.register(ConfigurableBackend(make_backend("premium").descriptor))
 
     report = calibrate_strategy(str(ds), _cfg(), "s", reg, quality_bar=0.8)
     assert report.n_docs == 4
@@ -340,7 +330,7 @@ def _fault_registry(fake):
 
     reg = Registry()
     reg.register(fake)
-    reg.register(ConfigurableBackend(make_backend("premium", cost_low=0.05).descriptor))
+    reg.register(ConfigurableBackend(make_backend("premium").descriptor))
     return reg
 
 
@@ -428,7 +418,7 @@ def _registry_with(cheap):
 
     reg = Registry()
     reg.register(cheap)
-    reg.register(ConfigurableBackend(make_backend("premium", cost_low=0.05).descriptor))
+    reg.register(ConfigurableBackend(make_backend("premium").descriptor))
     return reg
 
 

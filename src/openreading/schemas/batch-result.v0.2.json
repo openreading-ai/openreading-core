@@ -209,21 +209,6 @@
           ],
           "minimum": 0
         },
-        "cost_usd": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "minimum": 0,
-          "description": "Sum over items that reported a cost; absent (null) if none did (M8 \u2014 no fake precision)."
-        },
-        "cost_bases": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Distinct cost bases observed across items (e.g. ['estimated','metered'])."
-        },
         "pages_processed": {
           "type": [
             "integer",

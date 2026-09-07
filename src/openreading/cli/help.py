@@ -89,7 +89,7 @@ TOPICS: tuple[Topic, ...] = (
         ("folder", "folders", "directory", "glob", "many"),
     ),
     Topic("backends-policy", "route <file|url> [--config FILE] [--run]", ("route", "policy")),
-    Topic("cost", "What a run costs, and how to spend less", ("money", "spend", "billing")),
+    Topic("usage", "What a run uses, and how to use less", ("cost", "money", "spend", "billing")),
     Topic("env", "Environment variables this module reads", ("environment", "keys", "credentials")),
     Topic("datasets", "Datasets for calibrate, leaderboard and rules", ("dataset", "labels")),
     # when something stops
@@ -106,8 +106,8 @@ TOPICS: tuple[Topic, ...] = (
     Topic("calibrate", "calibrate <dataset> --strategy NAME"),
     Topic("benchmark", "benchmark <list|show|prepare|estimate|run|report>"),
     Topic(
-        "benchmark-cost",
-        "What a benchmark run costs, and how to spend less",
+        "benchmark-usage",
+        "What a benchmark run uses, and how to use less",
         (),
         listed=False,  # a child of `benchmark`; an index that lists every subsection is not one
     ),
@@ -121,7 +121,7 @@ TOPICS: tuple[Topic, ...] = (
 # Which heading each group of the index prints under, in index order.
 _GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("START HERE", ("quickstart", "help", "output", "chaining")),
-    ("DO ONE JOB", ("batch", "backends-policy", "cost", "env", "datasets")),
+    ("DO ONE JOB", ("batch", "backends-policy", "usage", "env", "datasets")),
     ("WHEN SOMETHING STOPS", ("exit-codes", "signals")),
     (
         "ONE COMMAND AT A TIME",
@@ -151,7 +151,7 @@ _BLURBS: dict[str, str] = {
     "chaining": "which verb's output feeds which verb's input",
     "batch": "a folder, a glob, or many files as one run and one JSON",
     "backends-policy": "name the backends this deployment permits, in preference order",
-    "cost": "what a run charges you, before it starts charging you",
+    "usage": "what a run consumes, in the units each backend meters in",
     "env": "where keys come from, and every variable this CLI reads",
     "datasets": "case.json inputs and expectations for calibration and scoring",
     "exit-codes": "every exit code, what caused it, and whether to retry",

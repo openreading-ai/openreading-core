@@ -79,8 +79,8 @@ def _reg():
     from tests.fakes import ScriptedBackend, scripted_registry
 
     return scripted_registry(
-        ScriptedBackend("reducto", cost_low=0.01, text=GARBLED),  # low quality → judged_lost
-        ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN),  # winner
+        ScriptedBackend("reducto", text=GARBLED),  # low quality → judged_lost
+        ScriptedBackend("aws-textract", text=CLEAN),  # winner
     )
 
 

@@ -131,7 +131,7 @@ def test_ac3_unrecognized_dimension_is_unscored_not_a_fabricated_zero(tmp_path):
 def test_ac7_report_validates_against_the_vendored_schema(tmp_path):
     ds = _two_case_dataset(tmp_path)
     a = ScriptedBackend("a", local=True, text="a fox and a zebra ran together")
-    b = ScriptedBackend("b", local=False, cost_low=0.01, text="fox only, no stripes here")
+    b = ScriptedBackend("b", local=False, text="fox only, no stripes here")
     report = run_leaderboard(str(ds), ["a", "b"], _registry(a, b))
     schemas.validate_leaderboard_report(report.to_schema_dict())  # would already raise internally
 

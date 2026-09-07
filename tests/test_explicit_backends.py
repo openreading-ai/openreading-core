@@ -1,6 +1,6 @@
 """The caller names the backends, and nothing else decides.
 
-`design/compliance-removal.md` + `design/explicit-backends.md`, landed as one change because
++ , landed as one change because
 every intermediate state is a repository that lies in a new way.
 
 Gone: the compliance filter and its 180 vendor claims, `optimize_for` and the stage-3 scorer, the

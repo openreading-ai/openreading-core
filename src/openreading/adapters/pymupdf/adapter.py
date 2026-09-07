@@ -33,7 +33,6 @@ from openreading.types.cost import CostReport, infra_only
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    Cost,
     LivenessProbe,
     Output,
     OutputChannels,
@@ -88,7 +87,7 @@ def _descriptor() -> AdapterDescriptor:
         # cached on self) — verified against the real R1/R2 conformance kit, not assumed.
         protocol_version=2,
         adapter_impl="in_process",
-        provisioning=Provisioning(byo_mode=["pip"], auth="none", billing_target="caller_infra"),
+        provisioning=Provisioning(byo_mode=["pip"], auth="none"),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(
             ocr=False,  # born-digital only; no OCR
@@ -102,7 +101,6 @@ def _descriptor() -> AdapterDescriptor:
             input_formats=["pdf", "xps", "epub", "mobi", "cbz", "svg"],
             max_pages_per_request="unbounded",
         ),
-        cost=Cost(native_unit="cpu_second", basis="infra_only", usd_per_page_equiv_low=0.0),
         runtime=RuntimeProfile(
             offline_capable=True,
             license="AGPL-3.0",  # copyleft — isolated in the `pymupdf` extra

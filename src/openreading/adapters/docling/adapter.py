@@ -31,7 +31,6 @@ from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
     ConfigField,
-    Cost,
     LivenessProbe,
     Output,
     OutputChannels,
@@ -136,7 +135,7 @@ def _descriptor() -> AdapterDescriptor:
         protocol_version=2,
         adapter_impl="container",
         provisioning=Provisioning(
-            byo_mode=["container"], auth="none", billing_target="caller_infra"
+            byo_mode=["container"], auth="none"
         ),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(
@@ -151,7 +150,6 @@ def _descriptor() -> AdapterDescriptor:
             multi_column="verified",
             input_formats=["pdf", "docx", "pptx", "xlsx", "html", "png", "jpg"],
         ),
-        cost=Cost(native_unit="cpu_second", basis="infra_only", usd_per_page_equiv_low=0.0),
         runtime=RuntimeProfile(
             offline_capable=True,
             license="MIT",

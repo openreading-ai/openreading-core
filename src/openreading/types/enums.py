@@ -115,13 +115,6 @@ class WaitMode(StrEnum):
     WEBHOOK = "webhook"
 
 
-class CostBasis(StrEnum):
-    BILLED = "billed"
-    ESTIMATED = "estimated"
-    INFRA_ONLY = "infra_only"
-    UNKNOWN = "unknown"
-
-
 class ChannelGrade(StrEnum):
     """N/D/X grading of an output channel for a backend (adapter_interface.md §6)."""
 

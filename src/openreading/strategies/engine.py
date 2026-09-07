@@ -122,11 +122,13 @@ fixed point).
   `budget_exhausted`, `invalid_input` alike — raises `PlanExhaustedError` (itself a
   `TerminalError`) carrying the node-path-annotated trail, the class named in the message; there
   is no distinct exception type per class.
-- Honest money: every billed rung (escalated and winner) is summed into the returned response's
-  `usage.cost_usd`; `usage.cost_basis` folds by the priority reduction `billed > estimated >
-  infra_only > unknown`, monotonically non-decreasing (never last-write-wins, so a weaker later
-  rung cannot downgrade a `billed` rung); a real cost with no basis coalesces to `unknown`, and a
-  nonzero total can never leave `cost_basis` at `infra_only` or unset (BL-126 / BL-134).
+- Every rung on the record, and none of them priced. Each rung that runs is an `Attempt` in
+  `orchestration.attempts[]`, so a reader counts the calls a walk made. The engine used to also
+  sum them into `usage.cost_usd` and fold a `cost_basis` across them by the priority reduction
+  `billed > estimated > infra_only > unknown`. Most of what that summed came from per-vendor
+  price tables core kept in its own source and could not verify, and once totalled it was
+  indistinguishable from money someone was actually charged. The
+  returned response's `usage` describes the rung that produced it, in that backend's own unit.
 
 Parallel evaluation (`parallel:`)
 ---------------------------------
@@ -181,22 +183,21 @@ Parallel evaluation (`parallel:`)
    - The spec's promise is that the response never blocks past the node deadline waiting for a
      drain or a cancel. The CANCEL half holds on every clock (next bullet). The DRAIN half is
      enforced only under a coordinated `FakeClock`: `_drain` cuts a branch whose next virtual wake
-     lands past the deadline, recording it (loser or shadow, detail `drain_over_deadline`) with
-     NO cost — never awaited to completion, its cost is unknown, not fabricated. Under a
+     lands past the deadline, recording it (loser or shadow, detail `drain_over_deadline`) —
+     never awaited to completion, so what it consumed is unknown, not fabricated. Under a
      `RealClock` `_drain` has no wake to inspect and waits until every remaining task completes,
      and a parallel leaf's own driver runs with `DEFAULT_DEADLINE_MS` rather than the node's
      remaining budget — so in production a drained loser CAN hold the response past the node
-     deadline. A completed loser's real cost stays billed (`cost_basis: "billed"`). T9's
-     variant — a drained loser outliving the response records `cost_basis: "estimated"` — is
-     not implemented: such a loser or shadow carries neither cost nor basis, only the detail.
+     deadline. A completed loser is recorded as a real attempt, because its call reached the
+     vendor. A drained one carries only the detail.
    - Cancel calls are dispatched concurrently on `_CANCEL_DISPATCH_EXECUTOR`, a dedicated pool,
      and awaited only up to the node's remaining deadline; one still running is abandoned, not
      retried. It is NOT the default `to_thread` executor on purpose: `asyncio.run()` (one per
      `run_strategy`) waits for every outstanding default-executor future at shutdown, so an
      abandoned cancel there would still add its full duration to the response.
-   - `usage.cost_usd` on the final response totals ALL attempts — winners, losers, shadows,
-     judges, deciders — with the per-attempt breakdown in `orchestration.attempts[]`. A
-     composite branch's spend lives on its nested response and is folded in the same way.
+   - `orchestration.attempts[]` records ALL of them — winners, losers, shadows, judges,
+     deciders — so a reader can count what a node dispatched. A composite branch records its own
+     attempts at its own level. The final response's `usage` describes the winner alone.
 8. `pick: best` also computes the worst pairwise text disagreement (1 − token Jaccard) across
    the compared branches; it is exposed to the enclosing step gate as `disagreement_over` and
    recorded on the winner attempt. `pick: merge` votes `typed_fields` per field — majority
@@ -329,7 +330,7 @@ Concurrency contract
   `/v1/parse` into `run_request(cache=…)` → `execute_plan` for the legacy `auto` chain only;
   `run()`, the CLI and `/v1/batch` pass none. Whoever builds it (Law 7) must:
   key per backend id (sibling branches cannot share a backend, so no collisions); count a hit as a
-  `succeeded` attempt at `cost_usd: 0` with the `idempotent_replay` warning — an instant success,
+  `succeeded` attempt with the `idempotent_replay` warning — an instant success,
   so a hit racing a live sibling resolves `pick: fastest` at once and cancels the rest; never cache
   cancelled
   or partial results; cache `Deficient` results (real, complete responses); read/write only on
@@ -368,7 +369,7 @@ router's `DropReason {backend, stage, code, detail}` verbatim), `pages[]`, `merg
 `webhook_dropped[]`; plus `candidates[]` when `keep_candidates=True` (every completed non-winner
 parallel branch's full envelope, for `compare --from`; default off for payload size; cascade
 rungs are not retained — D-v4-14). Each attempt carries backend, category, node path / label,
-duration, cost + `cost_basis`, and for gate events each predicate's observed vs threshold, fired
+duration, and for gate events each predicate's observed vs threshold, fired
 or `signal_unavailable`. Closed category vocabulary: `succeeded` · `error(<class>)` ·
 `skipped(missing_credentials)` · `skipped(circuit_open)` · `deadline_pruned` ·
 `quality_escalated` · `review_escalated` · `raced_lost` · `judged_lost` · `shadow` ·
@@ -462,7 +463,7 @@ Decisions (internal/decisions/DECISIONS.md)
 - D-v3-19: merge composes `typed_fields` only; base wins document channels; provenance in trace.
 - D-v3-20: page granularity is its own evaluator; range support is the `page_range_selection`
   capability.
-- D-v3-23: audit close-out — cascade honest money, deadline-bounded drain, webhook drop marker,
+- D-v3-23: audit close-out — deadline-bounded drain, webhook drop marker,
   `/v1/jobs` synthetic job, no eager strategy import, compliance-never-widened property test.
 - D-v3-24: `otherwise_pruned` downgrade reason.
 - D-v4-14: `keep_candidates` retains parallel branches only; threaded as a Python param, never a
@@ -696,7 +697,7 @@ def _response_payload(result: ExecResult) -> NormalizedResponse:
     dispatch. A REPLAYED "ok" record's payload came back through the journal/blob store as plain
     JSON (`InlineExecutor` is deliberately response-type-agnostic — `ledger/inline.py` never
     imports a concrete response type) and is reconstructed here, where the real type is known, so
-    every downstream consumer (`_branch_quality`, `_actual_cost`, gate evaluation, the final
+    every downstream consumer (`_branch_quality`, gate evaluation, the final
     envelope) sees the identical object shape whether the step ran live or replayed."""
     if result.replayed:
         return NormalizedResponse.model_validate(result.payload)
@@ -1031,8 +1032,7 @@ async def _decide(dp: DecisionPoint, ctx: _WalkCtx) -> tuple[str, str, str | Non
         return dp.engine_default, "engine", "malformed", {}
 
     # record the call as a decider_call attempt with its honest backend-reported cost, if any.
-    cost = verdict.cost_usd or 0.0
-    ctx.trace.record(Attempt(status.backend, "decider_call", dp.node_path, cost_usd=cost or None))
+    ctx.trace.record(Attempt(status.backend, "decider_call", dp.node_path))
 
     action, reason = revalidate_action(verdict.action, dp.candidates)
     if reason is not None:
@@ -1118,7 +1118,6 @@ class _BranchOutcome:
     backend: str = ""
     response: NormalizedResponse | None = None
     error_class: str | None = None
-    cost: float | None = None
     quality: float = 1.0
     # Ledger T3 (§4.0/§4.1): the leaf's own ExecResult.journal_seq/replayed, additive fields that
     # default to values reproducing today's behavior for any path that doesn't populate them. A
@@ -1316,8 +1315,7 @@ async def _run_branch(
     # Ledger T3 §4.0: exec() now hands back an ExecResult, not the bare payload — "ok" carries the
     # real response (live or reconstructed from a replay's own blob-resolved JSON); anything else
     # ("skipped"/"cancelled" — "failed" always raises above instead of reaching here) is a real,
-    # journaled non-dispatch outcome, not a crash on `_branch_quality(None, ...)`/`_actual_cost
-    # (None)`.
+    # journaled non-dispatch outcome, not a crash on `_branch_quality(None, ...)`.
     if result.status != "ok":
         status = (
             "skip" if result.status == "skipped" else result.status
@@ -1332,7 +1330,6 @@ async def _run_branch(
         "ok",
         backend,
         response=resp,
-        cost=_actual_cost(resp),
         quality=quality,
         journal_seq=result.journal_seq,
         replayed=result.replayed,
@@ -1564,13 +1561,19 @@ def _cancel_loser_job(ctx: _WalkCtx, job: Job | None) -> None:
 
 
 def _pick_best(results: dict[int, _BranchOutcome], ctx: _WalkCtx, shadows: set[int]) -> int | None:
-    """Highest composite quality among NON-SHADOW successes; ties → cheaper backend, then index."""
+    """Highest composite quality among NON-SHADOW successes; ties → the first-listed branch.
+
+    The tie-break used to consult a `_cost_midpoint` off `descriptor.cost`, so the cheaper backend
+    won a tie. That price was a number this package wrote down about someone else's rate card
+   , which made a tie resolve on an unverifiable fact rather than on
+    something the author wrote. Listed order is the author's own statement of preference, and it
+    is the whole rule now: put the backend you want to win a tie first."""
     succ = [
         r for r in results.values() if r.index not in shadows and r.status in ("ok", "composite_ok")
     ]
     if not succ:
         return None
-    best = max(succ, key=lambda r: (r.quality, -_cost_midpoint(r.backend, ctx), -r.index))
+    best = max(succ, key=lambda r: (r.quality, -r.index))
     return best.index
 
 
@@ -1583,16 +1586,6 @@ def _branch_quality(resp: NormalizedResponse, ctx: _WalkCtx) -> float:
     if not applicable:
         return 1.0
     return sum(1 for p in applicable if not p.fired) / len(applicable)
-
-
-def _cost_midpoint(backend: str, ctx: _WalkCtx) -> float:
-    adapter = ctx.registry.get(backend)
-    if adapter is None:
-        return 0.0
-    c = adapter.descriptor.cost
-    lo, hi = c.usd_per_page_equiv_low, c.usd_per_page_equiv_high
-    vals = [v for v in (lo, hi) if v is not None]
-    return sum(vals) / len(vals) if vals else 0.0
 
 
 # --------------------------------------------------------------------------- judge (decider.md §4)
@@ -1669,7 +1662,7 @@ async def _pairwise_judge(
 ) -> _BranchOutcome:
     """Single-elimination against the current best in listed order — n−1 pairs (decider.md §4).
     Each pair is judged in BOTH orderings; an inconsistent verdict is a tie broken deterministically
-    (identically to the engine comparator: cheaper backend, then first-listed)."""
+    (identically to the engine comparator: the first-listed candidate)."""
     excerpt_chars = int(judge_cfg.get("excerpt_chars", 4000))
     intent = judge_cfg.get("intent")
     best = succ[0]
@@ -1695,14 +1688,14 @@ async def _judge_pair(
     cb = _judge_candidate("B", b, excerpt_chars, ctx)
     # both orderings — position-bias guard (decider.md §4); sources are hidden behind the labels.
     v1 = await asyncio.to_thread(ctx.judge_llm.compare, ca, cb, intent)
-    _meter_judge_call(ctx, backend, path, v1.cost_usd)
+    _meter_judge_call(ctx, backend, path)
     v2 = await asyncio.to_thread(
         ctx.judge_llm.compare,
         _judge_candidate("A", b, excerpt_chars, ctx),
         _judge_candidate("B", a, excerpt_chars, ctx),
         intent,
     )
-    _meter_judge_call(ctx, backend, path, v2.cost_usd)
+    _meter_judge_call(ctx, backend, path)
     pick1 = a if v1.winner == "A" else b  # ordering 1: a=A, b=B
     pick2 = b if v2.winner == "A" else a  # ordering 2: b=A, a=B
     if pick1.index == pick2.index:
@@ -1738,17 +1731,13 @@ def _fields_view(fields: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _tie_break_pair(a: _BranchOutcome, b: _BranchOutcome, ctx: _WalkCtx) -> _BranchOutcome:
-    """Deterministic tie-break identical to the engine comparator: cheaper backend, then the
-    first-listed (lower branch index)."""
-    ka = (_cost_midpoint(a.backend or "", ctx), a.index)
-    kb = (_cost_midpoint(b.backend or "", ctx), b.index)
-    return a if ka <= kb else b
+    """Deterministic tie-break identical to the engine comparator: the first-listed candidate."""
+    return a if a.index <= b.index else b
 
 
-def _meter_judge_call(ctx: _WalkCtx, backend: str, path: str, cost: float) -> None:
-    """Record one pairwise call as a `judge_call` attempt with its honest backend-reported cost, if
-    any (decider.md §4, execution.md §7)."""
-    ctx.trace.record(Attempt(backend, "judge_call", f"{path}.judge", cost_usd=cost or None))
+def _meter_judge_call(ctx: _WalkCtx, backend: str, path: str) -> None:
+    """Record one pairwise call as a `judge_call` attempt (decider.md §4, execution.md §7)."""
+    ctx.trace.record(Attempt(backend, "judge_call", f"{path}.judge"))
 
 
 def _label_of(index: int | None, results: dict[int, _BranchOutcome]) -> str:
@@ -1798,69 +1787,37 @@ def _resolve_parallel(
     disagreement = _branch_disagreement(results, shadows) if pick == "best" else None
     if pick == "merge":
         _merge_fields(winner, results, path, ctx, shadows)  # compose typed_fields into the base
-    total_cost = 0.0
-    total_basis: str | None = None  # BL-126: priority-ordering reduction alongside total_cost
     for i in sorted(results):
         r = results[i]
         spath = f"{path}.parallel[{i}]"
         bk = r.backend or labels.get(i, "?")
         if r.status.startswith("composite"):
-            if i != winner and r.status == "composite_ok":
-                # BL-134: a composite branch's real spend lives on its nested response's own
-                # usage, never on _BranchOutcome.cost (_run_branch's own composite construction
-                # never passes cost=, so it is always None there) — a composite branch that LOSES
-                # pick: best/merge, or that SHADOWS and completes within the node deadline, must
-                # still have that real cost/basis folded in exactly like a leaf loser/shadow below.
-                # Only the composite WINNER's own fold is handled separately, once, after this loop
-                # (BL-126).
-                total_cost += _branch_cost(r) or 0.0
-                total_basis = _fold_basis(total_basis, _branch_basis(r))
             continue  # a composite branch recorded its own attempts; no additional trace entry
         if i in shadows:  # a shadow runs and is recorded but never wins (execution.md §3.1(5))
             if r.status in ("ok", "cancelled", "drained"):
                 # a shadow that outlived the node deadline is still recorded (§4 M3: shadows are
-                # always recorded), with no measured cost (Law 6) — never silently dropped.
+                # always recorded) — never silently dropped.
                 drained = r.status == "drained"
                 ctx.trace.record(
                     Attempt(
                         bk,
                         "shadow",
                         spath,
-                        cost_usd=r.cost,
-                        cost_basis="billed" if r.cost else None,
                         detail="drain_over_deadline" if drained else "",
                     )
                 )
                 _keep_candidate(ctx, bk, spath, "shadow", r.response)
-                total_cost += r.cost or 0.0
-                total_basis = _fold_basis(total_basis, _branch_basis(r))
             continue
         if i == winner:
             # under merge the winner is the base whose document channels are kept wholesale (§2.4)
             cat = "merge_base" if pick == "merge" else "succeeded"
-            ctx.trace.record(
-                Attempt(
-                    bk,
-                    cat,
-                    spath,
-                    cost_usd=r.cost,
-                    cost_basis="billed" if r.cost else None,
-                    disagreement=disagreement,
-                )
-            )
-            total_cost += r.cost or 0.0
-            total_basis = _fold_basis(total_basis, _branch_basis(r))
+            ctx.trace.record(Attempt(bk, cat, spath, disagreement=disagreement))
         elif r.status == "ok":
             cat = "merge_source" if pick == "merge" else loser_cat
-            ctx.trace.record(
-                Attempt(bk, cat, spath, cost_usd=r.cost, cost_basis="billed" if r.cost else None)
-            )
+            ctx.trace.record(Attempt(bk, cat, spath))
             _keep_candidate(ctx, bk, spath, cat, r.response)  # a discarded loser worth comparing
-            total_cost += r.cost or 0.0  # a completed loser is still billed (T9)
-            total_basis = _fold_basis(total_basis, _branch_basis(r))
         elif r.status == "drained":
-            # Law 6: a drain that would outlive the node deadline — recorded, but with no measured
-            # cost (it was never awaited to completion).
+            # Law 6: a drain that would outlive the node deadline is recorded all the same.
             ctx.trace.record(Attempt(bk, loser_cat, spath, detail="drain_over_deadline"))
             _keep_candidate(ctx, bk, spath, loser_cat, r.response)
         elif r.status == "error":
@@ -1878,24 +1835,6 @@ def _resolve_parallel(
         assert resp is not None
         # per-page provenance: the winner/base supplied document.pages wholesale (§2.4/§2.7).
         _tag_source_backend(resp, wr.backend or labels.get(winner, "?"))
-        # a composite winner recorded its own attempts (skipped from total_cost above); its own
-        # internal spend already lives on resp.usage — fold it in so overwriting doesn't drop it.
-        own = (
-            (resp.usage.cost_usd or 0.0)
-            if wr.status.startswith("composite") and resp.usage
-            else 0.0
-        )
-        if wr.status.startswith("composite") and resp.usage and resp.usage.cost_usd is not None:
-            # the composite winner's own basis is already correctly folded (it went through this
-            # same reconciliation internally); fold it into the sibling total via the shared,
-            # coalescing _branch_basis helper (BL-134) — not a raw passthrough, so a composite
-            # winner whose own cost lacks a resolved basis coalesces to "unknown" here too, rather
-            # than silently folding as if it contributed nothing.
-            total_basis = _fold_basis(total_basis, _branch_basis(wr))
-        if total_cost + own > 0:
-            _set_total_cost(
-                resp, total_cost + own, total_basis
-            )  # honest money: all billed attempts summed, basis reconciled (T9, BL-126)
         out = Outcome.ok(resp, wr.quality)
         out.disagreement = disagreement  # the enclosing step gate reads it as `disagreement_over`
         return out
@@ -1909,87 +1848,6 @@ def _resolve_parallel(
     if err_classes and all(c == "invalid_input" for c in err_classes):
         return Outcome.err("invalid_input")  # unanimity
     return Outcome.err("exhausted")
-
-
-_COST_BASIS_PRIORITY: dict[str, int] = {"billed": 3, "estimated": 2, "infra_only": 1, "unknown": 0}
-
-
-def _fold_basis(current: str | None, contributed: str | None) -> str | None:
-    """Priority-ordering reduction for `usage.cost_basis` as each rung/branch's cost folds into a
-    running total (BL-126): `billed > estimated > infra_only > unknown`, monotonically
-    non-decreasing as more contributions fold in — never last-write-wins, so a cheap `billed` rung
-    can never be silently downgraded by a later, weaker-basis rung's own value."""
-    if contributed is None:
-        return current
-    if current is None:
-        return contributed
-    if _COST_BASIS_PRIORITY.get(contributed, -1) > _COST_BASIS_PRIORITY.get(current, -1):
-        return contributed
-    return current
-
-
-def _branch_cost(r: _BranchOutcome) -> float | None:
-    """The real cost contributed by a parallel branch, leaf or composite (BL-134). `_BranchOutcome.
-    cost` is populated for a leaf branch, but `_run_branch`'s own composite-branch construction
-    never passes `cost=`, so it is always `None` there — a composite branch's real spend instead
-    lives on its nested response's own `usage.cost_usd`, already correctly totalled by that
-    response's own recursive fold."""
-    if r.cost is not None:
-        return r.cost
-    if r.response is not None and r.response.usage is not None:
-        return r.response.usage.cost_usd
-    return None
-
-
-def _branch_basis(r: _BranchOutcome) -> str | None:
-    """The basis to fold for a parallel branch, leaf or composite (BL-126, extended BL-134) — None
-    unless the branch contributed a genuinely non-null cost (`_branch_cost`, which — unlike a bare
-    `r.cost` check — also recognizes a composite branch's nested cost), so a branch that reported no
-    cost at all can never dilute the reduction. Coalesces a confirmed-but-unset `cost_basis` to
-    `"unknown"` rather than a bare `None` (BL-134) — a real cost with no known basis must
-    never be folded as if it contributed nothing at all."""
-    if _branch_cost(r) is None or r.response is None or r.response.usage is None:
-        return None
-    return r.response.usage.cost_basis or "unknown"
-
-
-def _rung_basis(resp: NormalizedResponse | None, cost: float | None) -> str | None:
-    """The basis to fold for a cascade/paged-cascade rung (BL-134) — the non-parallel sibling of
-    `_branch_basis`, for the two call shapes that fold a rung's `NormalizedResponse` + already-
-    extracted cost directly rather than a `_BranchOutcome`. None unless the rung contributed a
-    genuinely non-null cost, so a rung that reported no cost at all can never dilute the reduction.
-    Coalesces a confirmed-but-unset `cost_basis` to `"unknown"` rather than a bare `None`
-    (BL-134) — a real cost with no known basis must never be folded as if it contributed
-    nothing at all."""
-    if cost is None or resp is None or resp.usage is None:
-        return None
-    return resp.usage.cost_basis or "unknown"
-
-
-def _set_total_cost(resp: NormalizedResponse, total: float, basis: str | None = None) -> None:
-    """Write the folded `usage.cost_usd` and, when given, `usage.cost_basis` (BL-126). `basis` is
-    the CALLER's own priority-ordering reduction (`_fold_basis`) over every rung/branch that
-    contributed a non-null cost as it was folded into `total` — this function applies it, it does
-    not compute it.
-
-    BL-134 hardening: a nonzero `total` must never leave `cost_basis` at the "zero-cost"
-    label `infra_only`, or unset (`None`) — reachable even after every fold site coalesces a bare
-    `None` contribution to `"unknown"` (the fold-site fix alone), because `_COST_BASIS_PRIORITY`
-    ranks `unknown` BELOW `infra_only`: a genuinely-free branch/rung's own correct `infra_only` tag
-    can still outrank a billed-but-basis-unset branch/rung's coalesced `"unknown"` tag in the SAME
-    reduction, landing here as an `infra_only`-tagged response despite a real, nonzero, partly-
-    unexplained total. When that happens, downgrade honestly to `"unknown"` rather than assert a
-    zero-cost label on a response that just got a nonzero total."""
-    from openreading.types.response import Usage
-
-    if resp.usage is None:
-        resp.usage = Usage(cost_usd=total, cost_basis=basis)
-    else:
-        resp.usage.cost_usd = total
-        if basis is not None:
-            resp.usage.cost_basis = basis
-    if total > 0 and resp.usage.cost_basis in (None, "infra_only"):
-        resp.usage.cost_basis = "unknown"
 
 
 def _tag_source_backend(resp: NormalizedResponse, backend: str) -> None:
@@ -2009,7 +1867,7 @@ def _merge_fields(
 ) -> None:
     """`pick: merge` (§2.4): vote-merge `typed_fields` across the completed non-shadow branches into
     the base (best-scoring) response. Per field: majority value; tie → highest reported confidence;
-    still tied → cheaper backend, then first-listed. The chosen field is a REAL backend's TypedField
+    still tied → first-listed. The chosen field is a REAL backend's TypedField
     — its value and confidence are never fabricated; a field no branch produced stays absent. Text /
     markdown / pages are the base's, wholesale. Per-field provenance is recorded in the trace."""
     if winner is None:
@@ -2047,8 +1905,7 @@ def _merge_fields(
 
 def _vote_field(entries: list[tuple[int, str, Any]], ctx: _WalkCtx) -> tuple[int, str, Any]:
     """Choose one (index, backend, TypedField) for a field: majority value, then highest reported
-    confidence, then cheaper backend, then first-listed (§2.4). `None` confidence sorts lowest —
-    never invented."""
+    confidence, then first-listed (§2.4). `None` confidence sorts lowest — never invented."""
     votes: dict[str, int] = {}
     for _, _, tf in entries:
         votes[_value_key(tf)] = votes.get(_value_key(tf), 0) + 1
@@ -2056,8 +1913,8 @@ def _vote_field(entries: list[tuple[int, str, Any]], ctx: _WalkCtx) -> tuple[int
     def rank(entry: tuple[int, str, Any]) -> tuple:
         idx, backend, tf = entry
         conf = tf.confidence if tf.confidence is not None else -1.0
-        # highest votes for this value, then highest confidence, then cheaper backend, then index
-        return (votes[_value_key(tf)], conf, -_cost_midpoint(backend, ctx), -idx)
+        # highest votes for this value, then highest confidence, then index
+        return (votes[_value_key(tf)], conf, -idx)
 
     return max(entries, key=rank)
 
@@ -2106,12 +1963,13 @@ async def _eval_paged_cascade(node: dict[str, Any], path: str, ctx: _WalkCtx) ->
     Results are stitched per page, each output page carrying `pages[].source_backend`; per-page
     provenance also lands in `orchestration.pages[]`. PDF-only; a rung that fails escalates the whole
     page set forward (no keep-best rungs here — the page is simply re-parsed by a stronger backend).
-    Honest money (BL-120): `base_resp` is frozen to whichever rung ran first, so every later rung's
-    real cost is folded into the final response's `usage` here, mirroring `_eval_cascade`'s own
-    `billed_total` accumulator — a rung's spend is never dropped just because it wasn't first.
-    `cost_basis` folds via the same priority-ordering reduction as every other cascade/parallel
-    return path (BL-126), coalescing a confirmed-but-unset basis rather than a bare `None`
-    (BL-134)."""
+
+    `base_resp` is frozen to whichever rung ran first, so its `usage` describes that rung and no
+    other. This used to also fold every later rung's dollar cost into it. The dollars are gone
+   , and the counters are not summed in their place: a page re-parsed by
+    a second rung would count twice, and a `pages_processed` that exceeds the document is a number
+    nobody can act on. The trace names every rung that ran, which is where per-rung consumption
+    belongs."""
     from openreading.types.request import PageRange, Pages
 
     steps = node["steps"]
@@ -2119,8 +1977,6 @@ async def _eval_paged_cascade(node: dict[str, Any], path: str, ctx: _WalkCtx) ->
     stitched: dict[int, tuple[Any, str]] = {}  # page_number -> (Page, source_backend)
     base_resp: NormalizedResponse | None = None
     escalate_from: list[int] | None = None  # None = parse the whole doc; else these page numbers
-    billed_total = 0.0  # honest money: sum every billed rung, not just whichever ran first
-    billed_basis: str | None = None  # BL-126: priority-ordering reduction, not last-write-wins
 
     for si, step in enumerate(steps):
         spath = f"{path}.steps[{si}]"
@@ -2185,15 +2041,7 @@ async def _eval_paged_cascade(node: dict[str, Any], path: str, ctx: _WalkCtx) ->
             break
         resp_i = _response_payload(result)
 
-        cost = _actual_cost(resp_i)
-        ctx.trace.record(
-            Attempt(
-                backend, "succeeded", spath, cost_usd=cost, cost_basis="billed" if cost else None
-            )
-        )
-        if cost is not None:
-            billed_total += cost  # honest money: sum every billed rung (escalated + first)
-            billed_basis = _fold_basis(billed_basis, _rung_basis(resp_i, cost))
+        ctx.trace.record(Attempt(backend, "succeeded", spath))
         if base_resp is None:
             base_resp = resp_i
         for pg in (resp_i.document.pages if resp_i.document else None) or []:
@@ -2215,11 +2063,6 @@ async def _eval_paged_cascade(node: dict[str, Any], path: str, ctx: _WalkCtx) ->
     if base_resp.document is not None and ordered:
         base_resp.document.pages = [pg for _pn, (pg, _bk) in ordered]
     ctx.trace.assign_pages([{"page": pn, "backend": bk} for pn, (_pg, bk) in ordered])
-    if billed_total > 0:
-        # honest money: every rung, not just rung 1 (BL-120); basis is the priority-ordering
-        # reduction over every contributing rung, not base_resp's own single-rung value, and never
-        # last-write-wins (BL-126).
-        _set_total_cost(base_resp, billed_total, billed_basis)
     return Outcome.ok(base_resp)
 
 
@@ -2265,10 +2108,6 @@ async def _eval_cascade(
     best: tuple[float, int, NormalizedResponse, bool] | None = None
     ran = 0
     deadline_hit = False
-    billed_total = (
-        0.0  # honest money: sum every billed rung (escalated + winner), not just the last
-    )
-    billed_basis: str | None = None  # BL-126: priority-ordering reduction, not last-write-wins
 
     for i, step in enumerate(steps):
         spath = f"{path}.steps[{i}]"
@@ -2291,12 +2130,6 @@ async def _eval_cascade(
                 continue
 
             if _gated_parallel_step(step) and outcome.response is not None:
-                # honest money: the composite's own spend joins the running total exactly as a
-                # leaf's does, so a later accept / keep-best reports every billed rung.
-                own = (outcome.response.usage.cost_usd or 0.0) if outcome.response.usage else 0.0
-                billed_total += own
-                if outcome.response.usage and outcome.response.usage.cost_usd is not None:
-                    billed_basis = _fold_basis(billed_basis, outcome.response.usage.cost_basis)
                 snap = probe(
                     outcome.response,
                     doc_bytes=doc_bytes(ctx.req),
@@ -2313,22 +2146,8 @@ async def _eval_cascade(
                     if best is None or g.quality > best[0]:
                         best = (g.quality, i, outcome.response, outcome.budget_exhausted)
                     continue
-                if billed_total > 0:
-                    _set_total_cost(outcome.response, billed_total, billed_basis)
                 return outcome
 
-            # a gate-less composite step → accept, folding prior escalated rungs' billed cost.
-            if billed_total > 0 and outcome.response is not None:
-                own_usage = outcome.response.usage
-                own_cost = own_usage.cost_usd if own_usage is not None else None
-                own_basis = (
-                    own_usage.cost_basis if own_usage is not None and own_cost is not None else None
-                )
-                _set_total_cost(
-                    outcome.response,
-                    (own_cost or 0.0) + billed_total,
-                    _fold_basis(billed_basis, own_basis),
-                )
             return outcome
 
         # a leaf step
@@ -2358,9 +2177,6 @@ async def _eval_cascade(
 
         # success — this leaf ran
         ran += 1
-        if rr.cost is not None:
-            billed_total += rr.cost  # honest money: sum every billed rung
-            billed_basis = _fold_basis(billed_basis, _rung_basis(rr.response, rr.cost))
         resp = rr.response
         assert resp is not None
         snap = probe(resp, doc_bytes=doc_bytes(ctx.req), mime_type=ctx.req.document.mime_type)
@@ -2398,16 +2214,10 @@ async def _eval_cascade(
             if best is None or g.quality > best[0]:
                 best = (g.quality, i, resp, False)
             continue
-        if billed_total > 0:
-            _set_total_cost(
-                resp, billed_total, billed_basis
-            )  # honest money: all billed rungs, not just the winner (basis reconciled, BL-126)
         return Outcome.ok(resp, g.quality)
 
     # exhausted (or the deadline ended the walk)
     if best is not None and on_quality_exhausted == "best_effort":
-        if billed_total > 0:
-            _set_total_cost(best[2], billed_total, billed_basis)
         return Outcome.deficient(best[2], best[0], budget_exhausted=deadline_hit or best[3])
     if deadline_hit:
         return Outcome.err("budget_exhausted")
@@ -2420,7 +2230,6 @@ class _RunResult:
     backend: str = ""
     response: NormalizedResponse | None = None
     error_class: str | None = None
-    cost: float | None = None
     # Ledger T2 §7.3/§4.2: the exact Attempt this call appended (status == "ok" only), returned by
     # reference so a caller binds gates/category to the RIGHT record directly rather than
     # re-deriving "the last one" via `ctx.trace.attempts[-1]`. Defensive hardening, not a fix for a
@@ -2513,21 +2322,17 @@ async def _run_leaf(
         return _RunResult("skip", backend, journal_seq=result.journal_seq, replayed=result.replayed)
 
     resp = _response_payload(result)
-    cost = _actual_cost(resp)
     attempt = Attempt(
         backend,
         "succeeded",
         path,
         duration_ms=int(ctx.clock.now_ms() - started),
-        cost_usd=cost,
-        cost_basis="billed" if cost else None,
     )
     ctx.trace.record(attempt)
     return _RunResult(
         "ok",
         backend,
         response=resp,
-        cost=cost,
         attempt=attempt,
         journal_seq=result.journal_seq,
         replayed=result.replayed,
@@ -2602,7 +2407,7 @@ def _execute_leaf_sync(
 ) -> NormalizedResponse:
     """The synchronous submit→drive→normalize→meter path — runs in a worker thread (T2), so
     run_to_completion's asyncio.run is safe. Mirrors executor.execute_plan's inner loop, metering
-    included: every rung's own `usage.cost_usd` is what the honest-money aggregation sums.
+    included: every rung's own `usage` counters are what `apply_cost_report` fills.
 
     `on_submit` (parallel branches) hands the accepted Job back to the orchestration loop before
     the drive begins, so a loser's live backend job can be cancelled (execution.md §3.3)."""
@@ -2735,10 +2540,6 @@ def _resolve_backend(slug: str, ctx: _WalkCtx) -> str | None:
             backend_code=resolved,
         )
     return resolved
-
-
-def _actual_cost(resp: NormalizedResponse) -> float | None:
-    return resp.usage.cost_usd if resp.usage and resp.usage.cost_usd is not None else None
 
 
 def _is_composite(node: dict[str, Any]) -> bool:

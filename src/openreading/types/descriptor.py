@@ -26,8 +26,6 @@ class Provisioning(BaseModel):
         Literal["api_key", "cloud_credential", "pip", "container", "weights", "endpoint"]
     ] = Field(default_factory=list)
     auth: Literal["none", "api_key", "sigv4", "oauth2", "entra", "gcp_adc"] = "none"
-    # 'openreading' (resale) is intentionally never emitted; kept in the enum for schema parity.
-    billing_target: Literal["caller_account", "openreading", "caller_infra"] = "caller_account"
 
 
 class CredentialField(BaseModel):
@@ -114,18 +112,6 @@ class Output(BaseModel):
     block_granularity: Literal["word", "line", "paragraph", "section", "element"] | None = None
 
 
-class Cost(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    native_unit: Literal[
-        "page", "credit", "token", "doc", "gpu_second", "cpu_second", "subscription"
-    ] = "page"
-    usd_per_page_equiv_low: float | None = None
-    usd_per_page_equiv_high: float | None = None
-    basis: Literal["billed", "estimated", "infra_only", "unknown"] = "unknown"
-    lossiness: Literal["none", "page-def", "per-doc", "credit", "subscription"] = "none"
-
-
 class RuntimeProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -201,7 +187,6 @@ class AdapterDescriptor(BaseModel):
     provisioning: Provisioning
     wait_modes: list[WaitMode]
     capabilities: Capabilities
-    cost: Cost
     runtime: RuntimeProfile
     operations: list[str] = Field(default_factory=list)
     adapter_impl: Literal["http", "in_process", "subprocess", "container"] | None = None

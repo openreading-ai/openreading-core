@@ -10,8 +10,6 @@ import base64
 import json
 from pathlib import Path
 
-import pytest
-
 from openreading import run_batch, schemas
 from openreading.adapters.anthropic_claude import AnthropicClaudeAdapter
 from openreading.adapters.registry import BUILTIN_ADAPTERS
@@ -126,8 +124,6 @@ def test_poll_then_normalize_many_maps_succeeded_and_errored():
     assert out[0].usage is not None
     assert out[0].usage.input_tokens == 2400
     assert out[0].usage.output_tokens == 180
-    assert out[0].usage.cost_usd == pytest.approx(2400 / 1e6 * 5.0 + 180 / 1e6 * 25.0)
-    assert out[0].usage.cost_basis == "estimated"
 
 
 # --- Ledger T4b F4 (Phase C round-2): native-batch page counts must be exact, not heuristic --
@@ -285,13 +281,16 @@ def test_native_batch_end_to_end_via_run_batch(tmp_path, monkeypatch):
     assert all(i["transport"] == "native" for i in env["items"])  # dispatched to the native path
 
     # BL-100: every succeeded native-batch item is metered — not silently absent, and not a
-    # single batch-wide report_cost(job) call that would price every item at cost_usd=0.0 (the
+    # single batch-wide report_cost(job) call, which would report zero tokens for every item (the
     # batch job's raw payload has no top-level "usage" key).
-    expected_item_cost = 2400 / 1e6 * 5.0 + 180 / 1e6 * 25.0
+    #
+    # `usage` carries no dollars, so this asserts the counters the vendor returned. Claude meters
+    # tokens, which `merge_cost_report` deliberately never splits back into input/output, so what
+    # reaches the response is the per-item duration; the token total lives on the CostReport that
+    # produced it.
     for item in env["items"]:
-        assert item["response"]["usage"]["cost_usd"] == pytest.approx(expected_item_cost)
-    assert env["summary"]["cost_usd"] == pytest.approx(expected_item_cost * 2)
-    assert env["summary"]["cost_bases"] == ["estimated"]
+        assert "cost_usd" not in (item["response"].get("usage") or {})
+    assert "cost_usd" not in env["summary"]
 
 
 # --- BL-98: the native path compliance-gates the backend it drives, same as platform fan-out ----

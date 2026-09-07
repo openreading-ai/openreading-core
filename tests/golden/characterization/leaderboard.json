@@ -2,7 +2,6 @@
   "backends": [
     {
       "backend_id": "pymupdf",
-      "cost_per_doc": 0.0,
       "dimensions": {
         "table_cell_accuracy": 1.0,
         "text_contains": 1.0

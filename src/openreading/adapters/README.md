@@ -3,7 +3,7 @@
 <sub>[Docs home](../README.md) · [← JSON Schemas](../schemas/README.md)</sub>
 
 > **In one sentence.** These tables are what every backend declares about itself: its formats, its
-> variables, its price and its compliance posture.
+> variables and the ceilings it puts on one request.
 
 You want to know which backend can read your file, what key it needs, and whether your policy
 allows it. This page answers all three from the descriptor each backend ships. A backend is one
@@ -11,7 +11,7 @@ parser, such as the local `pymupdf` library or a hosted API. An adapter is the p
 one backend. Its descriptor is the static record in which the backend declares the formats it
 reads, the environment variables it needs and its compliance posture.
 
-The five tables under [Catalog](#catalog) cover what each backend reads, needs, promises, charges,
+The five tables under [Catalog](#catalog) cover what each backend reads, needs, promises, limits,
 and can put in a response. You need the package installed with `uv sync --all-extras --dev`, and a
 key for any hosted backend you want to call. Local backends such as `pymupdf` and `tesseract` need
 no key.
@@ -67,7 +67,7 @@ offline suite is what the CI badge covers. Real vendor calls run only in a manua
 with `uv run openreading backends --check <id>`, which probes the vendor.
 
 Every adapter passes a conformance kit before it ships, which checks bbox geometry, channel
-honesty, cost shape and determinism. Channel honesty means a channel graded `N`, `D` or `X` in
+honesty, usage shape and determinism. Channel honesty means a channel graded `N`, `D` or `X` in
 [the fifth table](#what-each-backend-can-put-in-a-response) behaves that way.
 
 ## Catalog
@@ -215,21 +215,16 @@ them with `make_adapter(id).descriptor.to_schema_dict()['compliance']` and use t
 reporting, not for routing. The router guide lists that gap under
 [Not built yet](../router/README.md#not-built-yet).
 
-### What each backend charges, and the ceilings on one request
+### The ceilings on one request
 
-Price is the widest difference between these backends, so settle it before you tune anything else.
-The fourth table gives each backend's published rate and the limits it puts on one request. A
-page-equivalent is the common unit this project uses to compare vendors that bill in different
-things. A vendor that charges per credit or per token declares what its rate works out to for a
-single page. That declaration is a range, and `usd_per_page_equiv_low` and
-`usd_per_page_equiv_high` are its two ends. Both numbers are per page and never per document, so a
-twelve-page document costs twelve times the rate in this table.
-
-The `basis` column says how far to trust that pair. `billed` means the response carries the charge
-the vendor made. `estimated` means the adapter projects the rate from a published price
-list. `infra_only` means the backend runs on hardware you already pay for, so the response omits
-`cost_usd` rather than inventing a number. `unknown` means the vendor publishes no rate at all, and
-the adapter declines to guess one.
+The fourth table gives the limits each backend puts on one request. It used to open with a price:
+each descriptor carried `usd_per_page_equiv_low`/`_high` and a `basis`, and this table printed
+them for all fifteen backends. Those numbers were a rate card this project had read off vendor
+pages and typed into Python, unverifiable from here and silently wrong the day a vendor repriced.
+They are gone, along with `usage.cost_usd`, the `cost/doc` leaderboard column and the spending
+preflight built on them. Price a run from your own provider invoice,
+which carries your tier and your negotiated rate. What core reports is what a backend consumed:
+`usage.pages_processed`, `credits`, `input_tokens`, `output_tokens`.
 
 The three limit columns say how much work one request may carry. Max pages per request is the page
 count the vendor accepts, quoted from the descriptor as free text. Nothing in the router or the
@@ -239,42 +234,36 @@ in
 [walkthrough step 2](../batch/README.md#2-a-single-file-a-glob-several-files---jobs-the-size-guard-a-strategy).
 Native batch max items is how many documents the vendor's own bulk endpoint accepts in one job.
 
-| id | low $/page-equiv | high $/page-equiv | `basis` | max pages per request | batch concurrency cap | native batch max items |
-|---|---|---|---|---|---|---|
-| `anthropic-claude` | 0.01 | 0.08 | estimated | 100 (<1M ctx) / 600 (1M ctx) | none | 100000 |
-| `aws-textract` | 0.0015 | 0.07 | estimated | 1 sync / 3000 async | none | none |
-| `azure-document-intelligence` | 0.0006 | 0.03 | estimated | 2000 | none | none |
-| `chunkr` | 0.008 | 0.03 | estimated | 2000 (soft) | none | none |
-| `docling` | 0.0 | none | infra_only | none | none | none |
-| `google-document-ai` | 0.0006 | 0.03 | estimated | 15 sync / 500 batch | none | none |
-| `google-gemini` | none | none | unknown | 1000 | none | none |
-| `mistral-ocr` | 0.004 | 0.005 | estimated | none | none | none |
-| `nuextract` | none | none | unknown | none | none | none |
-| `open-ocr` | 0.0005 | none | billed | engine-dependent: 200 (tesseract) / 5-20 (vision LLMs) | none | none |
-| `pulse` | 0.015 | 0.02 | estimated | none | none | none |
-| `pymupdf` | 0.0 | none | infra_only | unbounded | none | none |
-| `qwen-vl` | 0.0 | none | infra_only | none | none | none |
-| `reducto` | 0.015 | 0.06 | billed | unbounded (async) | none | none |
-| `tesseract` | 0.0 | none | infra_only | none | 4 | none |
+| id | max pages per request | batch concurrency cap | native batch max items |
+|---|---|---|---|
+| `anthropic-claude` | 100 (<1M ctx) / 600 (1M ctx) | none | 100000 |
+| `aws-textract` | 1 sync / 3000 async | none | none |
+| `azure-document-intelligence` | 2000 | none | none |
+| `chunkr` | 2000 (soft) | none | none |
+| `docling` | none | none | none |
+| `google-document-ai` | 15 sync / 500 batch | none | none |
+| `google-gemini` | 1000 | none | none |
+| `mistral-ocr` | none | none | none |
+| `nuextract` | none | none | none |
+| `open-ocr` | engine-dependent: 200 (tesseract) / 5-20 (vision LLMs) | none | none |
+| `pulse` | none | none | none |
+| `pymupdf` | unbounded | none | none |
+| `qwen-vl` | none | none | none |
+| `reducto` | unbounded (async) | none | none |
+| `tesseract` | none | 4 | none |
 
-Source: `Cost`, `Capabilities.max_pages_per_request` and `BatchSupport` in
+Source: `Capabilities.max_pages_per_request` and `BatchSupport` in
 `src/openreading/types/descriptor.py`, read through `make_adapter(id).descriptor`. Live truth: `uv
 run python -c "from openreading.adapters.registry import make_adapter, BUILTIN_ADAPTERS; [print(i,
-make_adapter(i).descriptor.to_schema_dict()['cost']) for i in BUILTIN_ADAPTERS]"`, with
-`.get('batch')` and `['capabilities'].get('max_pages_per_request')` for the other columns, because
-`to_schema_dict()` drops a field the descriptor leaves unset. If the table and that output
-disagree, the output is right and the table needs fixing.
+make_adapter(i).descriptor.to_schema_dict()['capabilities'].get('max_pages_per_request')) for i in
+BUILTIN_ADAPTERS]"`, with `.get('batch')` for the other two columns, because `to_schema_dict()`
+drops a field the descriptor leaves unset. If the table and that output disagree, the output is
+right and the table needs fixing.
 
-A corpus turns that spread into a decision. Two hundred thousand documents averaging twelve pages
-is 2.4 million page-equivalents. That corpus bills $1,200 at `open-ocr`'s low end and $24,000 at
-`anthropic-claude`'s. Comparing published floors, the factor is 20. At `anthropic-claude`'s high
-end the same corpus bills $192,000, so the full published spread is a factor of 160. Every figure
-here is a published rate rather than a quote you negotiated. Treat the low and high columns as a
-range, not as a price. Every cost estimate elsewhere in this project is built from these two
-columns. The `cost/doc` figure that `openreading leaderboard` prints is one of them, and it
-multiplies the low end alone by an assumed page count. A corpus that size runs in shards rather
-than one invocation. A single run holds every response in memory and has no resume of its own.
-[Sizing a large run](../batch/README.md#sizing-a-large-run) gives the ceiling and the shard size.
+A corpus of two hundred thousand documents averaging twelve pages is 2.4 million pages of work,
+and no run of that size belongs in one invocation. A single run holds every response in memory and
+has no resume of its own. [Sizing a large run](../batch/README.md#sizing-a-large-run) gives the
+ceiling and the shard size.
 
 ### What each backend can put in a response
 

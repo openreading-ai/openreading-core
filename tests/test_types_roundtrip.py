@@ -18,7 +18,6 @@ from openreading.types import (
     BlockType,
     Capabilities,
     ChannelGrade,
-    Cost,
     Document,
     LeaderboardBackend,
     LeaderboardCase,
@@ -101,7 +100,7 @@ def test_full_response_roundtrips_through_json_schema():
             ],
         ),
         typed_fields={"total": TypedField(value=42.0, type="currency", confidence=0.97)},
-        usage=Usage(pages_processed=1, cost_usd=0.07, cost_basis="estimated"),
+        usage=Usage(pages_processed=1),
     )
     resp.add_warning("confidence_partial", "some blocks lack confidence", field="blocks")
     schemas.validate_response(resp.to_schema_dict())
@@ -131,7 +130,7 @@ def test_descriptor_roundtrips_through_json_schema():
         type=BackendType.OSS_LIBRARY,
         protocol_version=1,
         adapter_impl="in_process",
-        provisioning=Provisioning(byo_mode=["pip"], auth="none", billing_target="caller_infra"),
+        provisioning=Provisioning(byo_mode=["pip"], auth="none"),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(
             ocr=False,
@@ -151,7 +150,6 @@ def test_descriptor_roundtrips_through_json_schema():
                 table_cells=ChannelGrade.NATIVE,
             ),
         ),
-        cost=Cost(native_unit="cpu_second", basis="infra_only"),
         runtime=RuntimeProfile(offline_capable=True, license="AGPL-3.0", sandbox="in_process"),
     )
     dumped = desc.to_schema_dict()
@@ -162,7 +160,7 @@ def test_descriptor_roundtrips_through_json_schema():
 
     # The CURRENT schema, not v0.1. A v0.8 descriptor carries no `compliance` block, which every
     # frozen schema from v0.1 to v0.7 required, so descriptor validation is deliberately no longer
-    # backward-compatible across that boundary (design/compliance-removal.md).
+    # backward-compatible across that boundary.
     schema = json.loads(
         (Path(schemas.__file__).parent / schemas.DESCRIPTOR_SCHEMA_FILE).read_text()
     )
@@ -189,7 +187,6 @@ def test_leaderboard_report_roundtrips_through_json_schema():
                 n_cases=2,
                 n_scored=2,
                 errors=0,
-                cost_per_doc=0.0,
                 non_deterministic=False,
                 dimensions={"text_contains": 0.95, "table_cell_accuracy": 0.87},
             ),
@@ -200,7 +197,6 @@ def test_leaderboard_report_roundtrips_through_json_schema():
                 n_cases=2,
                 n_scored=1,
                 errors=1,
-                cost_per_doc=1.25,
                 non_deterministic=True,
                 dimensions={"text_contains": 0.40},
             ),

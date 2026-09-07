@@ -145,4 +145,3 @@ def test_job_with_cost_hint_round_trips():
     back = _roundtrip(job)
     assert back.cost_hint is not None
     assert back.cost_hint.native_quantity == 3.0
-    assert back.cost_hint.billing_target == "caller_infra"

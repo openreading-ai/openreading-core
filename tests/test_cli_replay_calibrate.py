@@ -48,7 +48,7 @@ strategies:
       - tesseract
 """
 
-# BL-112: a hosted rung-1 backend (reducto — hipaa_baa=tier_gated, no baa_tier_confirmed anywhere
+# BL-112: a hosted rung-1 backend (reducto — no baa_tier_confirmed anywhere
 # in this config) under a strategy file policy: block that requires a BAA. Never needs a real
 # REDUCTO_API_KEY — the compliance refusal fires before any credential lookup or network call.
 _POLICY_REQUIRES_BAA_CONFIG = """\

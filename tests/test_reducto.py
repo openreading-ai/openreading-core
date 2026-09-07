@@ -176,7 +176,6 @@ def test_cost_is_credit_based():
     adapter = ReductoAdapter(client=FakeReductoClient())
     job = adapter.submit(_req(), RunContext())
     cost = adapter.report_cost(job)
-    assert cost.native_unit == "credit" and cost.billing_target == "caller_account"
     assert cost.native_quantity == 1.0
 
 

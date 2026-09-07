@@ -24,7 +24,6 @@ from openreading.types import (
     BlockType,
     Capabilities,
     ChannelGrade,
-    Cost,
     Document,
     JobState,
     NativeOrigin,
@@ -80,10 +79,9 @@ def _geometry_descriptor() -> AdapterDescriptor:
         id="fixture-geo",
         type=BackendType.OSS_LIBRARY,
         protocol_version=1,
-        provisioning=Provisioning(byo_mode=["pip"], auth="none", billing_target="caller_infra"),
+        provisioning=Provisioning(byo_mode=["pip"], auth="none"),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(printed_tables="verified", input_formats=["pdf"]),
-        cost=Cost(native_unit="cpu_second", basis="infra_only"),
         runtime=RuntimeProfile(offline_capable=True, license="AGPL-3.0", sandbox="in_process"),
         adapter_impl="in_process",
         output=Output(
@@ -299,26 +297,9 @@ def _cost_findings(adapter) -> list[tuple[str, str]]:
     return found
 
 
-class _ResellsCost(NullAdapter):
-    """Bills the caller through OpenReading. CostReport's own validator rejects that at
-    construction, so only a mutated (or duck-typed) report gets here — which is exactly why the
-    kit re-checks the value it is handed rather than trusting the type."""
-
-    def report_cost(self, job):
-        cost = super().report_cost(job)
-        cost.billing_target = "openreading"
-        return cost
-
-
 class _RaisingMeter(NullAdapter):
     def report_cost(self, job):
         raise RuntimeError("meter exploded")
-
-
-def test_check_cost_fires_on_a_non_pass_through_billing_target():
-    assert _cost_findings(_ResellsCost()) == [
-        ("cost", "billing_target='openreading' (pure pass-through only)")
-    ]
 
 
 def test_check_cost_fires_when_report_cost_raises():
@@ -329,11 +310,6 @@ def test_check_cost_fires_when_report_cost_raises():
 
 def test_check_cost_is_silent_on_a_conforming_adapter():
     assert _cost_findings(NullAdapter()) == []
-
-
-def test_kit_raises_on_a_resale_billing_target():
-    with pytest.raises(ConformanceError, match="pure pass-through only"):
-        check_adapter_conformance(_ResellsCost(), [_case()])
 
 
 # --- §7 rollout: ConformanceReport + strict_checks (advisory → strict per adapter) -------
@@ -571,7 +547,6 @@ def _spec_descriptor(creds, config) -> AdapterDescriptor:
         provisioning=Provisioning(byo_mode=["api_key"], auth="api_key"),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(),
-        cost=Cost(),
         runtime=RuntimeProfile(),
         credentials_spec=creds,
         config_spec=config,
@@ -662,11 +637,9 @@ def _byo_descriptor(
         provisioning=Provisioning(
             byo_mode=["api_key"] if byo_mode is None else byo_mode,
             auth=auth,
-            billing_target="caller_account",
         ),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(),
-        cost=Cost(native_unit="page", basis="estimated"),
         runtime=RuntimeProfile(),
         adapter_impl="http",
         output=Output(channels=OutputChannels(text=N)),

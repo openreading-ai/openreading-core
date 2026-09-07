@@ -288,7 +288,7 @@
       }
     ],
     "chosen_backend": "pymupdf",
-    "config_hash": "sha256:ac1637d70cf434a41670e0fc48f5bebb90c30d6dd9fa1805e40af6a913889c68",
+    "config_hash": "sha256:a41f9f4533c0516637ffe8864a0a51a0606dd7bfd00d8f7249b5c272fae107da",
     "decisions": [],
     "fallback_depth": 0,
     "outcome": "ok",
@@ -299,7 +299,6 @@
     "state": "succeeded"
   },
   "usage": {
-    "cost_basis": "infra_only",
     "pages_processed": 1
   },
   "warnings": [

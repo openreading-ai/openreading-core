@@ -14,8 +14,8 @@ Invariants:
   a network preflight — the first real proof of a key is the submit call).
 - Terminal / Retryable-exhausted / UnsupportedFeature fall to the next backend. (RetryableError
   reaching here means the driver already exhausted same-backend backoff.)
-- The successful response is metered: `report_cost()` fills the `usage` fields the adapter left
-  unset (`cost_usd` above all). A meter that raises degrades to a warning, never a failed run.
+- The successful response is metered: `report_cost()` fills the `usage` counters the adapter left
+  unset. A meter that raises degrades to a warning, never a failed run.
 - The successful response records the attempt trail in warnings[] (`fallback_used`), plus any
   operator confirmation the responding backend's compliance eligibility rests on.
 - Chain exhausted → PlanExhaustedError carrying the full trail.

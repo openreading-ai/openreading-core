@@ -33,7 +33,6 @@ from openreading.liveness import (
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    Cost,
     CredentialField,
     LivenessProbe,
     Provisioning,
@@ -63,7 +62,6 @@ def _descriptor(slug="fake", *, probe="none", creds=None, config=None, **kw) -> 
         provisioning=Provisioning(byo_mode=["api_key"], auth="api_key"),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(ocr="claimed"),
-        cost=Cost(native_unit="page"),
         runtime=RuntimeProfile(offline_capable=False),
         credentials_spec=creds if creds is not None else [],
         config_spec=config if config is not None else [],

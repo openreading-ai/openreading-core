@@ -12,7 +12,7 @@ from openreading.adapters.registry import build_registry
 from openreading.types.request import OpenReadingRequest
 from tests.fakes import make_backend
 
-# Cloud backends whose real descriptors carry a BAA in force (hipaa_baa='yes') and a no-training
+# Cloud backends whose real descriptors carry a BAA in force () and a no-training
 # posture, i.e. the ones allowed on a PHI path without running locally and without any operator
 # confirmation. Reducto's BAA is tier_gated, so it belongs here only once confirmed.
 _PHI_SAFE_CLOUD = {
@@ -26,7 +26,7 @@ def _phi_registry():
     """The real 9-adapter registry plus one deliberately non-compliant cloud backend that must
     never survive a PHI filter."""
     reg = build_registry()
-    reg.register(make_backend("gemini-dev", hipaa_baa="no", trains="yes", forms=True, tables=True))
+    reg.register(make_backend("gemini-dev", forms=True, tables=True))
     return reg
 
 

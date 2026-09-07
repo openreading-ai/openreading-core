@@ -178,7 +178,7 @@ flowchart LR
   E(["one response envelope"]):::hero --> A["status.state<br>succeeded · partial · failed · processing"]:::gate
   E --> B["backend.id · backend.type<br>who read it"]:::work
   E --> C["document<br>text · markdown · pages[]"]:::out
-  E --> D["usage<br>pages_processed · cost_basis"]:::work
+  E --> D["usage<br>pages_processed · credits · tokens"]:::work
   E --> F["warnings[]<br>what could not be produced"]:::gate
   E --> G["channel_provenance<br>native or derived, per channel"]:::out
   E --> H["backend_raw<br>the vendor's own answer, untouched"]:::src
@@ -201,7 +201,7 @@ jq '{schema_version, status, backend, usage, warnings}' sa.json
   "schema_version": "0.3",
   "status": { "state": "succeeded" },
   "backend": { "id": "pymupdf", "type": "oss_library", "output_paradigm": ["block_tree"] },
-  "usage": { "pages_processed": 1, "cost_basis": "infra_only" },
+  "usage": { "pages_processed": 1 },
   "warnings": [
     { "code": "confidence_unavailable",
       "message": "PyMuPDF is a deterministic parser; per-element confidence does not exist",
@@ -210,8 +210,11 @@ jq '{schema_version, status, backend, usage, warnings}' sa.json
 }
 ```
 
-`schema_version` names the JSON contract rather than the package you installed. `cost_basis` of
-`infra_only` means this run charged nobody, because the work happened on your own machine.
+`schema_version` names the JSON contract rather than the package you installed. `usage` reports
+what the backend consumed in its own unit, and nothing more: PyMuPDF read one page on your own
+machine, so a page count is the whole of it. There is no dollar figure on a response, because
+producing one meant multiplying by a rate this package had written down about a vendor and could
+not verify.
 
 That one warning is the contract at work. A channel is one named part of the response, such as
 text, tables, or per-block confidence. PyMuPDF measures no confidence, so the envelope omits the
@@ -420,9 +423,9 @@ uv run openreading compare examples/schedule_a_2024.pdf --backends pymupdf,tesse
 ```text
 COMPARE — 2 subjects (pairwise)
 
-SUBJECT             TYPE             PAGES BLOCKS  CHARS FIELDS      COST    TIME
-pymupdf             oss_library          1      2   4204      0         -       -
-tesseract           oss_library          1     59   3531      0         -       -
+SUBJECT             TYPE             PAGES BLOCKS  CHARS FIELDS    TIME
+pymupdf             oss_library          1      2   4204      0       -
+tesseract           oss_library          1     59   3531      0       -
 
 CONTENT: MIXED  (text:agree  table_cells:diverge)
 
@@ -778,13 +781,13 @@ uv run openreading explain run-1988.json
 ```
 ```text
 strategy scan_aware  →  tesseract (ok)
-  root.steps[0]    pymupdf      quality_escalated             55ms  $0
+  root.steps[0]    pymupdf      quality_escalated             55ms
       looks_bad
         scanned_pages_detected   obs=True thr=True  FIRED
         chars_per_page_below     obs=0.0 thr=100  FIRED
         garbled                  obs=None thr=True  skipped
         empty_pages_over         obs=1.0 thr=0.2  FIRED
-  root.steps[1]    tesseract    succeeded                  20036ms  $0
+  root.steps[1]    tesseract    succeeded                  20036ms
 ```
 
 Read it top to bottom. Timings vary between machines. PyMuPDF ran in 55 milliseconds and cost
@@ -806,7 +809,7 @@ uv run openreading explain run-2024.json
 ```
 ```text
 strategy scan_aware  →  pymupdf (ok)
-  root.steps[0]    pymupdf      succeeded                    351ms  $0
+  root.steps[0]    pymupdf      succeeded                    351ms
       looks_bad
         scanned_pages_detected   obs=False thr=True  ok
         chars_per_page_below     obs=4427.5 thr=100  ok
@@ -912,8 +915,8 @@ uv run openreading explain race.json
 ```
 ```text
 strategy quickest  →  pymupdf (ok)
-  root.parallel[0] pymupdf      succeeded                        -  $0
-  root.parallel[1] tesseract    raced_lost                       -  $0
+  root.parallel[0] pymupdf      succeeded                        -
+  root.parallel[1] tesseract    raced_lost                       -
 ```
 
 `raced_lost` means Tesseract was cancelled once PyMuPDF finished. A race has no gates, so no gate
@@ -936,15 +939,15 @@ uv run openreading compare --from duel.json --format table | head -10
 ```
 ```text
 strategy duel  →  pymupdf (ok)
-  root.parallel[0] pymupdf      succeeded                        -  $0
-  root.parallel[1] tesseract    judged_lost                      -  $0
+  root.parallel[0] pymupdf      succeeded                        -
+  root.parallel[1] tesseract    judged_lost                      -
 ```
 ```text
 COMPARE — 2 subjects (pairwise)
 
-SUBJECT             TYPE             PAGES BLOCKS  CHARS FIELDS      COST    TIME
-pymupdf             oss_library          1      2   4204      0         -       -
-tesseract           oss_library          1     59   3531      0         -       -
+SUBJECT             TYPE             PAGES BLOCKS  CHARS FIELDS    TIME
+pymupdf             oss_library          1      2   4204      0       -
+tesseract           oss_library          1     59   3531      0       -
 
 CONTENT: MIXED  (text:agree  table_cells:diverge)
 ```
@@ -955,9 +958,9 @@ quality-bundle selection leaves no decision record, so what you can audit is whi
 which lost, and under which category.
 
 > [!WARNING]
-> A `race:` and a `compare:` both start every backend listed. With local backends that costs
-> nothing but CPU. With a hosted backend, every branch that runs is billed to your key, losers
-> included. `usage.cost_usd` sums all of them.
+> A `race:` and a `compare:` both start every backend listed. With local backends that uses
+> nothing but your own CPU. With a hosted backend, every branch that runs is a call on your key,
+> losers included. The trace names each one; core quotes no price for any of them.
 
 The four presets are strategies you can run by name without writing a file at all:
 
@@ -1090,13 +1093,13 @@ uv run openreading parse examples/ --backend pymupdf > batch.json
 **You should see** one progress line per file on stderr, so `batch.json` stays pure JSON:
 
 ```text
-[1/7] README.md skipped unsupported_format
-[2/7] tutorial.md skipped unsupported_format
-[3/7] 1040-1988.pdf succeeded
-[4/7] 1040_2024.pdf succeeded
-[5/7] john_smith_1000_2026_01.pdf succeeded
-[6/7] john_smith_1000_2026_02.pdf succeeded
-[7/7] schedule_a_2024.pdf succeeded
+[1/7] 1040-1988.pdf succeeded
+[2/7] 1040_2024.pdf succeeded
+[3/7] README.md failed unsupported_format: pymupdf cannot read README.md. It reads pdf, xps, epub, mobi, cbz, svg, and this file is not one of them.
+[4/7] john_smith_1000_2026_01.pdf succeeded
+[5/7] john_smith_1000_2026_02.pdf succeeded
+[6/7] schedule_a_2024.pdf succeeded
+[7/7] tutorial.md failed unsupported_format: pymupdf cannot read tutorial.md. It reads pdf, xps, epub, mobi, cbz, svg, and this file is not one of them.
 ```
 
 A folder comes back as one envelope holding one response per document, plus a summary:
@@ -1105,16 +1108,16 @@ A folder comes back as one envelope holding one response per document, plus a su
 jq '.summary' batch.json
 ```
 ```json
-{ "total": 7, "succeeded": 5, "failed": 0, "skipped": 2,
-  "duration_ms": 510.0, "cost_bases": ["infra_only"],
+{ "total": 7, "succeeded": 5, "failed": 2, "duration_ms": 526.0,
   "pages_processed": 10, "backends": { "pymupdf": 5 } }
 ```
 
 Your `duration_ms` will differ, because it is wall-clock time on your machine.
 
-The total is seven because this folder holds two markdown files as well as five PDFs. PyMuPDF does
-not read `.md`, so each one is recorded with `skip_reason: "unsupported_format"` rather than
-dropped in silence. **The count you get back always accounts for every file you pointed at.**
+The total is seven because this folder holds two markdown files as well as five PDFs. Every source
+is offered to the backend, so each `.md` comes back as a FAILED item carrying PyMuPDF's own reason,
+`unsupported_format`, rather than being filtered out before it was ever tried. **The count you get
+back always accounts for every file you pointed at.**
 
 Each entry under `items[]` carries the source's path and its SHA-256, so a result can be traced
 back to the exact bytes that produced it:
@@ -1301,16 +1304,16 @@ uv run openreading strategy plan examples/1040-1988.pdf --strategy cheap_first -
 ```
 
 To execute it later, use `parse --strategy cheap_first --config hosted.yaml` with your document path.
-Before you run something billable, ask what it would cost:
+Before you run something against a hosted key, ask what it would do:
 
 ```bash
-uv run openreading help cost
+uv run openreading help usage
 ```
 
-Two fields on the envelope answer the same question afterwards. `usage.cost_usd` totals every
-attempt that ran, and `usage.cost_basis` says what that number is. `infra_only` means nobody
-charged you. `estimated` means a published rate applied to a page count. `billed` means a figure
-the vendor returned. Read the basis before you sum a run as spend.
+The envelope answers the same question afterwards. `usage` reports what each backend consumed in
+the unit it meters in, and `orchestration.attempts[]` names every attempt that ran, winners and
+losers alike, so you can count the calls. Neither carries a price. Join those counters to your own
+provider invoice, which is the only rate card that knows your tier.
 
 Which variables a backend reads, and which one wins when two are set, is one command:
 
@@ -1457,8 +1460,8 @@ Each message names the thing that is missing rather than failing generically. Th
 worth noticing: asking a backend for something it cannot do refuses the run instead of quietly
 returning less than you asked for.
 
-**Exit 0 is not the same as "everything was read."** On a batch, read `summary.failed` and
-`summary.skipped`. On a strategy run, read `orchestration.outcome` and `warnings[]`.
+**Exit 0 is not the same as "everything was read."** On a batch, read `summary.failed`. On a
+strategy run, read `orchestration.outcome` and `warnings[]`.
 
 ### Making a long run resumable
 

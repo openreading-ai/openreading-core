@@ -16,7 +16,7 @@ succeeded.
 The replacement is the caller's own conclusion. An operator who cares about compliance knows which
 vendors they hold agreements with, which regions their contracts cover, and what their auditors
 accepted. `backends: [aws-textract, pymupdf]` states that, and core honours it exactly, forever,
-with no table to rot. `design/compliance-removal.md` carries the full argument.
+with no table to rot. carries the full argument.
 
 The rule that replaces "compliance is never relaxed by fallback", and that a reader two years from
 now needs more than the diff: **core holds no fact it cannot verify. A constraint core cannot

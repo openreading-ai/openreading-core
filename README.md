@@ -159,7 +159,7 @@ better page layout analysis. It is not an error, and it does not reach your JSON
       "blocks": [ { "type": "text", "native_type": "text", "text": "First National Bank", "reading_order": 0,
         "bbox": { "x": 0.0588, "y": 0.0265, "w": 0.2085, "h": 0.0243, "page": 1,
                   "bbox_native": { "coords": [36.0, 21.02, 163.58, 40.3], "origin": "top_left", "unit": "pdf_point" } } } ] } ] },
-  "usage": { "pages_processed": 1, "cost_basis": "infra_only" },
+  "usage": { "pages_processed": 1 },
   "warnings": [ { "code": "confidence_unavailable", "field": "block_confidence",
                   "message": "PyMuPDF is a deterministic parser; per-element confidence does not exist" } ] }
 ```
@@ -309,15 +309,15 @@ uv run openreading explain strat.json
 ```
 ```
 strategy offline_first  →  pymupdf (ok)
-  root.steps[0]    pymupdf      succeeded                     41ms  $0
+  root.steps[0]    pymupdf      succeeded                     41ms
       scanned_pages_detected     obs=False thr=True  ok
       garbled                    obs=0.0189 thr=True  ok
       empty_pages_over           obs=0.0 thr=0.2  ok
       confidence_below           obs=None thr=0.6  skipped
 ```
 
-The trace shows PyMuPDF ran, three gates passed, and the run stopped there, with no second backend
-and no cost. The fourth gate is `skipped` rather than failed, because PyMuPDF reports no
+The trace shows PyMuPDF ran, three gates passed, and the run stopped there, so no second backend
+was ever called. The fourth gate is `skipped` rather than failed, because PyMuPDF reports no
 confidence. A missing measurement never counts as a passing one. Timings vary between machines.
 Write your own strategy with `uv run openreading strategy --help`. Set `OPENREADING_LEDGER` to a
 directory before a long `--strategy` run and every step is journaled there, so an interruption
@@ -339,13 +339,13 @@ Its `summary` tells you at a glance whether the sweep went as expected, and the 
 between machines:
 
 ```json
-{ "total": 3, "succeeded": 2, "failed": 0, "skipped": 1, "duration_ms": 82.0,
-  "cost_bases": ["infra_only"], "pages_processed": 2, "backends": { "pymupdf": 2 } }
+{ "total": 3, "succeeded": 2, "failed": 1, "duration_ms": 82.0,
+  "pages_processed": 2, "backends": { "pymupdf": 2 } }
 ```
 
-The total is three because `examples/README.md` is in that folder too. It is skipped with
-`skip_reason: "unsupported_format"` rather than dropped in silence, so the count you get back
-always accounts for every file you pointed at. `scripts/batch_demo.sh path/to/docs` runs the same
+The total is three because `examples/README.md` is in that folder too. It comes back as a failed
+item carrying PyMuPDF's own `unsupported_format` reason rather than being dropped in silence, so
+the count you get back always accounts for every file you pointed at. `scripts/batch_demo.sh path/to/docs` runs the same
 sweep with both local backends and compares the two corpora.
 
 The command above ran with no compliance filter in force, because that directory holds no

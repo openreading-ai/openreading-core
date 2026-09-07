@@ -30,7 +30,6 @@ from openreading.types.descriptor import (
     AdapterDescriptor,
     BatchIntake,
     Capabilities,
-    Cost,
     LivenessProbe,
     Output,
     OutputChannels,
@@ -124,7 +123,7 @@ def _descriptor() -> AdapterDescriptor:
         # cached on self) — verified against the real R1/R2 conformance kit, not assumed.
         protocol_version=2,
         adapter_impl="subprocess",
-        provisioning=Provisioning(byo_mode=["pip"], auth="none", billing_target="caller_infra"),
+        provisioning=Provisioning(byo_mode=["pip"], auth="none"),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(
             ocr="verified",
@@ -139,7 +138,6 @@ def _descriptor() -> AdapterDescriptor:
             page_range_selection=True,
             input_formats=["png", "jpg", "tiff", "bmp", "pdf (rasterized)"],
         ),
-        cost=Cost(native_unit="cpu_second", basis="infra_only", usd_per_page_equiv_low=0.0),
         runtime=RuntimeProfile(
             offline_capable=True,
             license="Apache-2.0",

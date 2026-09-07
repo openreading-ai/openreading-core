@@ -19,7 +19,6 @@ from openreading.router.clock import FakeClock, RealClock
 from openreading.router.router import RouterConfig
 from openreading.strategies import StrategyConfig, compile_strategy, engine, run_strategy
 from openreading.testing.sample_pdf import build_sample_pdf
-from openreading.types import CostBasis, CostReport, Job
 from openreading.types.enums import JobState
 from openreading.types.errors import PlanExhaustedError, TerminalError
 from openreading.types.request import OpenReadingRequest
@@ -27,22 +26,6 @@ from tests.fakes import PollFaultBackend, ScriptedBackend, scripted_registry
 
 CLEAN = "the quick brown fox jumps over the lazy dog every day here and now again " * 3
 GARBLED = "Ã©Ã¨ÃªÃ«Å â€™Ã±Â§Â¶ Ã Ã¢Ã¤ Ãµ Ã¼Ã¿ " * 4
-
-
-class _BilledScriptedBackend(ScriptedBackend):
-    """A ScriptedBackend whose `report_cost` reports a real `CostBasis.BILLED` basis (BL-126). The
-    base `ScriptedBackend.report_cost` is hardcoded to `infra_only(...)` regardless of `cost_usd`,
-    which can never exercise "a billed branch contributed" — this subclass makes that case
-    reproducible without touching the shared fixture every other test relies on."""
-
-    def report_cost(self, job: Job) -> CostReport:
-        return CostReport(
-            native_unit="page",
-            native_quantity=1.0,
-            cost_usd=self._cost_usd,
-            basis=CostBasis.BILLED,
-            billing_target="caller_account",
-        )
 
 
 def _req(compliance: dict | None = None):
@@ -106,7 +89,6 @@ def test_race_failed_fast_branch_does_not_win():
     reg = scripted_registry(
         ScriptedBackend(
             "reducto",
-            cost_low=0.01,
             latency_ms=5,
             error=TerminalError("5xx", backend_code="server"),
         ),
@@ -134,8 +116,8 @@ def test_race_failed_fast_branch_does_not_win():
 
 def test_best_picks_higher_quality():
     reg = scripted_registry(
-        ScriptedBackend("reducto", cost_low=0.01, text=GARBLED),  # low quality
-        ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN),  # high quality
+        ScriptedBackend("reducto", text=GARBLED),  # low quality
+        ScriptedBackend("aws-textract", text=CLEAN),  # high quality
     )
     res = _run(
         {
@@ -154,35 +136,14 @@ def test_best_picks_higher_quality():
     assert ("reducto", "judged_lost") in _cats(res)
 
 
-def test_best_tie_breaks_cheaper_backend():
-    reg = scripted_registry(
-        ScriptedBackend("aws-textract", cost_low=0.10, text=CLEAN),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN),  # same quality, cheaper
-    )
-    res = _run(
-        {
-            "version": 1,
-            "strategies": {
-                "s": {
-                    "parallel": ["aws-textract", "reducto"],
-                    "pick": "best",
-                    "budget": {"max_cost_usd": 1.0},
-                }
-            },
-        },
-        reg,
-    )
-    assert res.response.backend.id == "reducto"
-
-
 # ---- fresh adapter, money, composite failure --------------------------------------------------
 
 
 def test_each_branch_runs_its_own_backend():
     # pick: best runs both branches to completion — each drives its OWN distinct adapter exactly
     # once (T4: sibling branches have distinct backends, so no instance is shared concurrently).
-    a = ScriptedBackend("reducto", cost_low=0.01, text=CLEAN)
-    b = ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN)
+    a = ScriptedBackend("reducto", text=CLEAN)
+    b = ScriptedBackend("aws-textract", text=CLEAN)
     reg = scripted_registry(a, b)
     _run(
         {
@@ -340,213 +301,19 @@ def test_cancel_dispatch_never_blocks_the_response_past_the_node_deadline():
     )
 
 
-def test_money_sums_all_billed_branches():
-    reg = scripted_registry(
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN, cost_usd=0.05),
-        ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN, cost_usd=0.09),
-    )
-    res = _run(
-        {
-            "version": 1,
-            "strategies": {
-                "s": {
-                    "parallel": ["reducto", "aws-textract"],
-                    "pick": "best",
-                    "budget": {"max_cost_usd": 1.0},
-                }
-            },
-        },
-        reg,
-    )
-    # both branches completed (best waits for all) → usage.cost_usd sums winner + loser (T9)
-    assert res.response.usage.cost_usd == pytest.approx(0.14)
-
-
-def test_composite_winner_keeps_its_own_cost_plus_siblings():
-    # the winner is a COMPOSITE branch (nested cascade → reducto, own cost 0.10); a leaf sibling
-    # loser bills 0.08. The total must be own + sibling = 0.18, not just the sibling's.
-    reg = scripted_registry(
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN, cost_usd=0.10),
-        ScriptedBackend("aws-textract", cost_low=0.01, text=GARBLED, cost_usd=0.08),
-    )
-    res = _run(
-        {
-            "version": 1,
-            "strategies": {
-                "s": {
-                    "parallel": [
-                        {"steps": ["reducto"]},
-                        "aws-textract",
-                    ],  # composite branch wins on quality
-                    "pick": "best",
-                    "budget": {"max_cost_usd": 1.0},
-                }
-            },
-        },
-        reg,
-    )
-    assert res.response.backend.id == "reducto"  # the CLEAN composite branch wins
-    assert res.response.usage.cost_usd == pytest.approx(0.18)  # 0.10 own + 0.08 sibling loser
-
-
 # ---- BL-126: honest money — usage.cost_basis reconciles alongside cost_usd --------------------
-
-
-def test_money_reconciles_cost_basis_when_a_billed_loser_completes():
-    # the winner is free/local; a billed loser still completes and is billed (T9). Before this fix,
-    # _resolve_parallel folded the loser's cost_usd into the total but never touched cost_basis, so
-    # the response kept asserting the free winner's own "infra_only" — a real vendor charge
-    # silently reported as free.
-    winner = ScriptedBackend("pymupdf", local=True, text=CLEAN, latency_ms=1)
-    loser = _BilledScriptedBackend("reducto", cost_usd=0.09, text=GARBLED, latency_ms=5)
-    reg = scripted_registry(winner, loser)
-    res = _run(
-        {
-            "version": 1,
-            "strategies": {
-                "s": {
-                    "parallel": ["pymupdf", "reducto"],
-                    "pick": "best",
-                    "budget": {"max_cost_usd": 1.0},
-                }
-            },
-        },
-        reg,
-    )
-    assert res.response.backend.id == "pymupdf"  # the CLEAN branch wins on quality
-    assert res.response.usage.cost_usd == pytest.approx(0.09)
-    assert res.response.usage.cost_basis == "billed"
-
-
-def test_merge_reconciles_cost_basis_across_base_and_source_branches():
-    # pick: merge folds every branch's cost through the identical T9 loop pick: best uses — the
-    # merge_base/merge_source categories are cosmetic to cost accounting. A billed source branch's
-    # basis must not be dropped just because it lost the merge_base slot to the free branch.
-    base = ScriptedBackend("pymupdf", local=True, text=CLEAN)  # infra_only, wins merge_base
-    source = _BilledScriptedBackend("reducto", cost_usd=0.07, text=GARBLED)  # merge_source, billed
-    reg = scripted_registry(base, source)
-    res = _run(
-        {
-            "version": 1,
-            "strategies": {
-                "s": {
-                    "parallel": ["pymupdf", "reducto"],
-                    "pick": "merge",
-                    "budget": {"max_cost_usd": 1.0},
-                }
-            },
-        },
-        reg,
-    )
-    assert res.response.usage.cost_usd == pytest.approx(0.07)
-    assert res.response.usage.cost_basis == "billed"
 
 
 # ---- BL-134: a composite branch's cost never reaches any fold at all --------------------------
 
 
-def test_composite_loser_cost_is_not_dropped():
-    # _resolve_parallel's per-branch loop used to `continue` on every composite branch BEFORE any
-    # cost/basis folding ran — dropping a losing composite's real, already-computed cost entirely.
-    # Same-cost, same-content control isolating "compositeness" as the only variable (mirrors
-    # test_composite_winner_keeps_its_own_cost_plus_siblings, but the composite branch loses
-    # instead of wins): the composite loser's own 0.08 must still reach usage.cost_usd.
-    reg = scripted_registry(
-        ScriptedBackend("pymupdf", local=True, text=CLEAN, latency_ms=1),
-        ScriptedBackend("aws-textract", cost_low=0.01, text=GARBLED, cost_usd=0.08),
-    )
-    res = _run(
-        {
-            "version": 1,
-            "strategies": {
-                "s": {
-                    "parallel": [
-                        "pymupdf",
-                        {"steps": ["aws-textract"]},  # composite branch, loses on quality
-                    ],
-                    "pick": "best",
-                    "budget": {"max_cost_usd": 1.0},
-                }
-            },
-        },
-        reg,
-    )
-    assert res.response.backend.id == "pymupdf"  # the CLEAN leaf wins
-    assert res.response.usage.cost_usd == pytest.approx(0.08)  # composite loser's cost, not dropped
-    assert res.response.usage.cost_basis not in (None, "infra_only")
-
-
-def test_composite_shadow_cost_is_not_dropped():
-    # the identical drop, on a composite branch that SHADOWS and completes successfully within the
-    # node deadline rather than losing a comparison (mirrors test_shadow_runs_but_never_wins,
-    # wrapped as a composite branch — the officially documented use:-as-a-parallel-branch idiom,
-    # the openreading.strategies.presets docstring's own `audited` strategy, generalizes to any composite shape).
-    reg = scripted_registry(
-        ScriptedBackend("pymupdf", local=True, text=CLEAN),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN, cost_usd=0.05),
-    )
-    res = _run(
-        {
-            "version": 1,
-            "strategies": {
-                "s": {
-                    "parallel": ["pymupdf", {"steps": ["reducto"], "shadow": True}],
-                    "pick": "fastest",
-                    "budget": {"max_cost_usd": 1.0},
-                }
-            },
-        },
-        reg,
-    )
-    assert res.response.backend.id == "pymupdf"  # the shadow never wins
-    assert res.response.usage.cost_usd == pytest.approx(0.05)  # the shadow's cost, not dropped
-    assert res.response.usage.cost_basis not in (None, "infra_only")
-
-
-def test_composite_winner_raising_report_cost_never_looks_infra_only():
-    # BL-134, the composite-winner site specifically (:1135 pre-fix): its own basis fold used
-    # to pass resp.usage.cost_basis straight through with no coalescing. Here the composite winner's
-    # own internal leaf's report_cost() raises AFTER normalize() already set cost_usd (router/
-    # cost.py's own "an adapter meters a channel itself" pattern) — the nested response ends up with
-    # a real cost and an unset basis. The sibling loser's own genuinely-free-shaped "infra_only" tag
-    # would otherwise outrank a bare coalesced "unknown" by priority (_COST_BASIS_PRIORITY ranks
-    # unknown below infra_only) — _set_total_cost's own hardening must still keep the final response
-    # honest.
-    reg = scripted_registry(
-        ScriptedBackend(
-            "reducto",
-            cost_low=0.01,
-            text=CLEAN,
-            cost_usd=0.10,
-            report_cost_error=RuntimeError("meter exploded"),
-        ),
-        ScriptedBackend("aws-textract", cost_low=0.01, text=GARBLED, cost_usd=0.08),
-    )
-    res = _run(
-        {
-            "version": 1,
-            "strategies": {
-                "s": {
-                    "parallel": [{"steps": ["reducto"]}, "aws-textract"],
-                    "pick": "best",
-                    "budget": {"max_cost_usd": 1.0},
-                }
-            },
-        },
-        reg,
-    )
-    assert res.response.backend.id == "reducto"  # the CLEAN composite branch wins
-    assert res.response.usage.cost_usd == pytest.approx(0.18)  # 0.10 own + 0.08 sibling loser
-    assert res.response.usage.cost_basis not in (None, "infra_only")
-
-
 def test_all_branches_fail_composite_exhausted():
     reg = scripted_registry(
         ScriptedBackend(
-            "reducto", cost_low=0.01, error=TerminalError("5xx", backend_code="server")
+            "reducto", error=TerminalError("5xx", backend_code="server")
         ),
         ScriptedBackend(
-            "aws-textract", cost_low=0.01, error=TerminalError("5xx", backend_code="server")
+            "aws-textract", error=TerminalError("5xx", backend_code="server")
         ),
     )
     with pytest.raises(PlanExhaustedError):
@@ -586,12 +353,10 @@ def test_unanimous_invalid_input_propagates():
     reg2 = scripted_registry(
         ScriptedBackend(
             "reducto",
-            cost_low=0.01,
             error=TerminalError("corrupt", backend_code="corrupt_document"),
         ),
         ScriptedBackend(
             "aws-textract",
-            cost_low=0.01,
             error=TerminalError("corrupt", backend_code="corrupt_document"),
         ),
         ScriptedBackend("pymupdf", local=True, text=CLEAN),
@@ -653,9 +418,9 @@ def test_gated_parallel_step_winner_passes_is_accepted():
     # both branches clean -> the winner passes the garbled gate -> accepted; the `then` rung
     # (reducto) never runs.
     reg = scripted_registry(
-        ScriptedBackend("docling", cost_low=0.02, cost_usd=0.02, text=CLEAN),
-        ScriptedBackend("aws-textract", cost_low=0.02, cost_usd=0.02, text=CLEAN),
-        ScriptedBackend("reducto", cost_low=0.05, cost_usd=0.05, text=CLEAN),
+        ScriptedBackend("docling", text=CLEAN),
+        ScriptedBackend("aws-textract", text=CLEAN),
+        ScriptedBackend("reducto", text=CLEAN),
     )
     res = _run(_compare_then({"garbled": True}), reg)
     backends = [b for b, _ in _cats(res)]
@@ -668,9 +433,9 @@ def test_gated_parallel_step_winner_passes_is_accepted():
 def test_gated_parallel_step_winner_fails_escalates_to_then():
     # both branches garbled -> the winner trips the gate -> retained, `then` (reducto) runs & wins.
     reg = scripted_registry(
-        ScriptedBackend("docling", cost_low=0.02, cost_usd=0.02, text=GARBLED),
-        ScriptedBackend("aws-textract", cost_low=0.02, cost_usd=0.02, text=GARBLED),
-        ScriptedBackend("reducto", cost_low=0.05, cost_usd=0.05, text=CLEAN),
+        ScriptedBackend("docling", text=GARBLED),
+        ScriptedBackend("aws-textract", text=GARBLED),
+        ScriptedBackend("reducto", text=CLEAN),
     )
     res = _run(_compare_then({"garbled": True}), reg)
     assert res.response.backend.id == "reducto"
@@ -685,7 +450,7 @@ def test_gate_on_pick_fastest_step_is_the_cookbook_idiom():
     reg = scripted_registry(
         ScriptedBackend("docling", local=True, text=GARBLED, latency_ms=5),
         ScriptedBackend("aws-textract", local=True, text=GARBLED, latency_ms=20),
-        ScriptedBackend("reducto", cost_low=0.05, cost_usd=0.05, text=CLEAN),
+        ScriptedBackend("reducto", text=CLEAN),
     )
     res = _run(_compare_then({"garbled": True}, pick="fastest"), reg)
     assert res.response.backend.id == "reducto"
@@ -697,8 +462,8 @@ def test_gated_final_parallel_step_is_deficient_keep_best():
     # a gated parallel step in FINAL position: the winner trips the gate, nothing to escalate to,
     # so keep-best returns it as Deficient with an honest quality warning (advanced shape).
     reg = scripted_registry(
-        ScriptedBackend("docling", cost_low=0.02, cost_usd=0.02, text=GARBLED),
-        ScriptedBackend("aws-textract", cost_low=0.02, cost_usd=0.02, text=GARBLED),
+        ScriptedBackend("docling", text=GARBLED),
+        ScriptedBackend("aws-textract", text=GARBLED),
     )
     cfg = {
         "version": 1,
@@ -726,9 +491,9 @@ def test_ungated_parallel_step_does_not_gate_no_regression():
     # no escalate_if on the parallel step -> the winner is accepted even when garbled; the `then`
     # rung never runs. Proves P2 changes behavior ONLY when a step gate is present.
     reg = scripted_registry(
-        ScriptedBackend("docling", cost_low=0.02, cost_usd=0.02, text=GARBLED),
-        ScriptedBackend("aws-textract", cost_low=0.02, cost_usd=0.02, text=GARBLED),
-        ScriptedBackend("reducto", cost_low=0.05, cost_usd=0.05, text=CLEAN),
+        ScriptedBackend("docling", text=GARBLED),
+        ScriptedBackend("aws-textract", text=GARBLED),
+        ScriptedBackend("reducto", text=CLEAN),
     )
     cfg = {
         "version": 1,
@@ -750,11 +515,11 @@ def test_gated_parallel_step_with_composite_winner_still_gates():
     # response (garbled -> escalate), though a composite winner has no single leaf attempt to
     # annotate (the `winner is None` path).
     reg = scripted_registry(
-        ScriptedBackend("docling", cost_low=0.02, cost_usd=0.02, text=GARBLED),
+        ScriptedBackend("docling", text=GARBLED),
         ScriptedBackend(
-            "aws-textract", cost_low=0.02, error=TerminalError("5xx", backend_code="server")
+            "aws-textract", error=TerminalError("5xx", backend_code="server")
         ),
-        ScriptedBackend("reducto", cost_low=0.05, cost_usd=0.05, text=CLEAN),
+        ScriptedBackend("reducto", text=CLEAN),
     )
     cfg = {
         "version": 1,
@@ -830,8 +595,8 @@ def test_gated_parallel_after_an_escalated_leaf_step():
     # must skip that earlier leaf's attempt (a different path) and still bind the parallel winner.
     reg = scripted_registry(
         ScriptedBackend("pymupdf", local=True, text=GARBLED),  # step 0 escalates
-        ScriptedBackend("docling", cost_low=0.02, cost_usd=0.02, text=CLEAN),
-        ScriptedBackend("aws-textract", cost_low=0.02, cost_usd=0.02, text=CLEAN),
+        ScriptedBackend("docling", text=CLEAN),
+        ScriptedBackend("aws-textract", text=CLEAN),
     )
     cfg = {
         "version": 1,
@@ -880,9 +645,9 @@ def _compare_then_disagree(then="reducto", gate=None, budget=1.0):
 
 def test_disagreement_over_fires_when_branches_disagree():
     reg = scripted_registry(
-        ScriptedBackend("docling", cost_low=0.01, cost_usd=0.01, text=_DISJOINT_A),
-        ScriptedBackend("aws-textract", cost_low=0.01, cost_usd=0.01, text=_DISJOINT_B),
-        ScriptedBackend("reducto", cost_low=0.05, cost_usd=0.05, text=CLEAN),
+        ScriptedBackend("docling", text=_DISJOINT_A),
+        ScriptedBackend("aws-textract", text=_DISJOINT_B),
+        ScriptedBackend("reducto", text=CLEAN),
     )
     res = _run(_compare_then_disagree(), reg)
     assert res.response.backend.id == "reducto"  # disagreement escalated to the then rung
@@ -893,9 +658,9 @@ def test_disagreement_over_fires_when_branches_disagree():
 
 def test_disagreement_over_does_not_fire_when_branches_agree():
     reg = scripted_registry(
-        ScriptedBackend("docling", cost_low=0.01, cost_usd=0.01, text=CLEAN),
-        ScriptedBackend("aws-textract", cost_low=0.01, cost_usd=0.01, text=CLEAN),
-        ScriptedBackend("reducto", cost_low=0.05, cost_usd=0.05, text=CLEAN),
+        ScriptedBackend("docling", text=CLEAN),
+        ScriptedBackend("aws-textract", text=CLEAN),
+        ScriptedBackend("reducto", text=CLEAN),
     )
     res = _run(_compare_then_disagree(), reg)
     assert "reducto" not in [b for b, _ in _cats(res)]  # identical output → winner accepted
@@ -904,8 +669,8 @@ def test_disagreement_over_does_not_fire_when_branches_agree():
 def test_disagreement_telemetry_recorded_on_pick_best_winner():
     # unconditional: a pick:best node records the disagreement even with no gate referencing it.
     reg = scripted_registry(
-        ScriptedBackend("docling", cost_low=0.01, cost_usd=0.01, text=_DISJOINT_A),
-        ScriptedBackend("aws-textract", cost_low=0.01, cost_usd=0.01, text=_DISJOINT_B),
+        ScriptedBackend("docling", text=_DISJOINT_A),
+        ScriptedBackend("aws-textract", text=_DISJOINT_B),
     )
     cfg = {
         "version": 1,
@@ -973,7 +738,7 @@ def test_branch_missing_credentials_skips_and_the_race_still_resolves(monkeypatc
     outcomes = _branch_outcomes(monkeypatch)
     reg = scripted_registry(
         ScriptedBackend(
-            "reducto", cost_low=0.01, required_env=["OPENREADING_TEST_NEVERSET_KEY"], text=CLEAN
+            "reducto", required_env=["OPENREADING_TEST_NEVERSET_KEY"], text=CLEAN
         ),
         ScriptedBackend("pymupdf", local=True, text=CLEAN, latency_ms=20),
     )
@@ -997,7 +762,7 @@ def test_every_branch_unresolvable_is_composite_exhausted(monkeypatch):
     outcomes = _branch_outcomes(monkeypatch)
     reg = scripted_registry(
         ScriptedBackend(
-            "reducto", cost_low=0.01, required_env=["OPENREADING_TEST_NEVERSET_KEY"], text=CLEAN
+            "reducto", required_env=["OPENREADING_TEST_NEVERSET_KEY"], text=CLEAN
         )
     )
     with pytest.raises(PlanExhaustedError):

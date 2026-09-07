@@ -92,7 +92,6 @@ def run_leaderboard(
     # cross-package pull in this file already happens to be cycle-safe at module level; these two
     # are the only ones that aren't, so only these two are deferred.
     from openreading.comparison.report import _NON_DETERMINISTIC
-    from openreading.strategies.calibrate import _descriptor_cost
 
     if len(backend_ids) < 2:
         raise ValueError(f"leaderboard needs at least two backends (got {len(backend_ids)})")
@@ -138,7 +137,6 @@ def run_leaderboard(
             n_cases=len(reports[bid].results),
             n_scored=_n_scored(reports[bid]),
             errors=reports[bid].errors,
-            cost_per_doc=_descriptor_cost(adapters[bid].descriptor),  # REUSE, not reinvented
             non_deterministic=bid in _NON_DETERMINISTIC,
             dimensions=_dimension_means(reports[bid]),
         )

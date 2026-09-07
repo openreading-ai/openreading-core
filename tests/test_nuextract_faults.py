@@ -321,16 +321,14 @@ def test_disabled_outputs_suppress_channels_and_raw():
     assert not resp.warnings  # blocks not requested → no warning needed
 
 
-# ---- cost -------------------------------------------------------------------------------------
+# ---- usage ------------------------------------------------------------------------------------
 
 
 def test_report_cost_projects_token_usage():
     adapter = NuExtractAdapter(client=_completed())
     job = adapter.submit(_req(), RunContext())
     pre = adapter.report_cost(job)  # before the result lands there is nothing to meter
-    assert pre.native_quantity == 0.0 and pre.cost_usd is None
+    assert pre.native_quantity == 0.0  # zero counted, never a guess at what it will be
     job = adapter.poll(job, RunContext())
     cost = adapter.report_cost(job)
     assert cost.native_unit == "token" and cost.native_quantity == 1040.0
-    assert cost.cost_usd is None  # pricing not public — usage reported, rate never invented
-    assert cost.billing_target == "caller_account"

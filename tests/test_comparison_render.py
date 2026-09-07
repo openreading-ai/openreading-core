@@ -48,7 +48,6 @@ def _pipey_report() -> dict:
         text="Total | 42.00\nWidget",
         fields={"line_item": "Widget | Blue"},
         pages=[[{"type": "text", "text": "Total | 42.00"}, {"type": "text", "text": "Widget"}]],
-        cost_usd=0.02,
         duration_ms=1200,
     )
     b = make_envelope(
@@ -68,7 +67,7 @@ def test_pipes_in_finding_detail_and_snippet_keep_the_column_count_fixed():
     assert any("|" in (f.get("snippet") or "") for f in report["findings"])
 
     scoreboard, findings = _tables(render_markdown(report))
-    assert _widths(scoreboard) == {8}  # header + one row per subject, none wider
+    assert _widths(scoreboard) == {7}  # header + one row per subject, none wider
     assert len(scoreboard) == 1 + len(report["subjects"])
     assert _widths(findings) == {5}
     assert len(findings) == 1 + len(report["findings"])
@@ -88,7 +87,7 @@ def test_pipes_in_subject_labels_do_not_add_columns():
     report = build_report(load_subjects([a, b]))
 
     scoreboard, findings = _tables(render_markdown(report))
-    assert _widths(scoreboard) == {8}
+    assert _widths(scoreboard) == {7}
     assert _widths(findings) == {5}
     assert [row[0] for row in scoreboard[1:]] == [r"vendor\|v2", r"other\|v3"]
     subject_cells = {row[3] for row in findings[1:]}
@@ -109,7 +108,6 @@ def test_newline_in_a_cell_becomes_a_break_instead_of_ending_the_row():
                     "blocks": 1,
                     "chars": 3,
                     "fields": 0,
-                    "cost_usd": None,
                     "duration_ms": None,
                 },
             }
@@ -128,7 +126,7 @@ def test_newline_in_a_cell_becomes_a_break_instead_of_ending_the_row():
     }
     md = render_markdown(report)
     scoreboard, findings = _tables(md)
-    assert _widths(scoreboard) == {8}
+    assert _widths(scoreboard) == {7}
     assert _widths(findings) == {5}
     assert len(findings) == 2
     assert "first line<br>second line" in md
@@ -144,5 +142,5 @@ def test_agreeing_subjects_render_a_scoreboard_and_no_findings_table():
     assert "## Findings (0)" in md
     assert "_No differences on any compared dimension._" in md
     (scoreboard,) = _tables(md)  # the findings table is absent, not empty
-    assert _widths(scoreboard) == {8}
+    assert _widths(scoreboard) == {7}
     assert scoreboard[0][:2] == ["subject", "type"]

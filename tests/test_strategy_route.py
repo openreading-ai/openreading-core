@@ -158,7 +158,7 @@ def test_evaluate_when_unknown_fact_key_is_unavailable():
 def _reg():
     return scripted_registry(
         ScriptedBackend("pymupdf", local=True, text=CLEAN),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN),
+        ScriptedBackend("reducto", text=CLEAN),
     )
 
 

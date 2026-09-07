@@ -55,13 +55,13 @@ def _merge_cfg(branches):
 def test_merge_takes_majority_field_value():
     reg = scripted_registry(
         ScriptedBackend(
-            "reducto", cost_low=0.01, text=CLEAN, typed_fields={"amount": {"value": "100"}}
+            "reducto", text=CLEAN, typed_fields={"amount": {"value": "100"}}
         ),
         ScriptedBackend(
-            "aws-textract", cost_low=0.01, text=GARBLED, typed_fields={"amount": {"value": "100"}}
+            "aws-textract", text=GARBLED, typed_fields={"amount": {"value": "100"}}
         ),
         ScriptedBackend(
-            "azure-di", cost_low=0.01, text=GARBLED, typed_fields={"amount": {"value": "200"}}
+            "azure-di", text=GARBLED, typed_fields={"amount": {"value": "200"}}
         ),
     )
     res = _run(_merge_cfg(["reducto", "aws-textract", "azure-di"]), reg)
@@ -73,13 +73,11 @@ def test_merge_tie_breaks_by_confidence():
     reg = scripted_registry(
         ScriptedBackend(
             "reducto",
-            cost_low=0.01,
             text=CLEAN,
             typed_fields={"amount": {"value": "100", "confidence": 0.95}},
         ),
         ScriptedBackend(
             "aws-textract",
-            cost_low=0.01,
             text=CLEAN,
             typed_fields={"amount": {"value": "200", "confidence": 0.40}},
         ),
@@ -93,10 +91,10 @@ def test_merge_never_fabricates_confidence():
     # the chosen source reported no confidence → the merged field's confidence is None, not invented
     reg = scripted_registry(
         ScriptedBackend(
-            "reducto", cost_low=0.01, text=CLEAN, typed_fields={"ref": {"value": "AB"}}
+            "reducto", text=CLEAN, typed_fields={"ref": {"value": "AB"}}
         ),
         ScriptedBackend(
-            "aws-textract", cost_low=0.01, text=GARBLED, typed_fields={"ref": {"value": "AB"}}
+            "aws-textract", text=GARBLED, typed_fields={"ref": {"value": "AB"}}
         ),
     )
     res = _run(_merge_cfg(["reducto", "aws-textract"]), reg)
@@ -106,9 +104,9 @@ def test_merge_never_fabricates_confidence():
 
 def test_merge_absent_field_stays_absent():
     reg = scripted_registry(
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN, typed_fields={"a": {"value": "1"}}),
+        ScriptedBackend("reducto", text=CLEAN, typed_fields={"a": {"value": "1"}}),
         ScriptedBackend(
-            "aws-textract", cost_low=0.01, text=GARBLED, typed_fields={"b": {"value": "2"}}
+            "aws-textract", text=GARBLED, typed_fields={"b": {"value": "2"}}
         ),
     )
     res = _run(_merge_cfg(["reducto", "aws-textract"]), reg)
@@ -120,10 +118,10 @@ def test_merge_absent_field_stays_absent():
 def test_merge_records_base_and_source_with_provenance():
     reg = scripted_registry(
         ScriptedBackend(
-            "reducto", cost_low=0.01, text=CLEAN, typed_fields={"amount": {"value": "100"}}
+            "reducto", text=CLEAN, typed_fields={"amount": {"value": "100"}}
         ),
         ScriptedBackend(
-            "aws-textract", cost_low=0.01, text=GARBLED, typed_fields={"amount": {"value": "100"}}
+            "aws-textract", text=GARBLED, typed_fields={"amount": {"value": "100"}}
         ),
     )
     res = _run(_merge_cfg(["reducto", "aws-textract"]), reg)
@@ -139,10 +137,10 @@ def test_merge_records_base_and_source_with_provenance():
 def test_merge_base_supplies_text_and_source_backend():
     reg = scripted_registry(
         ScriptedBackend(
-            "reducto", cost_low=0.01, text=CLEAN, typed_fields={"amount": {"value": "100"}}
+            "reducto", text=CLEAN, typed_fields={"amount": {"value": "100"}}
         ),
         ScriptedBackend(
-            "aws-textract", cost_low=0.01, text=GARBLED, typed_fields={"amount": {"value": "100"}}
+            "aws-textract", text=GARBLED, typed_fields={"amount": {"value": "100"}}
         ),
     )
     res = _run(_merge_cfg(["reducto", "aws-textract"]), reg)
@@ -155,11 +153,10 @@ def test_merge_determinism():
     def once():
         reg = scripted_registry(
             ScriptedBackend(
-                "reducto", cost_low=0.01, text=CLEAN, typed_fields={"amount": {"value": "100"}}
+                "reducto", text=CLEAN, typed_fields={"amount": {"value": "100"}}
             ),
             ScriptedBackend(
                 "aws-textract",
-                cost_low=0.01,
                 text=GARBLED,
                 typed_fields={"amount": {"value": "200"}},
             ),

@@ -16,7 +16,6 @@ def _desc(**over) -> dict:
         "provisioning": {"auth": "api_key"},
         "wait_modes": ["inline"],
         "capabilities": {"ocr": "verified"},
-        "cost": {"native_unit": "page"},
         "runtime": {"offline_capable": False},
     }
     body.update(over)

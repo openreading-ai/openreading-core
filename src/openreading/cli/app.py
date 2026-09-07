@@ -305,13 +305,6 @@ def _save_batch_items(env: dict, save_dir: str) -> None:
         out.write_text(json.dumps(item["response"], indent=2))
 
 
-def _usd(v: float) -> str:
-    """A dollar amount for the cost preflight. Cents below a dollar-scale total, but four places
-    once rounding to the cent would print `$0.00` for a real (if small) bill — the preflight's
-    whole job is to be a number the reader can multiply, and zero multiplies to zero."""
-    return f"${v:,.2f}" if v >= 0.01 else f"${v:.4f}"
-
-
 def _page_number(raw: str) -> int:
     """argparse type for --pages. A page number below 1 is a typo on a 1-based flag, and letting
     it reach the request model turns it into a pydantic dump and exit 1, where every other bad
@@ -334,7 +327,7 @@ def _page_number(raw: str) -> int:
 
 
 def _cmd_parse_batch(args, overrides: dict, label: str) -> int:
-    """Batch parse (Manifest v0.6): one envelope over many documents. Progress + cost preflight go
+    """Batch parse (Manifest v0.6): one envelope over many documents. Progress + scope preflight go
     to stderr; stdout stays the single batch-result JSON. Exit 4 = partial (some items failed)."""
     bkwargs: dict[str, Any] = {**overrides, "config": args.config, "operation": args.operation}
     if getattr(args, "keep_candidates", False):
@@ -384,28 +377,18 @@ def _cmd_parse_batch(args, overrides: dict, label: str) -> int:
         live = list(resolved)
         if len(live) <= 10 or d.type.value != "hosted_api":
             return
-        # The rate is per PAGE, and items are documents. Naming the item count beside a per-page
-        # rate invites multiplying the two, which under-reads a real corpus by its average page
-        # count. So: state the basis in words, then multiply out the ONE total that is actually
-        # computable before any file is opened (intake reads no bytes and never fetches a URL, so
-        # page counts do not exist yet) and label it as the single-page floor it is.
+        # This advisory used to price the run from `descriptor.cost`, a per-page range this
+        # package wrote down about someone else's rate card. What it
+        # says now is what core actually knows before a byte is read: how many calls are about to
+        # leave this machine, to whom, on whose key. Pages are deliberately absent — intake reads
+        # no bytes and never fetches a URL, so no page count exists yet, and one call per item is
+        # the floor a multi-page document only ever exceeds.
         n = len(live)
-        ends = [v for v in (d.cost.usd_per_page_equiv_low, d.cost.usd_per_page_equiv_high) if v]
-        rate = (
-            "-".join(f"${v}" for v in ends) if ends else "billed per page-equiv"
-        )  # one endpoint published, or two, or none
-        basis = f"~{rate} per page-equiv" if ends else rate
         print(
-            f"[preflight] {n} items on hosted backend {backend}: {basis}, not per item",
+            f"[preflight] {n} items on hosted backend {backend}: {n} call(s) on your own key, "
+            "one per item and more if a document is paged",
             file=sys.stderr,
         )
-        if ends:
-            total = "-".join(_usd(v * n) for v in ends)
-            print(
-                f"[preflight] {n} items would cost ~{total} if every item is one page; multiply by "
-                "your average page count (pages are not counted before the run)",
-                file=sys.stderr,
-            )
 
     try:
         with contextlib.redirect_stdout(sys.stderr):  # backend chatter → stderr; stdout stays JSON
@@ -923,9 +906,8 @@ def _render_orchestration(orch: dict) -> None:
         f"strategy {orch.get('strategy')}  →  {orch.get('chosen_backend')} ({orch.get('outcome')})"
     )
     for a in orch.get("attempts", []):
-        cost = f"${a['cost_usd']:.4f}" if a.get("cost_usd") else "$0"
         dur = f"{a['duration_ms']}ms" if a.get("duration_ms") is not None else "-"
-        print(f"  {a['node']:<16} {a['backend']:<12} {a['category']:<26} {dur:>7}  {cost}")
+        print(f"  {a['node']:<16} {a['backend']:<12} {a['category']:<26} {dur:>7}")
 
         def _mark(g):
             return "FIRED" if g["fired"] else ("skipped" if g.get("skipped") else "ok")
@@ -1132,7 +1114,6 @@ def cmd_calibrate(args) -> int:
                 args.strategy,
                 build_registry(),
                 target_escalation=args.target_escalation,
-                max_cost_per_doc=args.max_cost_per_doc,
                 router_config=config.router_config(loaded.config.policy),
             )
     # calibrate_strategy resolves and drives its rung-1 backend directly — no Router/execute_plan/
@@ -1163,7 +1144,7 @@ def cmd_calibrate(args) -> int:
         print(
             f"[calibrate] 0 of {report.n_docs} cases were scored. None named a dimension "
             "scorers.score() recognizes, so scorer_agreement is not measured at any threshold "
-            "(only escalation_rate/cost_per_doc are real signal here)",
+            "(only escalation_rate is real signal here)",
             file=sys.stderr,
         )
     elif report.n_scored < report.n_docs:
@@ -1186,7 +1167,7 @@ def _render_leaderboard_table(report: Any) -> str:
     lines = [
         f"dataset: {d.path}  ({d.case_count} case(s): {', '.join(d.case_names)})",
         "",
-        f"{'rank':>4}  {'backend':<28} {'mean':>6} {'scored':>7} {'cost/doc':>10} "
+        f"{'rank':>4}  {'backend':<28} {'mean':>6} {'scored':>7} "
         f"{'errors':>7}  dimensions",
     ]
     for b in report.backends:
@@ -1201,7 +1182,7 @@ def _render_leaderboard_table(report: Any) -> str:
         mean = f"{b.mean_score:>6.3f}" if b.n_scored else f"{'—':>6}"
         lines.append(
             f"{b.rank:>4}  {b.backend_id:<28} {mean} {f'{b.n_scored}/{b.n_cases}':>7} "
-            f"{b.cost_per_doc:>10.4f} {b.errors:>7}  {dims}{nd}"
+            f"{b.errors:>7}  {dims}{nd}"
         )
     lines.append("")
     lines.append("per-case result:")
@@ -1402,43 +1383,36 @@ def _benchmark_targets(args):
 
 
 def _render_benchmark_estimate(descriptor, preset: str, targets) -> str:
-    """Price the whole published corpus, in pages, before anything is downloaded.
+    """How big the whole published corpus is, before anything is downloaded.
 
-    Pages, not documents, because every hosted backend charges per page and the two differ by a
-    lot. This is the ceiling: `run` defaults to a handful of documents and prints the real count.
+    Pages as well as documents, because every hosted backend meters per page and the two differ by
+    a lot. This is the ceiling: `run` defaults to a handful of documents and prints the real count.
+    It used to also multiply those pages by each backend's declared rate; the rates are gone
+    and the counts, which come from the publisher, are what is left.
     """
-    from openreading.evals.preflight import _backend_target_cost
+    from openreading.evals.preflight import _backend_target_scope
 
     lines = [f"estimate: {descriptor.id} {preset}, {len(targets)} target(s)"]
     if preset != "full":
         lines.append("documents: publisher smoke subset, counted after preparation")
-        lines.append("`benchmark run` prints the real page count and cost before it spends")
+        lines.append("`benchmark run` prints the real page count before it runs")
         return "\n".join(lines)
 
     documents = descriptor.estimated_documents
     pages = descriptor.estimated_pages
     lines.append(f"documents: {documents if documents is not None else 'publisher-defined'}")
-    lines.append(f"pages (the billing unit): {pages if pages is not None else 'publisher-defined'}")
-    if pages is None:
+    lines.append(f"pages (the metered unit): {pages if pages is not None else 'publisher-defined'}")
+    if documents is None:
         return "\n".join(lines)
-    low = high = 0.0
     for target in targets:
         if target.kind == "strategy":
             lines.append(
-                f"  {target.reference}: not priced (a strategy escalates, so one document is one "
-                "or more billed calls)"
+                f"  {target.reference}: at least {documents} call(s) — a strategy escalates, so "
+                "one document is one or more calls"
             )
             continue
-        cost = _backend_target_cost(target.reference, target.name, pages)
-        if cost.priced:
-            low += cost.low_usd or 0.0
-            high += cost.high_usd or 0.0
-            lines.append(f"  {target.reference}: ${cost.low_usd:.2f} to ${cost.high_usd:.2f}")
-        else:
-            lines.append(f"  {target.reference}: not priced ({cost.note})")
-    if targets:
-        lines.append(f"  total (priced targets): ${low:.2f} to ${high:.2f}")
-    lines.append("  a range from each backend's declared per-page rates, not a quote")
+        lines.append(_backend_target_scope(target.reference, target.name, documents).render())
+    lines.append("  a hosted target bills your own account; the rates are on your invoice")
     return "\n".join(lines)
 
 
@@ -1497,7 +1471,7 @@ def _benchmark_subset(args, descriptor, data_dir: Path, targets) -> Path | None:
     """
     import hashlib
 
-    from openreading.evals.preflight import confirm, estimate_cost
+    from openreading.evals.preflight import confirm, scope_run
     from openreading.evals.subset import CorpusError, materialize_subset, plan_subset
 
     try:
@@ -1506,12 +1480,12 @@ def _benchmark_subset(args, descriptor, data_dir: Path, targets) -> Path | None:
         print(f"[benchmark] {exc}", file=sys.stderr)
         return None
 
-    estimate = estimate_cost(plan, targets)
-    print(estimate.render())
+    scope = scope_run(plan, targets)
+    print(scope.render())
     for document in plan.documents:
         print(f"  document: {document.doc_id}")
-    if not confirm(estimate, assume_yes=args.yes):
-        print("[benchmark] stopped before spending", file=sys.stderr)
+    if not confirm(scope, assume_yes=args.yes):
+        print("[benchmark] stopped before running", file=sys.stderr)
         return None
 
     if plan.is_complete:
@@ -2276,7 +2250,6 @@ Examples:
   openreading calibrate src/openreading/evals/sample --strategy main \\
     --config openreading.yaml       # the sample dataset that ships here
   openreading calibrate samples/ --strategy main --target-escalation 0.15
-  openreading calibrate samples/ --strategy main --max-cost-per-doc 0.05
 
 This needs an openreading.yaml, because it tunes a strategy you wrote. A gate
 is a threshold your strategy sets for a result it will accept. This
@@ -2316,7 +2289,7 @@ Exits: 0 complete. 1 the publisher recorded a failure, scoring included.
 2 an unknown profile, target, preset or document, a missing package, or a run
 you stopped at the spending prompt. 3 a fault outside the publisher run.
 
-More: openreading help benchmark, openreading help cost""",
+More: openreading help benchmark, openreading help usage""",
     "benchmark list": """\
 Examples:
   openreading benchmark list                  # every profile, offline
@@ -2393,7 +2366,7 @@ Then:
 Exits: 0 ok. 2 an unknown or cataloged profile, a bad target or preset, or a
 terms acknowledgement you have not given.
 
-More: openreading help benchmark, openreading help cost""",
+More: openreading help benchmark, openreading help usage""",
     "benchmark report": """\
 Examples:
   openreading benchmark report                        # ./benchmark-results
@@ -2435,7 +2408,7 @@ Exits: 0 complete. 1 the publisher recorded a failed document, or scoring
 failed. 2 a bad profile, target, preset, --jobs or --doc, a missing package,
 or a run stopped at the prompt. 3 a fault outside the publisher's boundary.
 
-More: openreading help benchmark, openreading help cost""",
+More: openreading help benchmark, openreading help usage""",
     "rules": """\
 Examples:
   openreading rules src/openreading/evals/sample   # print what it would add
@@ -3037,9 +3010,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="fraction of docs that should escalate past rung 1 (e.g. 0.15)",
-    )
-    calibrate.add_argument(
-        "--max-cost-per-doc", type=float, default=None, help="budget ceiling per doc (e.g. 0.05)"
     )
     calibrate.set_defaults(func=cmd_calibrate)
 

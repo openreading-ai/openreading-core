@@ -77,7 +77,7 @@ def test_batch_result_failed_items_validate():
                 error={"code": "backend_error", "message": "boom"},
             ),
         ],
-        summary=BatchSummary(total=2, succeeded=0, failed=2, cost_bases=["estimated"]),
+        summary=BatchSummary(total=2, succeeded=0, failed=2),
     )
     schemas.validate_batch_result(br.to_schema_dict())
 

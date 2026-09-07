@@ -41,8 +41,8 @@ POST /v1/parse
     never enter it. `url` / `file_id` documents a backend ingests natively are never cached (the
     bytes behind an address can change); the cache dies with the process. Named-backend runs,
     /v1/batch and strategy runs are never replayed (DECISIONS D-v3-3: a replayed batch item would
-    sum an unbilled `usage.cost_usd` into the summary; silent memoization inside a library call
-    is a footgun, so the server owns the only cache).
+    sum `usage` counters into the summary for work nobody did; silent memoization inside a library
+    call is a footgun, so the server owns the only cache).
 POST /v1/route
     Body: vendored request. Response: the plan only, nothing executed —
     {"chosen", "fallbacks": [...], "dropped": {id: {"stage", "code", "reason"}}, "terminal_reason"}.

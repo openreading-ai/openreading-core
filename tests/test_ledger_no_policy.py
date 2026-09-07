@@ -1,6 +1,6 @@
 """The ledger keeps no policy about the caller's own disk.
 
-`design/ledger-policy-removal.md`. Three things left core in this change, all for one reason: a
+. Three things left core in this change, all for one reason: a
 directory on the operator's own machine is theirs.
 
 **Retention.** A destructor whose only job was deleting the caller's data on a timer, defaulting

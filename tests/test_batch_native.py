@@ -225,18 +225,15 @@ def test_native_and_platform_are_observationally_equivalent(tmp_path, monkeypatc
     assert {i["transport"] for i in native["items"]} == {"native"}
     assert {i["transport"] for i in platform["items"]} == {"platform"}
 
-    # BL-100: native must not silently drop cost accounting. _FakeNative.report_cost always
+    # BL-100: native must not silently drop usage accounting. _FakeNative.report_cost always
     # returns infra_only("page", 1.0) regardless of transport, so a correctly-metered native item
-    # is indistinguishable from its platform counterpart: same cost_basis, same pages_processed,
-    # no invented cost_usd (infra_only reports no dollar figure — merge_cost_report never invents
-    # one, so the key is dropped by to_schema_dict's exclude_none rather than sent as null).
+    # is indistinguishable from its platform counterpart: the same page count, and no money on
+    # either.
     for env in (native, platform):
         for item in env["items"]:
             usage = item["response"]["usage"]
-            assert usage["cost_basis"] == "infra_only"
             assert usage["pages_processed"] == 1
-            assert "cost_usd" not in usage
-    assert native["summary"]["cost_bases"] == platform["summary"]["cost_bases"] == ["infra_only"]
+            assert "cost_usd" not in usage and "cost_basis" not in usage
     assert native["summary"]["pages_processed"] == platform["summary"]["pages_processed"] == 3
 
 

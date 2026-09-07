@@ -156,7 +156,6 @@ def _backend(bid, rank, mean, n_cases, n_scored, errors=0, nd=False, dims=None):
         "n_cases": n_cases,
         "n_scored": n_scored,
         "errors": errors,
-        "cost_per_doc": 0.0,
         "non_deterministic": nd,
         "dimensions": dims or {},
     }

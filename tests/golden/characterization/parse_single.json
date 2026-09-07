@@ -278,7 +278,6 @@
     "state": "succeeded"
   },
   "usage": {
-    "cost_basis": "infra_only",
     "pages_processed": 1
   },
   "warnings": [

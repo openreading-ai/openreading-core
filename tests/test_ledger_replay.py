@@ -616,10 +616,10 @@ def test_pinned_eligible_is_armed_on_resume_and_the_gate_refuses_a_changed_descr
     assert fresh is not None
 
     # A "live" registry whose "x" descriptor has genuinely changed since the original run pinned
-    # it (a different cost profile) — config_hash/plan_hash are held fixed here (matching the
-    # header) so this test isolates the gate mechanism itself, per F6's own narrow finding, rather
-    # than the header-comparison path AC-4's own test already covers.
-    v2_reg = scripted_registry(ScriptedBackend("x", local=True, text="hi", cost_low=99.0))
+    # it (a capability the v1 descriptor did not declare) — config_hash/plan_hash are held fixed
+    # here (matching the header) so this test isolates the gate mechanism itself, per F6's own
+    # narrow finding, rather than the header-comparison path AC-4's own test already covers.
+    v2_reg = scripted_registry(ScriptedBackend("x", local=True, text="hi", page_ranges=True))
     resumed_executor = _arm_ledger(
         run_id,
         req,

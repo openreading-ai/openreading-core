@@ -182,18 +182,6 @@
                 "null"
               ]
             },
-            "cost_usd": {
-              "type": [
-                "number",
-                "null"
-              ]
-            },
-            "cost_basis": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
             "pages": {
               "type": "integer",
               "minimum": 0
@@ -343,7 +331,6 @@
             "field_missed",
             "field_value_conflict",
             "confidence_gap",
-            "cost_outlier",
             "empty_output",
             "structure"
           ]

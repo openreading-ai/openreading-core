@@ -1,6 +1,6 @@
 """The router no longer decides what a backend can read, and batch dispatches everything.
 
-`design/format-agnostic-intake.md` part 1. The stage-2 format branch dropped a backend when the
+part 1. The stage-2 format branch dropped a backend when the
 request's MIME type fell outside its descriptor's `input_formats`. That was a per-vendor
 capability table, and vendors change what they accept without telling us.
 

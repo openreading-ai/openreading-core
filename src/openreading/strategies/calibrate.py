@@ -1,12 +1,17 @@
 """`openreading calibrate` — derive gate thresholds from a labeled sample (signals.md §5).
 
-Raw thresholds are meaningless to users; the usable knobs are an **escalation rate** and a
-**budget**. Principle (signals.md §5, spec §4.4): *users pick rates and budgets; tools derive
-thresholds.* This module runs the strategy's rung-1 backend over a labeled sample, scores each
+Raw thresholds are meaningless to users; the usable knob is an **escalation rate**, the fraction
+of a sample that would fall through to the next rung. Principle (signals.md §5, spec §4.4): *users
+pick rates; tools derive thresholds.* This module used to report a `cost_per_doc` per operating
+point and accept a `--max-cost-per-doc` budget filter. Both multiplied the escalation rate by a
+price read off `descriptor.cost`, a number this package wrote down about someone else's rate card
+and could not verify, and the escalation rate it multiplied was the only measured half
+. The rate is what calibration now reports, and it is the figure a
+caller multiplies by their own invoice. This module runs the strategy's rung-1 backend over a labeled sample, scores each
 result with the EXISTING eval scorers (`openreading.evals.scorers` — no parallel scoring path),
 computes the engine's own signal probe per document, sweeps each gated threshold over its domain,
-and reports candidate operating points (threshold → predicted escalation rate, predicted cost/doc,
-scorer agreement) plus the recommended point as a ready-to-paste `escalate_if:` block. **It
+and reports candidate operating points (threshold → predicted escalation rate, scorer agreement)
+plus the recommended point as a ready-to-paste `escalate_if:` block. **It
 proposes; it never rewrites the user's config** — the file the user commits is the authority.
 
 Two layers: `sweep_predicate` is a PURE function over pre-computed observations (unit-testable
@@ -71,14 +76,12 @@ class Observation:
 class OperatingPoint:
     threshold: float
     escalation_rate: float  # fraction of the sample that would escalate at this threshold
-    cost_per_doc: float  # rung-1 cost + escalation_rate * rung-2 cost (descriptor basis)
     scorer_agreement: float  # fraction where the gate decision matches the scorer's verdict
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "threshold": self.threshold,
             "escalation_rate": round(self.escalation_rate, 4),
-            "cost_per_doc": round(self.cost_per_doc, 6),
             "scorer_agreement": round(self.scorer_agreement, 4),
         }
 
@@ -100,7 +103,6 @@ class CalibrationReport:
     rung2_backend: str | None
     sweeps: list[PredicateSweep] = field(default_factory=list)
     target_escalation: float | None = None
-    max_cost_per_doc: float | None = None
 
     def recommended_block(self) -> dict[str, Any]:
         """The ready-to-paste `escalate_if:` block (a RECOMMENDATION — the user commits the file)."""
@@ -118,7 +120,6 @@ class CalibrationReport:
             "rung1_backend": self.rung1_backend,
             "rung2_backend": self.rung2_backend,
             "target_escalation": self.target_escalation,
-            "max_cost_per_doc": self.max_cost_per_doc,
             "sweeps": [
                 {
                     "predicate": s.predicate,
@@ -134,18 +135,14 @@ class CalibrationReport:
 def _recommend(
     points: list[OperatingPoint],
     target_escalation: float | None,
-    max_cost_per_doc: float | None,
 ) -> OperatingPoint | None:
-    """Pick the operating point that best meets the user's target (signals.md §5: users pick rates
-    and budgets, tools derive thresholds). Budget is a hard filter; among the survivors, get closest
-    to the target escalation rate (ties → higher scorer agreement → lower threshold); with no target,
-    maximize scorer agreement then minimize cost. Deterministic."""
+    """Pick the operating point that best meets the user's target (signals.md §5: users pick rates,
+    tools derive thresholds). With a target, get closest to it (ties → higher scorer agreement →
+    lower threshold); with no target, maximize scorer agreement, then prefer the lower escalation
+    rate, then the higher threshold. Deterministic."""
     if not points:
         return None
     survivors = points
-    if max_cost_per_doc is not None:
-        affordable = [p for p in points if p.cost_per_doc <= max_cost_per_doc + 1e-9]
-        survivors = affordable or points  # if nothing fits the budget, still recommend the cheapest
     if target_escalation is not None:
         return min(
             survivors,
@@ -155,17 +152,14 @@ def _recommend(
                 p.threshold,
             ),
         )
-    return max(survivors, key=lambda p: (p.scorer_agreement, -p.cost_per_doc, -p.threshold))
+    return max(survivors, key=lambda p: (p.scorer_agreement, -p.escalation_rate, -p.threshold))
 
 
 def sweep_predicate(
     observations: list[Observation],
     predicate: str,
     *,
-    rung1_cost: float,
-    rung2_cost: float,
     target_escalation: float | None = None,
-    max_cost_per_doc: float | None = None,
     quality_bar: float = 0.8,
 ) -> PredicateSweep:
     """PURE sweep of one gated predicate over its domain — no backend involved. `quality_bar` labels
@@ -175,8 +169,8 @@ def sweep_predicate(
     (no recognized `expected` dimension — an ordinary "not labeled yet" shape, not a claim of
     perfection) carries no quality label at all, so it is excluded from `scorer_agreement`'s
     numerator AND denominator entirely, rather than silently reading as "agrees with every
-    threshold" (BL-79). It still counts toward `escalation_rate`/`cost_per_doc`, which are
-    signal-only and need no label."""
+    threshold" (BL-79). It still counts toward `escalation_rate`, which is signal-only and needs
+    no label."""
     signal_field, direction = _PREDICATE_SIGNAL[predicate]
     n = len(observations)
     needs = [o.scorer_overall < quality_bar for o in observations if o.scorer_overall is not None]
@@ -185,7 +179,6 @@ def sweep_predicate(
     for t in _domain(predicate):
         fires = [_fires(o.signals.get(signal_field), t, direction) for o in observations]
         esc = sum(fires) / n if n else 0.0
-        cost = rung1_cost + esc * rung2_cost
         scored_fires = [
             f for f, o in zip(fires, observations, strict=True) if o.scorer_overall is not None
         ]
@@ -194,10 +187,8 @@ def sweep_predicate(
             if n_scored
             else 0.0
         )
-        points.append(OperatingPoint(t, esc, cost, agree))
-    return PredicateSweep(
-        predicate, points, _recommend(points, target_escalation, max_cost_per_doc)
-    )
+        points.append(OperatingPoint(t, esc, agree))
+    return PredicateSweep(predicate, points, _recommend(points, target_escalation))
 
 
 def calibrate_strategy(
@@ -207,7 +198,6 @@ def calibrate_strategy(
     registry: Any,
     *,
     target_escalation: float | None = None,
-    max_cost_per_doc: float | None = None,
     quality_bar: float = 0.8,
     router_config: Any = None,
 ) -> CalibrationReport:
@@ -265,10 +255,6 @@ def calibrate_strategy(
     a1 = registry.get(rung1_backend)
     if a1 is None:
         raise ValueError(f"rung-1 backend {rung1_backend!r} is not registered")
-    a2 = registry.get(rung2_backend) if rung2_backend else None
-    rung1_cost = _descriptor_cost(a1.descriptor)
-    rung2_cost = _descriptor_cost(a2.descriptor) if a2 else 0.0
-
     # (BL-112) fold the strategy file's own `policy:` block into the RouterConfig once — it is a
     # deployment-wide setting that does not vary per case, the same fold compile_strategy performs
     # before every route(). The compliance side is folded PER CASE below (not here), because
@@ -351,10 +337,7 @@ def calibrate_strategy(
         sweep_predicate(
             observations,
             p,
-            rung1_cost=rung1_cost,
-            rung2_cost=rung2_cost,
             target_escalation=target_escalation,
-            max_cost_per_doc=max_cost_per_doc,
             quality_bar=quality_bar,
         )
         for p in predicates
@@ -367,24 +350,4 @@ def calibrate_strategy(
         rung2_backend=rung2_backend,
         sweeps=sweeps,
         target_escalation=target_escalation,
-        max_cost_per_doc=max_cost_per_doc,
     )
-
-
-def _descriptor_cost(desc: Any) -> float:
-    """A per-doc cost proxy from the descriptor (spec §6.2 basis): 0 for local; else the LOW
-    per-page-equivalent rate × an ASSUMED 25 pages. Both halves are modeling choices, not
-    measurements: the low end because a proxy that ranks backends must not move with a vendor's
-    ceiling, and 25 because nothing in this call knows the caller's documents — the descriptor is
-    all it is given. So the number is comparable across backends and wrong as an absolute for any
-    corpus whose average document is not 25 pages. Every consumer (`calibrate`'s sweep points,
-    `evals.leaderboard`'s `cost_per_doc` column) inherits both. Substituting the real page count
-    of scored documents is not a local edit: no page count survives `evals.runner.run_case`, and
-    per-backend measured denominators would make the column rank rows on different bases."""
-    # A local backend used to short-circuit to zero here via `runs_fully_local`. That field
-    # was a vendor-claim struct and is gone; a backend that publishes no price falls through to
-    # the unpriced default below, which is the honest answer for a number core cannot know.
-    lo = desc.cost.usd_per_page_equiv_low
-    hi = desc.cost.usd_per_page_equiv_high
-    rate = lo if lo is not None else (hi if hi is not None else 0.05)
-    return rate * 25  # _ASSUMED_PAGES, matching the engine's cost precheck

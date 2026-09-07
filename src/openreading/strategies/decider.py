@@ -185,14 +185,13 @@ belt and suspenders): `None` → `refusal`, out-of-set → `malformed`; a port t
 1. Candidates are built post-pruning. Compliance-dropped backends were removed from the tree
    before execution, so they never appear in `candidates`; the decider cannot choose what it
    cannot see.
-2. Decider spend is recorded, not enforced. Each call that RETURNS lands as a `decider_call`
-   attempt (judge calls as `judge_call`) in the trail carrying the cost the port reported
-   (`cost_usd`; 0 is stored as None), summed into `usage.cost_usd` like any other attempt —
-   honest money, no budget wall. A `DeciderPort.decide` that raises is caught (`malformed`) BEFORE
-   the attempt is recorded, so a raising call leaves no `decider_call` and no cost in the trail;
-   only its downgrade shows on the decision record. Today the recorded figure is a proxy: real
-   token accounting needs the adapter to report usage from the Messages call and lands with the
-   wire adapter (D-v3-17).
+2. Decider calls are recorded, not enforced. Each call that RETURNS lands as a `decider_call`
+   attempt (judge calls as `judge_call`) in the trail, so a reader can count them. A
+   `DeciderPort.decide` that raises is caught (`malformed`) BEFORE the attempt is recorded, so a
+   raising call leaves nothing in the trail; only its downgrade shows on the decision record. The
+   port used to report a `cost_usd` per call and the engine summed it into `usage.cost_usd`. Both
+   are gone with the rest of core's money: the caller's own provider
+   bill is where a decider's spend is visible.
 3. Compliance is never visible (cited as "rail 4" in engine comments). Pruning happens upstream;
    no compliance constraint, `DropReason`, or dropped backend appears in any `DecisionPoint`. The
    decider decides quality/latency trade-offs; it has no compliance surface to reason about,
@@ -265,7 +264,7 @@ port (D-v3-17): `JudgePort.compare` judges ONE ordered pair and returns a positi
   labels (`JudgeCandidate.label` "A"/"B"), sources hidden. Inconsistent verdicts across the two
   orderings count as a tie.
 - Ties break deterministically and identically to the engine comparator: cheaper backend
-  (descriptor cost midpoint), then first-listed (lower branch index). The spec asks for ties to be
+  first-listed (lower branch index). The spec asks for ties to be
   traced as ties; the engine does not: `_judge_pair` returns `_tie_break_pair(a, b, ctx)` with no
   annotation, and the one `judge` record (`_record_judge`) carries no tie field, so a tie-broken
   winner is indistinguishable in the trace from a consistent verdict.
@@ -277,7 +276,7 @@ port (D-v3-17): `JudgePort.compare` judges ONE ordered pair and returns a positi
   context; the operator's trace still names the chosen/eligible backends.
 - More than two candidates: single-elimination against the current best, in listed order — n−1
   pairs, 2·(n−1) calls, bounded cost. More than three candidates is a `validate` warning.
-- Judge calls are recorded attempts, category `judge_call`, each carrying its reported cost.
+- Judge calls are recorded attempts, category `judge_call`.
 - Downgrade: a judge that is ungated (`env_disabled`), compliance-ineligible (`compliance`,
   §3.5), portless (`unavailable`), or absent from a replay trace (`trace_missing`) yields the
   engine's deterministic composite score, traced `decider_downgraded`; the LLM path and every
@@ -457,12 +456,11 @@ class DecisionPoint:
 @dataclass
 class DecisionVerdict:
     """What a decider executor returns for one decision point. `action` is a candidate the model
-    chose (or `None` = declined → `refusal`). `cost_usd` is the call's backend-reported cost — the
-    engine records it as a `decider_call` attempt (its billed cost) in the trail (decider.md §3.3).
+    chose (or `None` = declined → `refusal`). The engine records the call as a `decider_call`
+    attempt in the trail (decider.md §3.3).
     `rationale` is bounded trace prose, never an instruction to the engine."""
 
     action: str | None
-    cost_usd: float = 0.0
     model_id: str | None = None
     rationale: str | None = None
 
@@ -470,8 +468,8 @@ class DecisionVerdict:
 class DeciderPort(Protocol):
     """The 14.2 LLM executor seam for gate-band / decide points. `decide` performs the strict
     single-tool invocation (`build_decider_tool`) and returns a `DecisionVerdict`; the engine
-    re-validates the action against the candidate list (`revalidate_action`) and records the call's
-    cost — the port is never trusted blindly (decider.md §3.2)."""
+    re-validates the action against the candidate list (`revalidate_action`) and records the call
+    as an attempt — the port is never trusted blindly (decider.md §3.2)."""
 
     def decide(self, dp: DecisionPoint) -> DecisionVerdict: ...
 
@@ -489,11 +487,10 @@ class JudgeCandidate:
 
 @dataclass
 class JudgeVerdict:
-    """One pairwise judgment. `winner` is a positional label ("A"/"B"); `cost_usd` is the call's
-    backend-reported cost, recorded as a `judge_call` attempt."""
+    """One pairwise judgment. `winner` is a positional label ("A"/"B"). The engine records each
+    call as a `judge_call` attempt."""
 
     winner: str  # "A" | "B"
-    cost_usd: float = 0.0
     model_id: str | None = None
 
 

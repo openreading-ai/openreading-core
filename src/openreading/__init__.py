@@ -225,8 +225,7 @@ Top level: `schema_version`, `status`, `backend`, `document` (required) + option
       },
       "typed_fields": {"total": {"value": "$4,400.00", "type": "string", "confidence": 0.96,
                                  "citations": [..]}},
-      "usage": {"duration_ms": 120, "cost_usd": 0.02, "cost_basis": "estimated",
-                "pages_processed": 2},
+      "usage": {"duration_ms": 120, "pages_processed": 2},
       "warnings": [{"code": "confidence_unavailable", "message": "..",
                     "field": "block_confidence"}]
     }
@@ -299,8 +298,7 @@ summary, warnings?}`. `items[i]` = `{source{relpath, filename, format, sha256, .
 succeeded|failed|skipped, response? (a full response.v0.3), error?{code, message},
 transport: platform|native|null. That is null
 on a `skipped` item, which never ran}`. `summary` =
-`{total, succeeded, failed, skipped, duration_ms, cost_usd, cost_bases[], pages_processed,
-backends{id: count}}`. Batch status: `succeeded` (>=1 ok, 0 failed) / `partial` (some of each) /
+`{total, succeeded, failed, duration_ms, pages_processed, backends{id: count}}`. Batch status: `succeeded` (>=1 ok, 0 failed) / `partial` (some of each) /
 `failed` (0 succeeded).
 
 `corpus-report.v0.1`: `{schema_version, subjects[], documents[{source, verdict:
@@ -326,15 +324,14 @@ Rules a caller must not get wrong
   independent calls and `--jobs` is how many run concurrently. Only a backend whose descriptor
   declares `batch.native` (Anthropic Message Batches) sends the whole list in one request. The
   envelope is identical either way.
-- Cost: a batch of N files on a hosted backend is N billed calls, with no discount unless a native
-  batch path applies. Local backends are free. `usage.cost_usd` totals every backend that ran;
-  `cost_basis` (closed enum) says what the number IS: `billed` (the provider's charge),
-  `estimated` (pricing model, most hosted backends), `infra_only` (local / self-hosted: pymupdf,
-  tesseract, docling, qwen-vl, which have no `cost_usd`), `unknown` (nuextract). Normally
-  filled, not never null: the router fills it from the adapter's cost report when the adapter
-  left it unset, but a `report_cost` that raises degrades to whatever `normalize()` set
-  (`str | null`) plus a `cost_unavailable` warning. Treat a missing `cost_basis` as
-  "unmetered". The engine never invents a number or enforces a budget from one.
+- Usage: a batch of N files on a hosted backend is N calls on your own key, with no discount
+  unless a native batch path applies. `usage` reports what each backend consumed in the unit it
+  meters in: `pages_processed`, `credits`, `input_tokens`, `output_tokens`, `duration_ms`. There
+  are no dollars anywhere in this package. Converting a counter into a price needed a per-vendor
+  rate core kept in its own source and could not verify, so `usage.cost_usd` and `cost_basis` are
+  gone along with the rates. Multiply these counters by the prices on
+  your own invoice, which is the only rate card that carries your tier. A `report_cost` that
+  raises degrades to whatever `normalize()` reported, plus a `cost_unavailable` warning.
 - CLI exit codes: 0 ok · 1 unexpected error / a batch where nothing succeeded · 2 usage error
   (unknown backend/strategy, unresolvable source, over `--max-items`/`--max-jobs`, compare misuse)
   · 3 cannot run (missing credentials naming the env var + signup URL; auth rejected, where the key
@@ -424,10 +421,9 @@ prose. Branch on:
 - corpus verdict `divergent`: backends materially disagree on this document -> route it through
   a `compare:` + `then:` strategy.
 
-Why the output can be trusted blind: never fabricate (absence is signal); compliance fails
-closed before anything runs; honest accounting (`usage.cost_usd` per attempt and in total, each
-labeled by `cost_basis`; the `orchestration` trace records machine-readably why every backend
-ran or did not).
+Why the output can be trusted blind: never fabricate (absence is signal); core holds no fact it
+cannot verify, so what reaches you was measured or came off the wire; the `orchestration` trace
+records machine-readably why every backend ran or did not.
 
 ONE trace vocabulary is closed, and it is not the whole trace. Every attempt's `category` comes
 from `openreading.strategies.trace.CATEGORIES`, a real 13-member frozenset you can import and
@@ -525,16 +521,16 @@ strategy `orchestration`, the batch summary and an armed ledger, with no common 
 Under review, and unlike the gaps above these propose REMOVING behaviour this package ships
 today, so read the record before relying on either feature: the compliance filter and the
 per-vendor compliance table leave core entirely, because core cannot verify a claim about a
-vendor and must not appear to enforce one (design records: `design/compliance-removal.md`,
+vendor and must not appear to enforce one (design records: ,
 `product/specs/compliance-removal.product-spec.md`); the stage-2 format gate goes the same way,
 and the several extension-to-MIME tables collapse into one resolver that answers "unknown"
-instead of guessing PDF (design record: `design/format-agnostic-intake.md`); the ledger stops
+instead of guessing PDF (design record: ); the ledger stops
 `optimize_for`, the stage-3 scorer, the capability gate and
 `auto` itself go with them, so choosing a backend becomes a lookup rather than an inference, the
-one the caller wrote (design records: `design/explicit-backends.md`,
+one the caller wrote (design records: ,
 `design/unverifiable-claims-sweep.md`). Vendor pricing goes the same way, so `usage` keeps the
 counters a backend reported and stops converting them into dollars core cannot verify (design
-record: `design/cost-removal.md`). `design/README.md` states the test all six apply, the order
+record: ). `design/README.md` states the test all six apply, the order
 they land in, and what each one deletes.
 
 Extending it (agent-executable)

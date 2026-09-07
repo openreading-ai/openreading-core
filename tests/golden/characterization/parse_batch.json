@@ -281,7 +281,6 @@
           "state": "succeeded"
         },
         "usage": {
-          "cost_basis": "infra_only",
           "pages_processed": 1
         },
         "warnings": [
@@ -940,7 +939,6 @@
           "state": "succeeded"
         },
         "usage": {
-          "cost_basis": "infra_only",
           "pages_processed": 2
         },
         "warnings": [
@@ -979,9 +977,6 @@
     "backends": {
       "pymupdf": 2
     },
-    "cost_bases": [
-      "infra_only"
-    ],
     "failed": 0,
     "pages_processed": 3,
     "succeeded": 2,

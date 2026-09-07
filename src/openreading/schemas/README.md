@@ -140,8 +140,7 @@ fixing. In the required column, n/a marks a row that names a whole object rather
 | `BBox.bbox_native` | no | the raw source geometry, untouched | n/a | 62–91 |
 | `BBox.bbox_native.origin` | no | one of `top_left`, `bottom_left` | closed, `MAJOR` only | 73–76 |
 | `BBox.bbox_native.unit` | no | one of `normalized`, `pdf_point`, `pixel`, `inch` | closed, `MAJOR` only | 79–84 |
-| `usage.cost_usd` | no | a number when the backend reports a cost. Absent on both local backends today, by the same absence rule as `warnings`. Never sum it without checking `cost_basis` first | n/a | 539–542 |
-| `usage.cost_basis` | no | `billed` means the backend charged this run, so the number is real money. `estimated` means a published rate was applied to a page count, so it is a projection and not spend. `infra_only` means a local backend ran and `cost_usd` is absent, so your only cost is your own compute. `unknown` means the backend reported no basis at all | closed, `MAJOR` only | 543–550 |
+| `usage.pages_processed` `credits` `input_tokens` `output_tokens` `duration_ms` | no | numbers, each in the unit the backend meters in, absent when the backend reported none. No dollar field: `cost_usd` and `cost_basis` were removed with the per-vendor price tables that filled them | n/a | 522–540 |
 | `warnings[]` | no | items are `{code, message, field}`, all strings. The key is **absent** when nothing warned, never present and empty | `code` is open, `MINOR` | 580–597 |
 | `orchestration` | no | object, present only for a run a strategy or a fallback chain drove. It is declared `additionalProperties: true` with no properties of its own, so the schema names nothing inside it and a validator checks nothing you read there. Every closed set within it is a promise made by code instead, listed field by field in the docs home's [open and closed register](../README.md#what-is-closed-and-what-only-looks-closed) | nothing inside it is closed at the schema level | 627–631 |
 | `channel_provenance` | no | map of channel name to `native` or `derived`. A channel is one kind of output inside the envelope, such as text, markdown or blocks. Marked `x-stability: experimental` | experimental, so outside the guarantees entirely | 632–642 |
@@ -168,8 +167,9 @@ uv run openreading parse sample.pdf --backend tesseract | jq -c 'keys'
 ```
 
 **You should see** `warnings` on the pymupdf run, which reports `confidence_unavailable`, and no
-`warnings` key at all on the tesseract run. The same rule governs `usage.cost_usd`, which is
-absent on a local run, and `typed_fields`, which is absent when no backend produced any.
+`warnings` key at all on the tesseract run. The same rule governs every `usage` counter, each
+absent when the backend reported none, and `typed_fields`, which is absent when no backend
+produced any.
 
 ### Reading an error
 

@@ -1773,7 +1773,7 @@ def _metered(
     adapter, job: Job, req, ctx: RunContext, credentials: ResolvedCredentials | None = None
 ) -> dict:
     """Normalize + meter a finished async job — the /v1/jobs and /v1/webhooks surfaces return the
-    same response envelope as /v1/parse, so `usage.cost_usd` is filled the same way.
+    same response envelope as /v1/parse, so `usage` is filled the same way.
 
     `credentials` (BL-93): forwarded to `apply_cost_report` so a `report_cost()` failure's warning
     is redacted the same way a `normalize()` failure's message is by the caller's own

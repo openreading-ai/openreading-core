@@ -55,7 +55,6 @@ from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
     ConfigField,
-    Cost,
     CredentialField,
     Output,
     OutputChannels,
@@ -67,7 +66,6 @@ from openreading.types.descriptor import (
 from openreading.types.enums import (
     BackendType,
     ChannelGrade,
-    CostBasis,
     JobState,
     OutputParadigm,
     ResponseState,
@@ -166,7 +164,7 @@ def _descriptor() -> AdapterDescriptor:
         adapter_impl="http",
         operations=["parse", "extract"],
         provisioning=Provisioning(
-            byo_mode=["api_key"], auth="api_key", billing_target="caller_account"
+            byo_mode=["api_key"], auth="api_key"
         ),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(
@@ -183,7 +181,6 @@ def _descriptor() -> AdapterDescriptor:
             max_pages_per_request=1000,
             max_file_size="50 MB",
         ),
-        cost=Cost(native_unit="token", basis="unknown", lossiness="page-def"),
         runtime=RuntimeProfile(
             offline_capable=False,
             license="proprietary",
@@ -634,10 +631,4 @@ class GoogleGeminiAdapter(BackendAdapter):
             (self._token_count(usage, "total_input_tokens") or 0)
             + (self._token_count(usage, "total_output_tokens") or 0)
         )
-        return CostReport(
-            native_unit="token",
-            native_quantity=quantity,
-            cost_usd=None,
-            basis=CostBasis.UNKNOWN,
-            billing_target="caller_account",
-        )
+        return CostReport(native_unit="token", native_quantity=quantity)

@@ -130,8 +130,8 @@ silently turned `0` back into the default (BL-138).
 No idempotency cache in library calls (D-v3-3): `run()` / the CLI pass `cache=None` so a library
 call always does the work; the server owns the only `BoundedResultCache` and passes it to
 `run_request` for the `auto` chain. Silent 15-minute memoization inside a library call is a
-footgun, and a replayed response would carry the original run's `cost_usd` into a batch total
-nobody was billed for.
+footgun, and a replayed response would carry the original run's `usage` counters into a batch
+total describing work nobody did.
 
 Batch semantics (`run_batch`)
 -----------------------------
@@ -1143,27 +1143,6 @@ def resume_run(run_id: str) -> dict[str, Any]:
     return result.response.to_schema_dict()
 
 
-def _effective_formats(backend: str, broker: EnvCredentialBroker) -> set[str]:
-    """The M3 supported-format set for a batch (internal/design/batch-intake.md §4): a directly named
-    backend contributes its own input_formats; `auto` / a `strategy:` id contributes the union
-    across every READY backend (an unready backend can't take anything). Normalized tokens."""
-    from openreading.adapters.registry import BUILTIN_ADAPTERS
-    from openreading.batch.sources import normalize_input_format
-    from openreading.readiness import backend_readiness
-
-    def _fmts(desc) -> set[str]:
-        return {normalize_input_format(f) for f in desc.capabilities.input_formats}
-
-    if backend is None or backend.startswith(_STRATEGY_PREFIX):
-        out: set[str] = set()
-        for slug in BUILTIN_ADAPTERS:
-            adapter = make_adapter(slug)
-            if backend_readiness(adapter, broker=broker).ready:
-                out |= _fmts(adapter.descriptor)
-        return {f for f in out if f}
-    return {f for f in _fmts(make_adapter(backend).descriptor) if f}
-
-
 def run_batch(
     sources: list[str],
     backend: str | None = None,
@@ -1233,9 +1212,10 @@ def run_batch(
         backend = f"{_STRATEGY_PREFIX}{strategy}"
     broker = broker or EnvCredentialBroker()
 
-    resolved = resolve_intake(
-        list(sources), supported_formats=_effective_formats(backend, broker), max_items=max_items
-    )
+    # No `supported_formats`: intake dispatches every source the caller named, and a backend that
+    # cannot read one refuses first-hand. Computing the set meant sweeping readiness for every
+    # registered backend on the way into a run that then ignored the answer.
+    resolved = resolve_intake(list(sources), max_items=max_items)
     if on_preflight is not None:
         on_preflight(resolved, backend)
 
@@ -1298,9 +1278,10 @@ def run_batch(
     return result.to_schema_dict()
 
 
-def _native_adapter(backend: str, resolved: list, broker: EnvCredentialBroker):
+def _native_adapter(backend: str | None, resolved: list, broker: EnvCredentialBroker):
     """§7 dispatch rule → the adapter to use for a native batch, or None for platform fan-out.
-    Native iff: a directly named backend (not auto/strategy), its descriptor declares `batch.native`
+    Native iff: a directly named backend (not a strategy, and not absent), its descriptor declares
+    `batch.native`
     truthy, it implements the NativeBatchAdapter protocol, there is >=1 non-skipped item, and the
     count is within `batch.max_items`."""
     from openreading.adapters.base import NativeBatchAdapter
@@ -1325,7 +1306,7 @@ def _native_adapter(backend: str, resolved: list, broker: EnvCredentialBroker):
 def _run_native(
     adapter,
     resolved: list,
-    backend: str,
+    backend: str | None,
     *,
     broker: EnvCredentialBroker,
     transport,

@@ -55,12 +55,11 @@ from openreading.adapters._http import error_for_status
 from openreading.adapters.base import BackendAdapter
 from openreading.derive import html_table_to_table, md_to_text, table_to_text
 from openreading.types.blocks import Block, Table, TypedField
-from openreading.types.cost import CostBasis, CostReport
+from openreading.types.cost import CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
     ConfigField,
-    Cost,
     CredentialField,
     Output,
     OutputChannels,
@@ -103,8 +102,6 @@ D = ChannelGrade.DERIVABLE
 
 _BASE_URL = "https://api.mistral.ai"
 _DEFAULT_MODEL = "mistral-ocr-latest"
-_OCR_USD_PER_PAGE = 0.004
-_ANNOTATED_USD_PER_PAGE = 0.005
 
 # The image formats the OCR endpoint documents; the data: URL MIME is derived from the extension
 # when the caller gives none, because a PNG labelled image/jpeg is rejected or mis-decoded.
@@ -196,7 +193,7 @@ def _descriptor() -> AdapterDescriptor:
         adapter_impl="http",
         operations=["parse", "extract"],
         provisioning=Provisioning(
-            byo_mode=["api_key"], auth="api_key", billing_target="caller_account"
+            byo_mode=["api_key"], auth="api_key"
         ),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(
@@ -213,13 +210,6 @@ def _descriptor() -> AdapterDescriptor:
             vlm_based="claimed",
             page_range_selection=True,
             input_formats=["pdf", "docx", "pptx", "png", "jpg", "jpeg", "avif"],
-        ),
-        cost=Cost(
-            native_unit="page",
-            basis="estimated",
-            usd_per_page_equiv_low=_OCR_USD_PER_PAGE,
-            usd_per_page_equiv_high=_ANNOTATED_USD_PER_PAGE,
-            lossiness="none",
         ),
         runtime=RuntimeProfile(offline_capable=False, license="proprietary", version_pin="api"),
         output=Output(
@@ -781,12 +771,4 @@ class MistralOCRAdapter(BackendAdapter):
             pages = float(value)
         elif isinstance(raw.get("pages"), list):
             pages = float(len(raw["pages"]))
-        annotated = bool(job.raw and job.raw.object_class == "extract")
-        price = _ANNOTATED_USD_PER_PAGE if annotated else _OCR_USD_PER_PAGE
-        return CostReport(
-            native_unit="page",
-            native_quantity=pages or 0.0,
-            cost_usd=None if pages is None else pages * price,
-            basis=CostBasis.UNKNOWN if pages is None else CostBasis.ESTIMATED,
-            billing_target="caller_account",
-        )
+        return CostReport(native_unit="page", native_quantity=pages or 0.0)

@@ -16,7 +16,7 @@
     "policy": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Deployment policy. One key: the backends this deployment permits, in preference order. It replaces nine compliance keys that asked the engine to enforce a posture from a per-vendor table it could not verify (design/compliance-removal.md).",
+      "description": "Deployment policy. One key: the backends this deployment permits, in preference order. It replaces nine compliance keys that asked the engine to enforce a posture from a per-vendor table it could not verify.",
       "properties": {
         "backends": {
           "type": "array",

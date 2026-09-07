@@ -21,8 +21,6 @@ from typing import Any
 
 from openreading import schemas
 from openreading.adapters.registry import BUILTIN_ADAPTERS, make_adapter
-from openreading.router import compliance as comp
-from openreading.router.compliance import RouterConfig
 from openreading.strategies.model import RawNode, StrategyConfig
 from openreading.strategies.normalize import (
     DEFAULT_BUNDLE,
@@ -122,18 +120,9 @@ class _Ctx:
         self.current_dialect: str | None = None
         self.decider_configured = config.decider is not None and config.decider.llm is not None
         self.issues: list[ValidationIssue] = []
-        # The steps-unreachable check used to build a compliance context here and ask the
-        # router which backends survived stage 1. There is no stage 1, so there is nothing to
-        # make a step unreachable that the author cannot already see in their own file.
-        self._compliance = None
-        self._router_config: RouterConfig | None = None
-
-    def policy_drop(self, desc) -> str | None:
-        """Return a drop reason if the effective policy would filter this backend out, else None."""
-        if self._compliance is None or self._router_config is None:
-            return None
-        dr = comp.evaluate(self._compliance, desc, self._router_config)
-        return dr.code if dr is not None else None
+        # The steps-unreachable check used to build a compliance context here and ask the router
+        # which backends survived stage 1. There is no stage 1 and no filter, so a step is
+        # unreachable only in ways the author can already see in their own file.
 
     def err(self, path: str, message: str) -> None:
         self.issues.append(ValidationIssue("error", path, message))
@@ -437,14 +426,6 @@ def _check_leaf(node: dict[str, Any], path: str, ctx: _Ctx, eff_deadline_ms: Any
             f"{path}.timeout",
             f"per-attempt timeout {node['timeout']} exceeds the effective deadline and will be "
             "clamped",
-        )
-    # steps unreachable under the file's own `policy:` block
-    drop = ctx.policy_drop(desc)
-    if drop is not None:
-        ctx.warn(
-            f"{path}.backend",
-            f"{slug!r} is filtered out by the policy ({drop}). This step can never run in that "
-            "compliance context. Remove it or relax the policy",
         )
     # step-position gate bindability + `missing:` on a backend that cannot produce typed fields
     for gate_key in ("escalate_if", "review_if"):

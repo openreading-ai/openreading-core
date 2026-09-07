@@ -61,16 +61,12 @@ def test_scoreboard_facts() -> None:
         backend_type="oss_library",
         pages=[[{"type": "title", "text": "Hi"}, {"type": "text", "text": "world"}]],
         duration_ms=12,
-        cost_usd=0.0,
-        cost_basis="infra_only",
     )
     b = make_envelope("tesseract", backend_type="oss_library", text="x")
     facts = _subj(compare([a, b]), "pymupdf")["facts"]
     assert facts == {
         "state": "succeeded",
         "duration_ms": 12,
-        "cost_usd": 0.0,
-        "cost_basis": "infra_only",
         "pages": 1,
         "blocks": 2,
         # BL-136: chars is the canonical-text derivation's own block fallback — blocks joined in

@@ -19,8 +19,6 @@ from .ingest import Subject
 from .stances import baseline_section, consensus_section, truth_section
 from .text import text_section
 
-_COST_OUTLIER_FACTOR = 3.0  # a subject costing ≥ this × the mean of the others is flagged
-
 _SEVERITY_RANK = {"major": 0, "warn": 1, "info": 2}
 
 # The non-determinism rule. The response carries NO determinism signal, and output_paradigm is
@@ -146,30 +144,6 @@ def _facts_findings(subjects: list[Subject]) -> list[dict[str, Any]]:
     return out
 
 
-def _cost_findings(subjects: list[Subject]) -> list[dict[str, Any]]:
-    costs = [(s.label, subject_facts(s)["cost_usd"]) for s in subjects]
-    priced = [(label, c) for label, c in costs if isinstance(c, int | float) and c > 0]
-    if len(priced) < 2:
-        return []
-    top_label, top_cost = max(priced, key=lambda x: x[1])
-    others = [c for label, c in priced if label != top_label]
-    mean_others = sum(others) / len(others)
-    if mean_others > 0 and top_cost >= _COST_OUTLIER_FACTOR * mean_others:
-        return [
-            {
-                "code": "cost_outlier",
-                "severity": "info",
-                "page": None,
-                "field": None,
-                "bbox": None,
-                "subjects": [top_label],
-                "detail": f"{top_label} cost ${top_cost:.4f} ≥ {_COST_OUTLIER_FACTOR}× the "
-                f"${mean_others:.4f} mean of the others",
-            }
-        ]
-    return []
-
-
 def _propagated_warnings(subjects: list[Subject]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for s in subjects:
@@ -202,7 +176,6 @@ def build_report(
         *text_findings,
         *block_findings,
         *_facts_findings(subjects),
-        *_cost_findings(subjects),
     ]
     nd_labels = _nondeterministic_labels(subjects)
     _cap_nondeterministic(raw_findings, nd_labels)  # the non-determinism rule

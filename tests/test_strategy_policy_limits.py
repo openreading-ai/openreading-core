@@ -85,7 +85,7 @@ def test_file_level_zero_duration_ceiling_prunes_hedge():
     # the ceiling through the file-level `limits:` block instead of a node-level `budget:`.
     reg = scripted_registry(
         ScriptedBackend("pymupdf", local=True, text=CLEAN),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN),
+        ScriptedBackend("reducto", text=CLEAN),
     )
     cfg = {
         "version": 1,
@@ -111,7 +111,7 @@ def test_file_level_nonzero_duration_ceiling_still_prunes_hedge():
     # nonzero path).
     reg = scripted_registry(
         ScriptedBackend("pymupdf", local=True, text=CLEAN),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN),
+        ScriptedBackend("reducto", text=CLEAN),
     )
     cfg = {
         "version": 1,

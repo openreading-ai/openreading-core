@@ -10,7 +10,6 @@
     "provisioning",
     "wait_modes",
     "capabilities",
-    "cost",
     "runtime"
   ],
   "properties": {
@@ -65,13 +64,6 @@
             "oauth2",
             "entra",
             "gcp_adc"
-          ]
-        },
-        "billing_target": {
-          "enum": [
-            "caller_account",
-            "openreading",
-            "caller_infra"
           ]
         }
       }
@@ -166,51 +158,6 @@
             "element"
           ],
           "description": "Optional hint: the native granularity of this backend's blocks so consumers and compare can reason about packaging differences instead of discovering them empirically (\u00a74.3)."
-        }
-      }
-    },
-    "cost": {
-      "type": "object",
-      "properties": {
-        "native_unit": {
-          "enum": [
-            "page",
-            "credit",
-            "token",
-            "doc",
-            "gpu_second",
-            "cpu_second",
-            "subscription"
-          ]
-        },
-        "usd_per_page_equiv_low": {
-          "type": [
-            "number",
-            "null"
-          ]
-        },
-        "usd_per_page_equiv_high": {
-          "type": [
-            "number",
-            "null"
-          ]
-        },
-        "basis": {
-          "enum": [
-            "billed",
-            "estimated",
-            "infra_only",
-            "unknown"
-          ]
-        },
-        "lossiness": {
-          "enum": [
-            "none",
-            "page-def",
-            "per-doc",
-            "credit",
-            "subscription"
-          ]
         }
       }
     },

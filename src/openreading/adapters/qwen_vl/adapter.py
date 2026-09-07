@@ -33,7 +33,6 @@ from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
     ConfigField,
-    Cost,
     CredentialField,
     LivenessProbe,
     Output,
@@ -170,7 +169,7 @@ def _descriptor() -> AdapterDescriptor:
         protocol_version=2,
         adapter_impl="http",
         provisioning=Provisioning(
-            byo_mode=["weights", "endpoint"], auth="none", billing_target="caller_infra"
+            byo_mode=["weights", "endpoint"], auth="none"
         ),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(
@@ -189,7 +188,6 @@ def _descriptor() -> AdapterDescriptor:
             page_range_selection=True,
             input_formats=["png", "jpg", "pdf (rasterized)"],
         ),
-        cost=Cost(native_unit="gpu_second", basis="infra_only", usd_per_page_equiv_low=0.0),
         runtime=RuntimeProfile(
             offline_capable=True,
             license="Apache-2.0 (Qwen3-VL; Qwen2.5-VL per-size)",

@@ -543,6 +543,40 @@ and `tests/test_schema_evolution.py` pins every released file byte for byte.
   `config_hash`, which folds a digest per descriptor by design (BL-163), so a run journaled before
   this release and resumed after it is refused with a hash mismatch. Finish in-flight runs before
   upgrading, or re-run them.
+- **Core quotes no price for anything.** Cost was three things wearing one word. An
+  **observation**: `pages_processed`, `credits`, `input_tokens`, `output_tokens` are counters the
+  vendor returned for this call, and `duration_ms` comes off a clock on this machine. Those stay.
+  An **assertion**: `descriptor.cost.usd_per_page_equiv_low`/`_high` on fifteen adapters, plus
+  private price tables inside four of them, one dated `accessed 2026-06-24` in its own comment.
+  Someone read a pricing page and typed numbers into Python. And a **derivation** laundering the
+  second into the first: `router/cost.py` multiplied the tables out into `response.usage.cost_usd`
+  and set it beside `input_tokens`, where no caller could tell which number was counted and which
+  was guessed. The assertion and the derivation are gone. **Removed:** `descriptor.cost` and
+  `provisioning.billing_target` (**`adapter-descriptor` v0.8**), `usage.cost_usd` and
+  `usage.cost_basis` (**`response` v0.3**), `summary.cost_usd` and `summary.cost_bases`
+  (**`batch-result` v0.2**), the `cost_outlier` compare finding and the per-subject cost columns
+  (**`comparison-report` v0.2**), the leaderboard's `cost_per_doc` column
+  (**`leaderboard-report` v0.1**), the `CostBasis` enum, `StepCost` on the ledger record
+  (**`step` v0.1**, **`journal` v0.1**), the strategy engine's whole money fold (`_set_total_cost`,
+  `_fold_basis`, `_branch_cost`, `_rung_basis`, `Attempt.cost_usd`/`cost_basis`,
+  `Trace.total_cost`, `DecisionVerdict.cost_usd`, `JudgeVerdict.cost_usd`), `calibrate`'s
+  `cost_per_doc` and its `--max-cost-per-doc` flag, and the benchmark spending preflight
+  (`estimate_cost`, `CostEstimate`, `CONFIRM_ABOVE_USD`). `CostReport` keeps `native_unit`,
+  `native_quantity`, `breakdown` and `duration_ms`. Every schema touched is an unreleased cut, so
+  no released file moves.
+- **Two tie-breaks and one gate change behaviour.** `pick: best` and `pick: merge` broke a tie on
+  the cheaper backend, read from `descriptor.cost`; they break on the **first-listed** branch now,
+  which is the author's own statement of preference and a fact core can actually check. The
+  benchmark confirmation prompt fired above one dollar; it fires above **25 pages** on a hosted
+  target, or whenever a target's call count cannot be stated at all, which is what a `strategy:`
+  target is.
+- **`openreading help cost` is now `openreading help usage`,** and `cost` is an alias so the old
+  spelling still opens it. The chapter reports what a run consumes rather than what it charges.
+  `benchmark estimate` and the batch `[preflight]` advisory both count calls and pages instead of
+  multiplying a rate: `[preflight] 16 items on hosted backend reducto: 16 call(s) on your own key`.
+- **`config_hash` moves again.** Deleting `cost` from every descriptor changes the per-descriptor
+  digest it folds (BL-163), so a run journaled before this release cannot be resumed after it.
+  Same remedy as the `page_range_selection` change above: finish in-flight runs first, or re-run.
 - **`--pages` explains the argparse trap it falls into.** `parse --pages 1 doc.pdf` feeds the
   file to `--pages`, and the error named a private function at the reader.
 - **`anthropic-claude` sends an image as an image.** A PNG or JPEG was labeled `application/pdf`

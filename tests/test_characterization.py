@@ -137,9 +137,12 @@ def _strategy() -> Any:
 
 
 def _leaderboard() -> Any:
-    """Two local backends over the one dataset this repository ships. Carries `cost_per_doc`,
-    which `design/cost-removal.md` deletes, so this pin is how that change proves its blast
-    radius stopped where it said it would."""
+    """Two local backends over the one dataset this repository ships.
+
+    It used to carry `cost_per_doc`, a descriptor-derived column never measured by the benchmark
+    it sat in. deleted it, and this pin is how that change proved its
+    blast radius stopped where it said it would: the ranking, the dimensions and the error tally
+    came through unmoved."""
     from openreading.evals import run_leaderboard
 
     report = run_leaderboard(
@@ -147,8 +150,8 @@ def _leaderboard() -> Any:
     ).to_schema_dict()
     # Two backends are required by `run_leaderboard`, and pymupdf plus tesseract is the only
     # keyless local pair. Tesseract's own rows are dropped from the pin because its scores depend
-    # on whether this machine's OCR binary works. The ranking machinery, the dimensions and
-    # `cost_per_doc` all survive on the pymupdf row, which is what this pin is for.
+    # on whether this machine's OCR binary works. The ranking machinery and the dimensions both
+    # survive on the pymupdf row, which is what this pin is for.
     report["backends"] = [b for b in report["backends"] if b["backend_id"] == "pymupdf"]
     for case in report.get("cases", []):
         if isinstance(case.get("scores"), dict):
@@ -157,7 +160,7 @@ def _leaderboard() -> Any:
 
 
 def _resume(tmp_ledger: Path) -> Any:
-    """An armed run replayed from its journal. `design/ledger-policy-removal.md` deletes
+    """An armed run replayed from its journal. deletes
     retention, the reaper and encryption at rest, all of which sit on this path, so a resumed
     envelope that still matches afterwards is the evidence that only policy was removed.
 

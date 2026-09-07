@@ -29,11 +29,10 @@ from openreading.derive import (
     table_to_text,
 )
 from openreading.types.blocks import Block, Chunk, Citation, TypedField
-from openreading.types.cost import CostBasis, CostReport
+from openreading.types.cost import CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    Cost,
     CredentialField,
     Output,
     OutputChannels,
@@ -252,7 +251,7 @@ def _descriptor() -> AdapterDescriptor:
         adapter_impl="http",
         operations=["parse", "extract", "split", "classify", "edit", "pipeline"],
         provisioning=Provisioning(
-            byo_mode=["api_key"], auth="api_key", billing_target="caller_account"
+            byo_mode=["api_key"], auth="api_key"
         ),
         wait_modes=[WaitMode.INLINE, WaitMode.WEBHOOK, WaitMode.POLL],
         capabilities=Capabilities(
@@ -269,13 +268,6 @@ def _descriptor() -> AdapterDescriptor:
             vlm_based="claimed",
             input_formats=["pdf", "png", "jpg", "docx", "xlsx", "pptx"],
             max_pages_per_request="unbounded (async)",
-        ),
-        cost=Cost(
-            native_unit="credit",
-            basis="billed",
-            usd_per_page_equiv_low=0.015,
-            usd_per_page_equiv_high=0.06,
-            lossiness="credit",
         ),
         runtime=RuntimeProfile(
             offline_capable=False, license="proprietary", version_pin="reducto-api"
@@ -741,12 +733,8 @@ class ReductoAdapter(BackendAdapter):
     def report_cost(self, job: Job) -> CostReport:
         usage = (job.raw.payload or {}).get("usage", {}) if job.raw else {}
         credits = usage.get("credits", 0.0)
-        pages = usage.get("num_pages", 1) or 1
         return CostReport(
             native_unit="credit",
             native_quantity=float(credits),
-            cost_usd=float(credits) * 0.015 if credits else 0.015 * pages,
-            basis=CostBasis.BILLED,
-            billing_target="caller_account",
             breakdown=usage.get("page_billing_breakdown"),
         )

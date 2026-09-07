@@ -293,8 +293,8 @@ another strategy runs that strategy's own rules; the outer `escalate_when` does 
 and `strategy validate` says so — loud, never silent. The final rung is never gated: keep-best,
 `on_quality_exhausted: best_effort`, and honest `warnings[]` are the inherited defaults.
 
-`race` — first *successful* response wins; losers cancelled; loser cost still lands in
-`usage.cost_usd`. `escalate_when` beside `race` is a load error, but a generic one: the shape is
+`race` — first *successful* response wins; losers cancelled; a cancelled loser's call still
+reached the vendor, and the trace records it. `escalate_when` beside `race` is a load error, but a generic one: the shape is
 rejected by `additionalProperties: false` on the schema's `plain_race_body` and surfaced by the
 loader as the located schema error ("invalid config at 'strategies/<name>': {...} is not valid
 under any of the given schemas"). The schema's `description` ("a race keeps the first success;
@@ -468,13 +468,12 @@ scanned-PDF fixture produces (the attempt line's timing is illustrative):
 Guardrails you get for free
 ===========================
 
-* Honest costs. `usage.cost_usd` totals every backend that ran, winners and losers alike — the
-  amount each one reported, labeled by `cost_basis` (`billed` | `estimated` | `infra_only` |
-  `unknown`, the `response.v0.3.json` enum, folded by priority `billed > estimated >
-  infra_only > unknown`; a real cost with no basis coalesces to `unknown`); the engine never
-  invents a number.
-* Compliance is untouchable. The file's `policy:` block prunes ineligible backends before
-  anything runs; no strategy can re-admit one.
+* Every attempt on the record. `orchestration.attempts[]` names every backend that ran, winners
+  and losers alike, so you can count the calls a run made. It carries no price: the totals it used
+  to publish as `usage.cost_usd` were built from per-vendor rates core could not verify
+ . `usage` reports what a backend consumed in its own unit.
+* The backend list is untouchable. The file's `policy.backends` allow-list is the whole
+  candidate set; no strategy can reach outside it.
 * Never silent. If everything gates, you get the best result kept so far with honest
   `warnings[]`, never a fabricated answer.
 
@@ -499,13 +498,13 @@ Design decisions, and the failure each avoids
   additive, the config `version` const stays 1, and v0.2 validates every v0.1 config.
 * Presets stay vendored in longhand; they carry `intent:`, which Plain cannot spell. The docs
   pair each with its Plain near-equivalent (`openreading.strategies.presets`).
-* No dollar ceiling. Prices change too often for a plan-time estimate to be honest, so the
-  engine reports the real billed cost and never enforces a spending wall. `budget:` carries
+* No dollar ceiling, and no dollars at all. Prices change too often for anything core writes down
+  to stay true, so the engine quotes none and enforces no spending wall. `budget:` carries
   `max_duration` and `max_attempts`, and `validate` refuses any file that declares
   `max_attempts`, because no engine code reads it. `budget_exhausted` therefore always means
   the time deadline.
 * No pre-parse scan router: the cheap first rung *is* the free scan detector. No auto-tiering by
-  descriptor cost: ordering stays explicit.
+  descriptor price: ordering stays explicit, in the order you wrote.
 
 Non-goals: no route/decide/judge/review/on_error/granularity/extends/with/shadow/hedge in Plain
 (all advanced, unchanged); no renaming of advanced constructs; no dotted-path or alias forms in

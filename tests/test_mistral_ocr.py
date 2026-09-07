@@ -17,7 +17,7 @@ from openreading.adapters.mistral_ocr import MistralOCRAdapter
 from openreading.ledger.header import slim_request
 from openreading.testing import ConformanceCase, check_adapter_conformance
 from openreading.types import BlockType, JobState
-from openreading.types.enums import CostBasis, WaitMode
+from openreading.types.enums import WaitMode
 from openreading.types.request import OpenReadingRequest
 from openreading.types.runtime import RunContext
 
@@ -217,7 +217,7 @@ def test_extraction_schema_without_json_schema_is_a_plain_ocr_call() -> None:
     assert "document_annotation_prompt" not in client.last_body
     assert job.raw is not None and job.raw.object_class == "parse"
     assert resp.backend.operation == "parse"
-    assert adapter.report_cost(job).cost_usd == pytest.approx(2 * 0.004)
+    assert adapter.report_cost(job).native_quantity == 2
 
 
 def test_cost_is_estimated_from_pages_and_annotation_mode() -> None:
@@ -227,11 +227,12 @@ def test_cost_is_estimated_from_pages_and_annotation_mode() -> None:
 
     parse_cost = adapter.report_cost(parse_job)
     extract_cost = adapter.report_cost(extract_job)
+    # Both report the page count Mistral returned. Annotation used to be priced a tenth of a cent
+    # higher per page than plain OCR; that rate is gone and the pages
+    # are identical either way, because the same document was sent.
     assert parse_cost.native_quantity == 2
-    assert parse_cost.cost_usd == pytest.approx(0.008)
-    assert extract_cost.cost_usd == pytest.approx(0.01)
-    assert parse_cost.basis is CostBasis.ESTIMATED
-    assert parse_cost.billing_target == "caller_account"
+    assert parse_cost.native_unit == "page"
+    assert extract_cost.native_quantity == parse_cost.native_quantity
 
 
 def test_missing_credentials_names_required_environment_variable() -> None:

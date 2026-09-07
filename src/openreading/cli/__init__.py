@@ -270,55 +270,56 @@ answer different questions, so no arrow joins them.
     openreading parse examples/ --strategy fast > all.json
     openreading explain all.json
 
-What a run costs, and how to spend less
----------------------------------------
-Every response carries a `usage` block, and `usage.cost_basis` is the honest
-label on the number beside it: `billed` came from the vendor, `estimated` came
-from a descriptor's published rate, `infra_only` means nothing was billed
-because the backend ran on your machine, and `unknown` means neither is
-available. A batch-result rolls the labels up as `summary.cost_bases`, so one
-line tells you whether a folder run spent anything at all.
+What a run uses, and how to use less
+------------------------------------
+Every response carries a `usage` block, and it reports what the backend
+consumed in the unit that backend meters in: `pages_processed`, `credits`,
+`input_tokens`, `output_tokens`, `duration_ms`. A counter the backend did not
+report is absent rather than zero.
 
     $ jq -c .usage out.json
-    {"pages_processed":1,"cost_basis":"infra_only"}
+    {"pages_processed":1}
 
-Per-page backends charge for pages, so document count alone understates a
-multi-page corpus. Forty forty-page documents contain forty times the pages
-of forty single-page documents. Other backends bill tokens or operations.
-Their per-page equivalent rates are estimates, when available, rather than
-the vendor's billing unit.
+There is no dollar figure anywhere in this package. `usage.cost_usd` and
+`usage.cost_basis` were removed along with the per-vendor price tables that
+filled them. Turning a page count into money needed a rate read off a vendor
+page and typed into this source, which nothing here could verify and nothing
+could tell had gone stale. The derived figure then sat on `usage` beside
+counters that were genuinely measured, and no reader could tell which was
+which. Multiply these counters by the prices on your own invoice, which is the
+one rate card carrying your tier and your negotiated rate.
 
-Four commands can spend more than you expect, each for its own reason.
+Four commands do more work than you may expect, each for its own reason.
 
   parse <folder>      one run per document. A hosted backend with more than ten
-                      live items prints a `[preflight]` estimate to stderr
-                      before it starts, stated per page with the single-page
-                      total multiplied out.
+                      live items prints a `[preflight]` line to stderr first,
+                      naming how many calls leave your machine and on whose
+                      key.
   compare --backends  one full run per subject. Three backends on one document
-                      is three billed runs of that document, not one.
+                      is three runs of that document, not one.
   leaderboard         cases times backends. `--all-ready` over a real dataset
-                      is the largest bill in this CLI.
+                      is the largest run in this CLI.
   benchmark run       someone else's corpus, so it runs two documents unless
-                      you say otherwise, prints pages and a dollar range first,
-                      and asks before anything unpriced or over a dollar. CI
+                      you say otherwise, prints pages and a call count first,
+                      and asks before a large or unbounded hosted run. CI
                       passes `--yes`.
 
-How to spend less.
+How to use less.
 
-Start local. `pymupdf` and `tesseract` need no key and bill nothing, so a
+Start local. `pymupdf` and `tesseract` need no key and no network, so a
 pipeline is worth debugging on them before a hosted backend ever sees it. Ask
 first. `openreading route doc.pdf` and `openreading strategy
 plan doc.pdf --strategy main` print what WOULD run and execute nothing. Cascade
-instead of fanning out. A `try:` strategy pays for the expensive backend only
-on the documents the cheap one could not read, where `compare:` pays for both
-on every document. Keep the sample small. `calibrate` and `benchmark run` both
+instead of fanning out. A `try:` strategy reaches the expensive backend only on
+the documents the cheap one could not read, where `compare:` calls both on
+every document. Keep the sample small. `calibrate` and `benchmark run` both
 take a subset, and a threshold found on 30 documents transfers to 3000. Raise
-`--jobs` freely. Concurrency changes how long a folder takes and never what it
-costs.
+`--jobs` freely. Concurrency changes how long a folder takes and never how many
+calls it makes.
 
-A skipped file costs nothing, because the skip decision is taken before the
-document is sent. A failed one may still have been billed, because the request
-left. `openreading help batch` has the difference.
+Every source is dispatched, so a file a backend cannot read still costs one
+call: it comes back as a failed item carrying that backend's own reason.
+`openreading help batch` has the shape.
 
 parse <file|url|dir|glob ...>
 -----------------------------
@@ -788,8 +789,8 @@ executes every repeated `--target`, and writes publisher artifacts beneath
 replaces complete publisher artifacts, while an ordinary rerun resumes by
 letting the official harness skip valid results.
 
-What a benchmark run costs, and how to spend less
-................................................
+What a benchmark run uses, and how to use less
+.............................................
 `run` prints the comparison when it finishes, ranked by the publisher's own
 numbers, and writes `openreading-run.json` beside the artifacts so a later
 reader can tell which pipeline was which target. `report` prints that same
@@ -798,8 +799,8 @@ json` for a script. Neither computes a score: both read the publisher's
 `_evaluation_report.json` back, so the terminal and the publisher's dashboard
 cannot disagree.
 
-`run` touches **two documents** unless you say otherwise, because it spends
-your money on someone else's API. `--limit N` runs N, `--limit 0` runs the
+`run` touches **two documents** unless you say otherwise, because it calls
+someone else's API on your key. `--limit N` runs N, `--limit 0` runs the
 whole prepared corpus, and `--doc NAME` (repeatable) runs documents you name by
 id (`table/doc1`) or file stem. A limited run is written out as a corpus in the
 publisher's own format, so every metric and report behaves exactly as it does
@@ -809,20 +810,20 @@ place.
 Documents under `--limit` are chosen round-robin across the corpus's
 categories, so two documents span two categories rather than two charts. The
 order is stable, so the same `--limit` picks the same documents and a rerun
-resumes instead of re-billing.
+resumes instead of running them again.
 
 Before a target runs, `run` prints the documents it chose, their PAGE count,
-and a dollar range per target. Pages expose volume that document counts hide:
-ExtractBench is 370 documents and 4,869 pages. A range, because a descriptor
-carries a low and a high rate and
-both are shown. Two things stay deliberately unpriced rather than guessed low:
-a `strategy:` target, which escalates and so bills one or more calls per
-document, and a token-billed backend that publishes no per-page rate.
+and the call count per target. Pages expose volume that document counts hide:
+ExtractBench is 370 documents and 4,869 pages. It quotes no price: the rates it
+used to multiply were a vendor rate card typed into this package's own source,
+unverifiable from here. One target reports its calls as a floor rather than a
+count: a `strategy:` target escalates, so one document is one or more calls,
+and nothing here knows how many rungs fire.
 
-Anything unpriced, or above one dollar at the high end, asks before it spends.
-`--yes` answers in advance. With no terminal attached the question is not asked
-and the run refuses, naming `--yes`, because a CI job hung on stdin is worse
-than one that stops.
+A hosted run above twenty-five pages, or one whose call count cannot be stated
+at all, asks before it starts. `--yes` answers in advance. With no terminal
+attached the question is not asked and the run refuses, naming `--yes`, because
+a CI job hung on stdin is worse than one that stops.
 
 Every document calls `openreading.run`, including a `strategy:NAME` target
 selected with `--config`. The file's `policy:` block therefore keeps its normal

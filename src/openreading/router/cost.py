@@ -1,9 +1,13 @@
-"""Cost accounting — the one place an adapter's `CostReport` becomes `response.usage`.
+"""Usage accounting — the one place an adapter's `CostReport` becomes `response.usage`.
 
-Adapters meter (`report_cost` projects `job.raw` counters through the pricing model); the router
-accounts. That split is the response schema's own wording for `usage`: "the router computes
-cost_usd via the pricing model, filling what the backend reports". Every path that turns a
-finished Job into a response calls `apply_cost_report` right after `normalize()`.
+Adapters meter (`report_cost` projects the counters out of `job.raw`); the router accounts. Every
+path that turns a finished Job into a response calls `apply_cost_report` right after
+`normalize()`.
+
+There is no pricing model here any more. This module used to fill `usage.cost_usd` and
+`usage.cost_basis` from a per-vendor price table each hosted adapter carried, which core could
+not verify and could not tell had gone stale. What crosses now is
+what a vendor reported or a clock measured.
 
 Two rules keep the merge honest:
 
@@ -26,10 +30,6 @@ from openreading.types.runtime import ResolvedCredentials
 def merge_cost_report(resp: NormalizedResponse, report: CostReport) -> None:
     """Project `report` onto `resp.usage`, filling only fields the adapter left unset."""
     usage = resp.usage or Usage()
-    if usage.cost_usd is None:
-        usage.cost_usd = report.cost_usd
-    if usage.cost_basis is None:
-        usage.cost_basis = str(report.basis)
     if usage.duration_ms is None:
         usage.duration_ms = report.duration_ms
 

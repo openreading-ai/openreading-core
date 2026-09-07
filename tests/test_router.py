@@ -2,7 +2,7 @@
 
 This file used to test three stages: a compliance hard-filter over a per-vendor table, a
 capability gate over `input_formats` and five `Features` flags, and a cost/quality scorer. All
-three are gone (`design/compliance-removal.md`, `design/explicit-backends.md`), and with them the
+three are gone, and with them the
 twenty-odd tests that pinned their worked examples.
 
 What remains is small on purpose. Selection is the backend the caller named, else

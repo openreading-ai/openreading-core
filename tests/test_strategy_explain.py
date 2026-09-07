@@ -70,8 +70,8 @@ def test_plain_gate_records_carry_source_word():
 
 def test_plain_source_maps_each_criterion_word():
     reg = scripted_registry(
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN, typed_fields={}),  # missing fires
-        ScriptedBackend("anthropic-claude", cost_low=0.01, text=CLEAN),
+        ScriptedBackend("reducto", text=CLEAN, typed_fields={}),  # missing fires
+        ScriptedBackend("anthropic-claude", text=CLEAN),
     )
     cfg = {
         "version": 1,
@@ -91,7 +91,7 @@ def test_plain_source_maps_each_criterion_word():
 def test_advanced_gate_records_have_no_source():
     reg = scripted_registry(
         ScriptedBackend("pymupdf", local=True, text=GARBLED),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN),
+        ScriptedBackend("reducto", text=CLEAN),
     )
     cfg = {
         "version": 1,

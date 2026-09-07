@@ -13,7 +13,6 @@ from openreading.adapters.google_gemini import GoogleGeminiAdapter
 from openreading.ledger.header import slim_request
 from openreading.testing import ConformanceCase, check_adapter_conformance
 from openreading.types import BlockType
-from openreading.types.enums import CostBasis
 from openreading.types.request import OpenReadingRequest
 from openreading.types.runtime import ResolvedCredentials, RunContext
 
@@ -175,14 +174,11 @@ def test_request_model_override_wins_over_environment_config():
     assert client.last_call is not None and client.last_call["model"] == "gemini-requested"
 
 
-def test_cost_is_unknown_but_token_quantity_is_preserved():
+def test_token_quantity_is_reported_in_the_unit_gemini_meters_in():
     adapter = GoogleGeminiAdapter(client=FakeGeminiClient())
     cost = adapter.report_cost(adapter.submit(_req(), RunContext()))
     assert cost.native_unit == "token"
     assert cost.native_quantity == 2580
-    assert cost.cost_usd is None
-    assert cost.basis is CostBasis.UNKNOWN
-    assert cost.billing_target == "caller_account"
 
 
 def test_gemini_is_flagged_non_deterministic_for_compare_and_leaderboard():

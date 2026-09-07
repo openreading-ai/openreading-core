@@ -1,4 +1,4 @@
-"""Corpus subsetting and the spending preflight.
+"""Corpus subsetting and the scope preflight.
 
 Both publisher formats are built by hand in ``tests/conftest.py``, to the shape their own loader
 documents: ParseBench's JSONL corpus (``{category}.jsonl`` whose ``pdf`` key is a path relative to
@@ -7,8 +7,12 @@ Building them rather than downloading keeps this in the offline lane, where a te
 money or waits on HuggingFace does not belong.
 
 What these lock down is the promise that makes a small run safe: the subset a reader asks for is
-the subset that runs, it is written in the format the publisher reads back, and the price is
-counted in pages rather than documents before anything bills.
+the subset that runs, it is written in the format the publisher reads back, and the work is
+counted in pages rather than documents before a hosted backend sees any of it.
+
+The preflight used to price that work from `descriptor.cost` and gate on a dollar total.
+took the rates out, so what it reports is the count and which targets
+bill the caller's own account, and the gate is a page threshold.
 """
 
 from __future__ import annotations
@@ -20,10 +24,10 @@ from pathlib import Path
 import pytest
 
 from openreading.evals.preflight import (
-    CONFIRM_ABOVE_USD,
+    CONFIRM_ABOVE_PAGES,
     confirm,
     count_pages,
-    estimate_cost,
+    scope_run,
 )
 from openreading.evals.subset import (
     CorpusError,
@@ -176,67 +180,67 @@ def test_pages_are_counted_from_the_documents_not_assumed(tmp_path) -> None:
 
     pages, unknown = count_pages(plan)
 
-    # The bundled sample is two pages, so two documents bill four pages. A document count would
-    # have said two, which is the understatement this whole module exists to remove.
+    # The bundled sample is two pages, so two documents are four pages of work. A document count
+    # would have said two, which is the understatement this whole module exists to remove.
     assert (pages, unknown) == (4, 0)
 
 
-def test_estimate_prices_per_page_and_names_the_range(tmp_path) -> None:
+def test_scope_counts_pages_and_calls_and_says_who_is_billed(tmp_path) -> None:
     plan = plan_subset(_jsonl_corpus(tmp_path), limit=2)
 
-    estimate = estimate_cost(plan, [BenchmarkTarget.parse("backend:reducto")])
+    scope = scope_run(plan, [BenchmarkTarget.parse("backend:reducto")])
 
-    # reducto declares $0.015 to $0.06 a page, over four pages.
-    assert estimate.pages == 4
-    assert estimate.targets[0].low_usd == pytest.approx(0.06)
-    assert estimate.targets[0].high_usd == pytest.approx(0.24)
-    assert "4 page(s)" in estimate.render()
-    assert "per-page rates, not a quote" in estimate.render()
+    assert scope.pages == 4  # two documents, two pages each
+    assert scope.targets[0].calls == 2  # one call per document
+    assert scope.targets[0].hosted is True
+    assert "4 page(s)" in scope.render()
+    assert "bills your own account" in scope.render()
 
 
-def test_a_local_backend_prices_at_zero_and_never_prompts(tmp_path) -> None:
+def test_a_local_backend_is_named_local_and_never_prompts(tmp_path) -> None:
     plan = plan_subset(_jsonl_corpus(tmp_path), limit=2)
 
-    estimate = estimate_cost(plan, [BenchmarkTarget.parse("backend:pymupdf")])
+    scope = scope_run(plan, [BenchmarkTarget.parse("backend:pymupdf")])
 
-    assert estimate.high_usd == 0.0
-    assert estimate.needs_confirmation is False
+    assert scope.hosted == ()
+    assert "runs on this machine" in scope.render()
+    assert scope.needs_confirmation is False
 
 
-def test_a_strategy_target_is_unpriced_and_always_asks(tmp_path) -> None:
+def test_a_strategy_target_reports_a_floor_rather_than_a_count(tmp_path) -> None:
     plan = plan_subset(_jsonl_corpus(tmp_path), limit=2)
 
-    estimate = estimate_cost(plan, [BenchmarkTarget.parse("strategy:main")])
+    scope = scope_run(plan, [BenchmarkTarget.parse("strategy:main")])
 
-    # Escalation means one document is one or more billed calls, and nothing here knows how many.
-    # Guessing the low end would read as a quote for a run that can cost several times it.
-    assert estimate.unpriced == ("strategy:main",)
-    assert estimate.needs_confirmation is True
-    assert "escalates" in estimate.render()
+    # Escalation means one document is one or more calls, and nothing here knows how many.
+    # Reporting the document count as the call count would understate a run that escalates.
+    assert scope.targets[0].calls is None
+    assert "at least 2 call(s)" in scope.render()
 
 
-def test_a_token_billed_backend_is_unpriced_rather_than_free(tmp_path) -> None:
+def test_a_token_metered_backend_is_still_counted_in_calls(tmp_path) -> None:
     plan = plan_subset(_jsonl_corpus(tmp_path), limit=2)
 
-    estimate = estimate_cost(plan, [BenchmarkTarget.parse("backend:google-gemini")])
+    scope = scope_run(plan, [BenchmarkTarget.parse("backend:google-gemini")])
 
-    assert estimate.unpriced == ("backend:google-gemini",)
-    assert "no per-page rate" in estimate.render()
+    # Gemini meters tokens, not pages, and used to be reported as "unpriced" because it published
+    # no per-page rate. A call count needs no rate, so it is counted like every other hosted target.
+    assert scope.targets[0].calls == 2 and scope.targets[0].hosted is True
 
 
-def test_a_large_run_crosses_the_confirmation_threshold(tmp_path) -> None:
+def test_a_large_hosted_run_crosses_the_confirmation_threshold(tmp_path) -> None:
     plan = plan_subset(_jsonl_corpus(tmp_path, per_category=30), limit=0)
 
-    estimate = estimate_cost(plan, [BenchmarkTarget.parse("backend:reducto")])
+    scope = scope_run(plan, [BenchmarkTarget.parse("backend:reducto")])
 
-    assert estimate.high_usd > CONFIRM_ABOVE_USD
-    assert estimate.needs_confirmation is True
+    assert scope.pages > CONFIRM_ABOVE_PAGES
+    assert scope.needs_confirmation is True
 
 
-def test_estimate_says_how_much_of_the_corpus_is_left_behind(tmp_path) -> None:
+def test_scope_says_how_much_of_the_corpus_is_left_behind(tmp_path) -> None:
     plan = plan_subset(_jsonl_corpus(tmp_path), limit=2)
 
-    rendered = estimate_cost(plan, [BenchmarkTarget.parse("backend:pymupdf")]).render()
+    rendered = scope_run(plan, [BenchmarkTarget.parse("backend:pymupdf")]).render()
 
     assert "2 document(s) of 12 prepared (10 not run)" in rendered
 
@@ -245,27 +249,35 @@ def test_estimate_says_how_much_of_the_corpus_is_left_behind(tmp_path) -> None:
 
 
 def test_yes_flag_skips_the_prompt(tmp_path) -> None:
+    plan = plan_subset(_jsonl_corpus(tmp_path, per_category=30), limit=0)
+    scope = scope_run(plan, [BenchmarkTarget.parse("strategy:main")])
+
+    assert confirm(scope, assume_yes=True) is True
+
+
+def test_a_local_run_never_asks(tmp_path) -> None:
     plan = plan_subset(_jsonl_corpus(tmp_path), limit=2)
-    estimate = estimate_cost(plan, [BenchmarkTarget.parse("strategy:main")])
+    scope = scope_run(plan, [BenchmarkTarget.parse("backend:pymupdf")])
 
-    assert confirm(estimate, assume_yes=True) is True
+    assert confirm(scope, assume_yes=False) is True
 
 
-def test_a_free_run_never_asks(tmp_path) -> None:
+def test_a_small_hosted_run_never_asks(tmp_path) -> None:
+    """Four pages is a smoke run. The gate exists for a corpus, not for a couple of documents."""
     plan = plan_subset(_jsonl_corpus(tmp_path), limit=2)
-    estimate = estimate_cost(plan, [BenchmarkTarget.parse("backend:pymupdf")])
+    scope = scope_run(plan, [BenchmarkTarget.parse("backend:reducto")])
 
-    assert confirm(estimate, assume_yes=False) is True
+    assert confirm(scope, assume_yes=False) is True
 
 
 def test_no_terminal_refuses_rather_than_blocking(tmp_path, monkeypatch) -> None:
-    plan = plan_subset(_jsonl_corpus(tmp_path), limit=2)
-    estimate = estimate_cost(plan, [BenchmarkTarget.parse("strategy:main")])
+    plan = plan_subset(_jsonl_corpus(tmp_path, per_category=30), limit=0)
+    scope = scope_run(plan, [BenchmarkTarget.parse("strategy:main")])
     monkeypatch.setattr("sys.stdin", io.StringIO(""))  # StringIO.isatty() is False
     stream = io.StringIO()
 
     # A CI job hung on stdin is a worse failure than one that stops and names the flag.
-    assert confirm(estimate, assume_yes=False, stream=stream) is False
+    assert confirm(scope, assume_yes=False, stream=stream) is False
     assert "pass --yes" in stream.getvalue()
 
 
@@ -273,8 +285,8 @@ def test_no_terminal_refuses_rather_than_blocking(tmp_path, monkeypatch) -> None
     ("answer", "proceeds"), [("y\n", True), ("yes\n", True), ("\n", False), ("n\n", False)]
 )
 def test_a_terminal_answer_decides(tmp_path, monkeypatch, answer: str, proceeds: bool) -> None:
-    plan = plan_subset(_jsonl_corpus(tmp_path), limit=2)
-    estimate = estimate_cost(plan, [BenchmarkTarget.parse("strategy:main")])
+    plan = plan_subset(_jsonl_corpus(tmp_path, per_category=30), limit=0)
+    scope = scope_run(plan, [BenchmarkTarget.parse("strategy:main")])
 
     class _Tty(io.StringIO):
         def isatty(self) -> bool:
@@ -282,7 +294,7 @@ def test_a_terminal_answer_decides(tmp_path, monkeypatch, answer: str, proceeds:
 
     monkeypatch.setattr("sys.stdin", _Tty(answer))
 
-    assert confirm(estimate, assume_yes=False, stream=io.StringIO()) is proceeds
+    assert confirm(scope, assume_yes=False, stream=io.StringIO()) is proceeds
 
 
 def test_pages_are_counted_once_per_file_not_once_per_category(tmp_path) -> None:

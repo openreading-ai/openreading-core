@@ -308,7 +308,6 @@ enforce for you.
 | `attempts[].category` | closed, 13 values | `openreading.strategies.trace.CATEGORIES`, a real `frozenset` |
 | `headline.verdict`, finding codes | closed | `comparison-report.v0.2.json`, with live-truth commands in [Compare](comparison/README.md) |
 | `document.pages[].blocks[].type` | closed, 22 values | `response.v0.3.json` |
-| `usage.cost_basis` | closed, 4 values | `response.v0.3.json` |
 | `orchestration.outcome` | closed in code, `ok` / `degraded` | a comment in `strategies/trace.py`. No schema enumerates it |
 | `decisions[].downgraded` | closed in code, 9 values | `openreading.strategies.decider.DOWNGRADE_REASONS` |
 | `decisions[].point` | **open** | four values ship (`decide`, `gate_band`, `judge`, `route`). A code comment names only the first three |

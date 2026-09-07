@@ -72,8 +72,6 @@
     "succeeded": 1,
     "failed": 2,
     "duration_ms": 4210,
-    "cost_usd": null,
-    "cost_bases": [],
     "pages_processed": 2,
     "backends": {
       "pymupdf": 1

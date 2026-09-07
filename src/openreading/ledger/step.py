@@ -44,13 +44,6 @@ class StepError(BaseModel):
     detail: str | None = None
 
 
-class StepCost(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    usd: float
-    basis: str | None = None
-
-
 class StepRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -92,7 +85,6 @@ class StepResult(BaseModel):
     content_key: str | None = None
     payload: BlobRef | JsonValue = None
     error: StepError | None = None
-    cost: StepCost | None = None
     started_epoch_ms: int | None = None
     ended_epoch_ms: int | None = None
     resolved_version: str | None = None

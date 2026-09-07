@@ -80,7 +80,7 @@ strategies:
 ```
 
 What happens: normalization copies the `default` bundle onto the pymupdf step (the final step
-stays ungated). On a digital PDF pymupdf passes and is accepted — reducto never runs, cost $0.
+stays ungated). On a digital PDF pymupdf passes and is accepted — reducto never runs at all.
 On a scan `scanned_pages_detected` fires: the pymupdf result is retained as `Deficient` (attempt
 category `quality_escalated`), reducto runs and is accepted, and the response carries a
 `quality_escalated` warning. The bundle's `confidence_below: 0.6` is skipped on pymupdf.
@@ -129,9 +129,9 @@ credential-bound client only because validation forbids two branches naming the 
 `pick: best` waits for all non-shadow branches (default `require: all`), then the engine's
 composite score
 compares candidates. With no gates on this node the score basis is the default-bundle Tier-1
-predicates evaluated over each candidate (comparison is never 0/0); remaining ties break by
-cheaper backend, then first-listed. The loser records `judged_lost` and its cost still lands in
-`usage.cost_usd` — honest money.
+predicates evaluated over each candidate (comparison is never 0/0); remaining ties break by the
+first-listed candidate. The loser records `judged_lost`, because its call reached the vendor
+whether or not it won.
 
 The judged variant — a `judge:` block on the same node makes the comparison LLM-judged:
 
@@ -259,8 +259,8 @@ launch adds no warning), and a reducto *failure* before 45s does NOT shortcut th
 delay — the hedge sleeps the full `start_after` on the shared clock (parallel law 2 in
 `openreading.strategies.engine`); only the node resolving first cancels a still-parked hedge. A
 hedge whose delay would land past the node deadline is `deadline_pruned`. If both run and
-reducto wins, the billed textract attempt stays billed (`raced_lost`, cost summed into
-`usage.cost_usd`) and the response never blocks on the loser's cancellation.
+reducto wins, the textract attempt is still recorded (`raced_lost`) because its call reached
+AWS, and the response never blocks on the loser's cancellation.
 
 7. Budget-capped best-effort cascade ending in `auto`
 -----------------------------------------------------
@@ -372,7 +372,7 @@ strategies:
 What happens: `sample_percent` buckets by sha256 of the document bytes — deterministic per input,
 so the same document always lands in the same bucket and replays agree with the idempotency
 cache. The shadow branch is excluded from `pick` and always drained (category `shadow`); its
-full response and cost land in the trace and `usage.cost_usd`. Shadow-vs-winner comparison over
+full response lands in the trace. Shadow-vs-winner comparison over
 time is the calibration feed for tuning gate thresholds.
 
 10. Gray-band review plus an explicit decision point
@@ -518,7 +518,7 @@ Reading the trace
 Every strategy-engaged response carries an `orchestration` block (`openreading.strategies.trace`):
 `strategy`, the attempt trail `attempts[]` — one record per backend run with `node`, `category`
 (`succeeded`, `quality_escalated`, `raced_lost`, `judged_lost`, `shadow`, `judge_call`, …),
-`duration_ms`, `cost_usd`, and `gates[]` where each evaluated predicate carries `threshold`,
+`duration_ms`, and `gates[]` where each evaluated predicate carries `threshold`,
 `observed`, `fired`, and `skipped: signal_unavailable` when it could not bind — and
 `decisions[]`: one record per decision point (gate bands, decide nodes, judges) plus one
 `point: "route"` record per route node evaluated, carrying every rule's `matched` flag and fact

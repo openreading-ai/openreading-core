@@ -68,8 +68,6 @@ class BatchSummary(BaseModel):
     succeeded: int
     failed: int
     duration_ms: float | None = None
-    cost_usd: float | None = None
-    cost_bases: list[str] = Field(default_factory=list)
     pages_processed: int | None = None
     backends: dict[str, int] = Field(default_factory=dict)
 

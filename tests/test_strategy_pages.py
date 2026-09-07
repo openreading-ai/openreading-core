@@ -18,7 +18,6 @@ from openreading.router.clock import FakeClock
 from openreading.router.router import RouterConfig
 from openreading.strategies import StrategyConfig, compile_strategy, run_strategy
 from openreading.testing.sample_pdf import build_sample_pdf
-from openreading.types import CostBasis, CostReport, Job
 from openreading.types.errors import (
     PlanExhaustedError,
     RetryableError,
@@ -31,37 +30,6 @@ from openreading.types.response import Page
 from tests.fakes import ScriptedBackend, scripted_registry
 
 GOOD = "the quick brown fox jumps over the lazy dog and it reads perfectly clean here "
-
-
-class _BilledScriptedBackend(ScriptedBackend):
-    """A ScriptedBackend whose `report_cost` reports a real `CostBasis.BILLED` basis (BL-120).
-    The base `ScriptedBackend.report_cost` is hardcoded to `infra_only(...)` regardless of
-    `cost_usd`, which can never exercise "a billed rung contributed" — this subclass makes that
-    case reproducible without touching the shared fixture every other test relies on."""
-
-    def report_cost(self, job: Job) -> CostReport:
-        return CostReport(
-            native_unit="page",
-            native_quantity=1.0,
-            cost_usd=self._cost_usd,
-            basis=CostBasis.BILLED,
-            billing_target="caller_account",
-        )
-
-
-class _EstimatedScriptedBackend(ScriptedBackend):
-    """A ScriptedBackend whose `report_cost` reports `CostBasis.ESTIMATED` (BL-126) — the
-    pricing-model-guess basis that must never let a cheaper `billed` rung's basis lose the
-    priority-ordering reduction, regardless of which rung ran first or second."""
-
-    def report_cost(self, job: Job) -> CostReport:
-        return CostReport(
-            native_unit="page",
-            native_quantity=1.0,
-            cost_usd=self._cost_usd,
-            basis=CostBasis.ESTIMATED,
-            billing_target="caller_account",
-        )
 
 
 def _req():
@@ -137,7 +105,7 @@ def _forced_doc_pages():
 def test_page_granularity_escalates_only_failing_pages_and_stitches():
     reg = scripted_registry(
         ScriptedBackend("pymupdf", local=True, pages=_cheap_pages()),
-        ScriptedBackend("reducto", cost_low=0.02, pages=_strong_pages(), page_ranges=True),
+        ScriptedBackend("reducto", pages=_strong_pages(), page_ranges=True),
     )
     res = _run(_paged_cfg(), reg)
     pages = {p.page_number: p for p in res.response.document.pages or []}
@@ -151,7 +119,7 @@ def test_page_granularity_escalates_only_failing_pages_and_stitches():
 def test_page_granularity_records_per_page_provenance():
     reg = scripted_registry(
         ScriptedBackend("pymupdf", local=True, pages=_cheap_pages()),
-        ScriptedBackend("reducto", cost_low=0.02, pages=_strong_pages(), page_ranges=True),
+        ScriptedBackend("reducto", pages=_strong_pages(), page_ranges=True),
     )
     res = _run(_paged_cfg(), reg)
     prov = {p["page"]: p["backend"] for p in res.orchestration["pages"]}
@@ -159,7 +127,7 @@ def test_page_granularity_records_per_page_provenance():
 
 
 def test_page_granularity_only_page_2_is_re_parsed():
-    strong = ScriptedBackend("reducto", cost_low=0.02, pages=_strong_pages(), page_ranges=True)
+    strong = ScriptedBackend("reducto", pages=_strong_pages(), page_ranges=True)
     reg = scripted_registry(ScriptedBackend("pymupdf", local=True, pages=_cheap_pages()), strong)
     _run(_paged_cfg(), reg)
     # the strong backend saw exactly the failing page range (page 2)
@@ -172,7 +140,7 @@ def test_page_granularity_no_failures_skips_the_strong_rung():
         Page(page_number=1, text=GOOD, confidence=0.95),
         Page(page_number=2, text=GOOD, confidence=0.92),
     ]
-    strong = ScriptedBackend("reducto", cost_low=0.02, pages=_strong_pages(), page_ranges=True)
+    strong = ScriptedBackend("reducto", pages=_strong_pages(), page_ranges=True)
     reg = scripted_registry(ScriptedBackend("pymupdf", local=True, pages=clean), strong)
     res = _run(_paged_cfg(), reg)
     assert len(strong.contexts) == 0  # every page passed → no escalation
@@ -183,7 +151,7 @@ def test_page_granularity_determinism():
     def once():
         reg = scripted_registry(
             ScriptedBackend("pymupdf", local=True, pages=_cheap_pages()),
-            ScriptedBackend("reducto", cost_low=0.02, pages=_strong_pages(), page_ranges=True),
+            ScriptedBackend("reducto", pages=_strong_pages(), page_ranges=True),
         )
         res = _run(_paged_cfg(), reg)
         return res.orchestration["pages"]
@@ -194,104 +162,10 @@ def test_page_granularity_determinism():
 # ---- BL-120: honest money — every rung's real cost reaches the final response's usage ----------
 
 
-def test_page_granularity_escalation_sums_the_escalated_rungs_billed_cost():
-    # rung 1 (pymupdf) is free/local and gates page 2; rung 2 (reducto) is a real, billed rung
-    # (cost_low= alone never reaches report_cost — an explicit cost_usd= is required so
-    # _actual_cost sees a real number, per this item's own acceptance criteria).
-    reg = scripted_registry(
-        ScriptedBackend("pymupdf", local=True, pages=_cheap_pages()),
-        ScriptedBackend("reducto", cost_usd=0.30, pages=_strong_pages(), page_ranges=True),
-    )
-    res = _run(_paged_cfg(), reg)
-    assert res.response.usage is not None
-    assert res.response.usage.cost_usd == pytest.approx(0.30)
-
-
-def test_page_granularity_no_escalation_reports_only_rung_1s_honest_cost():
-    # every page passes the gate, so rung 2 never runs — its cost must never leak into the total.
-    clean = [
-        Page(page_number=1, text=GOOD, confidence=0.95),
-        Page(page_number=2, text=GOOD, confidence=0.92),
-    ]
-    reg = scripted_registry(
-        ScriptedBackend("pymupdf", local=True, cost_usd=0.05, pages=clean),
-        ScriptedBackend("reducto", cost_usd=0.30, pages=_strong_pages(), page_ranges=True),
-    )
-    res = _run(_paged_cfg(), reg)
-    assert res.response.usage is not None
-    assert res.response.usage.cost_usd == pytest.approx(0.05)
-
-
-def test_page_granularity_escalation_does_not_leave_cost_basis_claiming_infra_only():
-    # base_resp is frozen to rung 1 (free/local, "infra_only"); once rung 2's real, billed spend
-    # is folded into cost_usd, cost_basis must not go on silently asserting the run was free.
-    strong = _BilledScriptedBackend(
-        "reducto", cost_usd=0.30, pages=_strong_pages(), page_ranges=True
-    )
-    reg = scripted_registry(ScriptedBackend("pymupdf", local=True, pages=_cheap_pages()), strong)
-    res = _run(_paged_cfg(), reg)
-    assert res.response.usage is not None
-    assert res.response.usage.cost_usd == pytest.approx(0.30)
-    assert res.response.usage.cost_basis == "billed"
-
-
 # ---- BL-126: cost_basis folds by priority, not by which rung happened to run last --------------
 
 
-def test_page_granularity_billed_rung_then_estimated_rung_keeps_billed_basis():
-    # rung 1 is a real BILLED rung; rung 2 (escalated to) only reports an ESTIMATED basis. Before
-    # this fix, _eval_paged_cascade's own last-write-wins line let the later, weaker-basis rung
-    # silently downgrade a real vendor charge to a pricing-model guess.
-    billed = _BilledScriptedBackend("pymupdf", cost_usd=0.30, local=True, pages=_cheap_pages())
-    estimated = _EstimatedScriptedBackend(
-        "reducto", cost_usd=0.05, pages=_strong_pages(), page_ranges=True
-    )
-    reg = scripted_registry(billed, estimated)
-    res = _run(_paged_cfg(), reg)
-    assert res.response.usage is not None
-    assert res.response.usage.cost_usd == pytest.approx(0.35)
-    assert res.response.usage.cost_basis == "billed"
-
-
-def test_page_granularity_estimated_rung_then_billed_rung_keeps_billed_basis():
-    # reversed order: an ESTIMATED rung 1 escalates to a BILLED rung 2. This ordering already
-    # "self-corrected" under the old last-write-wins code (it's the escalated-to rung that always
-    # wrote last) — pinned here so both orderings are covered, not only the one that used to fail.
-    estimated = _EstimatedScriptedBackend(
-        "pymupdf", cost_usd=0.05, local=True, pages=_cheap_pages()
-    )
-    billed = _BilledScriptedBackend(
-        "reducto", cost_usd=0.30, pages=_strong_pages(), page_ranges=True
-    )
-    reg = scripted_registry(estimated, billed)
-    res = _run(_paged_cfg(), reg)
-    assert res.response.usage is not None
-    assert res.response.usage.cost_usd == pytest.approx(0.35)
-    assert res.response.usage.cost_basis == "billed"
-
-
 # ---- BL-134: a rung with known cost but unset basis is folded as contributing nothing -----
-
-
-def test_page_granularity_a_raising_report_cost_never_leaves_a_billed_rung_looking_free():
-    # report_cost() can raise AFTER normalize() already set usage.cost_usd — the documented "an
-    # adapter meters a channel itself" pattern (router/cost.py's own module docstring).
-    # apply_cost_report's own except clause degrades gracefully but never runs merge_cost_report, so
-    # usage.cost_basis stays unset on the escalated-to rung. Before this fix, _eval_paged_cascade's
-    # own fold read that bare None straight through, so base_resp (rung 1, frozen) kept asserting
-    # its own "infra_only" despite a real, nonzero total once rung 2's spend was folded in.
-    strong = ScriptedBackend(
-        "reducto",
-        cost_usd=0.30,
-        pages=_strong_pages(),
-        page_ranges=True,
-        report_cost_error=RuntimeError("meter exploded"),
-    )
-    reg = scripted_registry(ScriptedBackend("pymupdf", local=True, pages=_cheap_pages()), strong)
-    res = _run(_paged_cfg(), reg)
-    assert res.response.usage is not None
-    assert res.response.usage.cost_usd == pytest.approx(0.30)
-    assert res.response.usage.cost_basis not in (None, "infra_only")
 
 
 # ---- fault injection: every early exit from the rung loop leaves an honest trace ---------------
@@ -310,7 +184,7 @@ def test_page_granularity_rung_missing_from_the_registry_records_provider_error(
 
 def test_page_granularity_first_rung_missing_from_the_registry_exhausts():
     # nothing ever produced a base response → the strategy fails; it does not return an empty doc.
-    reg = scripted_registry(ScriptedBackend("reducto", cost_low=0.02, pages=_strong_pages()))
+    reg = scripted_registry(ScriptedBackend("reducto", pages=_strong_pages()))
     steps = [{"backend": "pymupdf", "escalate_if": {"confidence_below": 0.80}}, "reducto"]
     with pytest.raises(PlanExhaustedError) as ei:
         _run(_paged_cfg(steps), reg)
@@ -321,7 +195,7 @@ def test_page_granularity_rung_without_range_support_reparses_the_whole_doc_and_
     # docling advertises no page_range_selection, so its rung runs document granularity — and a
     # doc-granularity rung ends the cascade even though its own page 2 would still fail the gate.
     doc_rung = ScriptedBackend("docling", local=True, pages=_forced_doc_pages())
-    last = ScriptedBackend("reducto", cost_low=0.02, pages=_strong_pages(), page_ranges=True)
+    last = ScriptedBackend("reducto", pages=_strong_pages(), page_ranges=True)
     reg = scripted_registry(
         ScriptedBackend("pymupdf", local=True, pages=_cheap_pages()), doc_rung, last
     )
@@ -347,7 +221,7 @@ def test_page_granularity_rung_without_range_support_reparses_the_whole_doc_and_
     ],
 )
 def test_page_granularity_escalation_rung_error_keeps_the_cheap_pages(exc, error_class):
-    strong = ScriptedBackend("reducto", cost_low=0.02, error=exc, page_ranges=True)
+    strong = ScriptedBackend("reducto", error=exc, page_ranges=True)
     reg = scripted_registry(ScriptedBackend("pymupdf", local=True, pages=_cheap_pages()), strong)
     res = _run(_paged_cfg(), reg)
     assert _cats(res) == [("pymupdf", "succeeded"), ("reducto", f"error({error_class})")]
@@ -373,7 +247,6 @@ def test_page_granularity_escalation_rung_plain_crash_keeps_the_cheap_pages_and_
     crash = ValueError(f"malformed page structure, saw key={canary}")
     strong = ScriptedBackend(
         "reducto",
-        cost_low=0.02,
         required_env=["OPENREADING_TEST_PAGED_PLAIN_KEY"],
         normalize_error=crash,
         page_ranges=True,

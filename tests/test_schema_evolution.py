@@ -132,11 +132,11 @@ _UNRELEASED = {
     # Leaderboard (BL-160) — brand-new family this milestone (not yet byte-frozen):
     "leaderboard-report.v0.1.json",
     # The removal set — batch intake dispatches every source, so `skip_reason`, the `skipped`
-    # item state and `summary.skipped` all leave (design/format-agnostic-intake.md):
+    # item state and `summary.skipped` all leave:
     "batch-result.v0.2.json",
     # The removal set — compliance, optimize_for and `auto` leave the request; the compliance
     # profile and the priority hints leave the descriptor; `policy` becomes one key
-    # (design/compliance-removal.md, design/explicit-backends.md):
+    # ():
     "request.v0.3.json",
     "adapter-descriptor.v0.7.json",
     "adapter-descriptor.v0.8.json",

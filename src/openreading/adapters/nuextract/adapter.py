@@ -15,8 +15,8 @@ The template in `extraction_schema.json_schema` is passed VERBATIM as the NuExtr
 template — {"field": "verbatim-string"|"string"|"integer"|"number"|"date-time"|[enum...]|
 [[multi-enum...]]}, nestable — it is NuExtract's OWN format, not JSON Schema. Temperature is
 pinned to 0 (the platform's project default 0.6 degrades extraction; NuMind recommends ~0).
-Token usage (inputTokens/outputTokens/totalTokens) is reported per job; platform token pricing
-is not public → cost basis UNKNOWN, cost_usd never invented.
+Token usage (inputTokens/outputTokens/totalTokens) is reported per job and forwarded verbatim.
+No rate is applied to it: core carries no prices at all.
 
 BYO API key (Bearer; NUEXTRACT_API_KEY, with the vendor SDK's NUMIND_API_KEY honored).
 NUEXTRACT_BASE_URL points at an on-prem/enterprise platform deployment. NOTE: the open-weight
@@ -36,12 +36,11 @@ from openreading.adapters._http import error_for_status
 from openreading.adapters.base import BackendAdapter
 from openreading.derive import md_to_blocks, md_to_text
 from openreading.types.blocks import TypedField
-from openreading.types.cost import CostBasis, CostReport
+from openreading.types.cost import CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
     ConfigField,
-    Cost,
     CredentialField,
     Output,
     OutputChannels,
@@ -186,7 +185,7 @@ def _descriptor() -> AdapterDescriptor:
         adapter_impl="http",
         operations=["extract", "parse"],
         provisioning=Provisioning(
-            byo_mode=["api_key"], auth="api_key", billing_target="caller_account"
+            byo_mode=["api_key"], auth="api_key"
         ),
         wait_modes=[WaitMode.POLL],
         capabilities=Capabilities(
@@ -196,11 +195,6 @@ def _descriptor() -> AdapterDescriptor:
             custom_schema_extraction="claimed",
             vlm_based="claimed",
             input_formats=["pdf", "png", "jpg", "pptx", "odt", "txt"],
-        ),
-        cost=Cost(
-            native_unit="token",
-            basis="unknown",  # platform token pricing is not public — never invent a rate
-            lossiness="page-def",
         ),
         runtime=RuntimeProfile(
             offline_capable=False,
@@ -596,9 +590,6 @@ class NuExtractAdapter(BackendAdapter):
         return CostReport(
             native_unit="token",
             native_quantity=float(tokens) if tokens is not None else 0.0,
-            cost_usd=None,  # token pricing not public — report usage, never invent a rate
-            basis=CostBasis.UNKNOWN,
-            billing_target="caller_account",
         )
 
     def _map_error(self, e: Exception):

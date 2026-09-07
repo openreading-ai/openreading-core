@@ -283,7 +283,7 @@ def test_blobstore_path_refuses_malformed_digest(tmp_path):
         store.put("fine-run-id", "sha256:../../evil", b"x", "application/octet-stream")
 
 
-# ---- blobs are written as-is (design/ledger-policy-removal.md) --------------------------------
+# ---- blobs are written as-is --------------------------------
 
 
 def test_blobstore_put_and_get_round_trip_the_bytes(tmp_path):

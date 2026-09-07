@@ -65,8 +65,8 @@ Template picker -- copy the closest shape for your target API:
     hosted API, webhook with signature verification (svix)  reducto/
     hosted API, temp-project flow, token usage, PARTIAL on  nuextract/
       validation error
-    hosted aggregator, INLINE+POLL+WEBHOOK, actual-USD      open_ocr/
-      billing
+    hosted aggregator, INLINE+POLL+WEBHOOK, reports a real   open_ocr/
+      debit in its own payload (never on `usage`)
     hosted API with a native multi-document batch endpoint  anthropic_claude/ (§3 Native batch)
     self-hosted model behind an OpenAI-compatible endpoint  qwen_vl/
     self-hosted container speaking HTTP                     docling/
@@ -90,10 +90,9 @@ Pin down ALL ten; when a fact is unknown, §3 says how to encode "unknown" hones
  5. Input intake: URL? base64 bytes? multipart upload? (drives `accepts_url` + `_input` mapping).
  6. Output channels actually produced: markdown / text / blocks / bbox / per-block confidence /
     typed fields / table cells -- this drives the N/D/X grading.
- 7. Pricing + usage counters the response reports (tokens, pages, credits, actual USD).
- 8. Compliance posture: BAA? SOC2? explicit no-train statement? retention? A claim that cannot
-    be verified from a primary source -> encode fail-closed (§3).
- 9. Limits: max pages, max file size, rate limits, retry semantics.
+ 7. Usage counters the response reports (tokens, pages, credits). Counters only: core carries
+    no prices at all, so nothing here reads a rate card.
+ 8. Limits: max pages, max file size, rate limits, retry semantics.
 10. Source URLs + access date -- required in `descriptor.sources`.
 
 2. Complete file checklist
@@ -178,12 +177,9 @@ Client: a `Protocol` + a real httpx class.
   `table_cells` only when `outputs.tables == "cells"`). Conformance enforces both directions and
   reads `field` as the primary signal -- the channel name spelled as whole words in code/message
   is only a fallback, so `field` is what you set.
-- Cost: `basis="billed"` only if the response carries the actual charge; `"estimated"` with
-  `usd_per_page_equiv_low/high` when projecting from a public price; `"unknown"` (and
-  `cost_usd=None` in `report_cost`) when pricing is not public -- NEVER invent a rate.
-- Compliance fails closed: no primary-source no-train statement ->
-  `trains_on_customer_data="unverified"`; unverified certs -> `False`; BAA only if documented.
-  The router drops fail-closed backends under strict policies -- that is the point.
+- Usage: `report_cost` returns the counter the vendor reported, in the vendor's own unit. There
+  is no price to declare and no `cost` block on a descriptor. Both left with the per-vendor rate
+  tables core could not verify.
 - `credentials_spec` / `config_spec`: every key your code reads from `ctx.credentials.values` /
   `ctx.runtime`, with `env=[...]` in precedence order (service-native var first, vendor-SDK
   aliases after). Secrets stay `secret=True`; endpoints/regions/engine-ids are ConfigFields
@@ -303,9 +299,9 @@ The 8 methods -- patterns
   `ResponseState.PARTIAL` with `status.error`, not a raise.
 - `report_cost(job)`: thin projection of `job.raw` usage counters. The router calls it right
   after `normalize()` and merges the result into `response.usage` (filling only what normalize
-  left unset), so this is what a caller sees as `usage.cost_usd` -- it must not raise, and it
-  must not invent a rate. `billing_target` is `"caller_account"` (BYO key) or `"caller_infra"`
-  (local/self-hosted); `"openreading"` is forbidden and conformance rejects it. Native-batch
+  left unset), so this is what a caller sees as `usage` -- it must not raise, and it must
+  report only what the vendor said. A rate applied to a counter is a number core cannot verify
+  and does not carry. Native-batch
   exception: the router-calls-it-right-after-normalize story is the single-item path only -- a
   `normalize_many` may need to call `openreading.router.cost.apply_cost_report` directly per
   item, since the batch-level `job` it receives has no top-level `usage` to project from.

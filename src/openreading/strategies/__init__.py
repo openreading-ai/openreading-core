@@ -115,8 +115,8 @@ The map — what each module documents
 - `signals` — the reference-free quality probe (Tier-1 engine-computed, Tier-2 envelope-reported)
   and `evaluate_gate` (gate maps OR; `any_of`/`all_of`; the missing-signal law).
 - `engine` — what running a tree means: the Outcome algebra, cascade/parallel/route/decide
-  evaluation order, keep-best, hedge/shadow/drain, `pick: merge`, page granularity, honest cost
-  accounting (every billed rung, loser, shadow, judge, and decider call), the concurrency
+  evaluation order, keep-best, hedge/shadow/drain, `pick: merge`, page granularity, the attempt
+  trail (every rung, loser, shadow, judge and decider call is recorded), the concurrency
   contract, `classify_error`, `run_strategy`.
 - `decider` — the LLM decision layer: two-key enablement (file `decider:` block AND the
   `OPENREADING_LLM_DECIDER` env; no request field can enable it), the per-request compliance gate
@@ -264,10 +264,11 @@ FAQ
   fired or not (`orchestration.attempts[]`, decision records). `openreading explain` walks a run's
   decisions; engine runs replay exactly, and LLM-mode runs replay via `openreading replay
   --trace`.
-- **What does it cost?** What you let it: `budget:` on any node and the operator-level `limits:`
-  ceiling bound spend before dispatch, and `usage.cost_usd` on the response honestly totals ALL
-  attempts — winners, losers, shadows, judges, deciders — with the per-attempt breakdown in the
-  trace.
+- **What does it use?** What you let it: `budget:` on any node and the operator-level `limits:`
+  ceiling bound the time a walk gets before dispatch, and `orchestration.attempts[]` names ALL of
+  them — winners, losers, shadows, judges, deciders — so you can count the calls a run made. No
+  price: core carries no rates, so join those counts to your own
+  provider invoice.
 - **Can I keep using plain fallback lists?** Yes — a bare list is a valid strategy body and means
   exactly the legacy chain. Add `escalate_if: default` the day you want quality-based
   escalation; nothing else changes.

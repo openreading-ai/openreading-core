@@ -88,10 +88,12 @@ so every adapter batches correctly on day one.
   including per-item backend choice under `auto` (a PNG may legitimately route to a different
   backend than a PDF in the same batch; each inner response carries `backend.id`). No batch-level
   cache of routing decisions that could widen the compliance-eligible set.
-- M8 honest aggregation: `summary.cost_usd` sums only items that reported a cost (absent if
-  none did); `summary.cost_bases` lists the distinct bases observed, so `estimated` and
-  `metered` never blend into fake precision; `summary` also carries `total / succeeded / failed
-  / skipped`, `duration_ms`, `pages_processed`, and `backends` (a per-item backend tally).
+- M8 honest aggregation: `summary` carries `total / succeeded / failed`, `duration_ms`,
+  `pages_processed` (summed over the items that reported one, absent if none did), and
+  `backends` (a per-item backend tally). It carries no money. `cost_usd` and `cost_bases` were
+  removed with the per-vendor price tables behind them: a total
+  summed out of derived guesses is fake precision, and the caller's own invoice is where the
+  real number lives.
 - M9 items are full envelopes: a succeeded item's `response` is a complete, schema-valid
   `response.v0.3` document -- anything compare/evals can already consume.
 - Concurrency: default `jobs=1`, which is serial, deterministic and rate-limit-safe. A default
@@ -108,19 +110,18 @@ so every adapter batches correctly on day one.
   (`RetryableError`, `next_poll_at`).
 - Idempotency: with a caller key `K`, item keys derive as `f"{K}:{sha256[:16]}"`; without `K`
   (or without a sha, e.g. a URL item) none is fabricated. `/v1/batch` never uses the server's
-  idempotency cache: a replayed response still carries the original `usage.cost_usd`, which the
-  summary would sum into a total nobody was billed for (DECISIONS D-v3-3).
+  idempotency cache: a replayed response still carries the original run's `usage` counters,
+  which the summary would sum into a total describing work nobody did (DECISIONS D-v3-3).
 - Progress: one stderr line per completed item -- skipped items included, so `[i/N]` always
   reaches N -- keeping stdout pure JSON.
-- Cost preflight (advisory, stderr, CLI): when more than 10 live items target a directly named
-  `hosted_api` backend, print the count and the descriptor's `usd_per_page_equiv` range before
-  starting. The rate is per PAGE and an item is a document, so the line says so in words and
-  multiplies out the one total that exists before any file is opened -- items x one page x rate --
-  labelled as the single-page floor it is. Intake reads no bytes and never fetches a URL (M5), so
-  real page counts are not knowable here and no truer total can be printed; a line naming the item
-  count beside a per-page rate reads as a per-item price and under-states a real corpus by its
-  average page count. Never an interactive prompt: batches must stay scriptable; the M4 guard is
-  the real spend protection.
+- Scope preflight (advisory, stderr, CLI): when more than 10 live items target a directly named
+  `hosted_api` backend, print how many calls are about to leave this machine, to whom, and on
+  whose key. One call per item is the floor, and a paged document exceeds it. It used to print a
+  dollar range from the descriptor's `usd_per_page_equiv` instead, a rate this package had
+  written down about someone else's rate card and could not verify.
+  Intake reads no bytes and never fetches a URL (M5), so no page count exists at this point
+  either. Never an interactive prompt: batches must stay scriptable; the M4 guard is the real
+  protection.
 - Interplay: `--strategy X` batches fine (each item runs the strategy; native batch never
   applies to strategies). `--extract`, `--pages`, `features` are request-level and apply to
   every item. Materialization stays per item inside the existing pipeline.
@@ -138,8 +139,8 @@ succeeded|failed|skipped; item `transport` platform|native. Both new families ar
     status.state; request {backend, strategy, jobs, source_args} (echo for provenance/replay);
     items[] {source, state, response|null, error {code, message}|null,
              transport};
-    summary {total, succeeded, failed, skipped, duration_ms, cost_usd?, cost_bases,
-             pages_processed?, backends}; warnings[] {code, message}
+    summary {total, succeeded, failed, duration_ms, pages_processed?, backends};
+    warnings[] {code, message}
 
 Status rule (`runner.batch_state`): `succeeded` = >=1 succeeded and 0 failed; `partial` = some
 of each; `failed` = 0 succeeded (all failed, all skipped, or empty -- nothing was produced).

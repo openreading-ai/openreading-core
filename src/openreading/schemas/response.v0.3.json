@@ -521,7 +521,7 @@
     },
     "usage": {
       "type": "object",
-      "description": "Normalized cost/usage. Fields are per-backend-natural; the router computes cost_usd via the pricing model, filling what the backend reports.",
+      "description": "Normalized usage: what a backend consumed, in the units it reported. Fields are per-backend-natural and the router fills only what the backend left unset. No money. cost_usd and cost_basis were removed because they were computed from a per-vendor price table this package kept in its own source and could not verify. Multiply these counters by the prices on your own invoice.",
       "properties": {
         "pages_processed": {
           "type": "integer"
@@ -535,18 +535,6 @@
         },
         "output_tokens": {
           "type": "integer"
-        },
-        "cost_usd": {
-          "type": "number",
-          "description": "Router-computed cost-per-page-equivalent, or backend-billed cost. Null for local backends (infra cost modeled separately)."
-        },
-        "cost_basis": {
-          "enum": [
-            "billed",
-            "estimated",
-            "infra_only",
-            "unknown"
-          ]
         },
         "duration_ms": {
           "type": "integer"

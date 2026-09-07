@@ -166,8 +166,8 @@ def test_batch_keep_candidates_reaches_every_item(tmp_path, capsys, monkeypatch)
         api,
         "build_registry",
         lambda: scripted_registry(
-            ScriptedBackend("reducto", cost_low=0.01, text=GARBLED),
-            ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN),
+            ScriptedBackend("reducto", text=GARBLED),
+            ScriptedBackend("aws-textract", text=CLEAN),
         ),
     )
     d = tmp_path / "c"
@@ -191,7 +191,7 @@ def test_batch_keep_candidates_reaches_every_item(tmp_path, capsys, monkeypatch)
 
 
 def test_preflight_warns_before_a_big_hosted_batch(tmp_path, capsys, monkeypatch):
-    # >10 live items on a hosted backend arms the cost preflight; with no key every item then
+    # >10 live items on a hosted backend arms the scope preflight; with no key every item then
     # fails offline at the credential check, so nothing here touches the network.
     for var in ("REDUCTO_API_KEY", "OPENREADING_REDUCTO_API_KEY"):
         monkeypatch.delenv(var, raising=False)
@@ -201,7 +201,7 @@ def test_preflight_warns_before_a_big_hosted_batch(tmp_path, capsys, monkeypatch
     main(["parse", str(d), "--backend", "reducto"])
     err = capsys.readouterr().err
     assert "[preflight] 11 items on hosted backend reducto" in err
-    assert "per page-equiv" in err or "billed per page" in err
+    assert "11 call(s) on your own key" in err
 
 
 # --- BL-84: --jobs floor/ceiling on the CLI surface --------------------------------------
@@ -258,14 +258,16 @@ def test_batch_jobs_within_a_raised_max_jobs_still_runs(tmp_path, capsys):
     assert env["summary"]["succeeded"] == 2
 
 
-# --- the two stderr advisories: what a run will cost, and what --jobs actually did ---------
+# --- the two stderr advisories: what a run will do, and what --jobs actually did -----------
 
 
-def test_preflight_cost_line_cannot_be_read_as_a_per_item_price(tmp_path, capsys, monkeypatch):
-    # The line used to read `12 items → hosted backend reducto (~$0.015-$0.06/page-equiv each)`.
-    # "12 items ... each" reads as a per-ITEM price, so the reader multiplies rate x items and
-    # under-reads a multi-page corpus by its average page count. The line must name the per-page
-    # basis in words and multiply out a total the reader can scale by their own page count.
+def test_preflight_line_quotes_no_price_at_all(tmp_path, capsys, monkeypatch):
+    """The line used to read `12 items → hosted backend reducto (~$0.015-$0.06/page-equiv each)`.
+
+    Every number in it came from `descriptor.cost`, a rate card this package had written down and
+    could not verify, so the advisory presented a guess in the same breath as a real item count
+   . What it names now is what core knows before a byte is read: how
+    many calls leave this machine, to whom, and on whose key."""
     for var in ("REDUCTO_API_KEY", "OPENREADING_REDUCTO_API_KEY"):
         monkeypatch.delenv(var, raising=False)
     d = tmp_path / "c"
@@ -273,10 +275,11 @@ def test_preflight_cost_line_cannot_be_read_as_a_per_item_price(tmp_path, capsys
         _pdf(d / f"f{i:02d}.pdf")
     main(["parse", str(d), "--backend", "reducto"])
     err = capsys.readouterr().err
-    assert "per page-equiv, not per item" in err  # the basis, in the unit's own words
-    assert "~$0.18-$0.72" in err  # 12 items x 1 page x $0.015-$0.06, multiplied out
-    assert "if every item is one page" in err  # ... and the assumption that total rests on
-    assert "each)" not in err  # the ambiguous wording is gone
+    preflight = [ln for ln in err.splitlines() if ln.startswith("[preflight]")]
+    assert preflight, "the advisory still fires for a big hosted batch"
+    assert all("$" not in ln for ln in preflight)
+    assert "12 call(s) on your own key" in err  # the count, which is a fact
+    assert "more if a document is paged" in err  # ... and why it is a floor
 
 
 def test_jobs_above_a_backend_cap_says_so_on_stderr(tmp_path, capsys):

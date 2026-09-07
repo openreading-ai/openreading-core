@@ -36,7 +36,6 @@ class LeaderboardBackend(BaseModel):
     n_cases: int = Field(ge=0)
     n_scored: int = Field(ge=0)
     errors: int = Field(ge=0)
-    cost_per_doc: float = Field(ge=0.0)
     non_deterministic: bool = False
     dimensions: dict[str, float] = Field(default_factory=dict)
 

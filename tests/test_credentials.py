@@ -647,7 +647,6 @@ def test_strategy_engine_leaf_redacts_leaked_secret_from_attempt_detail():
     reg = scripted_registry(
         ScriptedBackend(
             "leaky",
-            cost_low=0.01,
             required_env=["OPENREADING_TEST_BL47_ENGINE_KEY"],
             error=TerminalError(f"upstream echoed key={canary}", backend_code="server"),
         ),
@@ -681,7 +680,6 @@ def test_strategy_engine_leaf_redacts_a_plain_normalize_crash():
     reg = scripted_registry(
         ScriptedBackend(
             "leaky",
-            cost_low=0.01,
             required_env=["OPENREADING_TEST_BL99_LEAF_PLAIN_KEY"],
             normalize_error=ValueError(f"malformed page structure, saw key={canary}"),
         ),
@@ -712,7 +710,6 @@ def test_calibrate_strategy_redacts_leaked_secret(tmp_path, monkeypatch):
     reg = scripted_registry(
         ScriptedBackend(
             "cheap",
-            cost_low=0.01,
             required_env=["OPENREADING_TEST_BL47_CALIBRATE_KEY"],
             error=TerminalError(f"upstream echoed key={canary}", backend_code="server"),
         )
@@ -733,7 +730,6 @@ def test_run_case_redacts_leaked_secret():
     canary = "sk_CANARY_bl47_runner"
     backend = ScriptedBackend(
         "cheap",
-        cost_low=0.01,
         required_env=["OPENREADING_TEST_BL47_RUNNER_KEY"],
         error=TerminalError(f"upstream echoed key={canary}", backend_code="server"),
     )

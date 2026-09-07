@@ -349,13 +349,16 @@ def test_model_override_via_backend_version():
     assert adapter._client.last_call["model"] == "claude-sonnet-5"
 
 
-def test_cost_from_token_usage():
+def test_report_cost_forwards_the_token_counts_anthropic_returned():
+    """2400 input + 180 output, summed and left in tokens.
+
+    This used to multiply them by a per-model `_MODEL_PRICE` table and assert the dollars
+   ."""
     adapter = AnthropicClaudeAdapter(client=FakeClaudeClient())
     job = adapter.submit(_req(), RunContext())
     cost = adapter.report_cost(job)
-    # opus-4-8: 2400 in @ $5/M + 180 out @ $25/M
-    assert cost.cost_usd == pytest.approx(2400 / 1e6 * 5.0 + 180 / 1e6 * 25.0)
-    assert cost.billing_target == "caller_account"
+    assert cost.native_unit == "token"
+    assert cost.native_quantity == 2580
 
 
 def test_rate_limit_maps_to_retryable():

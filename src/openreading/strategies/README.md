@@ -458,7 +458,7 @@ uv run openreading calibrate ../src/openreading/evals/sample --strategy main --t
 ```json
 { "strategy": "main", "n_docs": 1, "n_scored": 1,
   "rung1_backend": "pymupdf", "rung2_backend": "tesseract",
-  "target_escalation": 0.15, "max_cost_per_doc": null,
+  "target_escalation": 0.15,
   "sweeps": [], "recommended": {} }
 ```
 
@@ -489,14 +489,15 @@ uv run openreading calibrate ../src/openreading/evals/sample --strategy sweepabl
   | jq -c '{n_docs, n_scored, points: (.sweeps[0].points[0:4]), n_points: (.sweeps[0].points|length), recommended}'
 ```
 ```json
-{"n_docs":1,"n_scored":1,"points":[{"threshold":0.0,"escalation_rate":0.0,"cost_per_doc":0.0,"scorer_agreement":1.0},{"threshold":100.0,"escalation_rate":0.0,"cost_per_doc":0.0,"scorer_agreement":1.0},{"threshold":200.0,"escalation_rate":0.0,"cost_per_doc":0.0,"scorer_agreement":1.0},{"threshold":300.0,"escalation_rate":1.0,"cost_per_doc":0.0,"scorer_agreement":0.0}],"n_points":31,"recommended":{"escalate_if":{"chars_per_page_below":0.0}}}
+{"n_docs":1,"n_scored":1,"points":[{"threshold":0.0,"escalation_rate":0.0,"scorer_agreement":1.0},{"threshold":100.0,"escalation_rate":0.0,"scorer_agreement":1.0},{"threshold":200.0,"escalation_rate":0.0,"scorer_agreement":1.0},{"threshold":300.0,"escalation_rate":1.0,"scorer_agreement":0.0}],"n_points":31,"recommended":{"escalate_if":{"chars_per_page_below":0.0}}}
 ```
 
 **You should see** 31 operating points where there were none, from the same single document. A
 point is one candidate threshold with what it would have done to this sample. `escalation_rate` is
-the share of documents that would have climbed to rung 2. `cost_per_doc` prices that share at the
-per-page rates each backend's descriptor declares. `scorer_agreement` is how often the gate agreed
-with the labels.
+the share of documents that would have climbed to rung 2, which is the figure you multiply by
+your own rung-2 rate. A point used to carry a `cost_per_doc` doing that multiplication for you,
+from a rate this package had written down about a vendor; it is gone.
+`scorer_agreement` is how often the gate agreed with the labels.
 
 Two terms decide that last number and neither has a flag. `quality_bar` is the eval score below
 which a document counts as one that should have escalated, and it is fixed at 0.8 in
@@ -565,16 +566,17 @@ catches it.
 
 **Climb to a hosted rung only on bad quality** (needs `REDUCTO_API_KEY`, a hosted key, so the shape
 is shown and not run). Write `try: [pymupdf, reducto]` with `escalate_when: looks_bad`. On a
-born-digital PDF the trace ends at `pymupdf`, cost `$0`. On a scan the `cheap_first` example in the
-`openreading.strategies.presets` docstring shows `pymupdf quality_escalated`, then `reducto
-succeeded` with its billed cost in `usage.cost_usd`. To have an LLM judge a `compare` instead of the
+born-digital PDF the trace ends at `pymupdf` and no hosted call leaves your machine. On a scan the
+`cheap_first` example in the `openreading.strategies.presets` docstring shows `pymupdf
+quality_escalated`, then `reducto succeeded`, with the credits Reducto reported in
+`usage.credits`. To have an LLM judge a `compare` instead of the
 engine's score, add `judge: {backend: anthropic-claude, intent: "Prefer complete line-item
 tables."}` beside `pick: best` in the longhand. Without `OPENREADING_LLM_DECIDER=1` the record says
 `downgraded=env_disabled`.
 
 > [!WARNING]
-> Every hosted rung that runs is billed to your key, losers, shadows, and judges included.
-> `usage.cost_usd` sums all of them.
+> Every hosted rung that runs is a call on your key, losers, shadows, and judges included. The
+> trace names each one, and core quotes no price for any of them.
 
 **Audit one agent's run from another.** A second agent can check a strategy run without trusting
 the first. The trace carries everything the check needs. `config_hash` pins the config that ran.
@@ -649,13 +651,13 @@ not record. Each rule names the failure it avoids and where it is enforced.
   `OPENREADING_LLM_DECIDER` set, and no request field can enable it
   (`openreading.strategies.decider` §1). A caller cannot talk a service into consulting an LLM its
   operator did not deploy.
-- The cost is honest, and honest is not the same as billed. `usage.cost_usd` totals every attempt
-  that ran, including winners, losers, shadows, and judges, and the engine adds no estimate of its
-  own (`openreading.strategies.plain`, "Guardrails"). What an attempt reported can still be a
-  projection. Seven of the fifteen backends declare `basis: estimated`, meaning a published rate
-  applied to a page count rather than money anyone charged. `usage.cost_basis` folds those bases by
-  the priority `billed > estimated > infra_only`. Read that field before you sum a run as spend
-  ([Backend adapters](../adapters/README.md#what-each-backend-charges-and-the-ceilings-on-one-request)).
+- Every attempt is on the record, and none of them carries a price. The trace names every
+  backend that ran, winners, losers, shadows and judges alike, so a reader can count the calls a
+  run made (`openreading.strategies.plain`, "Guardrails"). It used to also total them as
+  `usage.cost_usd`, folding a `cost_basis` across rungs. Most of what that summed was a published
+  rate this package had typed into its own source and applied to a page count, indistinguishable
+  once totalled from money someone was actually charged. Both are gone
+ : count the attempts here, price them from your provider invoice.
 
 Every threshold this page prints has a written derivation, and they all live in one document. `uv
 run python -m pydoc openreading.strategies.signals` is that catalog. It gives each signal's formula,

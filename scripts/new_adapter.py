@@ -205,7 +205,6 @@ def render_adapter_py(slug: str, template_slug: str, shape: TemplateShape) -> st
     imp = [
         "AdapterDescriptor",
         "Capabilities",
-        "Cost",
         "Provisioning",
         "RuntimeProfile",
     ]
@@ -286,22 +285,18 @@ def render_adapter_py(slug: str, template_slug: str, shape: TemplateShape) -> st
     if shape.category == "hosted":
         a('            byo_mode=["api_key"],')
         a('            auth="api_key",')
-        a('            billing_target="caller_account",')
     elif shape.category == "self_hosted":
         a('            byo_mode=["endpoint"],')
         a('            auth="none",')
-        a('            billing_target="caller_infra",')
     else:
         a("            byo_mode=[],")
         a('            auth="none",')
-        a('            billing_target="caller_infra",')
     a("        ),")
     wm = ", ".join(f"WaitMode.{m}" for m in shape.wait_modes) or "WaitMode.INLINE"
     a(f"        wait_modes=[{wm}],")
     a(
         f"        capabilities=Capabilities(),  # {MARKER}: every flag is False/empty until verified. See the openreading.adapters runbook §3"
     )
-    a(f"        cost=Cost(),  # {MARKER}: basis defaults 'unknown'. Never invent a rate")
     a("        runtime=RuntimeProfile(")
     a(f"            offline_capable={shape.category == 'local'},")
     a("        ),")

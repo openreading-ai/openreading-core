@@ -1273,7 +1273,7 @@ def test_webhook_valid_signature_completes_job(monkeypatch):
 
 def test_webhook_completed_job_carries_a_metered_response(monkeypatch):
     # the async surface returns the same response envelope as /v1/parse, so report_cost() reaches
-    # usage.cost_usd there too (reducto: 1.0 credit from the captured fixture → $0.015)
+    # `usage` there too (reducto meters credits; the captured fixture reports 1.0)
     import json as _json
 
     monkeypatch.setenv("REDUCTO_WEBHOOK_SECRET", _test_secret())
@@ -1285,7 +1285,7 @@ def test_webhook_completed_job_carries_a_metered_response(monkeypatch):
         "/v1/webhooks/reducto", content=payload, headers=_svix_headers(_test_secret(), payload)
     )
     usage = r.json()["response"]["usage"]
-    assert usage["cost_usd"] == 0.015 and usage["cost_basis"] == "billed"
+    assert usage["credits"] == 1.0
 
 
 def test_webhook_tampered_signature_is_401(monkeypatch):

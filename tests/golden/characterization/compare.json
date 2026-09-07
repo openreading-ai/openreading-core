@@ -56,8 +56,6 @@
       "facts": {
         "blocks": 2,
         "chars": 4204,
-        "cost_basis": "infra_only",
-        "cost_usd": null,
         "fields": 0,
         "pages": 1,
         "state": "succeeded",
@@ -76,8 +74,6 @@
       "facts": {
         "blocks": 0,
         "chars": 41,
-        "cost_basis": null,
-        "cost_usd": null,
         "fields": 0,
         "pages": 0,
         "state": "succeeded",

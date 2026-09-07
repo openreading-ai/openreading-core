@@ -168,11 +168,12 @@ backend cannot produce is ABSENT with a ``warnings[]`` entry — never fabricate
 - ``chunks[]``: ``id``, ``text``/``markdown``, ``block_ids`` (each chunk traces to spine blocks),
   ``page_span``, optional ``embedding``.
 - ``usage``: ``pages_processed``, native ``credits``, ``input_tokens``/``output_tokens``,
-  ``cost_usd`` with ``cost_basis`` (billed/estimated/infra_only/unknown), ``duration_ms``. The
-  adapter meters (``report_cost()`` projects its own counters through its pricing model) and the
-  router accounts: after ``normalize()`` it fills only the ``usage`` fields the adapter left
-  unset — an adapter-reported ``cost_usd`` is never overwritten, and a local backend gets
-  ``infra_only`` with a null price rather than an invented one.
+  ``duration_ms``. Counters only, in the unit each backend meters in. The adapter meters
+  (``report_cost()`` projects the counters out of ``job.raw``) and the router accounts: after
+  ``normalize()`` it fills only the ``usage`` fields the adapter left unset, and never reshapes
+  one unit into another. ``cost_usd`` and ``cost_basis`` were removed with the per-vendor price
+  tables that filled them (``): a derived price sat on ``usage`` beside
+  counters that were measured, and nothing downstream could tell the two apart.
 - ``job``: the async handle (``id``, timestamps, ``poll_url``, provider console URL).
 - ``warnings[]``: ``{code, message, field}`` for anything requested but unavailable, degraded or
   noteworthy. The code set is OPEN, so a consumer tolerates a code it has never seen. Every code
@@ -255,34 +256,20 @@ keeps every older descriptor valid) and no in-band version — filename + ``$id`
   webhook).
 - ``provisioning``: ``byo_mode`` (api_key, cloud_credential, pip, container, weights, endpoint —
   a coarse hint; the per-key truth is ``credentials_spec``), ``auth`` (none/api_key/sigv4/
-  oauth2/entra/gcp_adc), ``billing_target`` (caller_account/caller_infra; the ``openreading``
-  enum value exists but is never emitted — pure pass-through, no resale, kit-enforced).
+  oauth2/entra/gcp_adc).
 - ``capabilities``: each of ``ocr``, ``handwriting``, ``printed_tables``, ``complex_tables``,
   ``forms_key_value``, ``layout``, ``reading_order``, ``multi_column``, ``figures_charts``,
   ``signatures``, ``classification``, ``splitting``, ``custom_schema_extraction``,
   ``vlm_based``, ``human_in_the_loop`` is ``"verified"`` (first-party live run or benchmark),
   ``"claimed"`` (vendor docs only) or ``false``; plus ``languages``, ``input_formats``,
-  ``max_pages_per_request``, ``max_file_size``. Read by the router's stage-2 filter.
+  ``max_pages_per_request``, ``max_file_size``. Descriptive, not a gate: the router runs no
+  capability filter, and a backend that cannot read a document refuses first-hand.
 - ``output``: ``paradigms`` (the six raw shapes above); ``channels`` grades each response
   channel — ``markdown``, ``text``, ``blocks``, ``block_bbox``, ``block_confidence``,
   ``typed_fields``, ``table_cells`` — as N (native), D (derivable) or X (impossible); the
   conformance kit enforces C4/C5/C6 against these grades; optional ``block_granularity``
   (word | line | paragraph | section | element) so consumers and compare can reason about
   packaging differences instead of discovering them empirically.
-- ``cost``: ``native_unit`` (page/credit/token/doc/gpu_second/cpu_second/subscription),
-  ``usd_per_page_equiv_low``/``_high``, ``basis``, ``lossiness`` of the page-equivalence
-  conversion. Feeds stage-3 cost scoring and ``usage.cost_usd``.
-- ``compliance`` — facts, not marketing; the stage-1 filter treats anything unverified as
-  ineligible unless the deployment explicitly allows it: ``hipaa_baa`` (``yes`` | ``tier_gated``
-  — BAA only on a higher plan, eligible under ``require_baa`` only once the operator confirms
-  ``baa_tier_confirmed`` (D7a: otherwise a PHI caller could be routed to a vendor with nothing
-  signed) | ``no`` | ``na_local``), ``trains_on_customer_data`` (``yes`` | ``no`` | ``opt_out``
-  — eligible only when the operator confirms the opt-out | ``na_local`` | ``unverified`` — fails
-  closed under ``no_train_on_data`` unless ``allow_unverified_compliance``),
-  ``data_region_options`` (``["*"]`` for local), ``data_retention``/``max_retention_hours``
-  (unknown retention fails closed under ``max_retention``), ``runs_fully_local`` (the BAA-free
-  PHI path), ``soc2``, ``gdpr``, ``pci``, ``train_opt_out_precondition``, ``zdr_flag``,
-  ``phi_path_constraints``.
 - ``runtime``: ``offline_capable``, ``license`` (copyleft flagged here), ``system_deps``,
   ``version_pin``, hardware/serving profile, ``sandbox``. ``router``: ``normalization_difficulty``,
   ``integration_priority`` P0-P2, ``priority_reason``. ``sources``: primary-source URLs with

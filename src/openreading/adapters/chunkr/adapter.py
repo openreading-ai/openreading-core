@@ -32,12 +32,11 @@ from openreading.derive import (
     table_to_text,
 )
 from openreading.types.blocks import Block, Chunk, Citation, Table, TypedField
-from openreading.types.cost import CostBasis, CostReport
+from openreading.types.cost import CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
     ConfigField,
-    Cost,
     CredentialField,
     Output,
     OutputChannels,
@@ -203,7 +202,7 @@ def _descriptor() -> AdapterDescriptor:
         adapter_impl="http",
         operations=["parse", "extract"],
         provisioning=Provisioning(
-            byo_mode=["api_key", "container"], auth="api_key", billing_target="caller_account"
+            byo_mode=["api_key", "container"], auth="api_key"
         ),
         wait_modes=[WaitMode.POLL, WaitMode.WEBHOOK],
         capabilities=Capabilities(
@@ -218,13 +217,6 @@ def _descriptor() -> AdapterDescriptor:
             vlm_based="verified",
             input_formats=["pdf", "docx", "pptx", "xlsx", "png", "jpg", "tiff", "webp", "html"],
             max_pages_per_request="2000 (soft)",
-        ),
-        cost=Cost(
-            native_unit="credit",
-            basis="estimated",
-            usd_per_page_equiv_low=0.008,
-            usd_per_page_equiv_high=0.03,
-            lossiness="credit",
         ),
         runtime=RuntimeProfile(
             offline_capable=False,
@@ -640,13 +632,7 @@ class ChunkrAdapter(BackendAdapter):
     def report_cost(self, job: Job) -> CostReport:
         usage = (job.raw.payload or {}).get("output_usage", {}) if job.raw else {}
         pages = usage.get("page_count", 1) or 1
-        return CostReport(
-            native_unit="credit",
-            native_quantity=float(pages),
-            cost_usd=0.01 * float(pages),
-            basis=CostBasis.ESTIMATED,
-            billing_target="caller_account",
-        )
+        return CostReport(native_unit="credit", native_quantity=float(pages))
 
     def _map_error(self, e: Exception):
         if isinstance(e, (TerminalError, RetryableError)):

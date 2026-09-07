@@ -58,9 +58,9 @@ b. Fan-out sugar: ``openreading compare doc.pdf --backends a,b,c`` runs N indepe
    wide ``--all-ready`` (every backend the readiness table reports ready) cannot stampede provider
    rate limits; there is no concurrency flag. ``--save-dir DIR`` writes ``DIR/<backend-id>.json``
    so mode (a) can replay the comparison forever. ``--deadline`` applies to every fanned-out
-   backend exactly as ``parse --deadline`` does. Hosted backends bill once per backend and the
-   scoreboard shows each subject's ``usage.cost_usd``; fan-out is an explicit user act, so there
-   is no budget machinery. ``source`` = ``fanout``.
+   backend exactly as ``parse --deadline`` does. Hosted backends are called once each and the
+   scoreboard shows each subject's ``usage`` counters, never a price; fan-out is an explicit user
+   act, so there is no budget machinery. ``source`` = ``fanout``.
 c. From a strategy run (the one integration point): ``parse --keep-candidates`` (Python param
    ``keep_candidates=True`` on ``run``/``run_request``/``run_strategy``; server: a
    ``"keep_candidates": true`` key in the ``POST /v1/parse`` body) retains every completed
@@ -82,8 +82,8 @@ mode, so the stem never appears there), else the literal ``subject``.
 The four dimensions
 -------------------
 A. Run facts -> the scoreboard (always available, pure envelope reads, never degraded): per
-   subject ``status.state``, ``usage.duration_ms``, ``usage.cost_usd`` (+ basis),
-   ``usage.pages_processed``, page/block/char counts, ``typed_fields`` count, warning codes,
+   subject ``status.state``, ``usage.duration_ms``, ``usage.pages_processed``,
+   page/block/char counts, ``typed_fields`` count, warning codes,
    ``backend.type`` and ``output_paradigm``.
 B. Field delta (``typed_fields``): union of keys, one row per key with per-subject value,
    confidence and presence. Key matching: exact, then normalized (casefold, strip non-alnum).
@@ -167,7 +167,7 @@ the flat, severity-sorted view of everything the dimensional sections detail.
 Finding codes (closed set): ``field_value_conflict`` ``field_missed`` ``text_divergence``
 ``block_missed`` ``block_unique`` ``structure`` (packaging/granularity difference, not content
 loss) ``type_conflict`` ``position_conflict`` ``table_shape_mismatch`` ``confidence_gap``
-``page_count_mismatch`` ``cost_outlier`` ``empty_output``.
+``page_count_mismatch`` ``empty_output``.
 Warning codes: ``blocks_unavailable``; ``descriptor_unavailable`` (backend id unknown to the
 local registry => capability checks fall back to observed output, stated openly: ``fields`` is
 whether the subject actually produced ``typed_fields``, and ``blocks`` / ``confidence`` are ASSUMED

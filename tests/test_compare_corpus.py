@@ -60,14 +60,12 @@ def _rich_pair() -> tuple[dict, dict]:
         markdown="# Report\nbody one two three",
         fields={"Total": "$100.00", "Date": "2024-01-02"},
         pages=[[_blk("Report", "title", conf=0.95), _blk("body one two three", conf=0.9)]],
-        cost_usd=0.01,
     )
     b = make_envelope(
         "b",
         markdown="# Report\nbody one two three four",
         fields={"Total": "100 USD"},  # equivalent value, missing Date
         pages=[[_blk("Report", "text", conf=0.5), _blk("body one two three four", conf=0.8)]],
-        cost_usd=0.02,
     )
     return a, b
 

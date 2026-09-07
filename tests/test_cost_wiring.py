@@ -1,11 +1,15 @@
 """BL-8 — `report_cost()` reaches `response.usage`.
 
 `report_cost` is one of the eight mandatory adapter methods and every adapter implements it, but
-nothing in production ever called it: `usage.cost_usd` came back null for every real backend even
-though response.v0.3 says "the router computes cost_usd via the pricing model". These tests pin
-the wiring at the choke points the router owns (chain executor / strategy-engine leaf / the
-directly-named backend run), the fill-only merge rule, and the degrade-don't-fail rule when an
-adapter's meter raises. All offline: a captured Reducto fixture is the paid backend.
+nothing in production ever called it, so `usage` came back empty for every real backend. These
+tests pin the wiring at the choke points the router owns (chain executor / strategy-engine leaf /
+the directly-named backend run), the fill-only merge rule, and the degrade-don't-fail rule when an
+adapter's meter raises. All offline: a captured Reducto fixture is the hosted backend.
+
+What crosses is counters, not money. took `cost_usd` and `cost_basis` off
+`usage` along with the per-vendor price tables that filled them, so the assertions here are on the
+credit, page, token and millisecond figures a vendor actually reported. `test_cost_removed.py`
+guards the other direction: that no price comes back.
 """
 
 from __future__ import annotations
@@ -15,7 +19,6 @@ import json
 from pathlib import Path
 
 import httpx
-import pytest
 import respx
 
 from openreading import api, run_batch, schemas
@@ -29,7 +32,7 @@ from openreading.router.router import RoutePlan, RouterConfig
 from openreading.strategies import StrategyConfig, compile_strategy, run_strategy
 from openreading.testing.sample_pdf import build_sample_pdf
 from openreading.types.cost import CostReport, infra_only
-from openreading.types.enums import BackendType, CostBasis, ResponseState
+from openreading.types.enums import BackendType, ResponseState
 from openreading.types.request import OpenReadingRequest
 from openreading.types.response import (
     BackendInfo,
@@ -42,8 +45,9 @@ from openreading.types.runtime import RunContext
 from tests.fakes import ConfigurableBackend, make_backend
 
 _PARSE = json.loads((Path(__file__).parent / "fixtures" / "reducto" / "parse.json").read_text())
-# The fixture bills 1.0 credit; ReductoAdapter.report_cost prices a credit at $0.015.
-_EXPECTED_USD = 0.015
+# The fixture reports 1.0 credit, which is Reducto's own metered unit and the whole of what
+# `report_cost` forwards.
+_EXPECTED_CREDITS = 1.0
 _REDUCTO_BROKER = EnvCredentialBroker({"REDUCTO_API_KEY": "test-key"})
 _EMPTY_BROKER = EnvCredentialBroker({})
 
@@ -91,47 +95,27 @@ def _mock_reducto_http() -> None:
 def test_merge_projects_every_mappable_field():
     resp = _blank_response()
     merge_cost_report(
-        resp,
-        CostReport(
-            native_unit="page",
-            native_quantity=3.0,
-            cost_usd=0.42,
-            basis=CostBasis.BILLED,
-            billing_target="caller_account",
-            duration_ms=1234,
-        ),
+        resp, CostReport(native_unit="page", native_quantity=3.0, duration_ms=1234)
     )
     assert resp.usage is not None
-    assert resp.usage.cost_usd == 0.42
-    assert resp.usage.cost_basis == "billed"
     assert resp.usage.duration_ms == 1234
     assert resp.usage.pages_processed == 3
 
 
 def test_merge_fills_only_unset_fields():
     resp = _blank_response()
-    resp.usage = Usage(cost_usd=9.99, pages_processed=7)
+    resp.usage = Usage(pages_processed=7)
     merge_cost_report(
-        resp,
-        CostReport(
-            native_unit="page",
-            native_quantity=3.0,
-            cost_usd=0.42,
-            basis=CostBasis.BILLED,
-            billing_target="caller_account",
-        ),
+        resp, CostReport(native_unit="page", native_quantity=3.0, duration_ms=1234)
     )
-    assert resp.usage.cost_usd == 9.99  # what normalize() reported wins
-    assert resp.usage.pages_processed == 7
-    assert resp.usage.cost_basis == "billed"  # ...but an unset field is filled
+    assert resp.usage.pages_processed == 7  # what normalize() reported wins
+    assert resp.usage.duration_ms == 1234  # ...but an unset field is filled
 
 
-def test_merge_records_infra_only_basis_without_inventing_a_price():
+def test_merge_reports_a_local_backend_in_its_own_unit():
     resp = _blank_response()
     merge_cost_report(resp, infra_only("page", 2.0))
     assert resp.usage is not None
-    assert resp.usage.cost_usd is None  # a local backend has no per-call price
-    assert resp.usage.cost_basis == "infra_only"  # and says WHY the price is absent
     assert resp.usage.pages_processed == 2
 
 
@@ -143,52 +127,31 @@ def test_merge_never_rounds_a_fractional_page_count_into_pages_processed():
 
 def test_merge_does_not_split_a_combined_token_count():
     resp = _blank_response()
-    merge_cost_report(
-        resp,
-        CostReport(
-            native_unit="token",
-            native_quantity=900.0,
-            cost_usd=0.01,
-            basis=CostBasis.ESTIMATED,
-            billing_target="caller_account",
-        ),
-    )
+    merge_cost_report(resp, CostReport(native_unit="token", native_quantity=900.0))
     assert resp.usage is not None
     assert resp.usage.input_tokens is None and resp.usage.output_tokens is None
-    assert resp.usage.cost_usd == 0.01
 
 
 def test_merge_projects_credits():
     resp = _blank_response()
-    merge_cost_report(
-        resp,
-        CostReport(
-            native_unit="credit",
-            native_quantity=4.0,
-            cost_usd=0.06,
-            basis=CostBasis.BILLED,
-            billing_target="caller_account",
-        ),
-    )
+    merge_cost_report(resp, CostReport(native_unit="credit", native_quantity=4.0))
     assert resp.usage is not None and resp.usage.credits == 4.0
 
 
 # --- choke point 1: the chain executor --------------------------------------------------
 
 
-def test_executor_fills_cost_usd_from_report_cost():
+def test_executor_fills_usage_from_report_cost():
     adapter = _paid_adapter()
     resp = execute_plan(RoutePlan(chosen=adapter), _req(), broker=_REDUCTO_BROKER)
 
     metered = adapter.report_cost(adapter.submit(_req(), RunContext()))
     assert resp.usage is not None
-    assert resp.usage.cost_usd == metered.cost_usd == _EXPECTED_USD
-    assert resp.usage.cost_basis == "billed"
-    assert resp.usage.credits == 1.0
+    assert resp.usage.credits == metered.native_quantity == _EXPECTED_CREDITS
     schemas.validate_response(resp.to_schema_dict())
 
 
-def test_executor_cost_survives_the_idempotency_cache():
+def test_executor_usage_survives_the_idempotency_cache():
     from openreading.router.executor import BoundedResultCache
 
     # the cache keys on document CONTENT identity (D-v3-3, BL-23) — a url-sourced _req() has none,
@@ -208,7 +171,7 @@ def test_executor_cost_survives_the_idempotency_cache():
     replay = execute_plan(plan, req, broker=_REDUCTO_BROKER, cache=cache, clock=FakeClock())
 
     assert any(w.code == "idempotent_replay" for w in replay.warnings or [])
-    assert replay.usage is not None and replay.usage.cost_usd == _EXPECTED_USD
+    assert replay.usage is not None and replay.usage.credits == _EXPECTED_CREDITS
 
 
 class _RaisingMeter(ConfigurableBackend):
@@ -232,7 +195,7 @@ def test_a_raising_report_cost_degrades_instead_of_failing_the_run():
 # --- choke point 2: the strategy engine leaf --------------------------------------------
 
 
-def test_strategy_engine_leaf_fills_cost_usd_from_report_cost():
+def test_strategy_engine_leaf_fills_usage_from_report_cost():
     registry = Registry()
     registry.register(_paid_adapter())
     cfg = StrategyConfig.model_validate(
@@ -248,8 +211,7 @@ def test_strategy_engine_leaf_fills_cost_usd_from_report_cost():
         clock=FakeClock(),
     ).response
 
-    assert resp.usage is not None and resp.usage.cost_usd == _EXPECTED_USD
-    assert resp.usage.cost_basis == "billed"
+    assert resp.usage is not None and resp.usage.credits == _EXPECTED_CREDITS
     schemas.validate_response(resp.to_schema_dict())
 
 
@@ -257,7 +219,7 @@ def test_strategy_engine_leaf_fills_cost_usd_from_report_cost():
 
 
 @respx.mock
-def test_named_backend_run_reports_cost(monkeypatch, tmp_path):
+def test_named_backend_run_reports_usage(monkeypatch, tmp_path):
     monkeypatch.setenv("REDUCTO_API_KEY", "test-key")
     _mock_reducto_http()
     pdf = tmp_path / "a.pdf"
@@ -266,12 +228,11 @@ def test_named_backend_run_reports_cost(monkeypatch, tmp_path):
     out = api.run(str(pdf), backend="reducto")
 
     schemas.validate_response(out)
-    assert out["usage"]["cost_usd"] == _EXPECTED_USD
-    assert out["usage"]["cost_basis"] == "billed"
+    assert out["usage"]["credits"] == _EXPECTED_CREDITS
 
 
 @respx.mock
-def test_batch_summary_cost_is_non_null_for_a_paid_backend(monkeypatch, tmp_path):
+def test_batch_summary_counts_pages_for_a_hosted_backend(monkeypatch, tmp_path):
     monkeypatch.setenv("REDUCTO_API_KEY", "test-key")
     _mock_reducto_http()
     corpus = tmp_path / "corpus"
@@ -283,8 +244,9 @@ def test_batch_summary_cost_is_non_null_for_a_paid_backend(monkeypatch, tmp_path
 
     schemas.validate_batch_result(env)
     assert env["summary"]["succeeded"] == 2
-    assert env["summary"]["cost_usd"] == pytest.approx(2 * _EXPECTED_USD)
-    assert env["summary"]["cost_bases"] == ["billed"]
+    # The summary reports no money at all any more; `pages_processed` is None here because Reducto
+    # meters in credits, and the merge never reshapes one unit into another.
+    assert "cost_usd" not in env["summary"] and "cost_bases" not in env["summary"]
 
 
 # --- BL-108: a mechanical backstop against a future uncredentialed call site ----------------

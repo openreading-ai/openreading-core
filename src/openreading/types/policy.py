@@ -8,7 +8,7 @@ The nine keys before it asked core to enforce a compliance posture from a per-ve
 package keeps in its own source: whether each vendor signs a BAA, trains on customer data, or
 retains a document for so many hours. Nothing here can observe any of that, so a stale entry did
 not fail loudly, it routed a document to a backend the operator believed was excluded and the run
-succeeded. `design/compliance-removal.md` has the argument; the short version is that core holds
+succeeded. has the argument; the short version is that core holds
 no fact it cannot verify, and a constraint core cannot check is one it must not appear to enforce.
 
 An operator who cares about compliance already knows their own posture and which vendors they

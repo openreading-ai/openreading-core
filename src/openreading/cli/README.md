@@ -172,7 +172,7 @@ jq -r .document.text out.json | head -1
 jq '[.document.pages[].blocks[] | select(.type=="table")] | length' out.json
 jq -c '[.warnings[]?.code]' out.json
 uv run openreading parse sample.pdf --strategy offline_first 2>/dev/null > strat.json
-jq -c '.orchestration.attempts[] | {node, backend, category, cost_usd}' strat.json
+jq -c '.orchestration.attempts[] | {node, backend, category}' strat.json
 uv run openreading parse corpus/ --backend tesseract > tess.json 2>/dev/null
 uv run openreading compare run.json tess.json --format table 2>/dev/null | head -2
 ```
@@ -181,7 +181,7 @@ uv run openreading compare run.json tess.json --format table 2>/dev/null | head 
 OpenReading Test Document
 1
 ["confidence_unavailable"]
-{"node":"root.steps[0]","backend":"pymupdf","category":"succeeded","cost_usd":null}
+{"node":"root.steps[0]","backend":"pymupdf","category":"succeeded"}
 CORPUS COMPARE: run vs tess
 1 document(s): 0 equivalent · 0 divergent · 1 mixed · 0 unpaired
 ```
@@ -317,7 +317,7 @@ no verb lists runs, so recovery means reading `$OPENREADING_LEDGER/*.header.json
 modification time. Resuming it dispatches the rung that was in flight a second time. A
 `cancelled` rung is not replayed either. The resumed run records that backend as skipped and moves
 to the next entry in `try`. The answer can then come from a different backend than an uninterrupted
-run would have used. On a hosted backend that is a second billed call.
+run would have used. On a hosted backend that is a second call on your key.
 
 A batch takes the same signal paths and gives you less to work with. It exits 6 and names no run
 id, while its per-item runs under the ledger root may still be individually resumable. [Batch

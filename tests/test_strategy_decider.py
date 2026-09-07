@@ -111,7 +111,7 @@ def _review_cfg(review_default: str, *, decider: dict | None = None):
 
 def _review_reg():
     return scripted_registry(
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN, confidence=0.5),  # low conf → band
+        ScriptedBackend("reducto", text=CLEAN, confidence=0.5),  # low conf → band
         ScriptedBackend("pymupdf", local=True, text=CLEAN),
     )
 
@@ -150,7 +150,7 @@ def _decide_reg():
     return scripted_registry(
         ScriptedBackend("docling", local=True, text=CLEAN),
         ScriptedBackend("pymupdf", local=True, text=CLEAN),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN),  # a hosted decider backend
+        ScriptedBackend("reducto", text=CLEAN),  # a hosted decider backend
     )
 
 
@@ -196,7 +196,7 @@ class _FakePort:
 
     def decide(self, dp: DecisionPoint) -> DecisionVerdict:
         self.seen.append(dp)
-        return DecisionVerdict(action=self.action, cost_usd=self.cost_usd, rationale="fake")
+        return DecisionVerdict(action=self.action, rationale="fake")
 
 
 def test_llm_port_out_of_set_revalidates_to_malformed():
@@ -374,17 +374,20 @@ def test_decision_records_are_deterministic():
 # ---- decider_call metering (14.2) -------------------------------------------------------------
 
 
-def test_decider_call_is_metered_as_an_attempt():
-    port = _FakePort("escalate", cost_usd=0.02)
+def test_decider_call_is_recorded_as_an_attempt():
+    port = _FakePort("escalate")
     res = _run(
         _review_cfg("escalate", decider={"llm": {"backend": "pymupdf"}}),
         _review_reg(),
         env={"OPENREADING_LLM_DECIDER": "1"},
         decider_llm=port,
     )
-    metered = [a for a in res.orchestration["attempts"] if a["category"] == "decider_call"]
-    assert len(metered) == 1
-    assert metered[0]["cost_usd"] == 0.02  # the port's spend billed as a decider_call (rail 3)
+    # Rail 3: the call is visible in the trail so a reader can count decider calls. It used to
+    # also carry the port's own reported `cost_usd`, summed into `usage.cost_usd`; both are gone
+    # with the rest of core's money.
+    recorded = [a for a in res.orchestration["attempts"] if a["category"] == "decider_call"]
+    assert len(recorded) == 1
+    assert "cost_usd" not in recorded[0]
     d = _decisions(res)[0]
     assert d["decider"] == "llm" and d["rationale"] == "fake"
 
@@ -422,7 +425,7 @@ class _LongestJudge:
     def compare(self, a: JudgeCandidate, b: JudgeCandidate, intent):
         self.seen.append((a, b))
         winner = "A" if len(a.excerpt) >= len(b.excerpt) else "B"
-        return JudgeVerdict(winner=winner, cost_usd=self.cost_usd)
+        return JudgeVerdict(winner=winner)
 
 
 class _PositionJudge:
@@ -449,8 +452,8 @@ def _judge_cfg(judge_backend="pymupdf", branches=None):
 def test_judge_picks_higher_quality_candidate():
     # aws-textract (CLEAN, longer) vs reducto (GARBLED, shorter); the longest-judge picks CLEAN.
     reg = scripted_registry(
-        ScriptedBackend("reducto", cost_low=0.01, text=GARBLED_SHORT),
-        ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN),
+        ScriptedBackend("reducto", text=GARBLED_SHORT),
+        ScriptedBackend("aws-textract", text=CLEAN),
         ScriptedBackend("pymupdf", local=True, text=CLEAN),  # the (local, eligible) judge backend
     )
     res = _run(
@@ -469,8 +472,8 @@ def test_judge_picks_higher_quality_candidate():
 
 def test_judge_never_synthesizes_returns_a_real_candidate():
     reg = scripted_registry(
-        ScriptedBackend("reducto", cost_low=0.01, text=GARBLED_SHORT),
-        ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN),
+        ScriptedBackend("reducto", text=GARBLED_SHORT),
+        ScriptedBackend("aws-textract", text=CLEAN),
         ScriptedBackend("pymupdf", local=True, text=CLEAN),
     )
     res = _run(_judge_cfg(), reg, env={"OPENREADING_LLM_DECIDER": "1"}, judge_llm=_LongestJudge())
@@ -481,20 +484,22 @@ def test_judge_never_synthesizes_returns_a_real_candidate():
 
 def test_judge_position_bias_is_a_tie_broken_deterministically():
     # both CLEAN (engine would tie on quality); the position-biased judge is inconsistent → tie →
-    # cheaper backend wins (aws-textract 0.01 < reducto 0.10), regardless of branch order.
+    # the FIRST-LISTED candidate wins. The tie-break used to consult a descriptor price and pick
+    # the cheaper backend; that price is gone and written order is the
+    # author's own statement of preference, which is the whole rule now.
     reg = scripted_registry(
-        ScriptedBackend("reducto", cost_low=0.10, text=CLEAN),
-        ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN),
+        ScriptedBackend("reducto", text=CLEAN),
+        ScriptedBackend("aws-textract", text=CLEAN),
         ScriptedBackend("pymupdf", local=True, text=CLEAN),
     )
     res = _run(_judge_cfg(), reg, env={"OPENREADING_LLM_DECIDER": "1"}, judge_llm=_PositionJudge())
-    assert res.response.backend.id == "aws-textract"  # tie → cheaper backend, deterministic
+    assert res.response.backend.id == "reducto"  # tie → first listed, deterministic
 
 
 def test_judge_ungated_downgrades_to_engine_score():
     reg = scripted_registry(
-        ScriptedBackend("reducto", cost_low=0.01, text=GARBLED_SHORT),
-        ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN),
+        ScriptedBackend("reducto", text=GARBLED_SHORT),
+        ScriptedBackend("aws-textract", text=CLEAN),
     )
     res = _run(_judge_cfg(), reg, judge_llm=_LongestJudge())  # no env → judge disabled
     assert res.response.backend.id == "aws-textract"  # engine composite picks CLEAN
@@ -519,8 +524,8 @@ def test_decide_out_of_scope_decider_backend_downgrades_to_engine_traced():
 def test_judge_determinism():
     def once():
         reg = scripted_registry(
-            ScriptedBackend("reducto", cost_low=0.01, text=GARBLED_SHORT),
-            ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN),
+            ScriptedBackend("reducto", text=GARBLED_SHORT),
+            ScriptedBackend("aws-textract", text=CLEAN),
             ScriptedBackend("pymupdf", local=True, text=CLEAN),
         )
         res = _run(
@@ -565,8 +570,8 @@ def test_replay_missing_decision_is_trace_missing():
 def test_replay_reproduces_the_judge_winner():
     def reg():
         return scripted_registry(
-            ScriptedBackend("reducto", cost_low=0.01, text=GARBLED_SHORT),
-            ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN),
+            ScriptedBackend("reducto", text=GARBLED_SHORT),
+            ScriptedBackend("aws-textract", text=CLEAN),
             ScriptedBackend("pymupdf", local=True, text=CLEAN),
         )
 
@@ -588,8 +593,8 @@ def test_replay_stale_judge_winner_falls_back_to_the_engine():
     # never synthesize a winner and never crash looking the stale name up among the candidates.
     def reg():
         return scripted_registry(
-            ScriptedBackend("reducto", cost_low=0.01, text=GARBLED_SHORT),
-            ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN),
+            ScriptedBackend("reducto", text=GARBLED_SHORT),
+            ScriptedBackend("aws-textract", text=CLEAN),
             ScriptedBackend("pymupdf", local=True, text=CLEAN),
         )
 
@@ -664,7 +669,6 @@ def _mask_reg():
     return scripted_registry(
         ScriptedBackend(
             "reducto",
-            cost_low=0.01,
             text=CLEAN,
             confidence=0.5,
             typed_fields={"ssn": {"value": CANARY}, "amount": {"value": "100.00"}},

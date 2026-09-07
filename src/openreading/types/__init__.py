@@ -22,7 +22,6 @@ from openreading.types.cost import CostReport, infra_only
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    Cost,
     Output,
     OutputChannels,
     Provisioning,
@@ -33,7 +32,6 @@ from openreading.types.enums import (
     BackendType,
     BlockType,
     ChannelGrade,
-    CostBasis,
     JobState,
     NativeOrigin,
     NativeUnit,
@@ -122,7 +120,6 @@ __all__ = [
     "Capabilities",
     "Output",
     "OutputChannels",
-    "Cost",
     "RuntimeProfile",
     "RouterHints",
     # control plane
@@ -156,5 +153,4 @@ __all__ = [
     "ChannelGrade",
     "JobState",
     "WaitMode",
-    "CostBasis",
 ]

@@ -28,7 +28,6 @@ from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
     ConfigField,
-    Cost,
     CredentialField,
     Output,
     OutputChannels,
@@ -41,7 +40,6 @@ from openreading.types.enums import (
     BackendType,
     BlockType,
     ChannelGrade,
-    CostBasis,
     JobState,
     NativeOrigin,
     NativeUnit,
@@ -82,13 +80,6 @@ _OPERATIONS = {
     "AnalyzeExpense": {"features": [], "price": 0.01},
     "AnalyzeID": {"features": [], "price": 0.025},
     "AnalyzeLending": {"features": [], "price": 0.07},
-}
-_OP_PRICE: dict[str, float] = {
-    "DetectDocumentText": 0.0015,
-    "AnalyzeDocument": 0.065,
-    "AnalyzeExpense": 0.01,
-    "AnalyzeID": 0.025,
-    "AnalyzeLending": 0.07,
 }
 _ASYNC_OPS = {"AnalyzeDocument", "DetectDocumentText", "AnalyzeLending"}
 
@@ -196,7 +187,7 @@ def _descriptor() -> AdapterDescriptor:
         adapter_impl="http",
         operations=list(_OPERATIONS),
         provisioning=Provisioning(
-            byo_mode=["cloud_credential"], auth="sigv4", billing_target="caller_account"
+            byo_mode=["cloud_credential"], auth="sigv4"
         ),
         wait_modes=[WaitMode.INLINE, WaitMode.POLL],
         capabilities=Capabilities(
@@ -214,13 +205,6 @@ def _descriptor() -> AdapterDescriptor:
             languages=["en", "fr", "de", "it", "pt", "es"],
             input_formats=["pdf", "png", "jpg", "tiff"],
             max_pages_per_request="1 sync / 3000 async",
-        ),
-        cost=Cost(
-            native_unit="page",
-            basis="estimated",
-            usd_per_page_equiv_low=0.0015,
-            usd_per_page_equiv_high=0.07,
-            lossiness="none",
         ),
         runtime=RuntimeProfile(
             offline_capable=False, license="proprietary", version_pin="boto3>=1.34"
@@ -928,15 +912,12 @@ class AWSTextractAdapter(BackendAdapter):
         return resp
 
     def report_cost(self, job: Job) -> CostReport:
-        op = (job.raw.object_class if job.raw else None) or "AnalyzeDocument"
+        """The page count Textract returned in `DocumentMetadata`.
+
+        This used to multiply it by a per-operation `_OP_PRICE` table. Textract prices differ by
+        operation, region and volume tier, none of which this call knows.
+        """
         pages = 1
         if job.raw and isinstance(job.raw.payload, dict):
             pages = (job.raw.payload.get("DocumentMetadata") or {}).get("Pages", 1) or 1
-        price = _OP_PRICE.get(op, 0.0)
-        return CostReport(
-            native_unit="page",
-            native_quantity=float(pages),
-            cost_usd=price * pages,
-            basis=CostBasis.ESTIMATED,
-            billing_target="caller_account",
-        )
+        return CostReport(native_unit="page", native_quantity=float(pages))

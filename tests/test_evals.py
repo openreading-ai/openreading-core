@@ -326,7 +326,7 @@ def _hipaa_case() -> EvalCase:
 def test_run_case_compliant_backend_is_unaffected():
     # Positive control: a backend that DOES carry a BAA runs to completion exactly as before —
     # the gate is purely additive, never narrowing an already-eligible backend.
-    fake = _CountingBackend(make_backend("phi-backend", hipaa_baa="yes").descriptor)
+    fake = _CountingBackend(make_backend("phi-backend").descriptor)
 
     result = run_case(fake, _hipaa_case())
 

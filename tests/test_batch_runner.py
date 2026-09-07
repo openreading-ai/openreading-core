@@ -129,28 +129,6 @@ def test_on_progress_reaches_total_for_a_mixed_batch():
 # --- M8 honest aggregation --------------------------------------------------------------
 
 
-def test_aggregation_sums_cost_tallies_backends_and_bases():
-    srcs = [_src("a.pdf"), _src("b.pdf"), _src("c.pdf")]
-    resp = {
-        "a.pdf": _ok("reducto", cost=0.10, basis="estimated", pages=2),
-        "b.pdf": _ok("reducto", cost=0.20, basis="metered", pages=3),
-        "c.pdf": _ok("pymupdf"),  # no cost reported
-    }
-    res = run_batch(srcs, run_one=lambda s, i: resp[s.ref.filename])
-    assert res.summary.cost_usd == pytest.approx(0.30)  # only items that reported a cost
-    assert set(res.summary.cost_bases) == {
-        "estimated",
-        "metered",
-    }  # distinct bases, no fake precision
-    assert res.summary.backends == {"reducto": 2, "pymupdf": 1}
-    assert res.summary.pages_processed == 5
-
-
-def test_no_cost_reported_leaves_cost_usd_absent():
-    res = run_batch([_src("a.pdf")], run_one=lambda s, i: _ok("pymupdf"))
-    assert res.summary.cost_usd is None
-
-
 # --- concurrency preserves input order (M1) ---------------------------------------------
 
 

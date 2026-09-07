@@ -152,7 +152,7 @@ curl -s localhost:8787/v1/jobs/$(jq -r .job_id job.json) | jq -c '{job_id, state
 ```json
 {"schema_version":"0.2","subjects":["pymupdf","tesseract"],"findings":4}
 HTTP 200
-{"state":"partial","summary":{"total":2,"succeeded":1,"failed":1,"skipped":0,"duration_ms":19.0,"cost_bases":["infra_only"],"pages_processed":2,"backends":{"pymupdf":1}},"items":[{"relpath":"0","state":"succeeded","code":null},{"relpath":"1","state":"failed","code":"FileDataError"}]}
+{"state":"partial","summary":{"total":2,"succeeded":1,"failed":1,"duration_ms":19.0,"pages_processed":2,"backends":{"pymupdf":1}},"items":[{"relpath":"0","state":"succeeded","code":null},{"relpath":"1","state":"failed","code":"FileDataError"}]}
 {"job_id":"omjob_86129928b4744727b9f5a2001ddb265c","state":"succeeded","response_state":"succeeded","error":null}
 ```
 
@@ -371,7 +371,7 @@ sample through `/v1/parse` and `/v1/batch`, asserts schema-valid responses, and 
   `orchestration.dropped` block on the envelope. You see what survived, in `backend.id` on success
   or in a 502 `trail`, but never a list of what was pruned.
 - `/v1/parse`, `/v1/batch` and `/v1/compare` responses are schema-validated before they leave the
-  process. The server owns the only result cache, so a replayed item never hides a billed call.
+  process. The server owns the only result cache, so a replayed item never hides a real call.
 
 ## Operations
 
@@ -451,10 +451,12 @@ survives the process.
 There is no metrics or tracing surface here, and the "Not built yet" list says so. Three things are
 worth collecting instead. The stdout access log gives request counts and status codes. `uv run
 openreading backends --check <slug>` measures whether a backend answers and belongs on a schedule
-as a vendor-degradation canary ([Routing and keys](../router/README.md)). Each envelope from a
-hosted backend carries `usage.cost_usd`, the only per-request spend figure this process produces. A
-local backend reports `usage.cost_basis: "infra_only"` and no `cost_usd` at all. A consumer that
-totals spend therefore treats a missing key as zero rather than as an error.
+as a vendor-degradation canary ([Routing and keys](../router/README.md)). Each envelope carries `usage`, which reports
+what the backend consumed in the unit it meters in: `pages_processed`, `credits`,
+`input_tokens`/`output_tokens`, `duration_ms`. There is no spend figure. A dollar total needed a
+per-vendor rate this package could not verify, so `cost_usd` and `cost_basis` are gone
+; join these counters to your provider invoice instead. A counter a
+backend did not report is absent rather than zero, so read every field with a default.
 
 ### Load and time budgets
 

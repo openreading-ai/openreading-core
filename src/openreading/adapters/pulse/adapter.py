@@ -30,11 +30,10 @@ from openreading.derive import (
     table_to_text,
 )
 from openreading.types.blocks import Block, Citation, Table, TypedField
-from openreading.types.cost import CostBasis, CostReport
+from openreading.types.cost import CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    Cost,
     CredentialField,
     Output,
     OutputChannels,
@@ -177,7 +176,7 @@ def _descriptor() -> AdapterDescriptor:
         adapter_impl="http",
         operations=["extract"],
         provisioning=Provisioning(
-            byo_mode=["api_key"], auth="api_key", billing_target="caller_account"
+            byo_mode=["api_key"], auth="api_key"
         ),
         wait_modes=[WaitMode.INLINE, WaitMode.POLL],
         capabilities=Capabilities(
@@ -192,13 +191,6 @@ def _descriptor() -> AdapterDescriptor:
             custom_schema_extraction="claimed",
             vlm_based="claimed",
             input_formats=["pdf", "docx", "pptx", "xlsx", "png", "jpg"],
-        ),
-        cost=Cost(
-            native_unit="credit",
-            basis="estimated",
-            usd_per_page_equiv_low=0.015,
-            usd_per_page_equiv_high=0.02,
-            lossiness="credit",
         ),
         runtime=RuntimeProfile(offline_capable=False, license="proprietary", version_pin="api"),
         output=Output(
@@ -715,9 +707,6 @@ class PulseAdapter(BackendAdapter):
         return CostReport(
             native_unit="credit",
             native_quantity=float(credits) if credits is not None else float(pages),
-            cost_usd=float(credits) * 0.015 if credits is not None else 0.015 * pages,
-            basis=CostBasis.ESTIMATED,
-            billing_target="caller_account",
         )
 
     def _map_error(self, e: Exception):

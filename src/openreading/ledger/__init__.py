@@ -119,7 +119,7 @@ The port surface (`openreading.ledger.*`)
 -----------------------------------------
 - `ports`      -- `Executor`, `Journal`, `BlobStore` (Protocols).
 - `step`       -- `StepRequest`, `StepResult`, `StepRef`, `BlobRef`, `ExecResult`, `StepError`,
-                  `StepCost`; mirrors `schemas/step.v0.1.json` and `journal.v0.1.json`.
+                  mirrors `schemas/step.v0.1.json` and `journal.v0.1.json`.
 - `descriptor` -- `ExecutorDescriptor{id, limits, capabilities}`.
 - `inline`     -- `InlineExecutor` (the one core executor), `NullJournal`, `descriptor_digest`.
 - `jsonl`      -- `JsonlJournal`: one JSONL file per run, fsync per append.

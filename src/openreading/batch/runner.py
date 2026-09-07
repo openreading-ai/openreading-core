@@ -102,15 +102,10 @@ def _run_item(src: ResolvedSource, run_one: RunOne, base_key: str | None) -> Bat
 
 def _summarize(items: list[BatchItem], duration_ms: int) -> BatchSummary:
     succeeded = [i for i in items if i.state == "succeeded"]
-    costs, bases, pages = [], set(), []
+    pages: list[int] = []
     backends: dict[str, int] = {}
     for it in succeeded:
         usage = (it.response or {}).get("usage") or {}
-        c = usage.get("cost_usd")
-        if isinstance(c, (int, float)) and not isinstance(c, bool):
-            costs.append(float(c))
-        if usage.get("cost_basis"):
-            bases.add(str(usage["cost_basis"]))
         p = usage.get("pages_processed")
         if isinstance(p, int) and not isinstance(p, bool):
             pages.append(p)
@@ -122,8 +117,6 @@ def _summarize(items: list[BatchItem], duration_ms: int) -> BatchSummary:
         succeeded=len(succeeded),
         failed=sum(1 for i in items if i.state == "failed"),
         duration_ms=duration_ms,
-        cost_usd=round(sum(costs), 6) if costs else None,  # None when NO item reported a cost (M8)
-        cost_bases=sorted(bases),
         pages_processed=sum(pages) if pages else None,
         backends=backends,
     )
