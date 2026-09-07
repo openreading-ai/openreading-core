@@ -148,25 +148,26 @@ def test_local_files_get_size_and_sha256(tmp_path):
 # --- M3: honest format filter -----------------------------------------------------------
 
 
-def test_format_filter_marks_unsupported_and_unknown(tmp_path):
+def test_every_file_the_caller_named_is_resolved(tmp_path):
+    """Intake used to sort files into supported, unsupported and unknown from a 26-extension
+    table, and skip two of the three. It dispatches all of them now: whether a backend can read a
+    document is that backend's own answer, given first-hand, and a wrong entry in our table
+    silently excluded files the caller asked for."""
     d = tmp_path / "c"
     _mk(d / "good.pdf")
     _mk(d / "img.png")
     _mk(d / "doc.docx")
     _mk(d / "weird.xyzzy")
-    got = {
-        r.ref.filename: r.skip_reason
-        for r in resolve_intake([str(d)], supported_formats={"pdf", "png"})
-    }
-    assert got["good.pdf"] is None and got["img.png"] is None
-    assert got["doc.docx"] == "unsupported_format"  # known extension, backend can't take it
-    assert got["weird.xyzzy"] == "unknown_format"  # not a recognized document extension
+    got = sorted(r.ref.filename for r in resolve_intake([str(d)], supported_formats={"pdf", "png"}))
+    assert got == ["doc.docx", "good.pdf", "img.png", "weird.xyzzy"]
 
 
-def test_no_supported_set_means_no_filtering(tmp_path):
+def test_supported_formats_is_accepted_and_ignored(tmp_path):
+    """Kept in the signature so existing callers need not change, and honoured by nobody. It is
+    removed once they stop passing it."""
     f = _mk(tmp_path / "x.docx")
-    (r,) = resolve_intake([str(f)], supported_formats=None)
-    assert r.skip_reason is None  # nothing filtered when the caller gives no format set
+    assert len(resolve_intake([str(f)], supported_formats={"pdf"})) == 1
+    assert len(resolve_intake([str(f)], supported_formats=None)) == 1
 
 
 def test_streaming_sha256_matches_whole_file_hash_across_a_chunk_boundary(tmp_path):
@@ -181,11 +182,12 @@ def test_streaming_sha256_matches_whole_file_hash_across_a_chunk_boundary(tmp_pa
     assert ref.sha256 == hashlib.sha256(data).hexdigest()
 
 
-def test_skipped_files_are_not_hashed(tmp_path):
+def test_every_resolved_file_is_hashed(tmp_path):
+    """Hashing used to be skipped for a file intake had already decided not to process. Every
+    file is processed now, so every one carries the digest its ledger entry needs."""
     f = _mk(tmp_path / "x.docx")
     (r,) = resolve_intake([str(f)], supported_formats={"pdf"})
-    assert r.skip_reason == "unsupported_format"
-    assert r.ref.sha256 is None  # no point hashing a file we won't process
+    assert r.ref.sha256
 
 
 # --- M4: size guard ---------------------------------------------------------------------
@@ -232,7 +234,8 @@ def test_glob_with_no_matches_raises(tmp_path):
 
 
 def test_resolved_source_is_the_dataclass():
-    assert ResolvedSource.__annotations__.keys() >= {"ref", "skip_reason"}
+    assert ResolvedSource.__annotations__.keys() >= {"ref"}
+    assert "skip_reason" not in ResolvedSource.__annotations__
 
 
 # --- glob depth and identity (BL-cli-help) ------------------------------------------------

@@ -55,10 +55,9 @@ class BatchItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source: SourceRef
-    state: Literal["succeeded", "failed", "skipped"]
+    state: Literal["succeeded", "failed"]
     response: dict[str, Any] | None = None  # a full response.v0.3 envelope (validated separately)
     error: BatchItemError | None = None
-    skip_reason: Literal["unsupported_format", "unknown_format"] | None = None
     transport: Literal["platform", "native"] | None = None
 
 
@@ -68,7 +67,6 @@ class BatchSummary(BaseModel):
     total: int
     succeeded: int
     failed: int
-    skipped: int
     duration_ms: float | None = None
     cost_usd: float | None = None
     cost_bases: list[str] = Field(default_factory=list)
@@ -107,7 +105,7 @@ class BatchResult(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    schema_version: str = "0.1"
+    schema_version: str = "0.2"
     status: BatchStatus
     request: BatchRequestEcho | None = None
     items: list[BatchItem] = Field(default_factory=list)

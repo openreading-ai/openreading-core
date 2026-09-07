@@ -15,7 +15,6 @@ Invariants enforced here:
 
 from __future__ import annotations
 
-import mimetypes
 from dataclasses import dataclass, field, replace
 
 from openreading.adapters.base import BackendAdapter
@@ -46,29 +45,8 @@ _WEIGHTS = {
 }
 
 
-# mimetypes' builtin table only learned the OOXML vnd.* family after 3.11, and a container with no
-# /etc/mime.types has nothing else to learn it from, so pin the three the fleet actually advertises.
-_EXT_BY_MIME = {
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
-}
-
-
 def _truthy_cap(value) -> bool:
     return value not in (False, None, "false", "")
-
-
-def _format_token(mime: str) -> str:
-    """A MIME type -> the token compared against a descriptor's `input_formats`. mimetypes owns
-    the mapping because the trailing segment of a MIME type is not its format: the OOXML family
-    ends in 'document'/'sheet'/'presentation' and image/jpeg ends in 'jpeg' where the fleet
-    advertises 'jpg'. The split is only the last resort, for types nothing recognizes."""
-    mime = mime.strip().lower()
-    ext = mimetypes.guess_extension(mime)
-    if ext:
-        return ext.lstrip(".")
-    return _EXT_BY_MIME.get(mime) or mime.split("/")[-1].split(".")[-1]
 
 
 @dataclass
@@ -175,17 +153,6 @@ class Router:
                 return DropReason(2, f"missing_{cap_name}", f"request requires {cap_name}")
         if req.extraction_schema is not None and not _truthy_cap(caps.custom_schema_extraction):
             return DropReason(2, "missing_custom_schema_extraction", "extraction_schema requested")
-        # input format gate (loose): only when the backend advertises a format allow-list.
-        mime = req.document.mime_type
-        if mime and caps.input_formats:
-            token = _format_token(mime)
-            allowed = {f.lower() for f in caps.input_formats}
-            # match the leading token of each advertised format, so an honest annotation like
-            # "pdf (rasterized)" still satisfies a "pdf" request (the backend rasterizes it).
-            allowed_tokens = {f.split("(")[0].split()[0] for f in allowed if f.split()}
-            if token not in allowed_tokens and mime.lower() not in allowed:
-                return DropReason(2, "unsupported_format", f"{mime} not in {sorted(allowed)}")
-        return None
 
     # ---- stage 3 -------------------------------------------------------------
     def _score(self, req: OpenReadingRequest, desc: AdapterDescriptor) -> float:

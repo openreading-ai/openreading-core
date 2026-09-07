@@ -1,0 +1,83 @@
+{
+  "schema_version": "0.2",
+  "status": {
+    "state": "partial"
+  },
+  "request": {
+    "backend": "auto",
+    "strategy": null,
+    "jobs": 1,
+    "source_args": [
+      "invoices/",
+      "extra/logo.svg"
+    ]
+  },
+  "items": [
+    {
+      "source": {
+        "path": "invoices/a.pdf",
+        "relpath": "a.pdf",
+        "filename": "a.pdf",
+        "format": "pdf",
+        "mime_type": "application/pdf",
+        "size_bytes": 12345,
+        "sha256": "aaaa1111"
+      },
+      "state": "succeeded",
+      "response": {
+        "schema_version": "0.3",
+        "status": {
+          "state": "succeeded"
+        },
+        "backend": {
+          "id": "pymupdf",
+          "type": "oss_library"
+        },
+        "document": {
+          "text": "Invoice A total 100.00"
+        }
+      },
+      "transport": "platform"
+    },
+    {
+      "source": {
+        "path": "invoices/b.pdf",
+        "relpath": "b.pdf",
+        "filename": "b.pdf",
+        "format": "pdf",
+        "sha256": "bbbb2222"
+      },
+      "state": "failed",
+      "error": {
+        "code": "backend_error",
+        "message": "extraction timed out"
+      }
+    },
+    {
+      "source": {
+        "path": "extra/logo.svg",
+        "relpath": "logo.svg",
+        "filename": "logo.svg",
+        "format": "svg"
+      },
+      "state": "failed",
+      "error": {
+        "code": "unsupported_format",
+        "message": "pymupdf cannot read svg"
+      }
+    }
+  ],
+  "summary": {
+    "total": 3,
+    "succeeded": 1,
+    "failed": 2,
+    "duration_ms": 4210,
+    "cost_usd": null,
+    "cost_bases": [],
+    "pages_processed": 2,
+    "backends": {
+      "pymupdf": 1
+    }
+  },
+  "warnings": []
+}

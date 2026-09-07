@@ -130,6 +130,9 @@ _UNRELEASED = {
     "strategy-config.v0.3.json",
     # Leaderboard (BL-160) — brand-new family this milestone (not yet byte-frozen):
     "leaderboard-report.v0.1.json",
+    # The removal set — batch intake dispatches every source, so `skip_reason`, the `skipped`
+    # item state and `summary.skipped` all leave (design/format-agnostic-intake.md):
+    "batch-result.v0.2.json",
     # Pulse (internal/design/liveness.md) — brand-new family + the additive descriptor bump that
     # carries its optional `liveness` block (freeze both at milestone end):
     "liveness-report.v0.1.json",

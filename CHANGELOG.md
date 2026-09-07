@@ -456,6 +456,22 @@ and `tests/test_schema_evolution.py` pins every released file byte for byte.
 - **`compare <missing.pdf> --backends a,b` is usage, not an errno.** `parse` refused a mistyped
   filename at exit 2 with a sentence; fan-out returned a raw `SourceNotFoundError: [Errno 2]` at
   exit 1.
+- **The router no longer decides what a backend can read.** The stage-2 format gate dropped a
+  backend when the request's MIME type fell outside its descriptor's `input_formats`. Measured
+  before removal: `.docx` dropped nine backends and `.svg` dropped none, because an unknown
+  extension became `application/pdf` before the router saw it, so the gate was a projection of
+  core's own table rather than knowledge of any vendor. Being wrong in the `False` direction
+  silently excluded a backend that could have done the job. A backend that cannot read a document
+  refuses first-hand now, and the fallback chain already handles that. `input_formats` stays on
+  the descriptor as documentation; nothing branches on it.
+- **A batch dispatches every source the caller named.** Intake used to sort files against a
+  26-extension table and skip the ones it judged unsupported. `skip_reason`, the `skipped` item
+  state and `summary.skipped` are gone with it (**`batch-result` v0.2**), and a file the backend
+  cannot read is a `failed` item carrying that backend's own reason. Hidden files are still
+  excluded, which is a rule about visibility rather than format. Two consequences worth knowing: a
+  directory holding one unreadable file now exits **4** (batch partial) where it used to exit 0,
+  and `openreading parse doc.txt --backend pymupdf` gets pymupdf's own refusal rather than the
+  CLI's pre-check, with the same information in it.
 - **One MIME resolver, and it never guesses PDF.** Core carried six extension-to-MIME tables and
   five defaulted an unrecognised input to `application/pdf`, so seventeen of the twenty-six
   extensions the batch layer already knew about, `.svg`, `.html`, `.epub`, `.txt` and more,

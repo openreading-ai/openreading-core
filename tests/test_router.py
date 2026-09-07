@@ -519,31 +519,34 @@ def _declared_formats(adapter) -> set[str]:
 
 @pytest.mark.parametrize("fmt", sorted(_MIME))
 def test_shipped_registry_routes_every_mime_it_advertises(fmt):
-    """Against the REAL registry, not a fake one: deriving the token by splitting the MIME on
-    '/' and '.' yields 'document'/'sheet'/'presentation' for the OOXML family (and 'jpeg' for
-    image/jpeg), which dropped every backend and made `chosen` None for a plain .docx run."""
+    """Against the REAL registry, not a fake one. The format gate is gone, so what this asserts
+    now is that no MIME type empties the chain: every backend is eligible for every format, and a
+    backend that cannot read one refuses first-hand.
+
+    The defect this originally caught, an OOXML MIME split into 'document'/'sheet'/'presentation'
+    dropping every backend, is unreachable by construction once nothing gates on the token."""
     plan = Router(build_registry()).route(
         _req(document={"path": f"/doc.{fmt}", "mime_type": _MIME[fmt]})
     )
-    assert plan.chosen is not None, f"{_MIME[fmt]} dropped every backend: {plan.dropped}"
-    # every backend that advertises the format is eligible, and the gate still gates: no
-    # backend with a format allow-list survives without declaring it.
+    assert plan.chosen is not None, f"{_MIME[fmt]} emptied the chain: {plan.dropped}"
     advertised = {a.descriptor.id for a in build_registry() if fmt in _declared_formats(a)}
     assert advertised, f"no built-in adapter declares {fmt}"
+    # Every backend that declares it is still reachable, and so is every backend that does not.
     assert advertised <= set(plan.eligible_ids)
-    for adapter in plan.chain:
-        if adapter.descriptor.capabilities.input_formats:
-            assert fmt in _declared_formats(adapter)
+    assert not [i for i, d in plan.dropped.items() if d.code == "unsupported_format"]
 
 
-def test_format_gate_still_drops_a_backend_that_lacks_the_format():
+def test_a_backend_is_not_dropped_for_a_format_it_does_not_declare():
+    """The gate this replaces dropped `pdf-only` for a docx. `input_formats` is a vendor claim
+    core cannot verify, and being wrong in the False direction silently excluded a backend that
+    could have done the job. Both are eligible now, tried in order, and the one that cannot read
+    the document says so itself."""
     reg = Registry()
     reg.register(make_backend("pdf-only", local=True, input_formats=["pdf"]))
     reg.register(make_backend("office", local=True, input_formats=["docx", "xlsx", "pptx"]))
     plan = Router(reg).route(_req(document={"path": "/d.docx", "mime_type": _MIME["docx"]}))
-    assert plan.eligible_ids == ["office"]
-    assert plan.dropped["pdf-only"].stage == 2
-    assert plan.dropped["pdf-only"].code == "unsupported_format"
+    assert set(plan.eligible_ids) == {"pdf-only", "office"}
+    assert "pdf-only" not in plan.dropped
 
 
 def test_ooxml_resolves_without_a_platform_mime_database(monkeypatch):

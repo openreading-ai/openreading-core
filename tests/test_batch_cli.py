@@ -37,7 +37,7 @@ def test_directory_produces_one_batch_envelope(tmp_path, capsys):
     rc = main(["parse", str(d), "--backend", "pymupdf"])
     env = json.loads(capsys.readouterr().out)
     assert rc == 0
-    assert env["schema_version"] == "0.1" and "items" in env  # batch-result envelope
+    assert env["schema_version"] == "0.2" and "items" in env  # batch-result envelope
     assert env["summary"]["succeeded"] == 2 and env["status"]["state"] == "succeeded"
     schemas.validate_batch_result(env)
 
@@ -81,22 +81,24 @@ def test_stdout_is_pure_json_progress_on_stderr(tmp_path, capsys):
     assert "[1/2]" in cap.err or "[2/2]" in cap.err  # progress went to stderr
 
 
-def test_skip_reaches_the_progress_counter_on_stderr(tmp_path, capsys):
-    # Tier 2/1 (BL-147): a healthy batch with one skip used to leave the [N/total] stderr counter
-    # stalled short of total, with no line at all for the skipped file — reading as an incomplete
-    # or stalled run even though the batch finished cleanly. It must now reach [3/3] and print the
-    # skip's own line (state + skip_reason), same as the openreading.cli docstring's own worked example.
+def test_every_item_reaches_the_progress_counter_on_stderr(tmp_path, capsys):
+    # Tier 2/1 (BL-147): the [N/total] stderr counter must reach total and print a line per item.
+    # Skipping is gone, so the third file is dispatched and fails on the backend's own terms
+    # rather than being counted without ever running.
     d = tmp_path / "c"
     _pdf(d / "a.pdf")
     _pdf(d / "b.pdf")
-    (d / "c.docx").write_bytes(b"not really a docx")  # unsupported format for pymupdf → skipped
+    (d / "c.docx").write_bytes(b"not really a docx")  # pymupdf refuses it first-hand
     rc = main(["parse", str(d), "--backend", "pymupdf"])
     cap = capsys.readouterr()
     env = json.loads(cap.out)
-    assert env["status"]["state"] == "succeeded" and rc == 0
-    assert env["summary"]["skipped"] == 1
-    assert "[3/3]" in cap.err  # counter now reaches total, not stalled short of it
-    assert "c.docx" in cap.err and "unsupported_format" in cap.err  # the skip's own stderr line
+    # Exit 4 is the documented "batch parse: partial, some items failed". A directory holding a
+    # file the backend cannot read used to exit 0 because the file was skipped without ever being
+    # tried; it is now attempted, fails honestly, and the exit code says so.
+    assert env["status"]["state"] == "partial" and rc == 4
+    assert env["summary"]["failed"] == 1 and "skipped" not in env["summary"]
+    assert "[3/3]" in cap.err  # counter reaches total
+    assert "c.docx" in cap.err  # the failing item still gets its own stderr line
 
 
 def test_empty_directory_produces_empty_batch_warning_and_stderr_line(tmp_path, capsys):

@@ -30,16 +30,17 @@ def test_run_batch_dir_with_pymupdf_is_schema_valid_and_honest(tmp_path):
     schemas.validate_batch_result(env)  # M9-adjacent: the envelope itself is valid
 
     states = {i["source"]["relpath"]: i["state"] for i in env["items"]}
-    assert states == {"a.pdf": "succeeded", "note.docx": "skipped", "sub/b.pdf": "succeeded"}
-    # skip is honest, with a reason (docx is a known doc type pymupdf's input_formats excludes)
+    # The docx is dispatched now rather than skipped on our own say-so, and pymupdf refuses it
+    # first-hand. The failure is honest and carries that backend's reason.
+    assert states == {"a.pdf": "succeeded", "note.docx": "failed", "sub/b.pdf": "succeeded"}
     docx = next(i for i in env["items"] if i["source"]["relpath"] == "note.docx")
-    assert docx["skip_reason"] == "unsupported_format"
+    assert docx["error"]["code"], "a dispatched failure names the backend's own reason"
 
     s = env["summary"]
-    assert (s["total"], s["succeeded"], s["failed"], s["skipped"]) == (3, 2, 0, 1)
-    assert env["status"]["state"] == "succeeded"  # skips alone never fail a batch
+    assert (s["total"], s["succeeded"], s["failed"]) == (3, 2, 1)
+    assert "skipped" not in s
+    assert env["status"]["state"] == "partial"  # two succeeded, one failed
     assert s["backends"] == {"pymupdf": 2}
-    assert any(w["code"] == "items_skipped" for w in env.get("warnings", []))
 
 
 def test_run_batch_succeeded_item_carries_a_valid_response_envelope(tmp_path):

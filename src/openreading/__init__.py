@@ -113,8 +113,8 @@ Only an optional-but-unavailable channel is a returned envelope + `warnings[]` e
     # CLI: openreading parse invoice.pdf --backend reducto --extract "total, invoice date, vendor"
 
 Batch a folder -> one JSON. Batch is decided by input FORM: a directory / glob / >=2 args is a
-batch, a single file is single-doc. A file the backend cannot take is a `skipped` item with a
-reason, never a crash; a per-item failure never aborts the batch:
+batch, a single file is single-doc. A file the backend cannot take is a `failed` item carrying that
+backend's own reason, never a crash; a per-item failure never aborts the batch:
 
     env = openreading.run_batch(["invoices/"], backend="pymupdf", jobs=4)   # -> batch-result dict
     # CLI: openreading parse invoices/ --backend pymupdf > run.json
@@ -124,7 +124,7 @@ reason, never a crash; a per-item failure never aborts the batch:
 `jobs` = documents run AT ONCE (pure speed knob; output is identical and input-ordered).
 `max_items` caps expansion (default 200). `--save-dir D` also writes `D/<relpath>.json` per item.
 Write outputs OUTSIDE the batched directory (or under a hidden subdir like `dir/.runs/`), else
-the next batch re-ingests them as `unknown_format` skips.
+the next batch re-ingests them and they fail on the backend's own terms.
 
 Compare backends. Two forms, and only the first is free. Given >=2 already-computed responses
 (dicts or paths) `compare` is PURE: it reads saved envelopes, runs no backend, and costs nothing.
@@ -297,7 +297,7 @@ Batch & corpus shapes
 `batch-result.v0.1`: `{schema_version, status{state: succeeded|partial|failed}, items[],
 summary, warnings?}`. `items[i]` = `{source{relpath, filename, format, sha256, ..}, state:
 succeeded|failed|skipped, response? (a full response.v0.3), error?{code, message},
-skip_reason? (unsupported_format|unknown_format), transport: platform|native|null. That is null
+transport: platform|native|null. That is null
 on a `skipped` item, which never ran}`. `summary` =
 `{total, succeeded, failed, skipped, duration_ms, cost_usd, cost_bases[], pages_processed,
 backends{id: count}}`. Batch status: `succeeded` (>=1 ok, 0 failed) / `partial` (some of each) /

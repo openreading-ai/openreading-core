@@ -64,7 +64,6 @@ from openreading.batch.sources import (
     SourceNotFoundError,
     is_url,
     looks_batch,
-    normalize_input_format,
 )
 from openreading.cli.help import cmd_help
 from openreading.credentials import EnvCredentialBroker, load_dotenv
@@ -188,27 +187,10 @@ def cmd_parse(args) -> int:
         # belt to argparse's `choices` braces: the slug must also resolve in the catalog, so a
         # divergence surfaces as exit 2 here rather than a traceback deeper in the run.
         try:
-            adapter = make_adapter(args.backend)
+            make_adapter(args.backend)
         except KeyError as e:
             print(f"[parse] {e}", file=sys.stderr)
             return 2
-        # A single document in a format the named backend does not read is refused here, in the
-        # word the batch path already uses for it (`skip_reason: unsupported_format`). Dispatching
-        # anyway hands the reader the parsing library's own stream error, which names neither the
-        # format nor the fix. Guarded on a known extension and a descriptor that declares formats,
-        # so an extensionless file and a silent descriptor dispatch exactly as before.
-        if not looks_batch(args.files) and not is_url(args.files[0]):
-            fmt = normalize_input_format(Path(args.files[0]).suffix.lstrip("."))
-            supported = {
-                normalize_input_format(f) for f in adapter.descriptor.capabilities.input_formats
-            }
-            if fmt and supported and fmt not in supported:
-                print(
-                    f"[{args.backend}] unsupported_format: {args.backend} does not read "
-                    f".{fmt}. It reads {', '.join(sorted(supported))}.",
-                    file=sys.stderr,
-                )
-                return 3
 
     overrides: dict[str, Any] = {}
     if args.pages:
@@ -368,7 +350,7 @@ def _cmd_parse_batch(args, overrides: dict, label: str) -> int:
 
     def on_progress(done: int, total: int, item) -> None:
         loc = item.source.relpath or item.source.filename
-        extra = (item.error.code if item.error else None) or item.skip_reason or ""
+        extra = (item.error.code if item.error else None) or ""
         # Per-item isolation (M6) means a failure never raises out of the batch, so this line is
         # the only place its message is read — stdout is the envelope, usually redirected to a file.
         if item.error and item.error.message:
@@ -400,7 +382,7 @@ def _cmd_parse_batch(args, overrides: dict, label: str) -> int:
                 file=sys.stderr,
             )
 
-        live = [r for r in resolved if r.skip_reason is None]
+        live = list(resolved)
         if len(live) <= 10 or d.type.value != "hosted_api":
             return
         # The rate is per PAGE, and items are documents. Naming the item count beside a per-page

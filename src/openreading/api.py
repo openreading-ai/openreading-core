@@ -1415,7 +1415,7 @@ def _native_adapter(backend: str, resolved: list, broker: EnvCredentialBroker):
     bi = adapter.descriptor.batch
     if not bi or not bi.native or not isinstance(adapter, NativeBatchAdapter):
         return None
-    live = [r for r in resolved if r.skip_reason is None]
+    live = list(resolved)
     if not live:
         return None
     if bi.max_items is not None and len(live) > bi.max_items:
@@ -1467,7 +1467,7 @@ def _run_native(
     from openreading.types.batch import BatchItem, BatchItemError
 
     started = time.perf_counter()
-    live = [r for r in resolved if r.skip_reason is None]
+    live = list(resolved)
     file_block = config_file.policy if config_file is not None else None
     cfg = RouterConfig()
     reqs = []
@@ -1531,26 +1531,19 @@ def _run_native(
 
     items: list[BatchItem] = []
     total = len(resolved)
-    li = 0
-    for src in resolved:
-        if src.skip_reason is not None:
-            items.append(BatchItem(source=src.ref, state="skipped", skip_reason=src.skip_reason))
+    for li, src in enumerate(resolved):
+        res = results[li] if li < len(results) else BatchItemError(code="missing_result")
+        if isinstance(res, BatchItemError):
+            items.append(BatchItem(source=src.ref, state="failed", error=res, transport="native"))
         else:
-            res = results[li] if li < len(results) else BatchItemError(code="missing_result")
-            li += 1
-            if isinstance(res, BatchItemError):
-                items.append(
-                    BatchItem(source=src.ref, state="failed", error=res, transport="native")
+            items.append(
+                BatchItem(
+                    source=src.ref,
+                    state="succeeded",
+                    response=res.to_schema_dict(),
+                    transport="native",
                 )
-            else:
-                items.append(
-                    BatchItem(
-                        source=src.ref,
-                        state="succeeded",
-                        response=res.to_schema_dict(),
-                        transport="native",
-                    )
-                )
+            )
         if on_progress is not None:
             on_progress(len(items), total, items[-1])
 

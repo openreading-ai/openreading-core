@@ -39,8 +39,8 @@ def _minimal_response() -> dict:
 # --- batch-result family ----------------------------------------------------------------
 
 
-def test_batch_result_schema_const_is_0_1():
-    assert schemas.batch_result_schema()["properties"]["schema_version"]["const"] == "0.1"
+def test_batch_result_schema_const_is_0_2():
+    assert schemas.batch_result_schema()["properties"]["schema_version"]["const"] == "0.2"
 
 
 def test_batch_result_pydantic_round_trips_to_schema_valid():
@@ -56,21 +56,21 @@ def test_batch_result_pydantic_round_trips_to_schema_valid():
                 transport="platform",
             )
         ],
-        summary=BatchSummary(total=1, succeeded=1, failed=0, skipped=0),
+        summary=BatchSummary(total=1, succeeded=1, failed=0),
     )
     doc = br.to_schema_dict()
-    assert doc["schema_version"] == "0.1"  # producer default stamped
+    assert doc["schema_version"] == "0.2"  # producer default stamped
     schemas.validate_batch_result(doc)
 
 
-def test_batch_result_skipped_and_failed_items_validate():
+def test_batch_result_failed_items_validate():
     br = BatchResult(
         status={"state": "partial"},
         items=[
             BatchItem(
                 source=SourceRef(filename="x.docx", format="docx"),
-                state="skipped",
-                skip_reason="unsupported_format",
+                state="failed",
+                error={"code": "unsupported_format", "message": "backend cannot read docx"},
             ),
             BatchItem(
                 source=SourceRef(filename="y.pdf", format="pdf"),
@@ -78,17 +78,17 @@ def test_batch_result_skipped_and_failed_items_validate():
                 error={"code": "backend_error", "message": "boom"},
             ),
         ],
-        summary=BatchSummary(total=2, succeeded=0, failed=1, skipped=1, cost_bases=["estimated"]),
+        summary=BatchSummary(total=2, succeeded=0, failed=2, cost_bases=["estimated"]),
     )
     schemas.validate_batch_result(br.to_schema_dict())
 
 
 def test_batch_result_rejects_bad_state():
     bad = {
-        "schema_version": "0.1",
+        "schema_version": "0.2",
         "status": {"state": "done"},  # not in the closed enum
         "items": [],
-        "summary": {"total": 0, "succeeded": 0, "failed": 0, "skipped": 0},
+        "summary": {"total": 0, "succeeded": 0, "failed": 0},
     }
     with pytest.raises(ValidationError):
         schemas.validate_batch_result(bad)
@@ -122,10 +122,10 @@ def test_batch_result_envelope_is_forward_tolerant():
     # unknown top-level field parses (extra="ignore" on the envelope) and is dropped on re-serialize
     obj = BatchResult.model_validate(
         {
-            "schema_version": "0.1",
+            "schema_version": "0.2",
             "status": {"state": "succeeded"},
             "items": [],
-            "summary": {"total": 0, "succeeded": 0, "failed": 0, "skipped": 0},
+            "summary": {"total": 0, "succeeded": 0, "failed": 0},
             "some_future_field": {"x": 1},
         }
     )
@@ -159,7 +159,7 @@ def test_corpus_report_pydantic_round_trips_to_schema_valid():
 
 def test_corpus_report_rejects_bad_verdict():
     bad = {
-        "schema_version": "0.1",
+        "schema_version": "0.2",
         "subjects": [],
         "documents": [{"source": {"relpath": "a.pdf"}, "verdict": "kinda"}],
         "rollup": {"documents": 1},
@@ -231,7 +231,11 @@ def test_v03_descriptor_still_validates_against_v04():
 
 
 def test_golden_batch_result_validates():
-    schemas.validate_batch_result(json.loads((GOLDEN / "batch-result" / "v0.1.json").read_text()))
+    """v0.1 stays on disk frozen, and no longer validates against the current schema: it carries a
+    `skipped` item, which the vocabulary this release removed. v0.2 is the same run recorded after
+    intake started dispatching every source, so the svg is a failed item with the backend's own
+    reason."""
+    schemas.validate_batch_result(json.loads((GOLDEN / "batch-result" / "v0.2.json").read_text()))
 
 
 def test_golden_corpus_report_validates():

@@ -36,7 +36,7 @@ assumed).
 Intake resolution (`sources.resolve_intake`, pure: no network beyond stat/read)
 --------------------------------------------------------------------------------
 Each source becomes a `ResolvedSource` = `types.batch.SourceRef` {path|url, relpath, filename,
-format, mime_type, size_bytes, sha256} + `skip_reason`. `relpath` (relative to the expanded
+format, mime_type, size_bytes, sha256}. `relpath` (relative to the expanded
 directory root) is the stable cross-run pairing key for corpus compare; `sha256` of the file
 bytes is the identity fallback and the per-item idempotency ingredient. URLs get no sha at
 intake (only computed if the item is materialized).
@@ -49,12 +49,12 @@ intake (only computed if the item is materialized).
   >=2 source arguments => batch envelope even if expansion yields one file; a single explicit
   file/URL => the single `response.v0.3` behaviour, byte-for-byte backward compatible. Failure
   avoided: an envelope type that flips depending on how many files happen to be in a folder.
-- M3 honest format filter: `format` is the lowercased extension, matched against the effective
-  format set -- a named backend's `input_formats`, or the union across READY backends for
-  `auto` / a strategy. A descriptor entry like `"pdf (rasterized)"` matches on its first token
-  (DECISIONS D12). Non-matching known formats => `state: "skipped"`,
-  `skip_reason: "unsupported_format"`; unknown extensions => `"unknown_format"`. A `.docx`
-  handed to pymupdf is a skip with a reason, never a crash and never a silent omission.
+- M3 every named source is dispatched: `format` is the lowercased extension and it is recorded,
+  not acted on. Intake used to sort files against a backend's `input_formats` and skip the
+  non-matching ones, which was core deciding what a vendor can read from a table core cannot
+  verify. Being wrong in that direction silently excluded a file the caller asked for, and
+  nothing surfaced it. A `.docx` handed to pymupdf is now attempted, and pymupdf refuses it
+  first-hand as a `failed` item naming the format and what it does read.
 - M4 size guard: expansion beyond `max_items` (default `DEFAULT_MAX_ITEMS` = 200) raises
   `SourceLimitError` early -- BEFORE any bytes are read -- naming the count and the escape hatch
   (`--max-items` / `max_items=`). Protects against pointing the tool at a home directory and
@@ -136,7 +136,7 @@ succeeded|failed|skipped; item `transport` platform|native. Both new families ar
 `python -m openreading.schemas validate` sweep that `make verify` runs.
 
     status.state; request {backend, strategy, jobs, source_args} (echo for provenance/replay);
-    items[] {source, state, response|null, error {code, message}|null, skip_reason|null,
+    items[] {source, state, response|null, error {code, message}|null,
              transport};
     summary {total, succeeded, failed, skipped, duration_ms, cost_usd?, cost_bases,
              pages_processed?, backends}; warnings[] {code, message}

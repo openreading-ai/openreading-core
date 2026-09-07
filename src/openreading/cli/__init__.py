@@ -127,8 +127,7 @@ The exit code is the third stream, and it is the one a script reads. Branch on
 it before you parse anything: see the "Exit codes" ladder below, or run
 `openreading help exit-codes`. Exit 0 does not mean every document was read,
 and on a strategy run it does not mean nothing was gated. Read `summary.failed`
-and `summary.skipped` on a batch, and `orchestration.outcome` and `warnings[]`
-on a single response.
+on a batch, and `orchestration.outcome` and `warnings[]` on a single response.
 
 Environment variables this module reads
 ---------------------------------------
@@ -428,7 +427,7 @@ Batch flags (in addition to the single-document ones):
                       `DIR/<relpath>.json`.
 
 A file whose format the backend cannot take is a SKIPPED item with a reason
-(`unsupported_format` / `unknown_format`) -- never a crash, never a silent
+(the backend's own `unsupported_format`) -- never a crash, never a silent
 omission. Per-item isolation (M6) means a failure never raises out of the
 batch, so the stderr progress line (`[i/N] <path> <state> <code>: <message>`)
 is the only place a failed item's message is read. Two `[preflight]` advisories

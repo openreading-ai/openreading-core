@@ -753,16 +753,19 @@ def test_parse_rejects_a_page_number_below_one_as_a_usage_error(sample_pdf, caps
 
 
 def test_parse_names_the_format_a_named_backend_cannot_read(tmp_path, capsys):
-    # The batch path reports this same file as skip_reason "unsupported_format". The
-    # single-document path used to hand the reader libmupdf's own "Failed to open stream", which
-    # names neither the format nor the fix.
+    """The message still names the format and the fix, but the CLI no longer produces it.
+
+    The CLI used to pre-check the file's extension against `input_formats` before dispatching,
+    which was core deciding what a backend can read from a table core cannot verify. pymupdf's own
+    adapter refuses first-hand instead, with a better message, because it is stating a fact about
+    itself rather than a claim about somebody else."""
     notes = tmp_path / "notes.txt"
     notes.write_text("hello world\n")
     rc = main(["parse", str(notes), "--backend", "pymupdf"])
     assert rc == 3
     err = capsys.readouterr().err
-    assert err.startswith("[pymupdf] unsupported_format:")
-    assert ".txt" in err and "pdf" in err
+    assert "cannot read notes.txt" in err
+    assert "pdf" in err, "the message still names what this backend does read"
     assert "Failed to open stream" not in err
 
 

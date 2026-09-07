@@ -65,7 +65,7 @@ def test_run_batch_takes_the_same_policy_from_a_dict_and_from_a_file(pdf_path, t
     from_file = openreading.run_batch(
         [pdf_path], backend="auto", config=_policy_file(tmp_path, policy)
     )
-    keys = ("total", "succeeded", "failed", "skipped")
+    keys = ("total", "succeeded", "failed")
     assert {k: from_dict["summary"][k] for k in keys} == {k: from_file["summary"][k] for k in keys}
     assert [i.get("response", {}).get("backend") for i in from_dict["items"]] == [
         i.get("response", {}).get("backend") for i in from_file["items"]
@@ -351,14 +351,14 @@ def test_build_request_url_keeps_mime_type():
 
 @pytest.mark.parametrize("ext", [".docx", ".xlsx", ".pptx"])
 def test_route_office_document_reaches_a_backend(tmp_path, ext):
-    # the reported break: through the convenience path an Office file's OOXML MIME derived the
-    # format token "document"/"sheet"/"presentation" and every backend was dropped.
+    # The reported break: an Office file's OOXML MIME derived the format token
+    # "document"/"sheet"/"presentation" and every backend was dropped. Nothing gates on the token
+    # now, so the chain is never emptied by a format and the chosen backend need not declare it.
     doc = tmp_path / f"doc{ext}"
     doc.write_bytes(b"PK\x03\x04")
     plan = openreading.route(str(doc))
-    assert plan.chosen is not None, f"{ext} dropped every backend: {plan.dropped}"
-    declared = {f.split()[0].lower() for f in plan.chosen.descriptor.capabilities.input_formats}
-    assert ext.lstrip(".") in declared
+    assert plan.chosen is not None, f"{ext} emptied the chain: {plan.dropped}"
+    assert not [i for i, d in plan.dropped.items() if d.code == "unsupported_format"]
 
 
 def test_run_named_backend_respects_compliance(pdf_path, monkeypatch):

@@ -536,7 +536,7 @@ STRATEGY_CONFIG_SCHEMA_FILE = "strategy-config.v0.3.json"
 COMPARISON_REPORT_SCHEMA_FILE = "comparison-report.v0.2.json"
 # v0.6 (Manifest): the batch-run envelope + the corpus (batch-vs-batch) comparison report — two new
 # families composing the single-document contract (internal/design/batch-intake.md §5/§8).
-BATCH_RESULT_SCHEMA_FILE = "batch-result.v0.1.json"
+BATCH_RESULT_SCHEMA_FILE = "batch-result.v0.2.json"
 CORPUS_REPORT_SCHEMA_FILE = "corpus-report.v0.1.json"
 # BL-160 (Leaderboard): N registered backends ranked on ONE evals.dataset case.json corpus, via the
 # unchanged evals.runner.run_case path — a new family, not an edit to any existing schema.

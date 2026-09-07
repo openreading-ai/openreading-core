@@ -971,7 +971,7 @@
       "<str:88>"
     ]
   },
-  "schema_version": "0.1",
+  "schema_version": "0.2",
   "status": {
     "state": "succeeded"
   },
@@ -984,7 +984,6 @@
     ],
     "failed": 0,
     "pages_processed": 3,
-    "skipped": 0,
     "succeeded": 2,
     "total": 2
   }

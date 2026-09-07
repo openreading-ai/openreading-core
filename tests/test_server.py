@@ -2352,7 +2352,7 @@ def test_batch_endpoint_returns_schema_valid_envelope(client):
     assert r.status_code == 200
     env = r.json()
     schemas.validate_batch_result(env)
-    assert env["schema_version"] == "0.1" and "items" in env
+    assert env["schema_version"] == "0.2" and "items" in env
     assert env["summary"]["succeeded"] == 2 and env["status"]["state"] == "succeeded"
     assert all(i["transport"] == "platform" for i in env["items"])
 
