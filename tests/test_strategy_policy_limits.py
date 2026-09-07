@@ -11,9 +11,6 @@ below call it exactly where `openreading.api` does and then compile the request 
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass
-
-import pytest
 
 from openreading import api
 from openreading.config import apply as apply_config
@@ -22,7 +19,6 @@ from openreading.router.clock import FakeClock
 from openreading.router.router import RouterConfig
 from openreading.strategies import StrategyConfig, compile_strategy, run_strategy
 from openreading.testing.sample_pdf import build_sample_pdf
-from openreading.types.errors import ComplianceRefused
 from openreading.types.request import OpenReadingRequest
 from tests.fakes import ScriptedBackend, scripted_registry
 
@@ -62,135 +58,6 @@ def _run(cfg, name, reg, req):
 
 
 # ---- policy union -----------------------------------------------------------------------------
-
-
-def test_file_policy_unions_into_prune():
-    reg = scripted_registry(
-        ScriptedBackend("pymupdf", local=True, text=CLEAN),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN),  # non-local
-    )
-    cfg = {
-        "version": 1,
-        "policy": {"require_local": True},
-        "strategies": {"s": {"steps": ["pymupdf", "reducto"], "escalate_if": "default"}},
-    }
-    compiled = _compile(cfg, "s", reg, _req())
-    assert compiled.effective_compliance["require_local"] is True
-    assert "reducto" in {d.backend for d in compiled.dropped}  # pruned by the file policy
-
-
-def test_file_policy_feeds_route_compliance_facts():
-    reg = scripted_registry(ScriptedBackend("pymupdf", local=True, text=CLEAN))
-    cfg = {
-        "version": 1,
-        "policy": {"require_local": True},
-        "strategies": {
-            "s": {
-                "route": {
-                    "rules": [{"when": {"compliance": {"require_local": True}}, "use": "pymupdf"}],
-                    "default": "pymupdf",
-                }
-            }
-        },
-    }
-    res = _run(cfg, "s", reg, _req())  # request itself sets no compliance
-    assert res.orchestration["decisions"][0]["chosen"] == 0  # matched via the FILE policy
-
-
-def test_most_restrictive_wins_union():
-    reg = scripted_registry(ScriptedBackend("pymupdf", local=True, text=CLEAN))
-    cfg = {"version": 1, "policy": {"require_local": True}, "strategies": {"s": ["pymupdf"]}}
-    compiled = _compile(cfg, "s", reg, _req(compliance={"no_train_on_data": True}))
-    # both the request's no_train and the file's require_local are present (constraints only add)
-    assert compiled.effective_compliance["no_train_on_data"] is True
-    assert compiled.effective_compliance["require_local"] is True
-
-
-def test_file_policy_never_widens():
-    # a file policy can only tighten: request require_local stays True even if the file omits it
-    reg = scripted_registry(ScriptedBackend("pymupdf", local=True, text=CLEAN))
-    cfg = {"version": 1, "policy": {"no_train_on_data": True}, "strategies": {"s": ["pymupdf"]}}
-    compiled = _compile(cfg, "s", reg, _req(compliance={"require_local": True}))
-    assert compiled.effective_compliance["require_local"] is True
-
-
-def test_allow_unverified_compliance_from_file_policy_readmits():
-    # an unverified-train backend under no_train is dropped — unless the file allows unverified
-    reg = scripted_registry(
-        ScriptedBackend("pymupdf", local=True, text=CLEAN),
-        ScriptedBackend("reducto", cost_low=0.01, trains="unverified", text=CLEAN),
-    )
-    strict = {
-        "version": 1,
-        "strategies": {"s": {"steps": ["pymupdf", "reducto"], "escalate_if": "default"}},
-    }
-    dropped_strict = {
-        d.backend
-        for d in _compile(strict, "s", reg, _req(compliance={"no_train_on_data": True})).dropped
-    }
-    assert "reducto" in dropped_strict
-
-    reg2 = scripted_registry(
-        ScriptedBackend("pymupdf", local=True, text=CLEAN),
-        ScriptedBackend("reducto", cost_low=0.01, trains="unverified", text=CLEAN),
-    )
-    allowed = {
-        "version": 1,
-        "policy": {"allow_unverified_compliance": True},
-        "strategies": {"s": {"steps": ["pymupdf", "reducto"], "escalate_if": "default"}},
-    }
-    dropped_allowed = {
-        d.backend
-        for d in _compile(allowed, "s", reg2, _req(compliance={"no_train_on_data": True})).dropped
-    }
-    assert "reducto" not in dropped_allowed  # readmitted by the file policy
-
-
-def test_confirmed_baa_tier_from_file_policy_readmits_and_warns():
-    # a tier-gated BAA under require_baa is closed until the operator confirms the plan carries it
-    def _reg():
-        return scripted_registry(
-            ScriptedBackend("reducto", hipaa_baa="tier_gated", cost_low=0.01, text=CLEAN)
-        )
-
-    strict = {"version": 1, "strategies": {"s": ["reducto"]}}
-    with pytest.raises(ComplianceRefused):
-        _compile(strict, "s", _reg(), _req(compliance={"require_baa": True}))
-
-    confirmed = {
-        "version": 1,
-        "policy": {"baa_tier_confirmed": ["reducto"]},
-        "strategies": {"s": ["reducto"]},
-    }
-    req = _req(compliance={"require_baa": True})
-    res = _run(confirmed, "s", _reg(), req)
-    note = next(w for w in res.response.warnings or [] if w.code == "baa_tier_confirmed")
-    assert note.field == "reducto" and "tier_gated" in (note.message or "")
-
-
-def test_policy_merge_carries_unnamed_router_config_fields_forward():
-    # the file `policy:` fold rebuilds the RouterConfig; a field it does not name must survive
-    # rather than silently reset to its default. The subclass stands in for a field added later.
-    @dataclass
-    class _FutureRouterConfig(RouterConfig):
-        future_knob: str = ""
-
-    base = _FutureRouterConfig(
-        train_optout_confirmed=frozenset({"aws-textract"}), future_knob="set-by-the-deployment"
-    )
-    reg = scripted_registry(ScriptedBackend("pymupdf", local=True, text=CLEAN))
-    cfg = {
-        "version": 1,
-        "policy": {"allow_unverified_compliance": True},
-        "strategies": {"s": ["pymupdf"]},
-    }
-    compiled = _compile(cfg, "s", reg, _req(), base)
-
-    merged = compiled.router_config
-    assert merged.allow_unverified_compliance is True  # the file policy still OR-s in
-    assert merged.train_optout_confirmed == frozenset({"aws-textract"})  # base still unions
-    assert isinstance(merged, _FutureRouterConfig)
-    assert merged.future_knob == "set-by-the-deployment"
 
 
 # ---- limits -----------------------------------------------------------------------------------

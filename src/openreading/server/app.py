@@ -6,7 +6,7 @@ docstring; this one covers how the app enforces it and what it reads from the en
 
 HTTP status mapping (D-v2-8). Exceptions raised by the router/adapters are mapped in ONE place,
 _error_envelope (wrapped by _error_response):
-  403 ComplianceRefused / no eligible backend · 424 missing credentials (named backend) or
+  403 ScopeRefused / no eligible backend · 424 missing credentials (named backend) or
   `auth_rejected` · 413 doc too large (TerminalError, `doc_too_large`) · 422 unsupported feature ·
   400 unknown_strategy · 504 retryables exhausted / deadline · 502 PlanExhaustedError / other
   terminal · 500 anything else.
@@ -137,7 +137,6 @@ from openreading.router.router import Router, RouterConfig
 from openreading.strategies.loader import strip_strategy_prefix
 from openreading.types.enums import WaitMode
 from openreading.types.errors import (
-    ComplianceRefused,
     MissingCredentialsError,
     PlanExhaustedError,
     RetryableError,
@@ -152,7 +151,6 @@ from openreading.types.runtime import ResolvedCredentials, RunContext
 
 _ADAPTER_ERRORS = (
     PlanExhaustedError,
-    ComplianceRefused,
     # The caller's allow-list left this request nothing to run. Unlike the two cases above it is
     # raised from INSIDE, past the door, because these request shapes pick their own backends: a
     # strategy walk in strategies.prune, a plain `auto` chain in api.run_request, and either one's
@@ -636,7 +634,7 @@ def _engages_a_strategy(req: OpenReadingRequest, strategy_config: Any) -> bool:
     if strat is not None:
         return strat != "none"  # `strategy:none` is the escape hatch back to plain routing
     return bool(
-        req.backend.id == "auto"
+        req.backend.id is None
         and strategy_config
         and strategy_config.defaults
         and strategy_config.defaults.strategy
@@ -671,7 +669,7 @@ def _out_of_scope_backend(
     The refusal is reserved for the chain emptying, which fails closed.
 
     None is also returned when the plain router's own plan is already empty. That is
-    ComplianceRefused's call to make, not scope's (BL-159 AC-4: an allow-list only ever subtracts
+    ScopeRefused's call to make, not scope's (BL-159 AC-4: an allow-list only ever subtracts
     from what compliance and routing already allow, and there it subtracted nothing).
 
     A strategy walk is knowable only from inside, so it is enforced inside: the allow-list travels
@@ -687,7 +685,7 @@ def _out_of_scope_backend(
     strat = strip_strategy_prefix(backend_id)
     if _engages_a_strategy(req, strategy_config):
         return None  # checked inside the walk — see above
-    if backend_id == "auto" or strat == "none":
+    if backend_id is None or strat == "none":
         plan = Router(build_registry(), router_config or RouterConfig()).route(req)
         if plan.chosen is None:
             return None  # compliance's refusal, not scope's
@@ -739,7 +737,7 @@ def _error_envelope(exc: Exception) -> tuple[int, dict[str, Any]]:
             "message": str(exc),
             "backend_code": exc.backend_code,
         }
-    elif isinstance(exc, ComplianceRefused):
+    elif isinstance(exc, ScopeRefused):
         status = 403
         env = {
             "category": "compliance_refused",
@@ -1228,7 +1226,7 @@ def create_app(*, cors_origins: list[str] | None = None):
                 f"documents count {len(docs)} is over the max-documents limit "
                 f"({MAX_BATCH_DOCUMENTS})"
             )
-        backend = body.get("backend", "auto")
+        backend = body.get("backend")
         # `backend` is one shared string for the whole batch here, but it is an OBJECT
         # (`{"id": ...}`) on /v1/parse and in the vendored request schema, so a client reusing its
         # own /v1/parse body builder sends the object form — which used to reach `make_adapter`
@@ -1238,7 +1236,10 @@ def create_app(*, cors_origins: list[str] | None = None):
         # carries `operation`, `version`, `credentials_ref` and `runtime` — accepting the shape
         # and keeping only the slug would silently run a different operation than the caller asked
         # for, which is the failure this project refuses everywhere else.
-        if not isinstance(backend, str):
+        # A missing `backend` means the caller named none, which is a valid request: selection
+        # falls to `policy.backends` and then to the documented default. Only a present-but-wrong
+        # SHAPE is refused below.
+        if backend is not None and not isinstance(backend, str):
             named = backend.get("id") if isinstance(backend, dict) else None
             # Only echo a slug the caller actually wrote. Naming a default here would tell
             # someone who sent `{}` to run the whole batch on a backend they never asked for,
@@ -1298,7 +1299,7 @@ def create_app(*, cors_origins: list[str] | None = None):
         # way a named /v1/parse or /v1/jobs backend is — before make_adapter is even reached below
         # for the direct-name case, so an out-of-scope batch never resolves any vendor credential.
         scope = getattr(request.state, "api_key_scope", None)
-        if backend != "auto" and not str(backend).startswith("strategy:"):
+        if backend is not None and not str(backend).startswith("strategy:"):
             try:
                 make_adapter(backend)
             except KeyError as e:
@@ -1356,16 +1357,14 @@ def create_app(*, cors_origins: list[str] | None = None):
             sources.append(ResolvedSource(ref=ref))
             docs_by_relpath[str(i)] = doc
 
-        # BL-159 AC-3/AC-4 (continued): `backend == "auto"` (or "strategy:none") can route each
+        # BL-159 AC-3/AC-4 (continued): `backend is None` (or "strategy:none") can route each
         # item to a DIFFERENT backend — capability/format scoring reads each item's own document,
         # so no single upfront plan speaks for the whole batch the way it can for /v1/parse's one
         # document. Build each item's real request (exactly as run_one below does) and check it
         # BEFORE run_batch ever calls run_one for real, so a scope violation on any one item
         # rejects the whole batch up front rather than letting earlier items already spend against
         # a real backend while a later one is still found out of scope mid-pool.
-        if scope is not None and (
-            backend == "auto" or strip_strategy_prefix(str(backend)) == "none"
-        ):
+        if scope is not None and (backend is None or strip_strategy_prefix(str(backend)) == "none"):
             for doc in docs_by_relpath.values():
                 try:
                     item_req = OpenReadingRequest.model_validate(
@@ -1496,7 +1495,7 @@ def create_app(*, cors_origins: list[str] | None = None):
             jobs[sjob.id] = rec
             return _job_dict(rec)
 
-        if backend == "auto" or strat == "none":  # strategy:none forces the legacy auto path
+        if backend is None or strat == "none":  # strategy:none forces the legacy auto path
             return _bad_request("async jobs require a named backend, not 'auto' or 'strategy:none'")
         # BL-159 AC-3: `backend` is guaranteed a literal named id by this point (both `auto`-
         # shaped cases already returned above) — scope-gate it before prepare_named_backend
@@ -1508,7 +1507,7 @@ def create_app(*, cors_origins: list[str] | None = None):
                 return _scope_denied_response(denied)
         try:
             # Same helper /v1/parse's run_request uses for its named-backend branch (BL-91): a
-            # directly-named backend is compliance-gated (ComplianceRefused → 403) before
+            # directly-named backend is compliance-gated (ScopeRefused → 403) before
             # credential-gated (MissingCredentialsError → 424, signup_url hint included) — this
             # branch must not be able to hand-copy its own, independently-drifting version again.
             # deadline_ms=None (BL-153): no request-schema field originates a real per-request

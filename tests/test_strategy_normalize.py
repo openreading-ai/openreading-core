@@ -27,7 +27,6 @@ BUNDLE = dict(DEFAULT_BUNDLE)
 
 EXPANSIONS = [
     ("pymupdf", {"backend": "pymupdf"}),
-    ("auto", {"backend": "auto"}),
     ("strategy:invoices", {"use": "invoices"}),
     (["pymupdf", "reducto"], {"steps": [{"backend": "pymupdf"}, {"backend": "reducto"}]}),
     # cascade-level default bundle distributes to every non-final step, not the last
@@ -217,11 +216,11 @@ def test_default_bundle_is_the_spec_bundle():
 def test_presets_normalize_to_spec_longhand():
     cost_saver = normalize_strategy("cost_saver", None)
     assert cost_saver == {
-        "intent": "Local parse first; escalate to the router's best remaining pick only on bad quality.",
+        "intent": "Local parse first; escalate to a hosted backend only on bad quality.",
         "steps": [
             {"backend": "pymupdf", "escalate_if": BUNDLE},
             {"backend": "docling", "escalate_if": BUNDLE},
-            {"backend": "auto"},
+            {"backend": "aws-textract"},
         ],
     }
     fast = normalize_strategy("fast", None)

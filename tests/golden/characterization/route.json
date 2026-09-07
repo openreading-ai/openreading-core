@@ -1,21 +1,6 @@
 {
   "chosen": "pymupdf",
   "dropped": {},
-  "fallbacks": [
-    "docling",
-    "azure-document-intelligence",
-    "google-document-ai",
-    "chunkr",
-    "aws-textract",
-    "reducto",
-    "nuextract",
-    "tesseract",
-    "qwen-vl",
-    "open-ocr",
-    "mistral-ocr",
-    "pulse",
-    "anthropic-claude",
-    "google-gemini"
-  ],
+  "fallbacks": [],
   "terminal_reason": null
 }

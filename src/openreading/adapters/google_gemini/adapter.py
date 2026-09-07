@@ -54,7 +54,6 @@ from openreading.types.cost import CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     ConfigField,
     Cost,
     CredentialField,
@@ -185,13 +184,6 @@ def _descriptor() -> AdapterDescriptor:
             max_file_size="50 MB",
         ),
         cost=Cost(native_unit="token", basis="unknown", lossiness="page-def"),
-        compliance=ComplianceProfile(
-            hipaa_baa="no",
-            soc2=False,
-            gdpr=False,
-            trains_on_customer_data="unverified",
-            runs_fully_local=False,
-        ),
         runtime=RuntimeProfile(
             offline_capable=False,
             license="proprietary",
@@ -213,8 +205,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="medium",
-            integration_priority="P1",
-            priority_reason="General document understanding and schema-constrained extraction.",
         ),
         credentials_spec=[
             CredentialField(

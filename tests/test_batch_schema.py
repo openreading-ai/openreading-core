@@ -22,7 +22,6 @@ from openreading.types.batch import (
     CorpusReport,
     SourceRef,
 )
-from openreading.types.descriptor import AdapterDescriptor, BatchIntake
 
 GOLDEN = Path(__file__).parent / "golden"
 
@@ -169,62 +168,6 @@ def test_corpus_report_rejects_bad_verdict():
 
 
 # --- adapter-descriptor v0.4 (additive batch block) -------------------------------------
-
-
-def test_descriptor_v04_batch_block_still_validates():
-    # This used to also pin DESCRIPTOR_SCHEMA_FILE to v0.4. v0.5 (Pulse — the optional `liveness`
-    # block) is now current, and the "which file is current" pin moved with it to
-    # tests/test_liveness.py::test_descriptor_v05_is_current_and_accepts_liveness_block. What this
-    # test is actually FOR is unchanged and is the thing that must keep holding: a v0.4-shaped
-    # descriptor carrying `batch` stays valid under whatever version is current (additivity, §8).
-    desc = {
-        "id": "x",
-        "type": "hosted_api",
-        "provisioning": {"byo_mode": ["api_key"], "auth": "api_key"},
-        "wait_modes": ["poll"],
-        "capabilities": {"ocr": "verified"},
-        "cost": {"native_unit": "page"},
-        "compliance": {"hipaa_baa": "no"},
-        "runtime": {"offline_capable": False},
-        "batch": {"native": "claimed", "max_items": 100, "notes": "Message Batches"},
-    }
-    schemas.validate_descriptor(desc)
-
-
-def test_descriptor_batch_intake_round_trips():
-    bi = BatchIntake(native="claimed", max_items=100, max_concurrency=8, notes="x")
-    assert bi.native == "claimed"
-    # a descriptor carrying it dumps schema-valid
-    d = AdapterDescriptor.model_validate(
-        {
-            "id": "x",
-            "type": "hosted_api",
-            "protocol_version": 1,
-            "provisioning": {"auth": "api_key"},
-            "wait_modes": ["poll"],
-            "capabilities": {"ocr": "verified"},
-            "cost": {"native_unit": "page"},
-            "compliance": {"hipaa_baa": "no"},
-            "runtime": {"offline_capable": False},
-            "batch": {"native": "verified"},
-        }
-    )
-    schemas.validate_descriptor(d.to_schema_dict())
-
-
-def test_v03_descriptor_still_validates_against_v04():
-    # additive bump: a descriptor with no `batch` block stays valid
-    v03 = {
-        "id": "legacy",
-        "type": "oss_library",
-        "provisioning": {"auth": "none"},
-        "wait_modes": ["inline"],
-        "capabilities": {"ocr": "verified"},
-        "cost": {"native_unit": "page"},
-        "compliance": {"hipaa_baa": "no"},
-        "runtime": {"offline_capable": True},
-    }
-    schemas.validate_descriptor(v03)
 
 
 # --- golden fixtures for the new families ----------------------------------------------

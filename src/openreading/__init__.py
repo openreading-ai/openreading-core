@@ -194,7 +194,7 @@ local or behind a gateway):
 Responses on `/v1/parse`, `/v1/batch`, `/v1/compare` are schema-validated before they leave the
 process; async `/v1/jobs` responses come from the same round-trip-tested models but are NOT
 re-validated on the way out. The server loads strategy config ONLY from `OPENREADING_CONFIG`,
-never its cwd. HTTP statuses: 400 invalid body · 401 unauthorized · 403 ComplianceRefused /
+never its cwd. HTTP statuses: 400 invalid body · 401 unauthorized · 403 ScopeRefused /
 scope_denied · 404 unknown backend · 413 doc too large · 422 unsupported feature · 424 missing
 credentials · 502 plan exhausted / terminal · 504 deadline. Interactive docs at `/docs`.
 
@@ -339,7 +339,7 @@ Rules a caller must not get wrong
   (unknown backend/strategy, unresolvable source, over `--max-items`/`--max-jobs`, compare misuse)
   · 3 cannot run (missing credentials naming the env var + signup URL; auth rejected, where the key
   was found but the provider said no, with a `check <VAR>` hint naming the env var and never the
-  provider's response body; unsupported feature, ComplianceRefused, plan exhausted, a named
+  provider's response body; unsupported feature, ScopeRefused, plan exhausted, a named
   backend's RetryableError, which has no next rung) · 4 partial batch (some items failed); `route`
   with no compliant backend · 5 compare inputs not schema-valid · 6 interrupted while
   `OPENREADING_LEDGER` was armed (resumable; a single document names its run id, a batch names
@@ -380,12 +380,12 @@ prose. Branch on:
   `on_error:` map keys you write in `openreading.yaml`, a config-authoring vocabulary. Do not look
   for them in output. Per surface:
     * Python raises a typed exception, and the type IS the branch: `RetryableError` (retry with
-      backoff), `TerminalError` (do not retry), `UnsupportedFeatureError`, `ComplianceRefused`,
+      backoff), `TerminalError` (do not retry), `UnsupportedFeatureError`, `ScopeRefused`,
       `MissingCredentialsError`, `PlanExhaustedError`, `UnknownStrategyError`,
       `SourceNotFoundError`. This is the only surface that separates every condition, so prefer it
       when an agent must branch. ALL EIGHT import from the top level:
 
-          from openreading import ComplianceRefused, RetryableError, TerminalError
+          from openreading import ScopeRefused, RetryableError, TerminalError
 
       Their home module is `openreading.types.errors`, and importing from there still works. An
       `openreading.yaml` that will not load, a `policy:` block that is not a policy included,
@@ -395,7 +395,7 @@ prose. Branch on:
       `PlanExhaustedError` and `UnknownStrategyError` -- so catch those first or a broad
       `except TerminalError` swallows all three. Handling them as `TerminalError` is not WRONG
       (none is retryable), it just loses which one happened.
-    * HTTP returns `error.category`, machine-readable: `compliance_refused` (403),
+    * HTTP returns `error.category`, machine-readable: `scope_denied` (403),
       `unsupported_feature` (422), `terminal` (424 and 502), `plan_exhausted` (502),
       `retryable_exhausted` (504), `scope_denied` (403), `unauthorized`, `unknown_backend`,
       `unknown_strategy`, `bad_request`, `bad_signature`. On 424 the category is `terminal` and the
@@ -412,7 +412,8 @@ prose. Branch on:
   carries the adapter's own failure code (e.g. `TesseractNotFoundError`). Branch on that `code`,
   not the class: `error(provider_error)` is the catch-all, and a missing local binary or an
   unusable install lands there beside a genuine transient blip while failing identically forever.
-- `ComplianceRefused` (HTTP 403 `compliance_refused`): policy forbids every eligible backend;
+- `ScopeRefused` (HTTP 403 `scope_denied`): the declared allow-list permits none of the
+  registered backends;
   fails closed -> change the policy or the ask. NEVER retry: nothing about a retry changes the
   answer. Do not confuse this with `retryable_exhausted` (504), which is rate limiting or a
   deadline and IS worth retrying later. The CLI reports both as exit 3.
@@ -582,11 +583,10 @@ from openreading.comparison import compare
 # The triage above tells an agent to branch on the exception TYPE, because Python is the only
 # surface that separates every failure condition. That advice is only executable if the type can
 # be imported, and every one of these classes used to live two packages down, so the import an
-# agent actually writes -- `from openreading import ComplianceRefused` -- raised ImportError on the
+# agent actually writes -- `from openreading import ScopeRefused` -- raised ImportError on the
 # very surface the briefing recommends. They are re-exported here and their home is unchanged:
 # `openreading.types.errors` is the home of every one of them.
 from openreading.types.errors import (
-    ComplianceRefused,
     MissingCredentialsError,
     PlanExhaustedError,
     RetryableError,
@@ -607,7 +607,6 @@ __all__ = [
     "run_batch",
     "__version__",
     "SCHEMA_VERSION",
-    "ComplianceRefused",
     "MissingCredentialsError",
     "PlanExhaustedError",
     "RetryableError",

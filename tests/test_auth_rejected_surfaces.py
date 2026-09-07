@@ -126,29 +126,6 @@ def open_policy(tmp_path):
     return str(p)
 
 
-def test_route_run_exhaustion_prints_trail_hint_and_still_emits_the_plan(
-    sample_pdf, only_reducto, open_policy, capsys
-):
-    rc = main(["route", sample_pdf, "--config", open_policy, "--run"])
-    assert rc == 3
-    captured = capsys.readouterr()
-
-    # the formatted failure trail, then the actionable hint for the rejected backend
-    assert "plan exhausted: reducto:TerminalError(auth_rejected)" in captured.err
-    _assert_actionable(captured.err)
-
-    # the plan itself is still the answer to `route` — exhaustion does not suppress it
-    plan = json.loads(captured.out)
-    assert plan["chosen"] == "reducto"
-    assert "result" not in plan
-
-
-def test_route_run_without_run_flag_is_unaffected(sample_pdf, only_reducto, open_policy, capsys):
-    rc = main(["route", sample_pdf, "--config", open_policy])
-    assert rc == 0  # planning never touches a credential
-    assert json.loads(capsys.readouterr().out)["chosen"] == "reducto"
-
-
 # --- CLI: replay + calibrate --------------------------------------------------------------------
 
 _HOSTED_CONFIG = """\

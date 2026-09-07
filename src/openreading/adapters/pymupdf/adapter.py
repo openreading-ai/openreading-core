@@ -33,7 +33,6 @@ from openreading.types.cost import CostReport, infra_only
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     Cost,
     LivenessProbe,
     Output,
@@ -104,13 +103,6 @@ def _descriptor() -> AdapterDescriptor:
             max_pages_per_request="unbounded",
         ),
         cost=Cost(native_unit="cpu_second", basis="infra_only", usd_per_page_equiv_low=0.0),
-        compliance=ComplianceProfile(
-            hipaa_baa="na_local",
-            trains_on_customer_data="na_local",
-            runs_fully_local=True,
-            data_region_options=["*"],
-            max_retention_hours=0,
-        ),
         runtime=RuntimeProfile(
             offline_capable=True,
             license="AGPL-3.0",  # copyleft — isolated in the `pymupdf` extra
@@ -132,8 +124,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="medium",
-            integration_priority="P0",
-            priority_reason="Local zero-cost floor for born-digital loan files; first in-process adapter.",
         ),
         # v0.5 (Pulse): a `local` probe — the backend is a library in this process, so liveness is
         # a real measurement (does it import and report a version?) rather than an inference, and

@@ -17,7 +17,6 @@ from openreading.types.cost import CostReport, infra_only
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     Cost,
     Output,
     OutputChannels,
@@ -58,9 +57,6 @@ class NullAdapter(BackendAdapter):
             wait_modes=[WaitMode.INLINE],
             capabilities=Capabilities(),
             cost=Cost(native_unit="cpu_second", basis="infra_only"),
-            compliance=ComplianceProfile(
-                hipaa_baa="na_local", trains_on_customer_data="na_local", runs_fully_local=True
-            ),
             runtime=RuntimeProfile(
                 offline_capable=True, license="Apache-2.0", sandbox="in_process"
             ),

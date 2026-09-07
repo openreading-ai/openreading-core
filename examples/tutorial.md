@@ -569,20 +569,19 @@ flowchart TD
 
 ---
 
-## 8. Your first openreading.yaml: a policy
+## 8. Your first openreading.yaml: naming your backends
 
-`openreading.yaml` is the only file you write. A policy is the block in it naming what a backend
-must guarantee before it may read your documents. Compliance is a hard filter, and nothing later in
-the file, no fallback and no strategy, can bring a dropped backend back.
+`openreading.yaml` is the only file you write. Its `policy:` block names the backends this
+deployment permits, in the order you want them tried. That list is the whole policy grammar.
 
-A tax return is the everyday case for this. It carries a name, an address, a taxpayer
-identification number and a full year of financial detail. Plenty of teams may not ship one to an
-arbitrary vendor. Start with the strictest rule there is:
+A tax return is the everyday case. It carries a name, an address, a taxpayer identification number
+and a full year of financial detail, and plenty of teams may not ship one to an arbitrary vendor.
+So say which vendors may see it:
 
 ```yaml
 version: 1
 policy:
-  require_local: true      # only backends that run on this machine may see the document
+  backends: [pymupdf, tesseract]   # tried in this order; nothing else runs
 ```
 
 Save that as `openreading.yaml` in the clone root:
@@ -591,11 +590,11 @@ Save that as `openreading.yaml` in the clone root:
 cat > openreading.yaml <<'YAML'
 version: 1
 policy:
-  require_local: true
+  backends: [pymupdf, tesseract]
 YAML
 ```
 
-Now ask which backends survive. `route` prints the plan and reads nothing:
+Now ask what would run. `route` prints the chain and reads nothing:
 
 ```bash
 uv run openreading route examples/1040_2024.pdf
@@ -603,85 +602,61 @@ uv run openreading route examples/1040_2024.pdf
 ```json
 {
   "chosen": "pymupdf",
-  "fallbacks": ["docling", "tesseract", "qwen-vl"],
-  "dropped": {
-    "anthropic-claude": { "stage": 1, "code": "not_local",
-                          "reason": "require_local set but backend is not fully local" },
-    "aws-textract":     { "stage": 1, "code": "not_local", "reason": "..." },
-    "reducto":          { "stage": 1, "code": "not_local", "reason": "..." }
-  },
+  "fallbacks": ["tesseract"],
+  "dropped": {},
   "terminal_reason": null
 }
 ```
 
-Eleven hosted backends dropped, four local ones left, and no document was read. `chosen` is what
-would run, and `fallbacks` is the order to try next if it fails. A dropped backend never joins that
-list, because a fallback that readmits it would leak the return silently.
-
-Eligibility does not mean readiness: Docling and Qwen-VL remain candidates even when their endpoints are unset.
-Use the `backends` table from step 1 to check which candidates can run here.
+`chosen` is what would run and `fallbacks` is the order to try next if it fails. Reorder the list
+and the chain reorders with it: preference is yours to state, not something the tool infers.
 
 No flag named the policy. Every command finds `./openreading.yaml` in the directory you run it
-from, which is why the same rules apply to `parse`, `compare`, `strategy` and the rest without you
-repeating yourself.
+from, so the same list applies to `parse`, `compare`, `strategy` and the rest.
 
-### The nine keys
+### Why one key and not nine
 
-The whole policy grammar is nine keys, and a key the router does not recognise is refused rather
-than ignored. A typo therefore cannot leave you with a clean exit code and no filter.
+Earlier versions had nine keys: `require_baa`, `no_train_on_data`, `data_region`, `require_local`,
+`max_retention` and three attestations. They asked the engine to enforce a compliance posture by
+reading a per-vendor table it kept in its own source, recording whether each vendor signs a
+business associate agreement, trains on customer data, or retains a document for so many hours.
 
-A business associate agreement (BAA) is an agreement you arrange with a vendor for handling regulated health data.
+That table could not be true. Every entry was a claim about a company this project does not
+control, published on a page that changes without notice, with nothing here able to detect drift.
+A stale entry did not fail loudly. It routed your document to a backend you believed was excluded,
+and the run succeeded.
 
-| Key | Value | What it does |
-|---|---|---|
-| `require_local` | `true` | keeps only backends that run entirely inside your environment |
-| `require_baa` | `true` | keeps local backends and vendors with `hipaa_baa: yes`, or `tier_gated` with your confirmation |
-| `no_train_on_data` | `true` | keeps local backends and vendors that do not train, or whose required opt-out you confirmed |
-| `data_region` | `"us"`, `"eu"`, … | keeps only vendors that process in that region |
-| `max_retention` | `"zero"`, `"48h"`, … | keeps only vendors that hold your document no longer than this |
-| `optimize_for` | `accuracy`, `cost`, `latency`, `offline` | reorders the survivors, and never changes the set |
-| `allow_unverified_compliance` | `true` | accepts unverified claims on supported axes, such as training or retention. Explicit negatives still fail |
-| `train_optout_confirmed` | a list of backend ids | you attest that you applied that vendor's training opt-out yourself |
-| `baa_tier_confirmed` | a list of backend ids | you attest that you hold a signed BAA with that vendor |
+You already know your own posture: which vendors you hold agreements with, which regions your
+contracts cover, what your auditors accepted. `backends: [...]` is that conclusion, written by the
+only party who can reach it, and the engine honours it exactly.
 
-The last three can admit additional backends under the constraints you set, but they have different meanings.
-`allow_unverified_compliance` accepts uncertainty on supported axes, such as a descriptor's unverified training claim.
-The two confirmation lists record conditions you have fulfilled, such as applying a training opt-out.
-
-Try a looser policy and watch the drop reasons change:
+An empty list permits nothing:
 
 ```bash
 cat > openreading.yaml <<'YAML'
 version: 1
 policy:
-  require_baa: true
-  no_train_on_data: true
+  backends: []
 YAML
-uv run openreading route examples/1040_2024.pdf | jq '.dropped | to_entries[] | "\(.key): \(.value.code)"' -r
-```
-```text
-aws-textract: trains_on_data
-chunkr: no_baa
-google-gemini: no_baa
-mistral-ocr: no_baa
-nuextract: no_baa
-open-ocr: no_baa
-pulse: no_baa
-reducto: no_baa
+uv run openreading route examples/1040_2024.pdf
 ```
 
-Each `reason` in the full output quotes the descriptor field it read, for example
-`require_baa set but hipaa_baa='tier_gated' and 'reducto' is not in baa_tier_confirmed`. A
-descriptor is a backend's static self-description of formats, variables and compliance posture.
+That refuses rather than quietly running something, which is the same fail-closed direction the
+old compliance keys held.
 
-> [!IMPORTANT]
-> A descriptor records a vendor's advertised offer read on a date. It is not an agreement you
-> hold. `require_baa` narrows the field, and confirming your own signed paperwork is still your
-> job. [Routing and keys](../src/openreading/router/README.md) says where each claim came from.
+Put the two-backend list back before the next step:
+
+```bash
+cat > openreading.yaml <<'YAML'
+version: 1
+policy:
+  backends: [pymupdf, tesseract]
+YAML
+```
 
 Add `--run` to `route` when you want the chosen backend to execute and the envelope to come back
-beside the plan. Until then, `route` is the cheapest question in the tool: it costs nothing, sends
-nothing, and answers "who is even allowed to see this".
+beside the chain. Until then, `route` is the cheapest question in the tool: it costs nothing,
+sends nothing, and answers "what would run, in what order".
 
 ---
 
@@ -698,7 +673,7 @@ Plain is the short form, and it has six keys in total: `try`, `race`, `compare`,
 version: 1
 
 policy:
-  require_local: true              # step 8: the hard filter, still in force
+  backends: [pymupdf, tesseract]   # step 8: the allow-list, still in force
 
 strategies:
   scan_aware:
@@ -712,7 +687,7 @@ cat > openreading.yaml <<'YAML'
 version: 1
 
 policy:
-  require_local: true
+  backends: [pymupdf, tesseract]
 
 strategies:
   scan_aware:
@@ -895,7 +870,7 @@ Hosted backends can incur fresh charges, and replay refuses a trace whose config
 version: 1
 
 policy:
-  require_local: true
+  backends: [pymupdf, tesseract]
 
 strategies:
   scan_aware:
@@ -988,7 +963,7 @@ The four presets are strategies you can run by name without writing a file at al
 
 | Preset | What it does |
 |---|---|
-| `offline_first` | PyMuPDF, then Tesseract, then Docling when gates fire or attempts fail. Keep `require_local: true` to enforce locality |
+| `offline_first` | PyMuPDF, then Tesseract, then Docling when gates fire or attempts fail. Keep the local backends in `policy.backends` to enforce locality |
 | `cost_saver` | PyMuPDF, then Docling, then the router's best remaining pick when gates fire or attempts fail |
 | `fast` | race the two local parsers, keep the first success |
 | `max_accuracy` | the best eligible backend, then the next best when quality gates fire or the first attempt fails |
@@ -1311,10 +1286,7 @@ If that condition holds, save this as `hosted.yaml`. Keep `openreading.yaml` fro
 version: 1
 
 policy:
-  require_baa: true                # a hosted rung is allowed, but only a compliant one
-  no_train_on_data: true
-  baa_tier_confirmed: [reducto]     # only when your signed agreement is in force
-
+  backends: [pymupdf, tesseract]
 strategies:
   cheap_first:
     try: [pymupdf, reducto]        # local first, hosted only when the local read is bad
@@ -1575,7 +1547,7 @@ version: 1
 
 # ── Compliance. A hard filter applied before anything runs. Nothing below can widen it. ──
 policy:
-  require_local: true              # only backends that run on this machine may see the document
+  backends: [pymupdf, tesseract]
 
 # ── Strategies. Named plans over the backends the policy left standing. ──
 strategies:

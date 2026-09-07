@@ -27,7 +27,6 @@ from openreading.types.cost import CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     ConfigField,
     Cost,
     CredentialField,
@@ -223,25 +222,6 @@ def _descriptor() -> AdapterDescriptor:
             usd_per_page_equiv_high=0.07,
             lossiness="none",
         ),
-        compliance=ComplianceProfile(
-            hipaa_baa="yes",
-            soc2="verified",
-            gdpr="verified",
-            pci="verified",
-            trains_on_customer_data="opt_out",
-            train_opt_out_precondition="aws_org_ai_services_optout_policy_applied",
-            data_region_options=[
-                "us-east-1",
-                "us-west-2",
-                "eu-west-1",
-                "eu-central-1",
-                "ap-southeast-2",
-                "us-gov-west-1",
-            ],
-            data_retention="processed in-memory; not stored after processing (UNVERIFIED beyond 'encrypted')",
-            max_retention_hours=None,  # UNVERIFIED -> retention constraints fail closed
-            runs_fully_local=False,
-        ),
         runtime=RuntimeProfile(
             offline_capable=False, license="proprietary", version_pin="boto3>=1.34"
         ),
@@ -260,8 +240,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="high",
-            integration_priority="P0",
-            priority_reason="Lending wedge (AnalyzeLending mortgage classes); first async block-graph adapter.",
         ),
         credentials_spec=[
             CredentialField(

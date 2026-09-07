@@ -394,7 +394,6 @@ def build_run_context(
     runtime = broker.resolve_config(descriptor, req)
     return RunContext(
         credentials=creds if creds.values else None,
-        compliance=req.compliance.model_dump(exclude_none=True) if req.compliance else None,
         runtime=runtime or None,
         deadline_ms=deadline_ms if deadline_ms is not None else DEFAULT_DEADLINE_MS,
         idempotency_key=(

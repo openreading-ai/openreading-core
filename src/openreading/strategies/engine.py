@@ -490,7 +490,6 @@ from openreading.ledger.step import ExecResult, StepRequest
 from openreading.readiness import auth_hinted, missing_required
 from openreading.router.cache import content_key, document_digest
 from openreading.router.clock import Clock, FakeClock
-from openreading.router.compliance import BAA_TIER_CONFIRMED_WARNING
 from openreading.router.cost import apply_cost_report
 from openreading.router.driver import run_to_completion
 from openreading.router.registry import Registry
@@ -515,7 +514,6 @@ from openreading.strategies.signals import evaluate_gate, probe
 from openreading.strategies.trace import Attempt, GateRecord, Trace
 from openreading.types.enums import WaitMode
 from openreading.types.errors import (
-    ComplianceRefused,
     PlanExhaustedError,
     RetryableError,
     ScopeRefused,
@@ -658,7 +656,6 @@ class _WalkCtx:
     plain_sourced: bool = False
     # per-node judge enablement (a judge backend is on the node, so its gate is resolved lazily):
     env: Mapping[str, str] = field(default_factory=dict)
-    effective_compliance: Mapping[str, Any] = field(default_factory=dict)
     router_config: Any = None
     mask_fields: list[str] = field(default_factory=list)  # decider.llm.mask_fields (§5, both sinks)
     # replay (14.3): decision_id -> logged decision record; when set, every decision point takes its
@@ -789,7 +786,6 @@ def run_strategy(
         decider=compiled.decider,
         req=req,
         registry=registry,
-        effective_compliance=compiled.effective_compliance,
         router_config=compiled.router_config,
         env=os.environ if env is None else env,
         port=decider_llm,
@@ -806,7 +802,7 @@ def run_strategy(
         trees=compiled.trees,
         eligible=list(compiled.eligible),
         backend_allowlist=compiled.backend_allowlist,
-        facts=compute_facts(req, compiled.effective_compliance or None),
+        facts=compute_facts(req),
         deadline_ms=clock.now_ms()
         + _resolve_outer_budget_ms(compiled.max_duration_ms, deadline_ms),
         decider_status=decider_status,
@@ -816,7 +812,6 @@ def run_strategy(
         strategy_name=compiled.name,
         plain_sourced=compiled.plain_sourced,
         env=os.environ if env is None else env,
-        effective_compliance=compiled.effective_compliance,
         router_config=compiled.router_config,
         mask_fields=list(compiled.decider.mask_fields or []) if compiled.decider else [],
         # `replay=[]` is a valid empty trace (replay mode ON → every point trace_missing); only
@@ -840,9 +835,6 @@ def run_strategy(
         _summarize_trail(resp, trace, chosen)  # fallback_used / quality_escalated on the FINAL resp
         for code, msg in compiled.warnings:
             resp.add_warning(code, msg)
-        baa_note = compiled.baa_tier_notes.get(chosen or "")
-        if baa_note is not None:
-            resp.add_warning(BAA_TIER_CONFIRMED_WARNING, baa_note, chosen)
         degraded = outcome.kind == "deficient"
         if degraded:
             # A deadline overrun and a quality exhaustion are both `degraded` keep-best endings,
@@ -1308,7 +1300,7 @@ async def _run_branch(
                 adapter, ctx.req, ctx.broker, ctx.clock, DEFAULT_DEADLINE_MS, on_submit=record
             ),
         )
-    except (TerminalError, RetryableError, UnsupportedFeatureError, ComplianceRefused) as e:
+    except (TerminalError, RetryableError, UnsupportedFeatureError, ScopeRefused) as e:
         return _BranchOutcome(i, "error", backend, error_class=classify_error(e))
     except Exception as e:
         # BL-99: adapter.normalize() is ordinary adapter code, not one of the four taxonomy types
@@ -1652,7 +1644,6 @@ async def _select_best(
         judge_backend=judge_cfg["backend"],
         req=ctx.req,
         registry=ctx.registry,
-        effective_compliance=ctx.effective_compliance,
         router_config=ctx.router_config,
         env=ctx.env,
         port=ctx.judge_llm,
@@ -2173,7 +2164,7 @@ async def _eval_paged_cascade(node: dict[str, Any], path: str, ctx: _WalkCtx) ->
                     ),
                 ),
             )
-        except (TerminalError, RetryableError, UnsupportedFeatureError, ComplianceRefused) as e:
+        except (TerminalError, RetryableError, UnsupportedFeatureError, ScopeRefused) as e:
             ctx.trace.record(Attempt(backend, f"error({classify_error(e)})", spath))
             break
         except Exception as e:
@@ -2474,7 +2465,7 @@ async def _run_leaf(
                 adapter, ctx.req, ctx.broker, ctx.clock, int(deadline_ms - started)
             ),
         )
-    except (TerminalError, RetryableError, UnsupportedFeatureError, ComplianceRefused) as e:
+    except (TerminalError, RetryableError, UnsupportedFeatureError, ScopeRefused) as e:
         cls = classify_error(e)
         ctx.trace.record(
             Attempt(

@@ -22,7 +22,6 @@ from openreading.types.cost import CostReport, infra_only
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     Cost,
     Output,
     OutputChannels,
@@ -46,7 +45,6 @@ from openreading.types.enums import (
 )
 from openreading.types.errors import (
     AdapterError,
-    ComplianceRefused,
     RetryableError,
     ScopeRefused,
     TerminalError,
@@ -69,7 +67,6 @@ from openreading.types.leaderboard import (
 )
 from openreading.types.request import (
     BackendSpec,
-    Compliance,
     DocumentInput,
     Features,
     OpenReadingRequest,
@@ -119,7 +116,6 @@ __all__ = [
     "Outputs",
     "Features",
     "Routing",
-    "Compliance",
     # descriptor
     "AdapterDescriptor",
     "Provisioning",
@@ -127,7 +123,6 @@ __all__ = [
     "Output",
     "OutputChannels",
     "Cost",
-    "ComplianceProfile",
     "RuntimeProfile",
     "RouterHints",
     # control plane
@@ -148,7 +143,6 @@ __all__ = [
     "RetryableError",
     "TerminalError",
     "UnsupportedFeatureError",
-    "ComplianceRefused",
     "ScopeRefused",
     # enums
     "BackendType",

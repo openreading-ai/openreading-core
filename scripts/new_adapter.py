@@ -205,7 +205,6 @@ def render_adapter_py(slug: str, template_slug: str, shape: TemplateShape) -> st
     imp = [
         "AdapterDescriptor",
         "Capabilities",
-        "ComplianceProfile",
         "Cost",
         "Provisioning",
         "RuntimeProfile",
@@ -303,11 +302,6 @@ def render_adapter_py(slug: str, template_slug: str, shape: TemplateShape) -> st
         f"        capabilities=Capabilities(),  # {MARKER}: every flag is False/empty until verified. See the openreading.adapters runbook §3"
     )
     a(f"        cost=Cost(),  # {MARKER}: basis defaults 'unknown'. Never invent a rate")
-    a("        compliance=ComplianceProfile(")
-    a(
-        f'            trains_on_customer_data="unverified",  # {MARKER}: confirm from a primary source; stays fail-closed until then'
-    )
-    a("        ),")
     a("        runtime=RuntimeProfile(")
     a(f"            offline_capable={shape.category == 'local'},")
     a("        ),")

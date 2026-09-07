@@ -32,7 +32,6 @@ from openreading.types.cost import CostReport, infra_only
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     ConfigField,
     Cost,
     CredentialField,
@@ -191,13 +190,6 @@ def _descriptor() -> AdapterDescriptor:
             input_formats=["png", "jpg", "pdf (rasterized)"],
         ),
         cost=Cost(native_unit="gpu_second", basis="infra_only", usd_per_page_equiv_low=0.0),
-        compliance=ComplianceProfile(
-            hipaa_baa="na_local",
-            trains_on_customer_data="na_local",
-            runs_fully_local=True,
-            data_region_options=["*"],
-            max_retention_hours=0,
-        ),
         runtime=RuntimeProfile(
             offline_capable=True,
             license="Apache-2.0 (Qwen3-VL; Qwen2.5-VL per-size)",
@@ -237,8 +229,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="high",
-            integration_priority="P1",
-            priority_reason="Local VLM fallback: zero-egress PHI path when specialists are ineligible.",
         ),
         config_spec=[
             ConfigField(

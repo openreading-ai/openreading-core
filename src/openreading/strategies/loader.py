@@ -135,9 +135,13 @@ def build_config(loaded: LoadedFile | None) -> LoadedConfig | None:
     )
 
 
-def strip_strategy_prefix(backend_id: str) -> str | None:
+def strip_strategy_prefix(backend_id: str | None) -> str | None:
     """Return the strategy name if `backend_id` is a `strategy:<name>` reference, else None.
-    `strategy:none` is the reserved escape hatch and returns the literal 'none'."""
+    `strategy:none` is the reserved escape hatch and returns the literal 'none'.
+
+    `None` in means the caller named no backend, which is not a strategy reference either."""
+    if backend_id is None:
+        return None
     if backend_id.startswith(STRATEGY_PREFIX):
         return backend_id[len(STRATEGY_PREFIX) :]
     return None

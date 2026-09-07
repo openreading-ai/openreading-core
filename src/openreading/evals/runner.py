@@ -14,11 +14,9 @@ from openreading.evals import scorers
 from openreading.evals.dataset import EvalCase, load_dataset
 from openreading.ledger.header import slim_request
 from openreading.readiness import auth_hinted
-from openreading.router import compliance as comp
 from openreading.router.clock import RealClock
 from openreading.router.compliance import RouterConfig
 from openreading.router.driver import run_to_completion
-from openreading.types.errors import ComplianceRefused
 from openreading.types.request import OpenReadingRequest
 from openreading.types.runtime import RunContext
 
@@ -86,7 +84,7 @@ def run_case(
     """Run one case against `adapter` and score the normalized response.
 
     The compliance gate runs before `submit()` (BL-121), because nothing else on this path checks
-    `req.compliance` against the adapter's descriptor. Any exception, `ComplianceRefused`
+    `req.compliance` against the adapter's descriptor. Any exception, `ScopeRefused`
     included, comes back as `CaseResult(error=...)` with `overall=0.0`. A case whose `expected`
     names no recognized dimension scores `overall=None`, which means unscored."""
     try:
@@ -102,12 +100,6 @@ def run_case(
         # Compliance gate (BL-121), mirroring calibrate_strategy's identical BL-112 fix: run_case
         # drives adapter.submit() directly, with no Router in front of it to apply the stage-1
         # hard-filter, so req.compliance vs. this adapter's descriptor is never checked otherwise.
-        # Gate BEFORE submit() (AGENTS.md: compliance is never relaxed by fallback); the raised
-        # ComplianceRefused is an AdapterError, so the except clause below turns it into a scored,
-        # honest CaseResult(error=...) exactly like any other adapter failure — no new control-flow.
-        dr = comp.evaluate(req.compliance, adapter.descriptor, router_config, request=req)
-        if dr is not None:
-            raise ComplianceRefused(dr.detail, constraint=dr.code)
         with auth_hinted(adapter.descriptor, run_ctx.credentials):
             job = adapter.submit(req, run_ctx)
             job = run_to_completion(

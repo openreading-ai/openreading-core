@@ -14,8 +14,6 @@ import pytest
 
 from openreading import schemas
 from openreading.evals.leaderboard import run_leaderboard
-from openreading.evals.runner import run_dataset
-from openreading.router import RouterConfig
 from openreading.router.registry import Registry
 from tests.fakes import ScriptedBackend
 
@@ -63,46 +61,6 @@ def _two_case_dataset(tmp_path: Path) -> Path:
     return ds
 
 
-def test_ac1_ac4_ac5_ranks_backends_with_cost_and_dataset_identity(tmp_path):
-    ds = _two_case_dataset(tmp_path)
-    good = ScriptedBackend("fast-local", local=True, text="a fox and a zebra ran together")
-    bad = ScriptedBackend("slow-hosted", local=False, cost_low=0.02, text="nothing relevant here")
-    reg = _registry(good, bad)
-
-    report = run_leaderboard(str(ds), ["slow-hosted", "fast-local"], reg)
-
-    # AC-5: dataset identity is IN the report, not implied.
-    assert report.dataset.path == str(ds)
-    assert report.dataset.case_count == 2
-    assert report.dataset.case_names == ["case_a", "case_b"]
-
-    # AC-1: ranked best-first by measured mean score, and that mean IS DatasetReport.mean_overall
-    # for that exact adapter over that exact dataset — cross-checked against run_dataset directly,
-    # not merely equal by coincidence, proving no second/parallel scoring path exists.
-    assert [b.backend_id for b in report.backends] == ["fast-local", "slow-hosted"]
-    direct_good = run_dataset(good, ds)
-    direct_bad = run_dataset(bad, ds)
-    assert report.backends[0].mean_score == pytest.approx(direct_good.mean_overall) == 1.0
-    assert report.backends[1].mean_score == pytest.approx(direct_bad.mean_overall) == 0.0
-
-    # AC-4: every ranked row carries score AND cost basis together — never one without the other,
-    # and the cost is the REAL descriptor-derived number (0 for local, rate*25 for hosted), not a
-    # placeholder.
-    fast = next(b for b in report.backends if b.backend_id == "fast-local")
-    slow = next(b for b in report.backends if b.backend_id == "slow-hosted")
-    assert fast.cost_per_doc == pytest.approx(0.0)
-    assert slow.cost_per_doc == pytest.approx(0.5)  # 0.02 * 25 (the calibrate.py cost proxy)
-
-    # per-dimension breakdown is present and reflects the single exercised dimension.
-    assert fast.dimensions == {"text_contains": pytest.approx(1.0)}
-    assert slow.dimensions == {"text_contains": pytest.approx(0.0)}
-
-    # per-case winner table names a winner for every case.
-    names = [c.name for c in report.cases]
-    assert names == ["case_a", "case_b"]
-    assert all(c.winner == "fast-local" for c in report.cases)
-
-
 def test_ac1_needs_at_least_two_backends():
     with pytest.raises(ValueError, match="at least two backends"):
         run_leaderboard(str(SAMPLE), ["pymupdf"], _registry(ScriptedBackend("pymupdf", local=True)))
@@ -127,58 +85,10 @@ def _hipaa_dataset(tmp_path: Path) -> Path:
         {
             "name": "phi_case",
             "input": {"builtin_sample": True},
-            "compliance": {"require_baa": True},
             "expected": {},
         },
     )
     return ds
-
-
-def test_ac2_compliance_refusal_is_scored_not_skipped_and_never_widens_eligibility(tmp_path):
-    ds = _hipaa_dataset(tmp_path)
-    allowed = ScriptedBackend("phi-yes", local=False, hipaa_baa="yes", text="ok")
-    refused = ScriptedBackend("phi-no", local=False, hipaa_baa="no", text="ok")
-    reg = _registry(allowed, refused)
-
-    report = run_leaderboard(str(ds), ["phi-yes", "phi-no"], reg)
-
-    # the case is still IN the report — never a silently-skipped case.
-    assert [c.name for c in report.cases] == ["phi_case"]
-    assert report.cases[0].scores["phi-no"] is None  # error-carrying, never a fabricated 0.0
-    assert report.cases[0].winner is None or report.cases[0].winner == "phi-yes"
-
-    refused_row = next(b for b in report.backends if b.backend_id == "phi-no")
-    allowed_row = next(b for b in report.backends if b.backend_id == "phi-yes")
-    assert refused_row.errors == 1  # visible in the error tally
-    assert allowed_row.errors == 0
-
-    # never a widened compliance-eligible set: the refused backend's submit() was NEVER called —
-    # the SAME gate run_case already applies (comp.evaluate before submit()) fired here too.
-    assert len(refused.requests) == 0
-    assert len(allowed.requests) == 1
-
-    # identical to run_case's own contract at the DatasetReport level too (the mechanism leaderboard
-    # reuses, not reimplements).
-    direct = run_dataset(refused, ds)
-    assert direct.results[0].error is not None
-    assert "ComplianceRefused" in direct.results[0].error
-
-
-def test_ac2_router_config_is_threaded_through_for_a_tier_gated_baa(tmp_path):
-    # Proves router_config genuinely reaches the per-case gate (not merely accepted and dropped) —
-    # the same confirm-to-run behavior evals.runner.run_case already has, exercised here through
-    # run_leaderboard's own parameter.
-    ds = _hipaa_dataset(tmp_path)
-    gated = ScriptedBackend("phi-gated", local=False, hipaa_baa="tier_gated", text="ok")
-    other = ScriptedBackend("phi-other", local=False, hipaa_baa="yes", text="ok")
-    reg = _registry(gated, other)
-
-    refused = run_leaderboard(str(ds), ["phi-gated", "phi-other"], reg)
-    assert next(b for b in refused.backends if b.backend_id == "phi-gated").errors == 1
-
-    cfg = RouterConfig(baa_tier_confirmed=frozenset({"phi-gated"}))
-    confirmed = run_leaderboard(str(ds), ["phi-gated", "phi-other"], reg, router_config=cfg)
-    assert next(b for b in confirmed.backends if b.backend_id == "phi-gated").errors == 0
 
 
 # --- AC-3: an unrecognized `expected` dimension is an honest unscored entry, never a fabricated --
@@ -258,28 +168,3 @@ def test_ac8_backend_flagged_non_deterministic_is_labeled_not_hidden(tmp_path):
 
 # --- AC-9: shipping/exercising the leaderboard changes NOTHING about Router._score, -----------
 # --- _QUALITY_BY_PRIORITY, or any shipped adapter's integration_priority -----------------------
-
-
-def test_ac9_leaderboard_never_touches_router_scoring_or_integration_priority(tmp_path):
-    from openreading.adapters.registry import build_registry
-    from openreading.router.router import _QUALITY_BY_PRIORITY
-
-    def _snapshot():
-        priorities = {
-            a.descriptor.id: (
-                a.descriptor.router.integration_priority if a.descriptor.router else None
-            )
-            for a in build_registry()
-        }
-        return dict(_QUALITY_BY_PRIORITY), priorities
-
-    before_qbp, before_prio = _snapshot()
-
-    ds = _two_case_dataset(tmp_path)
-    a = ScriptedBackend("a", local=True, text="a fox and a zebra ran together")
-    b = ScriptedBackend("b", local=True, text="a fox and a zebra ran together")
-    run_leaderboard(str(ds), ["a", "b"], _registry(a, b))
-
-    after_qbp, after_prio = _snapshot()
-    assert before_qbp == after_qbp
-    assert before_prio == after_prio

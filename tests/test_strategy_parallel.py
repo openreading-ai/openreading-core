@@ -948,26 +948,6 @@ def _branch_outcomes(monkeypatch) -> dict[int, engine._BranchOutcome]:
     return seen
 
 
-def test_branch_auto_with_nothing_left_to_resolve_errors_exhausted(monkeypatch):
-    # `require_local` drops the hosted backend at routing, so the sibling `auto` branch has no
-    # untried eligible backend once branch 0 claims the only local one (T12, walk-wide attempted).
-    outcomes = _branch_outcomes(monkeypatch)
-    reg = scripted_registry(
-        ScriptedBackend("pymupdf", local=True, text=CLEAN),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN),  # non-local → routed out
-    )
-    res = _run(
-        {"version": 1, "strategies": {"s": {"parallel": ["pymupdf", "auto"], "pick": "fastest"}}},
-        reg,
-        req=_req({"require_local": True}),
-    )
-    assert outcomes[1].status == "error"
-    assert outcomes[1].error_class == "exhausted"
-    assert outcomes[1].backend == ""  # nothing resolved, so nothing to name
-    assert res.response.backend.id == "pymupdf"  # the race still has a real winner
-    assert ("auto", "error(exhausted)") in _cats(res)
-
-
 def test_branch_backend_absent_from_registry_errors_provider_error(monkeypatch):
     # `reducto` is named by the strategy but registered nowhere in this process: the router never
     # saw it, so pruning kept the branch, and the resolver is the first thing to notice.

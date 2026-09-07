@@ -127,7 +127,7 @@ VALID_CONFIGS = [
     },
     {
         "version": 1,
-        "policy": {"require_baa": True, "no_train_on_data": True},
+        "policy": {"backends": ["pymupdf", "tesseract"]},
         "limits": {"max_duration_per_doc": "10m"},
         "decider": {
             "llm": {"backend": "anthropic-claude", "timeout": "5s", "send_document_content": False}
@@ -155,7 +155,7 @@ INVALID_CONFIGS = [
         "bare-number duration",
     ),
     (
-        {"version": 1, "strategies": {"x": {"backend": "pymupdf", "with": {"compliance": {}}}}},
+        {"version": 1, "strategies": {"x": {"backend": "pymupdf", "with": {"nope": 1}}}},
         "with forbidden key",
     ),
     (

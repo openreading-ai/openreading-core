@@ -218,16 +218,13 @@ real:
 cat > openreading.yaml <<'YAML'
 version: 1
 policy:
-  require_baa: true
-  no_train_on_data: true
 YAML
 uv run openreading route sample.pdf --run
 ```
 ```json
 { "chosen": "pymupdf",
   "fallbacks": ["docling", "azure-document-intelligence", "google-document-ai", "tesseract", "qwen-vl", "anthropic-claude"],
-  "dropped": { "aws-textract": { "stage": 1, "code": "trains_on_data", "reason": "no_train_on_data set but trains_on_customer_data='opt_out'" },
-               "reducto": { "stage": 1, "code": "no_baa", "reason": "require_baa set but hipaa_baa='tier_gated' and 'reducto' is not in baa_tier_confirmed" },
+  "dropped": {},
                "…": "6 more" },
   "terminal_reason": null,
   "result": { "schema_version": "0.3", "status": { "state": "succeeded" }, "backend": { "id": "pymupdf", … } } }
@@ -274,7 +271,7 @@ table.
 | a rung gated and a later one answered | exit `0`, warning `quality_escalated` / `fallback_used` | same dict | `200` | consume, and log the trail. Unattended, alert on it: a permanent host fault looks like a one-off blip |
 | some channels or pages missing | exit `0`, `status.state` `partial` | same dict | `200` | consume what is present. `warnings[]` names what is missing |
 | this backend has no confidence to give | exit `0`, warning `confidence_unavailable` | same dict | `200` | do not gate on a number that is not there |
-| policy forbids every eligible backend | exit `3` from a `parse` run under a policy. `route` prints the empty plan and exits `4` | `ComplianceRefused` | `403`, `error.category` `compliance_refused` | change the policy or the request. **Never retry**, because nothing about a retry changes the answer |
+| the allow-list permits no registered backend | exit `3` from a `parse` run. `route` prints the empty chain and exits `4` | `ScopeRefused` | `403`, `error.category` `scope_denied` | widen `policy.backends`, or name a backend the list contains. **Never retry**, because nothing about a retry changes the answer |
 | rate limit or deadline exhausted | exit `3` | `RetryableError` | `504`, `error.category` `retryable_exhausted` | retry later with backoff. Same CLI exit code as the row above, opposite action |
 | a key is missing | exit `3` | `MissingCredentialsError` | `424`, `error.backend_code` `missing_credentials`, `missing_env[]` | provision the named vars |
 | a key was found and rejected | exit `3` | `TerminalError` | `424`, `error.backend_code` `auth_rejected` | fix the key. Retrying will not help |

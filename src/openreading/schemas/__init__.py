@@ -106,7 +106,7 @@ where nesting began. Optional blocks: ``schema_version`` (const ``"0.2"``), ``ou
   ``data_region`` (e.g. ``"us"``, ``"eu"``; enforced against the descriptor's
   ``data_region_options``), ``require_local``, ``max_retention`` (``"zero"``, ``"48h"``). These
   also bind
-  a directly named backend: a non-compliant request is refused (``ComplianceRefused`` / HTTP
+  a directly named backend: a non-compliant request is refused (``ScopeRefused`` / HTTP
   403), never silently run.
 - ``async``: ``mode`` auto (default; router picks per backend and document) | sync | async;
   ``webhook_url`` (always caller-supplied; without it async polls).
@@ -503,7 +503,7 @@ from typing import Any
 # v0.2 (Security review, M12): additionalProperties:false now closes every nested object node,
 # not only the top level, matching the pydantic mirrors' extra="forbid" — additive+Changed over
 # v0.1 (§6/§8; see "Schema version history" above for the full rationale).
-REQUEST_SCHEMA_FILE = "request.v0.2.json"
+REQUEST_SCHEMA_FILE = "request.v0.3.json"
 # v0.3 (Canon): named channel invariants (C1-C11 in $defs descriptions), confidence bounds [0,1]
 # on TableCell/Page/doc_type/Citation, + document.confidence / channel_provenance / schema_url,
 # and the const-fix for the v0.1/0.2 version-identity drift. Additive+Changed over v0.2 (§6/§8).
@@ -517,7 +517,7 @@ RESPONSE_SCHEMA_FILE = "response.v0.3.json"
 # v0.7 (Ledger T4a, AC-8) adds the optional `protocol_version` integer (optional here so this
 # schema stays additive over v0.6; the pydantic AdapterDescriptor model requires it with no
 # default — see that field's own comment for why the two layers deliberately diverge).
-DESCRIPTOR_SCHEMA_FILE = "adapter-descriptor.v0.7.json"
+DESCRIPTOR_SCHEMA_FILE = "adapter-descriptor.v0.8.json"
 # v0.3 (Strategies): the optional openreading.yaml orchestration grammar.
 # v0.2 (Plain, v0.7): the simple dialect's body grammar (plain_try/race/compare_body) + the
 # disagreement_over gate predicate — additive over v0.1 (config `version` const stays 1). Cut as
@@ -528,7 +528,7 @@ DESCRIPTOR_SCHEMA_FILE = "adapter-descriptor.v0.7.json"
 # With the file the only spelling, a typo and a quoted boolean are refused here rather than by a
 # validator standing in for the schema. No file that was valid and meaningful becomes invalid: a
 # key outside this set was already refused, one rung later. The config `version` const stays 1.
-STRATEGY_CONFIG_SCHEMA_FILE = "strategy-config.v0.3.json"
+STRATEGY_CONFIG_SCHEMA_FILE = "strategy-config.v0.4.json"
 # v0.4 (Compare): the read-only cross-backend comparison report (the openreading.comparison
 # docstring).
 # v0.5 (Canon): the `structure` finding code + content-first `headline`; finding-

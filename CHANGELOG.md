@@ -456,6 +456,34 @@ and `tests/test_schema_evolution.py` pins every released file byte for byte.
 - **`compare <missing.pdf> --backends a,b` is usage, not an errno.** `parse` refused a mistyped
   filename at exit 2 with a sentence; fan-out returned a raw `SourceNotFoundError: [Errno 2]` at
   exit 1.
+- **The caller names the backends, and nothing else decides.** The compliance filter, the
+  stage-3 scorer, the capability gate and `auto` are all removed, and `policy.backends` replaces
+  them in the same release so no caller is left without a way to bound the backend set. Selection
+  is a lookup: the backend you named, else `policy.backends` in written order, else `pymupdf`,
+  which needs no key and no config. An empty list permits nothing and refuses with `scope_denied`.
+  Every source of an allow-list intersects and none widens.
+- **`compliance` leaves the request and the descriptor.** 180 vendor claims across 15 adapters:
+  whether each signs a BAA, trains on customer data, which regions it offers, how long it retains
+  a document. Nothing in this package could observe any of it, so a stale entry did not fail
+  loudly, it routed a document to a backend the operator believed was excluded and the run
+  succeeded. Gone with it: the nine stage-1 drop codes, `ComplianceRefused`, the 403
+  `compliance_refused`, `BAA_TIER_CONFIRMED_WARNING`, and the three attestation keys.
+- **`optimize_for` is removed.** Four documented values feeding one formula. Its "quality" term
+  ranked by `integration_priority`, this project's own P0/P1/P2 build label, and `latency` read no
+  latency figure because no descriptor carried one: measured, `latency` and `accuracy` returned
+  byte-identical chains. `integration_priority` and `priority_reason` leave the descriptor too.
+- **The capability gate is removed.** `_truthy_cap` passed `claimed` and `verified` identically,
+  so a vendor's documentation gated dispatch exactly as a test we ran did. The `False` side was
+  worse: asking for signature detection dropped thirteen backends, Azure among them, which ships
+  it. A backend that cannot do a thing refuses first-hand now.
+- **`auto` is deleted.** It asked the engine to infer from data it could not verify. Requests that
+  named it now name no backend, which resolves through the three rules above. **A request with no
+  list gets a chain of ONE.** Previously `auto` fanned out to all fifteen backends; to get a
+  fallback chain, list the backends you want.
+- **Three schemas bump**: `request` v0.3 (no `compliance`, no `optimize_for`, `backend.id`
+  nullable), `adapter-descriptor` v0.8 (no `compliance`, no priority hints), `strategy-config`
+  v0.4 (`policy` is one key; `when` drops the `compliance` fact). A v0.8 descriptor is **not** a
+  valid v0.1-v0.7 descriptor, because those required a `compliance` block.
 - **The ledger keeps no policy about your disk.** Retention, the reaper, the expiry stamp,
   `OPENREADING_LEDGER_RETENTION_HOURS`, `OPENREADING_RETENTION_SWEEP_S` and the server's sweep
   loop are all removed, and so is encryption at rest. Retention was a destructor whose only job

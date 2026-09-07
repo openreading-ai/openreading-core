@@ -30,7 +30,6 @@ from openreading.types.descriptor import (
     AdapterDescriptor,
     BatchIntake,
     Capabilities,
-    ComplianceProfile,
     Cost,
     LivenessProbe,
     Output,
@@ -141,13 +140,6 @@ def _descriptor() -> AdapterDescriptor:
             input_formats=["png", "jpg", "tiff", "bmp", "pdf (rasterized)"],
         ),
         cost=Cost(native_unit="cpu_second", basis="infra_only", usd_per_page_equiv_low=0.0),
-        compliance=ComplianceProfile(
-            hipaa_baa="na_local",
-            trains_on_customer_data="na_local",
-            runs_fully_local=True,
-            data_region_options=["*"],
-            max_retention_hours=0,
-        ),
         runtime=RuntimeProfile(
             offline_capable=True,
             license="Apache-2.0",
@@ -174,8 +166,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="low",
-            integration_priority="P1",
-            priority_reason="Offline OCR floor for scanned loan/clinical docs; first subprocess adapter.",
         ),
         # v0.4 (Manifest v0.6): no native multi-doc API (a local subprocess). CPU-bound OCR, so cap
         # platform batch concurrency near the core count (the runner takes min(--jobs, this)).

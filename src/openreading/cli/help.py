@@ -28,7 +28,7 @@ docstring is wrong and the sections should merge, so this module never concatena
 Slugs are DECLARED in `TOPICS`, never derived from heading text. Derivation cannot work here:
 headings carry usage signatures (`parse <file|url|dir|glob ...>`), and the slug a reader reaches
 for is often not the heading's first word. Somebody holding a document with patient data types
-`compliance`, and the heading says `route`. `TOPICS` order is the index order.
+`backends-policy`, and the heading says `route`. `TOPICS` order is the index order.
 
 Rendering is VERBATIM. `help` prints lines; it does not reflow them. The docstring interleaves
 flush-left prose, bullets, aligned flag tables, an exit ladder and literal output samples with no
@@ -88,7 +88,7 @@ TOPICS: tuple[Topic, ...] = (
         "Batch: a directory, a glob, or two or more sources",
         ("folder", "folders", "directory", "glob", "many"),
     ),
-    Topic("compliance", "route <file|url> [--config FILE] [--run]", ("route", "policy")),
+    Topic("backends-policy", "route <file|url> [--config FILE] [--run]", ("route", "policy")),
     Topic("cost", "What a run costs, and how to spend less", ("money", "spend", "billing")),
     Topic("env", "Environment variables this module reads", ("environment", "keys", "credentials")),
     Topic("datasets", "Datasets for calibrate, leaderboard and rules", ("dataset", "labels")),
@@ -121,7 +121,7 @@ TOPICS: tuple[Topic, ...] = (
 # Which heading each group of the index prints under, in index order.
 _GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("START HERE", ("quickstart", "help", "output", "chaining")),
-    ("DO ONE JOB", ("batch", "compliance", "cost", "env", "datasets")),
+    ("DO ONE JOB", ("batch", "backends-policy", "cost", "env", "datasets")),
     ("WHEN SOMETHING STOPS", ("exit-codes", "signals")),
     (
         "ONE COMMAND AT A TIME",
@@ -150,7 +150,7 @@ _BLURBS: dict[str, str] = {
     "output": "what goes to stdout, what goes to stderr, what the code says",
     "chaining": "which verb's output feeds which verb's input",
     "batch": "a folder, a glob, or many files as one run and one JSON",
-    "compliance": "say which backends may see a document, and see who was dropped",
+    "backends-policy": "name the backends this deployment permits, in preference order",
     "cost": "what a run charges you, before it starts charging you",
     "env": "where keys come from, and every variable this CLI reads",
     "datasets": "case.json inputs and expectations for calibration and scoring",

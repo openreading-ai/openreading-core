@@ -34,7 +34,6 @@ from openreading.types.cost import CostBasis, CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     Cost,
     CredentialField,
     Output,
@@ -201,15 +200,6 @@ def _descriptor() -> AdapterDescriptor:
             usd_per_page_equiv_high=0.02,
             lossiness="credit",
         ),
-        compliance=ComplianceProfile(
-            hipaa_baa="tier_gated",  # BAA on Pro plan
-            soc2="verified",
-            gdpr="verified",
-            trains_on_customer_data="unverified",  # no explicit no-train statement → fail closed
-            data_region_options=["us", "eu"],
-            data_retention="result URLs expire 1h; zero-data-retention on Enterprise",
-            runs_fully_local=False,
-        ),
         runtime=RuntimeProfile(offline_capable=False, license="proprietary", version_pin="api"),
         output=Output(
             paradigms=[OutputParadigm.MARKDOWN, OutputParadigm.ELEMENT_LIST],
@@ -226,9 +216,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="medium",
-            integration_priority="P1",
-            priority_reason="Clean dev-first API with markdown+bbox+schema; compliance fits the "
-            "lending/health wedge, but no-train is UNVERIFIED (fails closed).",
         ),
         credentials_spec=[
             CredentialField(key="api_key", required=True, env=["PULSE_API_KEY"], example="pk_..."),

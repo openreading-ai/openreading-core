@@ -17,7 +17,6 @@ def _desc(**over) -> dict:
         "wait_modes": ["inline"],
         "capabilities": {"ocr": "verified"},
         "cost": {"native_unit": "page"},
-        "compliance": {"hipaa_baa": "no"},
         "runtime": {"offline_capable": False},
     }
     body.update(over)

@@ -50,7 +50,10 @@ class BackendRuntime(BaseModel):
 class BackendSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    id: str
+    # `None` means the caller named no backend, so selection falls to `policy.backends` and then
+    # to the documented default. It replaces the `"auto"` sentinel, which asked the engine to
+    # infer from vendor claims it could not verify.
+    id: str | None = None
     type: BackendType | None = None
     operation: str | None = None
     version: str | None = None
@@ -143,18 +146,7 @@ class Routing(BaseModel):
         ]
         | None
     ) = None
-    optimize_for: Literal["accuracy", "cost", "latency", "offline"] | None = None
     fallback: list[str] | None = None
-
-
-class Compliance(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    require_baa: bool = False
-    no_train_on_data: bool = False
-    data_region: str | None = None
-    require_local: bool = False
-    max_retention: str | None = None
 
 
 class AsyncSpec(BaseModel):
@@ -170,7 +162,7 @@ class OpenReadingRequest(BaseModel):
     # "0.2": the newest request schema file's const (schemas.REQUEST_SCHEMA_FILE); C12 pins this
     # default to match it. Every nested model here was already extra="forbid" — v0.2 only taught
     # the wire schema the same rule, so this default bump carries no behavior change of its own.
-    schema_version: str = "0.2"
+    schema_version: str = "0.3"
     document: DocumentInput
     backend: BackendSpec
     outputs: Outputs | None = None
@@ -178,7 +170,6 @@ class OpenReadingRequest(BaseModel):
     features: Features | None = None
     pages: Pages | None = None
     routing: Routing | None = None
-    compliance: Compliance | None = None
     async_: AsyncSpec | None = Field(default=None, alias="async")
     idempotency_key: str | None = None
 

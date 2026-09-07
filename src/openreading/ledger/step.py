@@ -129,7 +129,7 @@ class ExecResult(BaseModel):
     `InlineExecutor.exec`'s own `CancelledError` handler). A `"failed"` outcome — live or
     replayed — always raises instead of returning; it is never represented as an `ExecResult`, so a
     caller's own `except (TerminalError, RetryableError, UnsupportedFeatureError,
-    ComplianceRefused)` handling keeps working unmodified on both a live and a replayed failure."""
+    ScopeRefused)` handling keeps working unmodified on both a live and a replayed failure."""
 
     model_config = ConfigDict(extra="forbid")
 

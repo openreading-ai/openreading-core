@@ -58,7 +58,7 @@ Backend resolution
 string `backend.id`, not a wire-schema change (D-v3-2); `strategy=` is sugar for it and
 `"strategy:none"` is the escape hatch to the plain router. `"auto"` runs the compliance-first
 router and executes the resulting chain (`router.executor.execute_plan`); an empty plan raises
-`ComplianceRefused` (the router eliminated every backend — a refusal, not a runtime failure;
+`ScopeRefused` (the router eliminated every backend — a refusal, not a runtime failure;
 `PlanExhaustedError` is reserved for a non-empty plan whose backends all failed). An
 `openreading.yaml` is discovered on EVERY request (explicit `config=` -> `OPENREADING_CONFIG` ->
 `./openreading.yaml`, first hit wins), because its `policy:` block gates a named backend exactly
@@ -69,7 +69,7 @@ no strategy means byte-identical legacy behavior. The four presets (`cost_saver`
 `fast`, `offline_first`) work with no file.
 
 A directly-named backend is still compliance-gated against the request (`Router.check_eligible`
--> `ComplianceRefused`), then credential-gated (`MissingCredentialsError` naming the exact vars
+-> `ScopeRefused`), then credential-gated (`MissingCredentialsError` naming the exact vars
 plus the descriptor's signup URL) — naming a backend never bypasses the request's own
 constraints, on the single, native-batch, or server path alike.
 
@@ -99,14 +99,14 @@ turned off by a typo is not a gate.
 Exceptions
 ----------
 Every class named here is importable from the top level (`from openreading import
-ComplianceRefused`), which is where a caller branching on the type will look for it. The homes are
+ScopeRefused`), which is where a caller branching on the type will look for it. The homes are
 unchanged: `openreading.types.errors` defines all of them, and `ConfigError` lives in
 `openreading.config`, which owns the file it names.
 
 `KeyError` unknown backend slug · `ValueError` reserved override · `ConfigError` (an
 `openreading.yaml` that will not load, a malformed `policy:` block included; CLI exit 3, server
 startup failure) · `SourceNotFoundError` ·
-`UnknownStrategyError` (server 400 / CLI exit 2) · `ComplianceRefused` (403 / exit 3) ·
+`UnknownStrategyError` (server 400 / CLI exit 2) · `ScopeRefused` (403 / exit 3) ·
 `MissingCredentialsError` (424 / exit 3) · `PlanExhaustedError` (`auto` only: every rung failed;
 carries the attempt trail) · `TerminalError` (any adapter failure, INCLUDING an unexpected
 exception out of `submit()`/`poll()`/`normalize()`, wrapped after `auth_hinted` redaction so a
@@ -274,14 +274,12 @@ from openreading.ledger.ports import Executor, LedgerArmingError
 from openreading.ledger.sanitizer import Sanitizer
 from openreading.readiness import auth_hinted, missing_required
 from openreading.router.clock import RealClock
-from openreading.router.compliance import BAA_TIER_CONFIRMED_WARNING, baa_tier_confirmation
 from openreading.router.cost import apply_cost_report
 from openreading.router.driver import run_to_completion
 from openreading.router.executor import BoundedResultCache, execute_plan
 from openreading.router.router import RoutePlan, Router, RouterConfig
 from openreading.types.errors import (
     AdapterError,
-    ComplianceRefused,
     MissingCredentialsError,
     ScopeRefused,
     SourceNotFoundError,
@@ -346,7 +344,7 @@ def _document_dict(source: str | bytes, mime_type: str | None) -> dict[str, Any]
 
 def build_request(
     source: str | bytes,
-    backend: str = "auto",
+    backend: str | None = None,
     *,
     operation: str | None = None,
     mime_type: str | None = None,
@@ -375,7 +373,7 @@ def build_request(
         "backend": {"id": backend},
     }
     # A `strategy:<name>` id is a reserved prefix, not a registry slug — never make_adapter it (T1).
-    if backend != "auto" and not backend.startswith("strategy:"):
+    if backend is not None and not backend.startswith("strategy:"):
         body["backend"]["type"] = make_adapter(backend).descriptor.type.value
     if operation:
         body["backend"]["operation"] = operation
@@ -520,7 +518,7 @@ def route(
     openreading.yaml or a dict of its shape, and without it `./openreading.yaml` is discovered.
     The file's `policy:` block gates the plan."""
     loaded = load_config_file(config)
-    req = build_request(source, "auto", operation=operation, mime_type=mime_type)
+    req = build_request(source, None, operation=operation, mime_type=mime_type)
     req, cfg = apply_config(req, loaded.policy if loaded else None, RouterConfig())
     return Router(build_registry(), cfg).route(req)
 
@@ -777,16 +775,14 @@ def prepare_named_backend(
     (the server's own caller of this function) still doesn't — a caller that omits `deadline_ms`
     still resolves to the same default as before, unchanged.
 
-    Raises KeyError (unknown backend), ComplianceRefused, or MissingCredentialsError — callers
+    Raises KeyError (unknown backend), ScopeRefused, or MissingCredentialsError — callers
     map each the same way they map any other adapter-invocation error. On success, returns
     (adapter, req, ctx) ready for `adapter.submit(req, ctx)`."""
     broker = broker or EnvCredentialBroker()
     config = config or RouterConfig()
     adapter = make_adapter(backend)  # KeyError → caller maps to 404
     # A directly-named backend is still subject to the request's compliance constraints — raise
-    # ComplianceRefused (→ 403) rather than silently ignoring them.
-    if req.compliance is not None:
-        Router(build_registry(), config, broker=broker).check_eligible(req, backend)
+    # ScopeRefused (→ 403) rather than silently ignoring them.
     req = materialize_document(req, adapter.descriptor, transport=transport)
     ctx = build_run_context(req, adapter.descriptor, broker=broker, deadline_ms=deadline_ms)
     missing = missing_required(adapter.descriptor, ctx)
@@ -842,7 +838,7 @@ def run_request(
     Only the directly-named arm needs nothing here, because there the id IS the request and the
     caller can gate it before the call.
 
-    Raises KeyError (unknown backend), UnknownStrategyError, PlanExhaustedError, ComplianceRefused,
+    Raises KeyError (unknown backend), UnknownStrategyError, PlanExhaustedError, ScopeRefused,
     ScopeRefused (the caller's allow-list leaves the walk, or the pruned `auto` chain, nothing to
     run), TerminalError, or RetryableError (a directly-named backend's rate-limit exhaustion, or
     router.driver's poll loop past its deadline/MAX_CONSECUTIVE_FAULTS — the `auto` path folds this
@@ -854,7 +850,11 @@ def run_request(
 
     # `strategy:<name>` — run the strategy; `strategy:none` forces the legacy path (ignore any
     # defaults.strategy); otherwise `auto` + defaults.strategy engages that strategy (spec §1.3).
-    strat = backend[len(_STRATEGY_PREFIX) :] if backend.startswith(_STRATEGY_PREFIX) else None
+    strat = (
+        backend[len(_STRATEGY_PREFIX) :]
+        if backend and backend.startswith(_STRATEGY_PREFIX)
+        else None
+    )
     if strat is not None and strat != "none":
         return _run_strategy_request(
             req,
@@ -869,9 +869,9 @@ def run_request(
             backend_allowlist=backend_allowlist,
         )
     if strat == "none":
-        backend = "auto"  # escape hatch: plain router, no defaults.strategy
+        backend = None  # escape hatch: the plain chain, no defaults.strategy
     elif (
-        backend == "auto"
+        backend is None
         and strategy_config
         and strategy_config.defaults
         and strategy_config.defaults.strategy
@@ -889,17 +889,16 @@ def run_request(
             backend_allowlist=backend_allowlist,
         )
 
-    if backend == "auto":
+    if backend is None:
         plan = Router(build_registry(), config, broker=broker).route(req)
         if plan.chosen is None:
-            # the router eliminated every backend on compliance/capability → refused, NOT a
-            # runtime failure (PlanExhaustedError is for a non-empty plan whose backends all fail).
-            # Checked BEFORE the allow-list below, so an already-empty plan stays compliance's
-            # call: scope removed nothing there, and only ever subtracts (BL-159 AC-4).
-            dropped = ", ".join(f"{i}:{dr.code}" for i, dr in sorted(plan.dropped.items()))
-            raise ComplianceRefused(
-                f"no eligible backend for the request (dropped: {dropped})",
-                constraint=plan.terminal_reason or "no_compliant_backend",
+            # An empty chain means the declared allow-list permitted nothing, or named only
+            # backends this build does not carry. It is a refusal rather than a runtime failure:
+            # PlanExhaustedError is for a non-empty chain whose backends all failed.
+            raise ScopeRefused(
+                "no backend left to run: the declared allow-list permits none of the registered "
+                "backends",
+                constraint=plan.terminal_reason or "no_backend_in_scope",
             )
         if backend_allowlist is not None:
             # The caller's ceiling, applied to the whole CHAIN — chosen plus every fallback — and
@@ -957,11 +956,6 @@ def run_request(
             resp = apply_cost_report(
                 adapter, job, adapter.normalize(job, ctx, slim_req), ctx.credentials
             )
-            note = baa_tier_confirmation(
-                req.compliance, adapter.descriptor, config, request=req, broker=broker
-            )
-            if note is not None:
-                resp.add_warning(BAA_TIER_CONFIRMED_WARNING, note, adapter.descriptor.id)
             return resp.to_schema_dict()
     except AdapterError:
         raise  # the five _ADAPTER_ERRORS taxonomy types keep their own specific handling downstream
@@ -969,7 +963,7 @@ def run_request(
         # BL-99: adapter.normalize() is ordinary adapter code, not one of the five taxonomy types —
         # a plain KeyError/IndexError/ValueError/AttributeError out of it (or submit()/poll()) used
         # to propagate straight out of run_request, past every caller's typed except clauses
-        # (server's _ADAPTER_ERRORS catch, the CLI's own (TerminalError, ComplianceRefused) catch),
+        # (server's _ADAPTER_ERRORS catch, the CLI's own (TerminalError, ScopeRefused) catch),
         # to a bare, undocumented crash. auth_hinted (widened above) has already redacted e's
         # message by the time it reaches here; converting it into a TerminalError — already one of
         # run_request's documented raises — gives it the identical structured, non-500 handling
@@ -979,7 +973,7 @@ def run_request(
 
 def run(
     source: str | bytes,
-    backend: str = "auto",
+    backend: str | None = None,
     *,
     strategy: str | None = None,
     config: str | os.PathLike[str] | dict | LoadedFile | None = None,
@@ -1027,7 +1021,7 @@ def run(
     # plain named-backend run still never imports the strategy package (law P6, guardrail T10).
     loaded = load_config_file(config)  # CLI/Python discover cwd; None → legacy path
     strategy_file = None
-    if backend == "auto" or backend.startswith(_STRATEGY_PREFIX):
+    if backend is None or backend.startswith(_STRATEGY_PREFIX):
         from openreading.strategies.loader import build_config
 
         strategy_file = build_config(loaded)
@@ -1160,7 +1154,7 @@ def _effective_formats(backend: str, broker: EnvCredentialBroker) -> set[str]:
     def _fmts(desc) -> set[str]:
         return {normalize_input_format(f) for f in desc.capabilities.input_formats}
 
-    if backend == "auto" or backend.startswith(_STRATEGY_PREFIX):
+    if backend is None or backend.startswith(_STRATEGY_PREFIX):
         out: set[str] = set()
         for slug in BUILTIN_ADAPTERS:
             adapter = make_adapter(slug)
@@ -1172,7 +1166,7 @@ def _effective_formats(backend: str, broker: EnvCredentialBroker) -> set[str]:
 
 def run_batch(
     sources: list[str],
-    backend: str = "auto",
+    backend: str | None = None,
     *,
     strategy: str | None = None,
     config: str | os.PathLike[str] | dict | LoadedFile | None = None,
@@ -1215,7 +1209,7 @@ def run_batch(
     A per-item failure on the platform fan-out path is isolated into that item's `BatchItem.error`
     and never raised (M6) — but when `backend` resolves to ONE native-batch-capable adapter (§7),
     a batch-level failure out of that adapter's `submit_many`/`run_to_completion`/`normalize_many`
-    propagates out of this call like any single `run()` error: TerminalError, ComplianceRefused, or
+    propagates out of this call like any single `run()` error: TerminalError, ScopeRefused, or
     RetryableError (a directly-named backend has no next rung to fall back to, exactly like
     `run_request`'s own named-backend branch — see its docstring). `_run_native`'s own docstring
     already makes this promise; it is repeated here because this is the function most callers
@@ -1247,7 +1241,7 @@ def run_batch(
 
     # §6: a named backend may cap platform concurrency (e.g. CPU-bound tesseract) via
     # descriptor.batch.max_concurrency — the runner takes min(requested, cap).
-    if backend != "auto" and not backend.startswith(_STRATEGY_PREFIX):
+    if backend is not None and not backend.startswith(_STRATEGY_PREFIX):
         try:
             bi = make_adapter(backend).descriptor.batch
         except KeyError:
@@ -1311,7 +1305,7 @@ def _native_adapter(backend: str, resolved: list, broker: EnvCredentialBroker):
     count is within `batch.max_items`."""
     from openreading.adapters.base import NativeBatchAdapter
 
-    if backend == "auto" or backend.startswith(_STRATEGY_PREFIX):
+    if backend is None or backend.startswith(_STRATEGY_PREFIX):
         return None
     try:
         adapter = make_adapter(backend)
@@ -1384,9 +1378,6 @@ def _run_native(
         req, cfg = apply_config(req, file_block, cfg)
         req = materialize_document(req, adapter.descriptor, transport=transport)
         reqs.append(req)
-
-    if reqs[0].compliance is not None:
-        Router(build_registry(), cfg, broker=broker).check_eligible(reqs[0], backend)
 
     ctx = build_run_context(
         reqs[0],

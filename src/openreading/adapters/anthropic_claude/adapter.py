@@ -35,7 +35,6 @@ from openreading.types.descriptor import (
     AdapterDescriptor,
     BatchIntake,
     Capabilities,
-    ComplianceProfile,
     ConfigField,
     Cost,
     CredentialField,
@@ -186,17 +185,6 @@ def _descriptor() -> AdapterDescriptor:
             usd_per_page_equiv_high=0.08,
             lossiness="page-def",
         ),
-        compliance=ComplianceProfile(
-            hipaa_baa="yes",
-            soc2="verified",
-            gdpr="verified",
-            trains_on_customer_data="no",
-            data_region_options=["us", "global"],
-            data_retention="no training; retention per enterprise terms",
-            max_retention_hours=0,
-            phi_path_constraints=["messages_api_inline_pdf_only"],
-            runs_fully_local=False,
-        ),
         runtime=RuntimeProfile(
             offline_capable=False, license="proprietary", version_pin="messages-2023-06-01"
         ),
@@ -222,8 +210,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="medium",
-            integration_priority="P1",
-            priority_reason="Self-serve-BAA hosted PHI path for custom-schema extraction on hard docs.",
         ),
         credentials_spec=[
             CredentialField(

@@ -87,9 +87,9 @@ from openreading.strategies import (
     validate_config,
 )
 from openreading.types.errors import (
-    ComplianceRefused,
     PlanExhaustedError,
     RetryableError,
+    ScopeRefused,
     TerminalError,
     UnsupportedFeatureError,
 )
@@ -106,7 +106,7 @@ from openreading.types.liveness import ProbeKind
 # `_cmd_parse_batch` reuses the same constant too (BL-128) rather than hand-rolling its own third
 # tuple — the identical gap, one call site later, for a native-batch backend's submit_many/
 # run_to_completion.
-_CLEAN_EXIT3_ERRORS = (TerminalError, ComplianceRefused, RetryableError, UnsupportedFeatureError)
+_CLEAN_EXIT3_ERRORS = (TerminalError, ScopeRefused, RetryableError, UnsupportedFeatureError)
 
 # `benchmark run` defaults small because it spends the reader's money on someone else's API. Two
 # documents is enough to see every target produce output and a score, and cheap enough that
@@ -181,7 +181,7 @@ def cmd_parse(args) -> int:
             file=sys.stderr,
         )
         return 2
-    label = args.backend or (f"strategy:{args.strategy}" if args.strategy else "auto")
+    label = args.backend or (f"strategy:{args.strategy}" if args.strategy else "default")
     if args.backend:
         # belt to argparse's `choices` braces: the slug must also resolve in the catalog, so a
         # divergence surfaces as exit 2 here rather than a traceback deeper in the run.
@@ -360,7 +360,7 @@ def _cmd_parse_batch(args, overrides: dict, label: str) -> int:
         # Both advisories describe what `api.run_batch` is about to do to a DIRECTLY NAMED backend:
         # `auto` and strategies resolve per item inside the router, so neither the rate nor the
         # concurrency cap below is knowable here — and run_batch skips the cap for them too.
-        if backend == "auto" or backend.startswith("strategy:"):
+        if backend is None or backend.startswith("strategy:"):
             return
         try:
             d = make_adapter(backend).descriptor
@@ -544,7 +544,7 @@ def cmd_route(args) -> int:
         print(f"[route] {e}", file=sys.stderr)
         return 3
     try:
-        req = api.build_request(args.file, "auto")
+        req = api.build_request(args.file, None)
     except OSError as e:
         print(f"[route] cannot read {args.file}: {_describe_read_error(e)}", file=sys.stderr)
         return 3
@@ -891,7 +891,7 @@ def cmd_strategy_plan(args) -> int:
         print("[strategy plan] no openreading.yaml found (use --config PATH)", file=sys.stderr)
         return 3
     try:
-        req = api.build_request(args.file, "auto")
+        req = api.build_request(args.file, None)
     except OSError as e:
         print(
             f"[strategy plan] cannot read {args.file}: {_describe_read_error(e)}", file=sys.stderr
@@ -902,7 +902,7 @@ def cmd_strategy_plan(args) -> int:
         compiled = compile_strategy(
             req, args.strategy, loaded.config, build_registry(), router_config
         )
-    except (NormalizeError, ComplianceRefused) as e:
+    except (NormalizeError, ScopeRefused) as e:
         print(f"[strategy plan] {e}", file=sys.stderr)
         return 3
     out = {
@@ -1053,7 +1053,7 @@ def cmd_replay(args) -> int:
         print("[replay] no openreading.yaml found (use --config PATH)", file=sys.stderr)
         return 3
     try:
-        req = api.build_request(args.file, "auto")
+        req = api.build_request(args.file, None)
     except OSError as e:
         print(f"[replay] cannot read {args.file}: {_describe_read_error(e)}", file=sys.stderr)
         return 3
@@ -1086,7 +1086,7 @@ def cmd_replay(args) -> int:
                 clock=RealClock(),
                 replay=decisions,
             )
-    except (NormalizeError, ComplianceRefused) as e:
+    except (NormalizeError, ScopeRefused) as e:
         print(f"[replay] {e}", file=sys.stderr)
         return 3
     except PlanExhaustedError as e:
@@ -1096,7 +1096,7 @@ def cmd_replay(args) -> int:
     # full-repo grep for `raise TerminalError(` inside strategies/engine.py and prune.py (no call
     # site) and by 0% coverage — every backend-level TerminalError raised during run_strategy's
     # walk is already absorbed into PlanExhaustedError by a per-node catch (engine.py's three
-    # `except (TerminalError, RetryableError, UnsupportedFeatureError, ComplianceRefused)` sites),
+    # `except (TerminalError, RetryableError, UnsupportedFeatureError, ScopeRefused)` sites),
     # caught above. The same class of dead clause BL-107 already removed from cmd_calibrate.
     result.response.orchestration = result.orchestration
     out = result.response.to_schema_dict()
@@ -1153,7 +1153,6 @@ def cmd_calibrate(args) -> int:
         RetryableError,
         TerminalError,
         UnsupportedFeatureError,
-        ComplianceRefused,
     ) as e:
         print(f"[calibrate] {e}", file=sys.stderr)
         return 3

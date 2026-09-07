@@ -30,7 +30,6 @@ from openreading.types.cost import CostBasis, CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     ConfigField,
     Cost,
     CredentialField,
@@ -158,17 +157,6 @@ def _descriptor() -> AdapterDescriptor:
             usd_per_page_equiv_high=0.03,
             lossiness="none",
         ),
-        compliance=ComplianceProfile(
-            hipaa_baa="yes",
-            soc2="verified",
-            gdpr="verified",
-            pci="verified",
-            trains_on_customer_data="no",
-            data_region_options=["us", "eu", "europe-west2", "europe-west3", "asia-south1"],
-            data_retention="in-memory sync processing (~0 retention)",
-            max_retention_hours=24,
-            runs_fully_local=False,
-        ),
         runtime=RuntimeProfile(
             offline_capable=False, license="proprietary", version_pin="documentai v1"
         ),
@@ -187,8 +175,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="high",
-            integration_priority="P0",
-            priority_reason="Best-in-class hosted PHI path: self-serve BAA + verified no-train + handwriting.",
         ),
         # Document AI authenticates by ADC (ambient); credentials_path (BL-155) is graded secret
         # even though it is only a path, not a bearer token — its resolved value is where the

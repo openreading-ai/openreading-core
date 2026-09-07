@@ -18,7 +18,6 @@ from openreading.types import (
     BlockType,
     Capabilities,
     ChannelGrade,
-    ComplianceProfile,
     Cost,
     Document,
     LeaderboardBackend,
@@ -27,7 +26,6 @@ from openreading.types import (
     NativeOrigin,
     NativeUnit,
     NormalizedResponse,
-    OpenReadingRequest,
     Output,
     OutputChannels,
     OutputParadigm,
@@ -120,21 +118,6 @@ def test_typed_fields_only_response_is_valid():
     schemas.validate_response(resp.to_schema_dict())
 
 
-def test_request_roundtrips_including_async_alias():
-    req = OpenReadingRequest.model_validate(
-        {
-            "document": {"bytes_base64": "JVBERi0=", "mime_type": "application/pdf"},
-            "backend": {"id": "aws-textract", "type": "hosted_api", "operation": "AnalyzeLending"},
-            "outputs": {"typed_fields": True, "blocks": True},
-            "compliance": {"require_baa": True, "no_train_on_data": True},
-            "async": {"mode": "async", "webhook_url": "https://example.test/hook"},
-        }
-    )
-    dumped = req.to_schema_dict()
-    assert "async" in dumped and dumped["async"]["mode"] == "async"
-    schemas.validate_request(dumped)
-
-
 def test_page_range_end_before_start_rejected():
     # M3: cross-field numeric comparison is inexpressible in the vendored JSON Schema draft, so
     # this is enforced only in pydantic — see PageRange._end_not_before_start.
@@ -169,9 +152,6 @@ def test_descriptor_roundtrips_through_json_schema():
             ),
         ),
         cost=Cost(native_unit="cpu_second", basis="infra_only"),
-        compliance=ComplianceProfile(
-            hipaa_baa="na_local", trains_on_customer_data="na_local", runs_fully_local=True
-        ),
         runtime=RuntimeProfile(offline_capable=True, license="AGPL-3.0", sandbox="in_process"),
     )
     dumped = desc.to_schema_dict()
@@ -180,8 +160,11 @@ def test_descriptor_roundtrips_through_json_schema():
 
     from jsonschema.validators import validator_for
 
+    # The CURRENT schema, not v0.1. A v0.8 descriptor carries no `compliance` block, which every
+    # frozen schema from v0.1 to v0.7 required, so descriptor validation is deliberately no longer
+    # backward-compatible across that boundary (design/compliance-removal.md).
     schema = json.loads(
-        (Path(schemas.__file__).parent / "adapter-descriptor.v0.1.json").read_text()
+        (Path(schemas.__file__).parent / schemas.DESCRIPTOR_SCHEMA_FILE).read_text()
     )
     validator_for(schema)(schema).validate(dumped)
     # channel grades serialize to N/D/X

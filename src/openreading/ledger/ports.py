@@ -65,7 +65,7 @@ class Executor(Protocol):
         same as a live failure would. `ExecResult.status` is therefore only ever `"ok"`,
         `"skipped"`, or `"cancelled"` — a `"failed"` outcome, live or replayed, always raises
         instead of returning, so a caller's own `except (TerminalError, RetryableError,
-        UnsupportedFeatureError, ComplianceRefused)` handling keeps working unmodified either way."""
+        UnsupportedFeatureError, ScopeRefused)` handling keeps working unmodified either way."""
         ...
 
 

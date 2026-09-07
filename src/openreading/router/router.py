@@ -1,16 +1,26 @@
-"""The 3-stage router (internal/research/openreading/routing_and_compliance.md §4.1): compliance
-hard-filter → capability filter → cost/quality/latency scoring. It reads AdapterDescriptors only
-and never branches on backend type.
+"""Backend selection: a lookup, not an inference.
 
-Invariants enforced here:
-- Stages 1 & 2 are boolean gates; stage 3 only reorders survivors.
-- Compliance is NEVER relaxed by fallback: the fallback chain is drawn ONLY from the
-  stage-1-and-2 surviving set (§5.3). A backend dropped for compliance cannot reappear.
-- UNVERIFIED compliance fails closed (§4.4), via RouterConfig.allow_unverified_compliance=False.
-- A tier-gated BAA or training opt-out counts only where the operator confirmed it; the plan
-  records the confirmations its eligible set rests on so the response can name them.
-- If the eligible set is empty, the plan is a terminal compliance-bounded failure rather than a
-  silent downgrade. Local backends are the guaranteed floor for require_local/require_baa.
+The router had three stages. A compliance hard-filter reading a per-vendor table, a capability
+gate reading `input_formats` and five `Features` flags, and a scorer weighing a "quality" that was
+really this project's own P0/P1/P2 build priority against price ranges typed off a pricing page.
+Every input to all three was a claim core could not verify, and being wrong produced a silently
+different answer rather than an error.
+
+What replaces them is the caller's own statement, in three rules:
+
+    1. the backend the caller named        -> a chain of one
+    2. else `policy.backends`, in order    -> that is the chain
+    3. else `pymupdf`                      -> zero credentials, zero config, cannot fail on setup
+
+Rule 3 is what keeps a fresh clone working with no `.env` and no `openreading.yaml`. It is a named
+default in one line of documentation, not a decision derived from data.
+
+`auto` is gone with the stages. It asked core to infer, and inference is what left.
+
+The law this module now keeps, which is the one worth carrying forward: **core holds no fact it
+cannot verify.** A backend that cannot read a document refuses first-hand, and
+`executor.execute_plan` already walks to the next one. Being wrong about a capability costs one
+round trip; being wrong about a vendor claim cost a silent exclusion nothing recovered from.
 """
 
 from __future__ import annotations
@@ -18,59 +28,27 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 
 from openreading.adapters.base import BackendAdapter
-from openreading.credentials import EnvCredentialBroker
-from openreading.router import compliance as comp
 from openreading.router.compliance import DropReason, RouterConfig
 from openreading.router.registry import Registry
-from openreading.types.descriptor import AdapterDescriptor
-from openreading.types.errors import ComplianceRefused
-from openreading.types.request import Features, OpenReadingRequest
-
-# request.features flag -> descriptor capability that must be truthy when the flag is set.
-_FEATURE_CAPABILITY = {
-    "handwriting": "handwriting",
-    "forms_key_value": "forms_key_value",
-    "signatures": "signatures",
-    "classification": "classification",
-}
-
-_QUALITY_BY_PRIORITY = {"P0": 1.0, "P1": 0.6, "P2": 0.3}
-# (w_quality, w_cost) by optimize_for. No latency field in the descriptor yet, so w_latency≈0.
-_WEIGHTS = {
-    "accuracy": (1.0, 0.1),
-    "cost": (0.2, 1.0),
-    "latency": (0.5, 0.1),
-    "offline": (0.3, 0.2),
-    None: (0.7, 0.5),
-}
-
-
-def _truthy_cap(value) -> bool:
-    return value not in (False, None, "false", "")
-
-
-@dataclass
-class ScoredBackend:
-    """One stage-2 survivor and its stage-3 score. Sorted descending, these produce the chain
-    order."""
-
-    adapter: BackendAdapter
-    score: float
+from openreading.types.request import OpenReadingRequest
 
 
 @dataclass
 class RoutePlan:
-    """What the router decided: the `chosen` backend, the ordered `fallbacks` behind it, one
-    `DropReason` per excluded backend, and the operator confirmations the eligible set rests
-    on. `chain` is the order `executor.execute_plan` walks."""
+    """What the router resolved: the `chosen` backend, the ordered `fallbacks` behind it, and one
+    `DropReason` per backend an allow-list removed. `chain` is the order
+    `executor.execute_plan` walks.
+
+    `dropped` used to carry nine compliance codes and two capability ones, all of them core's own
+    belief about a vendor. Every entry now names something the CALLER said: a backend their
+    allow-list excluded. That is a fact core can state, so the map survives the removal of
+    everything that used to fill it.
+    """
 
     chosen: BackendAdapter | None
     fallbacks: list[BackendAdapter] = field(default_factory=list)
     dropped: dict[str, DropReason] = field(default_factory=dict)
     terminal_reason: str | None = None
-    # eligible backend id -> the operator confirmation its require_baa eligibility rests on. The
-    # executor turns each into a BAA_TIER_CONFIRMED_WARNING on the response it actually returns.
-    baa_tier_notes: dict[str, str] = field(default_factory=dict)
     # The CALLER's backend allow-list (the server's OPENREADING_API_KEY_SCOPES entry for the
     # presented token), or None when the caller is unscoped. Set by restrict_to() below, which is
     # also what prunes the chain to it — the two are one operation on purpose, so a plan cannot be
@@ -113,126 +91,78 @@ class RoutePlan:
         if allowlist is None:
             return self
         kept = [a for a in self.chain if a.descriptor.id in allowlist]
+        removed = {
+            a.descriptor.id: DropReason(1, "scope_denied", "excluded by the caller's allow-list")
+            for a in self.chain
+            if a.descriptor.id not in allowlist
+        }
         return replace(
             self,
             chosen=kept[0] if kept else None,
             fallbacks=kept[1:],
+            dropped={**self.dropped, **removed},
             backend_allowlist=allowlist,
         )
 
 
 class Router:
-    """The 3-stage router. `route()` turns a request into a `RoutePlan` using nothing but the
-    registry's descriptors, and `check_eligible()` applies stage 1 to one named backend."""
+    """Resolves a request into an ordered chain. No stages, no scoring, no inference."""
 
-    def __init__(
-        self,
-        registry: Registry,
-        config: RouterConfig | None = None,
-        *,
-        broker: EnvCredentialBroker | None = None,
-    ) -> None:
-        self.broker = broker
+    #: Rule 3. Zero credentials and zero config fields, so it cannot fail on setup, which is what
+    #: keeps a fresh clone with no `.env` and no `openreading.yaml` able to read a document.
+    DEFAULT_BACKEND = "pymupdf"
+
+    def __init__(self, registry: Registry, config: RouterConfig | None = None, **_ignored) -> None:
+        # `**_ignored` absorbs the `broker=` keyword that stage 1 needed to resolve a container
+        # endpoint. Nothing here reads the environment any more; the argument is swallowed so
+        # callers need not all change in the same commit.
         self.registry = registry
         self.config = config or RouterConfig()
 
-    # ---- stage 1 -------------------------------------------------------------
-    def _compliance_drop(
-        self, req: OpenReadingRequest, desc: AdapterDescriptor
-    ) -> DropReason | None:
-        return comp.evaluate(req.compliance, desc, self.config, request=req, broker=self.broker)
+    def _resolve_ids(self, req: OpenReadingRequest) -> list[str]:
+        """The three rules, in order."""
+        named = req.backend.id if req.backend else None
+        if named and not named.startswith("strategy:"):
+            return [named]
+        if self.config.backends is not None:
+            return list(self.config.backends)
+        return [self.DEFAULT_BACKEND]
 
-    # ---- stage 2 -------------------------------------------------------------
-    def _capability_drop(
-        self, req: OpenReadingRequest, desc: AdapterDescriptor
-    ) -> DropReason | None:
-        feats: Features = req.features or Features()
-        caps = desc.capabilities
-        for flag, cap_name in _FEATURE_CAPABILITY.items():
-            if getattr(feats, flag) and not _truthy_cap(getattr(caps, cap_name, False)):
-                return DropReason(2, f"missing_{cap_name}", f"request requires {cap_name}")
-        if req.extraction_schema is not None and not _truthy_cap(caps.custom_schema_extraction):
-            return DropReason(2, "missing_custom_schema_extraction", "extraction_schema requested")
-
-    # ---- stage 3 -------------------------------------------------------------
-    def _score(self, req: OpenReadingRequest, desc: AdapterDescriptor) -> float:
-        opt = req.routing.optimize_for if req.routing else None
-        wq, wc = _WEIGHTS.get(opt, _WEIGHTS[None])
-        prio = desc.router.integration_priority if desc.router else None
-        quality = _QUALITY_BY_PRIORITY.get(prio or "", 0.5)
-        local = bool(desc.compliance.runs_fully_local)
-        lo, hi = desc.cost.usd_per_page_equiv_low, desc.cost.usd_per_page_equiv_high
-        if local:
-            cost = 0.0
-        else:
-            # `is not None`, not truthiness: a published 0.0 bound is a real free tier, and a
-            # one-sided range must average over the bound it actually has.
-            bounds = [b for b in (lo, hi) if b is not None]
-            cost = sum(bounds) / len(bounds) if bounds else 0.05  # unpriced → mild penalty
-        local_bonus = 0.25 if (local and opt in ("cost", "offline")) else 0.0
-        return wq * quality - wc * cost + local_bonus
-
-    # ---- orchestration -------------------------------------------------------
     def route(self, req: OpenReadingRequest) -> RoutePlan:
-        """Classify every registered backend through stages 1 and 2, score the survivors in
-        stage 3, honor `routing.fallback` within those survivors, and return the plan. With no
-        survivors the plan is `chosen=None` with `terminal_reason="no_compliant_backend"`."""
-        dropped: dict[str, DropReason] = {}
-        survivors: list[BackendAdapter] = []
-        notes: dict[str, str] = {}
-        for adapter in self.registry:
-            desc = adapter.descriptor
-            dr = self._compliance_drop(req, desc) or self._capability_drop(req, desc)
-            if dr is not None:
-                dropped[desc.id] = dr
-            else:
-                survivors.append(adapter)
-                note = comp.baa_tier_confirmation(
-                    req.compliance, desc, self.config, request=req, broker=self.broker
-                )
-                if note is not None:
-                    notes[desc.id] = note
+        """The caller's backends, in the caller's order, as a chain.
 
-        if not survivors:
-            return RoutePlan(
-                chosen=None,
-                dropped=dropped,
-                terminal_reason="no_compliant_backend",
-            )
-
-        scored = sorted(
-            (ScoredBackend(a, self._score(req, a.descriptor)) for a in survivors),
-            key=lambda s: s.score,
-            reverse=True,
-        )
-        ordered = [s.adapter for s in scored]
+        An id naming nothing in the registry is skipped rather than raised on: a chain is a
+        preference list, and one unavailable entry should not refuse a run the rest can serve.
+        A chain that empties is `chosen=None`, which the caller turns into `scope_denied`.
+        """
+        ordered = [a for i in self._resolve_ids(req) if (a := self.registry.get(i)) is not None]
         ordered = self._apply_explicit_fallback(req, ordered)
-        return RoutePlan(
-            chosen=ordered[0], fallbacks=ordered[1:], dropped=dropped, baa_tier_notes=notes
-        )
+        if not ordered:
+            return RoutePlan(chosen=None, terminal_reason="no_backend_in_scope")
+        return RoutePlan(chosen=ordered[0], fallbacks=ordered[1:])
 
     def _apply_explicit_fallback(
         self, req: OpenReadingRequest, ordered: list[BackendAdapter]
     ) -> list[BackendAdapter]:
-        """Honor a caller-supplied routing.fallback ordering WITHIN the eligible set (never
-        outside it — compliance is not relaxed). Listed ids move to the front in the given
-        order; the rest keep their score order."""
+        """Honour a caller-supplied `routing.fallback` ordering within the resolved set. Listed
+        ids move to the front in the given order; the rest keep theirs. Never adds a backend the
+        chain did not already contain, so it reorders a restriction rather than widening one."""
         wanted = req.routing.fallback if req.routing else None
         if not wanted:
             return ordered
-        wanted = list(dict.fromkeys(wanted))  # de-dup while preserving caller-given order
+        wanted = list(dict.fromkeys(wanted))  # de-dup, preserving caller-given order
         by_id = {a.descriptor.id: a for a in ordered}
         front = [by_id[i] for i in wanted if i in by_id]
         rest = [a for a in ordered if a.descriptor.id not in set(wanted)]
         return front + rest
 
     def check_eligible(self, req: OpenReadingRequest, backend_id: str) -> BackendAdapter:
-        """For a concretely-named backend: raise ComplianceRefused (before submit) if it fails
-        the compliance hard-filter; return the adapter if it survives stage 1."""
+        """The adapter for a concretely-named backend, or KeyError.
+
+        It used to raise `ScopeRefused` for a backend that failed the hard filter. There is
+        no filter: a caller who names a backend gets it, and the backend answers for itself.
+        """
         adapter = self.registry.get(backend_id)
         if adapter is None:
             raise KeyError(f"backend not registered: {backend_id!r}")
-        dr = self._compliance_drop(req, adapter.descriptor)
-        if dr is not None:
-            raise ComplianceRefused(dr.detail, constraint=dr.code)
         return adapter

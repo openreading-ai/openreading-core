@@ -33,7 +33,6 @@ from openreading.types.cost import CostBasis, CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     Cost,
     CredentialField,
     Output,
@@ -278,16 +277,6 @@ def _descriptor() -> AdapterDescriptor:
             usd_per_page_equiv_high=0.06,
             lossiness="credit",
         ),
-        compliance=ComplianceProfile(
-            hipaa_baa="tier_gated",
-            soc2="verified",
-            gdpr="verified",
-            trains_on_customer_data="no",
-            data_region_options=["us", "eu"],
-            max_retention_hours=0,
-            zdr_flag="zdr_tier_gated",
-            runs_fully_local=False,
-        ),
         runtime=RuntimeProfile(
             offline_capable=False, license="proprietary", version_pin="reducto-api"
         ),
@@ -306,8 +295,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="medium",
-            integration_priority="P0",
-            priority_reason="Accuracy ceiling for the hard residual; first webhook adapter.",
         ),
         credentials_spec=[
             CredentialField(

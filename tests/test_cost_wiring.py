@@ -59,7 +59,7 @@ def _paid_adapter() -> ReductoAdapter:
     return ReductoAdapter(client=FakeReductoClient())
 
 
-def _req(backend: str = "auto") -> OpenReadingRequest:
+def _req(backend: str = None) -> OpenReadingRequest:
     return OpenReadingRequest.model_validate(
         {
             "document": {"url": "https://example.test/doc.pdf", "mime_type": "application/pdf"},
@@ -199,7 +199,7 @@ def test_executor_cost_survives_the_idempotency_cache():
                 "bytes_base64": base64.b64encode(build_sample_pdf()).decode(),
                 "mime_type": "application/pdf",
             },
-            "backend": {"id": "auto"},
+            "backend": {"id": None},
         }
     )
     cache = BoundedResultCache()

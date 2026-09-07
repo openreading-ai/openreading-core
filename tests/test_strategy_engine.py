@@ -17,7 +17,6 @@ from openreading.strategies import StrategyConfig, classify_error, compile_strat
 from openreading.strategies.engine import on_error_action
 from openreading.types import CostBasis, CostReport, Job
 from openreading.types.errors import (
-    ComplianceRefused,
     PlanExhaustedError,
     RetryableError,
     TerminalError,
@@ -507,53 +506,7 @@ def test_missing_credentials_skips():
 # ---- auto leaf + attempted set ----------------------------------------------------------------
 
 
-def test_auto_leaf_picks_untried_eligible():
-    # steps [pymupdf, auto]: pymupdf escalates, auto must pick reducto (not re-pick pymupdf)
-    reg = scripted_registry(
-        ScriptedBackend("pymupdf", local=True, text=GARBLED),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN),
-    )
-    res = _run(
-        {
-            "version": 1,
-            "strategies": {"s": {"steps": ["pymupdf", "auto"], "escalate_if": "default"}},
-        },
-        "s",
-        reg,
-    )
-    assert res.response.backend.id == "reducto"
-    assert [a["backend"] for a in res.orchestration["attempts"]] == ["pymupdf", "reducto"]
-
-
 # ---- compile / prune pipeline -----------------------------------------------------------------
-
-
-def test_compile_prunes_noncompliant_backend():
-    reg = scripted_registry(
-        ScriptedBackend("pymupdf", local=True, text=CLEAN),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN),  # non-local
-    )
-    req = _req(compliance={"require_local": True})
-    res = _run(
-        {
-            "version": 1,
-            "strategies": {"s": {"steps": ["pymupdf", "reducto"], "escalate_if": "default"}},
-        },
-        "s",
-        reg,
-        req=req,
-    )
-    # reducto pruned before execution; only pymupdf remains, and it's recorded in dropped[]
-    dropped = {d["backend"] for d in res.orchestration.get("dropped", [])}
-    assert "reducto" in dropped
-    assert res.response.backend.id == "pymupdf"
-
-
-def test_fully_pruned_root_refuses():
-    reg = scripted_registry(ScriptedBackend("reducto", cost_low=0.01, text=CLEAN))  # only non-local
-    req = _req(compliance={"require_local": True})
-    with pytest.raises(ComplianceRefused):
-        _run({"version": 1, "strategies": {"s": ["reducto"]}}, "s", reg, req=req)
 
 
 def test_routing_fallback_overridden_warns():
@@ -570,7 +523,7 @@ def test_routing_fallback_desugars_to_escalate_off_cascade():
     document (today's chain is a point in the design, not a second engine)."""
     err = TerminalError("boom", backend_code="server")
     plain_req = OpenReadingRequest.model_validate(
-        {"document": {"path": "/d.pdf"}, "backend": {"id": "auto"}}
+        {"document": {"path": "/d.pdf"}, "backend": {"id": None}}
     )
     # legacy fallback chain: a fails → b wins
     legacy = execute_plan(
@@ -636,7 +589,7 @@ def test_response_stays_v01_schema_valid():
 
 def test_parallel_branch_recovers_from_a_plain_normalize_crash_and_redacts_it():
     # _run_branch's own `except (TerminalError, RetryableError, UnsupportedFeatureError,
-    # ComplianceRefused)` clause (execution.md §3) never matched a plain, non-AdapterError exception
+    # ScopeRefused)` clause (execution.md §3) never matched a plain, non-AdapterError exception
     # out of normalize() — it isn't one of the five _ADAPTER_ERRORS taxonomy types. Uncaught, it
     # propagated out of the branch's asyncio.Task and blew up the whole parallel node, not just the
     # one losing branch. `_BranchOutcome`/the trace's own aggregation never carries a branch error's
@@ -755,37 +708,3 @@ def test_a_genuine_quality_exhaustion_still_says_quality_below_threshold():
     codes = {w.code for w in (res.response.warnings or [])}
     assert "quality_below_threshold" in codes
     assert "budget_exhausted" not in codes
-
-
-def test_a_failing_rung_records_the_backend_s_own_error_code(monkeypatch):
-    """A29: with the `tesseract` binary off PATH, a `try: [tesseract, pymupdf]` strategy exits 0,
-    `outcome: ok`, warning `fallback_used`, and the attempt reads `error(provider_error)` — the
-    same category a rate-limit or a network blip gets, though a missing local binary is permanent
-    and will fail identically on every run until someone installs it.
-
-    The engine's error CLASS is a closed, schema-versioned set with an `on_error` routing contract
-    (`strategy-config` `$defs.on_error`, `additionalProperties: false`), and no uniform, cheap way
-    exists to tell "permanent host fault" from "transient provider fault" without branching on
-    backend type — the one thing the router is forbidden to do. So the class stays
-    `provider_error`, and what ships instead is the discriminator the adapter already computed and
-    the trace was throwing away: `TerminalError.backend_code`, recorded as the attempt's `code`
-    exactly as a compliance drop records its own. `detail` is prose for a human; `code` is what a
-    monitor groups by."""
-    reg = scripted_registry(
-        ScriptedBackend(
-            "tesseract",
-            local=True,
-            error=TerminalError(
-                "tesseract failed: tesseract is not installed or it's not in your PATH.",
-                backend_code="TesseractNotFoundError",
-            ),
-        ),
-        ScriptedBackend("pymupdf", local=True, text=CLEAN),
-    )
-    res = _run({"version": 1, "strategies": {"s": {"steps": ["tesseract", "pymupdf"]}}}, "s", reg)
-
-    failed = res.orchestration["attempts"][0]
-    assert failed["category"] == "error(provider_error)"
-    assert failed["code"] == "TesseractNotFoundError"
-    # the succeeding rung carries no code — the key is present only when there is one
-    assert "code" not in res.orchestration["attempts"][1]

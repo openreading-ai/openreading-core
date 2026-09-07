@@ -265,50 +265,38 @@ one. `✗ DIVERGENT` labels the CONTENT section rather than the whole run. The r
 verdict is `equivalent`, because one misread label is not enough to call a winner.
 `--format diffs` is where the disagreement itself lives.
 
-**Route.** Route decides which backends may see a sensitive document, and prints the plan before
-anything runs. A bank statement is the everyday case. It names a person, an account and every place
-they spent money, and plenty of teams may not ship one to an arbitrary vendor. `require_baa` keeps
-out every vendor that does not publish a BAA, the HIPAA contract a vendor signs before handling
-regulated data. `no_train_on_data` refuses vendors that train on what you send:
+**Route.** Route prints the chain that would run, before anything runs. A bank statement is the
+everyday case. It names a person, an account and every place they spent money, and plenty of teams
+may not ship one to an arbitrary vendor. So you say which vendors may see it:
 
 ```bash
 cat > openreading.yaml <<'YAML'
 version: 1
 policy:
-  require_baa: true
-  no_train_on_data: true
+  backends: [pymupdf, tesseract]
 YAML
 uv run openreading route examples/john_smith_1000_2026_01.pdf
 ```
 ```json
 { "chosen": "pymupdf",
-  "fallbacks": ["docling", "azure-document-intelligence", "google-document-ai", "tesseract", "qwen-vl", "anthropic-claude"],
-  "dropped": { "reducto": { "stage": 1, "code": "no_baa", "reason": "require_baa set but hipaa_baa='tier_gated' and 'reducto' is not in baa_tier_confirmed" },
-               "…": "7 more" },
+  "fallbacks": ["tesseract"],
+  "dropped": {},
   "terminal_reason": null }
 ```
 
-That printed a plan and read nothing, and no flag named the policy: every command finds
+That printed a chain and read nothing, and no flag named the list: every command finds
 `openreading.yaml` in the working directory the same way. Add `--run` to execute the chosen
-backend and get the envelope back beside the plan. Reducto is dropped because its BAA is offered only on some tiers
-and none is confirmed here. The three hosted vendors that survive each publish a BAA. That claim
-comes from the backend's descriptor, its static self-description of formats, variables and
-compliance posture. That is a vendor's advertised offer read on a date, not an agreement you hold,
-so `require_baa` narrows the field without finishing the job. Confirm your own signed paperwork
-before real data moves, and see [the catalog](src/openreading/adapters/README.md#catalog) for where
-each claim came from. A BAA is a HIPAA control, and this example uses a bank statement because those
-are the documents this clone ships. A policy gates five things: the BAA, training on your data, the
-data region, retention, and local-only execution. Descriptors also record `soc2`, `gdpr` and `pci`,
-which no policy key reads
-([Backend adapters](src/openreading/adapters/README.md#where-those-compliance-claims-come-from)).
+backend and get the envelope back beside the chain. `fallbacks` is the order a `--run` tries next
+if `pymupdf` fails, and reordering your list reorders it.
 
-The `fallbacks` list is the order a `--run` tries next if `pymupdf` fails. A dropped backend never
-joins that list, because a fallback that readmits it would leak the statement silently. Your
-`policy:` block is the only thing that sets the eligible set, the backends allowed to run. Three of the
-policy's keys widen that set on purpose, which
-[Routing and keys](src/openreading/router/README.md#how-it-decides) names. A key the router does
-not recognise is refused rather than ignored. That way a typo cannot leave you with a clean exit
-code and no filter.
+`policy:` has one key. Earlier versions had nine, asking the engine to enforce a compliance
+posture by reading a per-vendor table it kept in its own source: whether each vendor signs a BAA,
+trains on your data, or retains a document for so many hours. That table could not be true. Every
+entry was a claim about a company this project does not control, published on a page that changes
+without notice, and a stale entry did not fail loudly, it routed your document to a backend you
+believed was excluded. You already know which vendors you hold agreements with, so `backends:` is
+that conclusion written by the one party who can reach it. An empty list permits nothing, and a
+key the loader does not recognise is refused rather than ignored.
 
 **Strategy.** A strategy gives you the cheap result when it is good enough and the stronger one
 when it is not. It checks each output against quality gates. A gate is one test on a result, for
@@ -530,6 +518,6 @@ command.
 ([`LICENSE`](LICENSE)). The `[pymupdf]` extra is the one copyleft component, as the Install section
 says.
 
-`openreading-core` is the engine itself: the schemas, every backend adapter, the compliance-first
+`openreading-core` is the engine itself: the schemas, every backend adapter, the
 router, strategies, compare, batch, the ledger, the local server, and the benchmark harness.
 [`AGENTS.md`](AGENTS.md) states which additions belong in this repository and which do not.

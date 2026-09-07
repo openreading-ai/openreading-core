@@ -126,29 +126,6 @@ class Cost(BaseModel):
     lossiness: Literal["none", "page-def", "per-doc", "credit", "subscription"] = "none"
 
 
-class ComplianceProfile(BaseModel):
-    # extra="allow" keeps forward-compat for any future §4.3 field an adapter carries.
-    model_config = ConfigDict(extra="allow")
-
-    hipaa_baa: Literal["yes", "tier_gated", "no", "na_local"] = "no"
-    soc2: CapabilityValue = False
-    gdpr: CapabilityValue = False
-    pci: CapabilityValue = False
-    data_region_options: list[str] = Field(default_factory=list)
-    data_retention: str | None = None
-    # 'unverified' = the vendor's no-train claim is unconfirmed → the router fails closed unless
-    # RouterConfig.allow_unverified_compliance is set
-    # (internal/research/openreading/routing_and_compliance.md §3/§4).
-    trains_on_customer_data: Literal["yes", "no", "opt_out", "na_local", "unverified"] = "no"
-    runs_fully_local: bool = False
-    # richer §4.3 fields the compliance filter reads
-    # (internal/research/openreading/routing_and_compliance.md):
-    max_retention_hours: float | None = None
-    train_opt_out_precondition: str | None = None
-    zdr_flag: str | None = None
-    phi_path_constraints: list[str] = Field(default_factory=list)
-
-
 class RuntimeProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -169,8 +146,6 @@ class RouterHints(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     normalization_difficulty: Literal["low", "medium", "high"] | None = None
-    integration_priority: Literal["P0", "P1", "P2"] | None = None
-    priority_reason: str | None = None
 
 
 class Source(BaseModel):
@@ -227,7 +202,6 @@ class AdapterDescriptor(BaseModel):
     wait_modes: list[WaitMode]
     capabilities: Capabilities
     cost: Cost
-    compliance: ComplianceProfile
     runtime: RuntimeProfile
     operations: list[str] = Field(default_factory=list)
     adapter_impl: Literal["http", "in_process", "subprocess", "container"] | None = None

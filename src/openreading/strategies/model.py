@@ -63,11 +63,8 @@ with `yaml.safe_load` only (D-v3-1: a config file may never construct arbitrary 
 ```yaml
 version: 1                    # required — config format version (additive evolution)
 
-policy:                       # optional — the only place a compliance policy is written
-  require_baa: true           #   compliance keys → request.compliance (unioned, most-restrictive-wins)
-  no_train_on_data: true
-  allow_unverified_compliance: false    # deployment keys → RouterConfig, as today
-  baa_tier_confirmed: [reducto]         #   tier-gated BAAs this deployment has actually signed
+policy:                       # optional — the backends this deployment permits, in order
+  backends: [pymupdf, tesseract]
 
 limits:                       # optional — operator ceilings on every strategy-engaged run (§6.4)
   max_duration_per_doc: 10m
@@ -76,7 +73,7 @@ decider:                      # optional — LLM decider configuration; inert wi
   llm: { backend: anthropic-claude, timeout: 5s, send_document_content: false }
 
 defaults:                     # optional — deployment defaults
-  strategy: cost_saver        #   applied ONLY when backend.id == "auto" and no strategy is named
+  strategy: cost_saver        #   applied ONLY when the request names no backend
                               # `advanced:` (circuit_breaker, attempt_timeout) parses and is
                               # refused by `strategy validate` — nothing reads it (§8)
 
@@ -116,7 +113,7 @@ no request-schema bump. `loader.strip_strategy_prefix` is the recognizer the ser
 so the no-file path never imports this package (the no-change law — package docstring).
 
 - `backend.id: "reducto"` (any concrete id) → Strategy layer bypassed entirely — the direct path,
-  including the compliance check and `ComplianceRefused`. `limits:` does not apply (§6.4).
+  including the compliance check and `ScopeRefused`. `limits:` does not apply (§6.4).
 - `backend.id: "strategy:<name>"` → Run the named strategy. Unknown name → `unknown_strategy` error
   (HTTP 400; CLI `parse` exit 2).
 - `backend.id: "strategy:none"` → Force the legacy path even when `defaults.strategy` is set — the
@@ -379,7 +376,6 @@ route:
       use: strategy:tables_heavy
     - when: { pages_over: 200, mime: application/pdf }
       use: strategy:big_docs
-    - when: { compliance: { require_local: true } }      # compliance facts are routable (nested)
       use: strategy:local_only
     - when: { sample_percent: 5 }                        # deterministic content-hash bucket
       use: strategy:audited
@@ -495,7 +491,7 @@ fast:                  # race the local parsers; first success wins
   on_win: cancel
 
 offline_first:         # local-only cascade — pair with policy require_local to ENFORCE locality
-  intent: "Never leave the machine. Enforcement belongs to policy: { require_local: true }."
+  intent: "Never leave the machine. Enforcement belongs to policy: { backends: [pymupdf, tesseract] }."
   steps: [pymupdf, tesseract, docling]
   escalate_if: default
 ```
@@ -705,7 +701,7 @@ The classes map onto the existing four-exception taxonomy (`openreading.types.er
 - `budget_exhausted` — a node's time deadline (`max_duration`) was reached. Default action: `next`
 - `missing_credentials` — broker cannot resolve required env vars. Default action: always `skip` —
   not configurable, never an error
-- *(compliance)* — ComplianceRefused. Default action: uncatchable — pruned before execution; naming
+- *(compliance)* — ScopeRefused. Default action: uncatchable — pruned before execution; naming
   it in `on_error` is a load-time error
 
 Alias: `transient` = `timeout` + `rate_limited` + `provider_error`. `any` = every catchable
@@ -728,7 +724,7 @@ adapter's `backend_code` (the verbatim code every `AdapterError` already carries
 - `TerminalError`, backend_code this-backend-can't codes (`doc_too_large`, `page_limit_exceeded`) →
   `unsupported_feature` — a different backend with higher limits can still succeed, so it advances
 - `TerminalError`, backend_code anything else (including unknown codes) → `provider_error`
-- `ComplianceRefused`, backend_code — → never reaches the engine for tree backends (pruned); from a
+- `ScopeRefused`, backend_code — → never reaches the engine for tree backends (pruned); from a
   decider/judge eligibility check it triggers the downgrade path, not `on_error`
 
 Adapters keep mapping native errors onto the four exception types exactly as before; the code

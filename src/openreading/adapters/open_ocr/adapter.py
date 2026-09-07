@@ -35,7 +35,6 @@ from openreading.types.cost import CostBasis, CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     ConfigField,
     Cost,
     CredentialField,
@@ -145,13 +144,6 @@ def _descriptor() -> AdapterDescriptor:
             usd_per_page_equiv_low=0.0005,
             lossiness="none",
         ),
-        compliance=ComplianceProfile(
-            hipaa_baa="no",
-            soc2=False,
-            gdpr=False,
-            trains_on_customer_data="unverified",  # no public no-train statement → fail closed
-            runs_fully_local=False,
-        ),
         runtime=RuntimeProfile(offline_capable=False, license="proprietary", version_pin="v1"),
         output=Output(
             paradigms=[OutputParadigm.TOKEN_STREAM],
@@ -167,10 +159,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="low",
-            integration_priority="P1",
-            priority_reason="Aggregator-as-backend: one adapter fans out to ~20 OCR engines "
-            "with per-page USD billing returned on every response (the only BILLED-basis "
-            "backend). Text channel only — routes when structure isn't needed.",
         ),
         credentials_spec=[
             CredentialField(

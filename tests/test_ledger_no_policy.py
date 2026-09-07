@@ -75,14 +75,6 @@ def test_a_run_still_resumes(armed):
     assert out["status"]["state"] == "succeeded"
 
 
-def test_no_descriptor_changes_what_the_ledger_writes(armed, monkeypatch):
-    """`inline.py` skipped `blobs.put` entirely for a backend carrying `zdr_flag`, so a vendor
-    compliance claim decided what landed on the caller's disk. Nothing reads that flag now."""
-    from openreading.ledger import inline
-
-    assert not hasattr(inline.InlineExecutor, "_is_zdr_backend")
-
-
 def test_retention_and_its_environment_variables_are_gone():
     import importlib
 

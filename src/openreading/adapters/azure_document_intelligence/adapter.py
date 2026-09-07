@@ -32,7 +32,6 @@ from openreading.types.cost import CostBasis, CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     ConfigField,
     Cost,
     CredentialField,
@@ -189,17 +188,6 @@ def _descriptor() -> AdapterDescriptor:
             usd_per_page_equiv_high=0.03,
             lossiness="none",
         ),
-        compliance=ComplianceProfile(
-            hipaa_baa="yes",
-            soc2="verified",
-            gdpr="verified",
-            pci="verified",
-            trains_on_customer_data="no",
-            data_region_options=["eastus", "westus", "westeurope", "northeurope", "us", "eu"],
-            data_retention="analyze results auto-purged after 24h; input not stored",
-            max_retention_hours=24,
-            runs_fully_local=False,
-        ),
         runtime=RuntimeProfile(
             offline_capable=False, license="proprietary", version_pin="api-version 2024-11-30"
         ),
@@ -218,8 +206,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="medium",
-            integration_priority="P0",
-            priority_reason="Deepest lending prebuilt set; markdown mode; self-serve BAA.",
         ),
         credentials_spec=[
             CredentialField(key="key", required=True, env=["AZURE_DOCUMENT_INTELLIGENCE_KEY"]),

@@ -133,11 +133,6 @@ def test_decide():
     assert "helper" in d and "reducto" in d
 
 
-def test_leaf_and_auto():
-    assert describe_strategy(_tree("pymupdf")) == "Runs pymupdf."
-    assert "best available" in describe_strategy(_tree("auto"))
-
-
 def test_max_attempts_is_never_described():
     # `max_attempts` is read by no engine code, so describing it states a ceiling the run does not
     # hold to. `strategy validate` refuses the key; this summary must not affirm it either.

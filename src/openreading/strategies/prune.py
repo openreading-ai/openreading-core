@@ -21,7 +21,6 @@ from typing import Any
 
 from openreading.adapters.registry import BUILTIN_ADAPTERS
 from openreading.config import apply as apply_policy
-from openreading.config import union_compliance
 from openreading.credentials import EnvCredentialBroker
 from openreading.router.compliance import DropReason
 from openreading.router.registry import Registry
@@ -31,8 +30,8 @@ from openreading.strategies.normalize import normalize_strategy
 from openreading.strategies.presets import PRESET_NAMES
 from openreading.strategies.trace import DropRecord
 from openreading.types.descriptor import AdapterDescriptor
-from openreading.types.errors import ComplianceRefused, ScopeRefused
-from openreading.types.request import Compliance, OpenReadingRequest
+from openreading.types.errors import ScopeRefused
+from openreading.types.request import OpenReadingRequest
 
 _DURATION_UNITS = {"ms": 1, "s": 1000, "m": 60_000, "h": 3_600_000}
 
@@ -62,7 +61,6 @@ class CompiledPlan:
     overrides_fallback: bool = False
     warnings: list[tuple[str, str]] = field(default_factory=list)  # (code, message)
     # the post-union effective compliance (request ∪ file policy:) — feeds route facts
-    effective_compliance: dict[str, Any] = field(default_factory=dict)
     # `limits:` operator time ceiling wrapping every strategy-engaged run (spec §6.4)
     max_duration_ms: int | None = None
     # the root strategy was authored in the Plain dialect (internal/design/simple-strategies.md §9) —
@@ -73,7 +71,6 @@ class CompiledPlan:
     decider: DeciderLLM | None = None
     router_config: RouterConfig = field(default_factory=RouterConfig)
     # RoutePlan.baa_tier_notes, carried through so the engine can warn on the responding backend.
-    baa_tier_notes: dict[str, str] = field(default_factory=dict)
     # The caller's backend allow-list, carried so the engine can re-check every id it actually
     # dispatches. Belt and braces on purpose: the prune above bounds `auto` by SHORTENING a
     # list, and a list is not a filter — nothing downstream re-reads it, so a future node type
@@ -91,7 +88,7 @@ def compile_strategy(
     backend_allowlist: frozenset[str] | None = None,
     broker: EnvCredentialBroker | None = None,
 ) -> CompiledPlan:
-    """Compile `name` for `req`. Raises ComplianceRefused when the root prunes to nothing (the
+    """Compile `name` for `req`. Raises ScopeRefused when the root prunes to nothing (the
     same terminal outcome the `auto` arm gives on an empty plan). `plain_info` (from the loader)
     marks a Plain-dialect root so run_strategy can tag gate records for `explain` grouping (§9).
 
@@ -128,13 +125,10 @@ def compile_strategy(
     # first version of this change removed the fold from here on the grounds that `api` had done
     # it, which is true of every caller inside this package and of none outside it.
     req, router_config = apply_policy(req, config.policy, router_config)
-    effective_compliance = union_compliance(req.compliance, None)
 
-    # (1) build the effective request: unioned compliance + stripped routing.fallback (so auto
-    # leaves see pure stage-3 order).
+    # (1) build the effective request: strip routing.fallback so an unnamed leaf resolves through
+    # the same three rules the router applies everywhere else.
     updates: dict[str, Any] = {}
-    if effective_compliance:
-        updates["compliance"] = Compliance(**effective_compliance)
     overrides_fallback = bool(req.routing and req.routing.fallback)
     if overrides_fallback and req.routing is not None:
         updates["routing"] = req.routing.model_copy(update={"fallback": None})
@@ -153,7 +147,7 @@ def compile_strategy(
 
     # (2)+(3) normalize + prune every strategy (so `use:` refs resolve against pruned trees).
     # BL-168: iterate in a fixed order — `set()` iteration order is hash-seed-dependent, and it
-    # reached `trace.dropped`, `orchestration["dropped"]`, and the ComplianceRefused message below,
+    # reached `trace.dropped`, `orchestration["dropped"]`, and the ScopeRefused message below,
     # so the explanation shown for *why a compliant run was refused* was not reproducible.
     all_names = sorted(set(config.strategies) | PRESET_NAMES | {name})
     trees: dict[str, dict[str, Any] | None] = {}
@@ -186,14 +180,12 @@ def compile_strategy(
                 f"(denied: {', '.join(scope_drops)})",
                 backend_code=scope_drops[0],
             )
-        raise ComplianceRefused(
+        raise ScopeRefused(
             f"strategy {name!r} has no compliant backend for this request (dropped: {dropped_list})",
             constraint="no_compliant_backend",
         )
 
-    config_hash = _compute_config_hash(
-        root, effective_compliance, router_config, registry, plan, config.policy
-    )
+    config_hash = _compute_config_hash(root, router_config, registry, plan, config.policy)
 
     warnings: list[tuple[str, str]] = []
     if overrides_fallback:
@@ -220,19 +212,16 @@ def compile_strategy(
         config_hash=config_hash,
         overrides_fallback=overrides_fallback,
         warnings=warnings,
-        effective_compliance=effective_compliance,
         max_duration_ms=max_dur,
         decider=(config.decider.llm if config.decider else None),
         router_config=router_config,
         plain_sourced=plain_sourced,
-        baa_tier_notes=dict(plan.baa_tier_notes),
         backend_allowlist=backend_allowlist,
     )
 
 
 def _compute_config_hash(
     root: dict[str, Any],
-    effective_compliance: dict[str, Any],
     router_config: RouterConfig,
     registry: Registry,
     plan: RoutePlan,
@@ -257,7 +246,7 @@ def _compute_config_hash(
     directions. It is the parsed block rather than the file's bytes, so reindenting or reordering
     keys is not a different run.
 
-    Folds `root`, `effective_compliance`, `router_config`, the file policy, and a descriptor
+    Folds `root`, `router_config`, the file policy, and a descriptor
     digest per backend the router actually classified (`eligible` + `dropped` — together every registered backend, since
     `Router.route` classifies each one or the other) into ONE JSON structure before hashing, rather
     than concatenating pre-hashed pieces with a delimiter — this sidesteps any "is `AB`+`C` distinct
@@ -290,7 +279,7 @@ def _compute_config_hash(
         for bid in participating_ids
     )
     written = file_policy.model_dump(exclude_none=True) if file_policy is not None else None
-    payload = [root, effective_compliance, router_config_canonical, descriptor_digests, written]
+    payload = [root, router_config_canonical, descriptor_digests, written]
     return "sha256:" + _hash_json(payload)
 
 

@@ -20,9 +20,9 @@ from openreading.strategies import StrategyConfig, compile_strategy, run_strateg
 from openreading.testing.sample_pdf import build_sample_pdf
 from openreading.types import CostBasis, CostReport, Job
 from openreading.types.errors import (
-    ComplianceRefused,
     PlanExhaustedError,
     RetryableError,
+    ScopeRefused,
     TerminalError,
     UnsupportedFeatureError,
 )
@@ -297,18 +297,6 @@ def test_page_granularity_a_raising_report_cost_never_leaves_a_billed_rung_looki
 # ---- fault injection: every early exit from the rung loop leaves an honest trace ---------------
 
 
-def test_page_granularity_unresolvable_auto_rung_stops_with_no_extra_attempt():
-    # `auto` on the escalation rung with every eligible backend already attempted: the cascade
-    # stops rather than re-running the rung it just escalated away from.
-    reg = scripted_registry(ScriptedBackend("pymupdf", local=True, pages=_cheap_pages()))
-    steps = [{"backend": "pymupdf", "escalate_if": {"confidence_below": 0.80}}, "auto"]
-    res = _run(_paged_cfg(steps), reg)
-    assert _cats(res) == [("pymupdf", "succeeded")]
-    assert _provenance(res) == {1: "pymupdf", 2: "pymupdf", 3: "pymupdf"}
-    pages = {p.page_number: p for p in res.response.document.pages or []}
-    assert pages[2].text == "scrmbl"  # the failing page is kept as-is, never dropped
-
-
 def test_page_granularity_rung_missing_from_the_registry_records_provider_error():
     # the strategy names a real backend that this run's registry does not carry.
     reg = scripted_registry(ScriptedBackend("pymupdf", local=True, pages=_cheap_pages()))
@@ -355,7 +343,7 @@ def test_page_granularity_rung_without_range_support_reparses_the_whole_doc_and_
         (TerminalError("5xx", backend_code="server"), "provider_error"),
         (RetryableError("slow down", backend_code="429"), "rate_limited"),
         (UnsupportedFeatureError("no pdf", feature="pdf"), "unsupported_feature"),
-        (ComplianceRefused("no baa", constraint="require_baa"), "provider_error"),
+        (ScopeRefused("no baa", constraint="require_baa"), "provider_error"),
     ],
 )
 def test_page_granularity_escalation_rung_error_keeps_the_cheap_pages(exc, error_class):
@@ -374,7 +362,7 @@ def test_page_granularity_escalation_rung_plain_crash_keeps_the_cheap_pages_and_
 ):
     # BL-99: the identical escalation-rung-failure shape as the four cases parametrized above, but
     # the one substitution none of them make — a plain, non-AdapterError exception (not a
-    # TerminalError/RetryableError/UnsupportedFeatureError/ComplianceRefused) out of normalize().
+    # TerminalError/RetryableError/UnsupportedFeatureError/ScopeRefused) out of normalize().
     # _eval_paged_cascade's own `except _TAXONOMY` clause never matched it at all, so it propagated
     # straight out of the page cascade uncaught — the cheap rung's already-good pages, recovered
     # below, were never returned. `_eval_paged_cascade` doesn't record a rung error's message either

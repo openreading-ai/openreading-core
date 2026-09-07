@@ -238,7 +238,7 @@ Surfaces
   back to `<filename>.json`; mirrors compare's fan-out flag) so per-backend envelopes are
   reusable offline. Stdout is the one envelope; progress/advisories on stderr. Exits: 0 all
   succeeded; 4 partial (some items failed); 1 nothing succeeded; 2 unresolvable source, over
-  `--max-items` or `--max-jobs`; 3 cannot run at all (credentials, policy, `ComplianceRefused`,
+  `--max-items` or `--max-jobs`; 3 cannot run at all (credentials, policy, `ScopeRefused`,
   or a native `submit_many` `RetryableError`/deadline); 6 interrupted with `OPENREADING_LEDGER` set (batch keys on the var, not on an armed run)
   (batch-level resume is not supported, so no run id is named).
 - Python: `openreading.run_batch(sources, backend="auto", *, strategy, jobs=1, max_jobs=32,

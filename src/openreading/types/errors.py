@@ -1,7 +1,7 @@
 """The four-category error taxonomy (adapter_interface.md §1.3).
 
 The router does four different things with failures, so every adapter maps its backend's
-errors onto exactly these four. `ComplianceRefused` is raised by the router BEFORE submit();
+errors onto exactly these four. `ScopeRefused` is raised by the router BEFORE submit();
 the other three come from inside submit()/poll()/normalize().
 """
 
@@ -34,7 +34,7 @@ class AdapterError(Exception):
     #
     # Dispatch is via the explicit `_TAXONOMY` table at the bottom of this module (only the four
     # classes design doc §11's retry-policy table names — RetryableError/TerminalError/
-    # UnsupportedFeatureError/ComplianceRefused — plus this base), NOT an `__init_subclass__`
+    # UnsupportedFeatureError/ScopeRefused — plus this base), NOT an `__init_subclass__`
     # auto-registry: a few further-derived subclasses below (`MissingCredentialsError` et al.)
     # have their own `__init__` that doesn't accept a bare `backend_code` kwarg, so blindly
     # reconstructing any registered subclass by name would raise on those. An unrecognized `type`
@@ -114,46 +114,42 @@ class UnsupportedFeatureError(AdapterError):
         )
 
 
-class ComplianceRefused(AdapterError):
-    """Backend ineligible under request.compliance. Raised by the router before submit();
-    the backend is SKIPPED and removed from the fallback chain for this request."""
+class ScopeRefused(AdapterError):
+    """The declared backend allow-list leaves nothing this request could run.
+
+    403 `scope_denied` on the wire. It used to have a sibling, `ComplianceRefused`, which answered
+    a different question: compliance refused because the DOCUMENT may not go to that backend,
+    scope refuses because the CALLER did not permit it. Core cannot answer the first honestly, so
+    only the second remains, and it is the one whose fix is in the caller's own hands.
+
+    Every source of an allow-list intersects and none widens: the file's `policy.backends`, a
+    caller's argument, and the server's API-key scope. A run with any permitted backend left is
+    pruned rather than refused, so this is raised only when the intersection leaves nothing.
+    `backend_code` names one backend that was denied, so the message is actionable, never the
+    token, which is the secret.
+    """
 
     def __init__(
         self, message: str = "", *, backend_code: str | None = None, constraint: str = ""
     ) -> None:
-        super().__init__(message, backend_code=backend_code)
+        # `constraint` names WHICH rule emptied the set, so a caller can tell "your list permitted
+        # nothing" from "your list named backends this build does not carry". It defaults to the
+        # generic code so the common case needs no argument.
+        super().__init__(message, backend_code=backend_code or constraint or "scope_denied")
         self.constraint = constraint
 
     def to_dict(self) -> dict[str, Any]:
         return {**super().to_dict(), "constraint": self.constraint}
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> AdapterError:
-        return ComplianceRefused(
+    def from_dict(cls, d: dict[str, Any]) -> ScopeRefused:
+        # Its own, because the base dispatches through `_TAXONOMY` back to this class: without an
+        # override the lookup would call itself forever.
+        return cls(
             d.get("message", ""),
             backend_code=d.get("backend_code"),
             constraint=d.get("constraint", ""),
         )
-
-
-class ScopeRefused(AdapterError):
-    """The CALLER's backend allow-list excludes every backend this request could reach.
-
-    A sibling of ComplianceRefused, not a subclass, and deliberately its own category on the wire
-    (403 `scope_denied`, never 403 `compliance_refused`). The two answer different questions and
-    have different fixes: compliance refuses because the DOCUMENT may not go to that backend, and
-    the fix is the policy or the deployment's attestations; scope refuses because THIS CREDENTIAL
-    may not spend at that backend, and the fix is the token's allow-list. Reporting one as the
-    other sends the operator to the wrong file.
-
-    Like compliance, an allow-list only ever SUBTRACTS from the eligible set, so a walk with any
-    in-scope backend left is pruned rather than refused; this is raised only when the subtraction
-    leaves nothing to run. `backend_code` names one backend that was denied, so the message is
-    actionable — never the token, which is the secret.
-    """
-
-    def __init__(self, message: str = "", *, backend_code: str | None = None) -> None:
-        super().__init__(message, backend_code=backend_code)
 
 
 class MissingCredentialsError(TerminalError):
@@ -191,7 +187,7 @@ _TAXONOMY: dict[str, type[AdapterError]] = {
     "RetryableError": RetryableError,
     "TerminalError": TerminalError,
     "UnsupportedFeatureError": UnsupportedFeatureError,
-    "ComplianceRefused": ComplianceRefused,
+    "ScopeRefused": ScopeRefused,
 }
 
 

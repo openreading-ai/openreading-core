@@ -36,7 +36,6 @@ from openreading.types.cost import CostBasis, CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     ConfigField,
     Cost,
     CredentialField,
@@ -227,16 +226,6 @@ def _descriptor() -> AdapterDescriptor:
             usd_per_page_equiv_high=0.03,
             lossiness="credit",
         ),
-        compliance=ComplianceProfile(
-            hipaa_baa="tier_gated",  # BAA is an Enterprise-tier feature
-            soc2="claimed",  # SOC 2 Type I & II audits in progress (cert-complete UNVERIFIED)
-            gdpr=False,  # DPA offered at Enterprise; no explicit statement (UNVERIFIED → not claimed)
-            trains_on_customer_data="opt_out",  # no-train guaranteed Scale-tier+ only → confirm to use
-            train_opt_out_precondition="scale_tier_or_above_no_train_guarantee",
-            data_region_options=["us"],
-            data_retention="per-task expires_in → permanent delete; TLS + AES-256 at rest",
-            runs_fully_local=False,
-        ),
         runtime=RuntimeProfile(
             offline_capable=False,
             license="proprietary (AGPL-3.0 self-host available)",
@@ -257,9 +246,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="medium",
-            integration_priority="P0",
-            priority_reason="One adapter covers a hosted RAG-grade backend AND the offline/compliance "
-            "tier (identical API self-hosted, AGPL).",
         ),
         credentials_spec=[
             CredentialField(key="api_key", required=True, env=["CHUNKR_API_KEY"], example="ch_..."),

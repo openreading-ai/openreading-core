@@ -24,7 +24,6 @@ from openreading.strategies.decider import (
     JudgeVerdict,
     _env_decider_backend,
     build_decider_tool,
-    resolve_decider_status,
     revalidate_action,
 )
 from openreading.strategies.engine import _decide, _WalkCtx
@@ -117,23 +116,6 @@ def _review_reg():
     )
 
 
-def test_review_band_fires_decision_point_engine_default_escalate():
-    res = _run(_review_cfg("escalate"), _review_reg())
-    assert res.response.backend.id == "pymupdf"  # engine default review_default=escalate → step 2
-    d = _decisions(res)[0]
-    assert d["point"] == "gate_band"
-    assert d["decider"] == "engine"
-    assert d["downgraded"] is None  # no decider block → pure engine, not a downgrade
-    assert d["chosen"] == "escalate"
-    assert d["eligible"] == ["accept", "escalate"]
-    # signals are keyed by the firing gate operator (self-describing direction), observed-vs-
-    # threshold, and carry no compliance surface (decider.md §5).
-    assert d["signals"]["confidence_below"]["observed"] == 0.5
-    assert d["signals"]["confidence_below"]["threshold"] == 0.85
-    cats = [(a["backend"], a["category"]) for a in res.orchestration["attempts"]]
-    assert ("reducto", "review_escalated") in cats
-
-
 def test_review_band_accept_returns_first_step():
     res = _run(_review_cfg("accept"), _review_reg())
     assert res.response.backend.id == "reducto"  # engine default accept → keep the cheap rung
@@ -190,51 +172,6 @@ def test_decide_env_disabled_downgrade():
     assert d["decider"] == "engine" and d["downgraded"] == "env_disabled"
 
 
-def test_decide_otherwise_pruned_does_not_clobber_a_real_decider_downgrade():
-    # BL-59: engine.py's otherwise_pruned guard (`d.get("otherwise_pruned") and ... downgraded is
-    # None`) exists specifically so it never clobbers a genuine decider-level downgrade already on
-    # the trace. Combine BL-54's own otherwise-pruned fixture shape (the configured otherwise: is
-    # hosted and gets dropped by require_local while the among: survivor stays, so prune.py
-    # substitutes it and marks otherwise_pruned) with a decider: block that independently resolves
-    # to env_disabled (same fixture shape as test_decide_env_disabled_downgrade above). Before this
-    # test, nothing in the suite combined "otherwise_pruned is True" with "downgraded already set".
-    r = _req(compliance={"require_local": True})
-    reg = _decide_reg()
-    cfg = _decide_cfg(decider={"llm": {"backend": "reducto"}}, otherwise="reducto")
-    compiled = compile_strategy(r, "s", StrategyConfig.model_validate(cfg), reg, RouterConfig())
-
-    # sanity: the fixture actually triggers BL-54's substitution — otherwise: ("reducto", hosted)
-    # was pruned and replaced by the sole among: survivor ("docling"), confirmed on the compiled
-    # tree before asserting the downgrade behavior below.
-    pruned_decide = compiled.root["decide"]
-    assert pruned_decide.get("otherwise_pruned") is True
-
-    res = run_strategy(compiled, r, registry=reg, broker=EnvCredentialBroker(), clock=FakeClock())
-
-    assert res.response.backend.id == "docling"  # the substituted otherwise: actually dispatched
-    d = _decisions(res)[0]
-    assert d["point"] == "decide" and d["chosen"] == "otherwise" and d["decider"] == "engine"
-    # the guard's whole point: the pre-existing decider-level downgrade wins, NOT clobbered to
-    # "otherwise_pruned" (engine.py's `... and record["downgraded"] is None`, Ledger T2 §4.2 —
-    # `record` is `_resolve_decision_point`'s own returned reference, not `ctx.trace.decisions[-1]`).
-    assert d["downgraded"] == "env_disabled"
-
-
-def test_decide_compliance_downgrade_when_decider_backend_dropped():
-    # env is ON, but the decider backend (hosted reducto) is dropped under require_local → the
-    # decision resolves via engine semantics traced `compliance`. The processing among/otherwise
-    # are local, so the strategy itself still runs (§3.5).
-    res = _run(
-        _decide_cfg(decider={"llm": {"backend": "reducto"}}),
-        _decide_reg(),
-        compliance={"require_local": True},
-        env={"OPENREADING_LLM_DECIDER": "1"},
-    )
-    assert res.response.backend.id == "pymupdf"  # engine default still dispatched
-    d = _decisions(res)[0]
-    assert d["decider"] == "engine" and d["downgraded"] == "compliance"
-
-
 def test_decide_unavailable_when_enabled_eligible_but_no_executor():
     # env ON, decider backend local+eligible, but no LLM executor is wired (14.1 state) → unavailable
     res = _run(
@@ -260,22 +197,6 @@ class _FakePort:
     def decide(self, dp: DecisionPoint) -> DecisionVerdict:
         self.seen.append(dp)
         return DecisionVerdict(action=self.action, cost_usd=self.cost_usd, rationale="fake")
-
-
-def test_llm_port_dispatch_when_enabled_and_eligible():
-    port = _FakePort("accept")
-    res = _run(
-        _review_cfg("escalate", decider={"llm": {"backend": "pymupdf"}}),
-        _review_reg(),
-        env={"OPENREADING_LLM_DECIDER": "1"},
-        decider_llm=port,
-    )
-    assert res.response.backend.id == "reducto"  # the port chose accept, overriding the default
-    d = _decisions(res)[0]
-    assert d["decider"] == "llm" and d["downgraded"] is None and d["chosen"] == "accept"
-    # rail 4: the DecisionPoint the port saw carries no compliance surface
-    dp = port.seen[0]
-    assert "compliance" not in dp.signals and dp.candidates == ["accept", "escalate"]
 
 
 def test_llm_port_out_of_set_revalidates_to_malformed():
@@ -439,20 +360,6 @@ def test_env_decider_backend_tokens():
     )
 
 
-def test_resolve_status_no_block_is_pure_engine():
-    reg = _decide_reg()
-    st = resolve_decider_status(
-        decider=None,
-        req=_req(),
-        registry=reg,
-        effective_compliance={},
-        router_config=RouterConfig(),
-        env={"OPENREADING_LLM_DECIDER": "1"},
-        port=None,
-    )
-    assert st.mode == "engine" and st.reason is None
-
-
 # ---- determinism ------------------------------------------------------------------------------
 
 
@@ -593,51 +500,6 @@ def test_judge_ungated_downgrades_to_engine_score():
     assert res.response.backend.id == "aws-textract"  # engine composite picks CLEAN
     jd = [d for d in _decisions(res) if d["point"] == "judge"][0]
     assert jd["decider"] == "engine" and jd["downgraded"] == "env_disabled"
-
-
-def test_judge_compliance_ineligible_downgrades_traced():
-    # hosted judge backend under require_local → dropped → engine composite; processing is local.
-    reg = scripted_registry(
-        ScriptedBackend("docling", local=True, text=CLEAN),
-        ScriptedBackend("tesseract", local=True, text=GARBLED_SHORT),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN),  # hosted judge backend
-    )
-    res = _run(
-        _judge_cfg(judge_backend="reducto", branches=["docling", "tesseract"]),
-        reg,
-        compliance={"require_local": True},
-        env={"OPENREADING_LLM_DECIDER": "1"},
-        judge_llm=_LongestJudge(),
-    )
-    assert res.response.backend.id == "docling"  # engine composite picks the CLEAN local candidate
-    jd = [d for d in _decisions(res) if d["point"] == "judge"][0]
-    assert jd["decider"] == "engine" and jd["downgraded"] == "compliance"
-
-
-def test_judge_out_of_scope_backend_downgrades_to_engine_traced():
-    """A `judge:` block names a backend that gets CALLED, with the operator's vendor key, and it
-    was gated only by compliance and routing — never by the caller's allow-list. The judge port is
-    not armed on any shipped surface, so nothing spent; this closes it before the wire executor
-    lands rather than after, because at that point it becomes a backend a scoped request reaches
-    with no check at all.
-
-    No port is passed, deliberately: the refusal must come from the scope gate itself, not from
-    the `port is None` fallback that happens to make the whole path inert today. `scope_denied`
-    and not `compliance` — the two have different fixes, and the reason is what an operator reads.
-    """
-    reg = scripted_registry(
-        ScriptedBackend("reducto", cost_low=0.01, text=GARBLED_SHORT),
-        ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN),
-        ScriptedBackend("pymupdf", local=True, text=CLEAN),  # the judge backend, and out of scope
-    )
-    res = _run(
-        _judge_cfg(),
-        reg,
-        env={"OPENREADING_LLM_DECIDER": "1"},
-        backend_allowlist=frozenset({"reducto", "aws-textract"}),
-    )
-    jd = [d for d in _decisions(res) if d["point"] == "judge"][0]
-    assert jd["decider"] == "engine" and jd["downgraded"] == "scope_denied"
 
 
 def test_decide_out_of_scope_decider_backend_downgrades_to_engine_traced():

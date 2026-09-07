@@ -30,14 +30,14 @@ Contract:
   dropped, and Plain's `looks_bad` scan member is result-aware (`openreading.strategies.plain`)
   where the bundle's `scanned_pages_detected` is a bare input-side fact. Hence "≈", not "=".
 
-    cost_saver    ≈ try: [pymupdf, docling, auto]
+    cost_saver    ≈ try: [pymupdf, docling, aws-textract]
                     escalate_when: {looks_bad: true, low_confidence: true}
-    max_accuracy  ≈ try: [auto, auto]            + the same escalate_when
+    max_accuracy  ≈ try: [aws-textract, azure-document-intelligence] + the same escalate_when
     offline_first ≈ try: [pymupdf, tesseract, docling] + the same escalate_when
     fast          ≈ race: [pymupdf, tesseract]
 
 `offline_first` orders local backends only, but *enforcement* of "never leave the machine" is
-`policy: { require_local: true }` — compliance lives outside the tree and a strategy can never
+`policy: { backends: [...] }` — the allow-list lives outside the tree and a strategy can never
 widen it.
 
 Cookbook
@@ -276,7 +276,7 @@ strategies:
     steps:
       - pymupdf
       - docling
-      - auto                             # router's stage-3 pick among eligible − attempted
+      - aws-textract                     # a named rung: every rung names what it runs
 ```
 
 Plain spelling (`max_time` is the wall; `best_effort` keep-best is the inherited default):
@@ -284,7 +284,7 @@ Plain spelling (`max_time` is the wall; `best_effort` keep-best is the inherited
 ```yaml
 strategies:
   best_effort:
-    try: [pymupdf, docling, auto]
+    try: [pymupdf, docling, aws-textract]
     escalate_when: looks_bad
     max_time: "2m"
 ```
@@ -311,13 +311,12 @@ it. Compliance lives in `policy:`, outside the tree.
 version: 1
 
 policy:
-  require_baa: true
-  no_train_on_data: true
+  backends: [pymupdf, tesseract, aws-textract]
 
 strategies:
   phi_pipeline:
     steps:
-      - pymupdf                      # local: PHI never leaves; always eligible under require_baa
+      - pymupdf                      # local: the document never leaves this machine
       - aws-textract                 # hosted rung with a BAA path
       - reducto                      # pruned in deployments where its claims aren't verified
       - docling                      # local floor
@@ -329,8 +328,7 @@ Plain spelling — `policy:` is shared with Plain, so only the cascade changes:
 ```yaml
 version: 1
 policy:
-  require_baa: true
-  no_train_on_data: true
+  backends: [pymupdf, tesseract, aws-textract]
 strategies:
   phi_pipeline:
     try: [pymupdf, aws-textract, reducto, docling]
@@ -339,7 +337,7 @@ strategies:
 
 What happens: the file's `policy:` unions into every request's compliance block
 (most-restrictive-wins, DECISIONS D-v3-12), and the 3-stage router prunes the tree *before*
-execution. Fully-local rungs are always eligible under `require_baa`. A hosted rung whose
+execution. A hosted rung whose
 BAA/no-train posture is not verified is dropped up front: the cascade simply has one fewer rung,
 recorded in `orchestration.dropped[]` with the router's `DropReason`; nothing can re-admit it,
 and naming compliance in `on_error` is a load-time error. `strategy validate` warns statically
@@ -448,13 +446,13 @@ default.
 version: 1
 
 policy:
-  no_train_on_data: true             # unions into every request; most-restrictive-wins
+  backends: [pymupdf, tesseract, aws-textract]
 
 limits:                              # operator ceiling on every strategy-engaged run;
   max_duration_per_doc: 10m          #   binds strategies, not direct-named requests
 
 defaults:
-  strategy: front_door               # backend.id "auto" traffic runs front_door
+  strategy: front_door               # traffic naming no backend runs front_door
 
 strategies:
   base_cascade:
@@ -480,7 +478,7 @@ strategies:
           backend: anthropic-claude                    # must pass the request's compliance filter
           intent: Prefer complete tables with arithmetically consistent totals.
         on_win: cancel                                 # losers cancelled; billed cost still recorded
-      - auto                                           # router's pick among eligible − attempted
+      - aws-textract                                   # a named rung
 
   tables_heavy:                                        # a second cascade written out in full:
     budget: { max_duration: 6m }                       #   `extends:` is designed, not a file key
@@ -500,8 +498,6 @@ strategies:
   front_door:
     route:                                             # facts computed once, pre-parse
       rules:
-        - when: { compliance: { require_local: true } }  # compliance facts are routable (nested)
-          use: strategy:local_only
         - when: { doc_type: [invoice, bank_statement] }
           use: strategy:tables_heavy
         - when: { sample_percent: 2 }                  # deterministic content-hash bucket
@@ -509,16 +505,12 @@ strategies:
       default: strategy:base_cascade                   # mandatory floor
 ```
 
-What happens: an `auto` request routes through `front_door`. A `require_local` request takes
-`local_only` — and the compliance filter has *already* pruned every hosted leaf, so even a
-routing mistake could not reach one. An invoice takes `tables_heavy`, a second cascade with a
+What happens: a request with no named backend routes through `front_door`. An invoice takes
+`tables_heavy`, a second cascade with a
 bigger duration budget. Inside `base_cascade`: pymupdf, then the hedged judged duel inside the
 cascade's 4m budget inside the operator's 10m ceiling (children clamp, never extend; `limits:`
 binds strategy-engaged runs only, never a direct-named request), then an `auto` rung that can
 only pick a backend the walk has not touched — the attempted set spans rungs, branches, shadows,
-and losers. The `compliance` route fact is a nested `{field: value}`
-map, keys ANDed, never a dotted key (DECISIONS D-v3-11). Every decision, gate evaluation, prune,
-and dollar lands in one trace.
 
 Reading the trace
 =================
@@ -558,13 +550,15 @@ from openreading.strategies.model import RawNode
 
 PRESETS: dict[str, RawNode] = {
     "cost_saver": {
-        "intent": "Local parse first; escalate to the router's best remaining pick only on bad quality.",
-        "steps": ["pymupdf", "docling", "auto"],
+        # The third rung used to be `auto`, which asked the router to pick from vendor claims.
+        # Every rung names a backend now, so a reader can see what a preset will actually run.
+        "intent": "Local parse first; escalate to a hosted backend only on bad quality.",
+        "steps": ["pymupdf", "docling", "aws-textract"],
         "escalate_if": "default",
     },
     "max_accuracy": {
-        "intent": "Best eligible backend; second opinion from the next-best when quality gates fire.",
-        "steps": ["auto", "auto"],
+        "intent": "A hosted backend first; second opinion from another when quality gates fire.",
+        "steps": ["aws-textract", "azure-document-intelligence"],
         "escalate_if": "default",
     },
     "fast": {
@@ -574,7 +568,7 @@ PRESETS: dict[str, RawNode] = {
         "on_win": "cancel",
     },
     "offline_first": {
-        "intent": "Never leave the machine. Enforcement belongs to policy: { require_local: true }.",
+        "intent": "Never leave the machine. Enforcement belongs to policy: { backends: [pymupdf, tesseract] }.",
         "steps": ["pymupdf", "tesseract", "docling"],
         "escalate_if": "default",
     },

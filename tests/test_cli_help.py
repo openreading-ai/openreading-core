@@ -292,7 +292,7 @@ def test_chaining_recipe_keeps_a_slower_completed_candidate():
         ScriptedBackend("tesseract", local=True, latency_ms=20),
     )
     pytest.importorskip("pymupdf")
-    request = build_request(build_sample_pdf(), "auto", mime_type="application/pdf")
+    request = build_request(build_sample_pdf(), None, mime_type="application/pdf")
     compiled = compile_strategy(
         request,
         args.strategy,

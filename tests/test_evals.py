@@ -22,7 +22,6 @@ from openreading.evals import (
 )
 from openreading.evals.dataset import load_case
 from openreading.evals.scorers import contains_fraction
-from openreading.router import RouterConfig
 from tests.fakes import ConfigurableBackend, make_backend
 
 SAMPLE = Path("src/openreading/evals/sample")
@@ -236,31 +235,6 @@ def test_load_case_applies_outputs_and_extraction_schema_overrides(tmp_path):
 # --- BL-112 sub-requirement: load_case forwards a case.json `compliance` key ------------------
 
 
-def test_load_case_omits_compliance_when_absent():
-    # the shipped sample case.json carries no compliance key — request_body must not gain one
-    # out of nowhere (this is the structurally-always-None channel BL-112's finding names).
-    cases = load_dataset(SAMPLE, backend_id="pymupdf")
-    assert "compliance" not in cases[0].request_body
-
-
-def test_load_case_forwards_compliance_into_request_body(tmp_path):
-    case_dir = tmp_path / "case_a"
-    case_dir.mkdir()
-    case_json = case_dir / "case.json"
-    case_json.write_text(
-        json.dumps(
-            {
-                "name": "phi_case",
-                "input": {"builtin_sample": True},
-                "compliance": {"require_local": True},
-                "expected": {},
-            }
-        )
-    )
-    case = load_case(case_json, backend_id="pymupdf")
-    assert case.request_body["compliance"] == {"require_local": True}
-
-
 def test_end_to_end_pymupdf_scores_high_on_sample():
     pytest.importorskip("fitz", reason="pymupdf not installed")
     from openreading.adapters.pymupdf import PyMuPDFAdapter
@@ -326,7 +300,7 @@ def test_run_dataset_handles_a_genuinely_unlabeled_case_without_crashing(tmp_pat
 
 
 class _CountingBackend(ConfigurableBackend):
-    """Counts real submit() calls, so a compliance-refusal test can prove ComplianceRefused fires
+    """Counts real submit() calls, so a compliance-refusal test can prove ScopeRefused fires
     before adapter.submit() is ever reached — not merely that the result ends up unscored."""
 
     def __init__(self, descriptor):
@@ -344,22 +318,9 @@ def _hipaa_case() -> EvalCase:
         request_body={
             "document": {"bytes_base64": "aGVsbG8=", "mime_type": "application/pdf"},
             "backend": {"id": "phi-backend"},
-            "compliance": {"require_baa": True},
         },
         expected={},
     )
-
-
-def test_run_case_refuses_a_noncompliant_backend_before_submit():
-    fake = _CountingBackend(make_backend("phi-backend", hipaa_baa="no").descriptor)
-
-    result = run_case(fake, _hipaa_case())
-
-    assert fake.submit_calls == 0  # refused before any backend call
-    assert result.error is not None
-    assert "ComplianceRefused" in result.error
-    assert "hipaa_baa" in result.error
-    assert result.overall == 0.0
 
 
 def test_run_case_compliant_backend_is_unaffected():
@@ -371,35 +332,3 @@ def test_run_case_compliant_backend_is_unaffected():
 
     assert fake.submit_calls == 1
     assert result.error is None
-
-
-def test_run_case_router_config_confirms_a_tier_gated_baa():
-    # The new router_config parameter is actually threaded into comp.evaluate, not merely
-    # accepted and ignored: a tier-gated BAA is refused without the operator's confirmation and
-    # accepted once the backend id is listed in RouterConfig.baa_tier_confirmed.
-    fake = _CountingBackend(make_backend("phi-backend", hipaa_baa="tier_gated").descriptor)
-
-    refused = run_case(fake, _hipaa_case())
-    assert refused.error is not None and fake.submit_calls == 0
-
-    cfg = RouterConfig(baa_tier_confirmed=frozenset({"phi-backend"}))
-    confirmed = run_case(fake, _hipaa_case(), router_config=cfg)
-    assert confirmed.error is None and fake.submit_calls == 1
-
-
-def test_run_dataset_forwards_router_config_to_every_case(monkeypatch):
-    # run_dataset has no policy-union step of its own (unlike calibrate_strategy) — it only needs
-    # to thread the caller's router_config through to run_case for every case in the dataset.
-    monkeypatch.setattr(
-        "openreading.evals.runner.load_dataset",
-        lambda dataset_dir, *, backend_id: [_hipaa_case()],
-    )
-    fake = _CountingBackend(make_backend("phi-backend", hipaa_baa="tier_gated").descriptor)
-
-    refused = run_dataset(fake, "unused")
-    assert refused.errors == 1 and fake.submit_calls == 0
-
-    confirmed = run_dataset(
-        fake, "unused", router_config=RouterConfig(baa_tier_confirmed=frozenset({"phi-backend"}))
-    )
-    assert confirmed.errors == 0 and fake.submit_calls == 1

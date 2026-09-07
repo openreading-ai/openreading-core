@@ -41,12 +41,10 @@ from openreading.ledger.header import slim_request
 from openreading.readiness import attach_auth_hint, missing_required
 from openreading.router.cache import content_key, document_identity
 from openreading.router.clock import Clock, RealClock
-from openreading.router.compliance import BAA_TIER_CONFIRMED_WARNING
 from openreading.router.cost import apply_cost_report
 from openreading.router.driver import run_to_completion
 from openreading.router.router import RoutePlan
 from openreading.types.errors import (
-    ComplianceRefused,
     PlanExhaustedError,
     RetryableError,
     ScopeRefused,
@@ -63,14 +61,14 @@ _CACHE_TTL_MS = 15 * 60 * 1000
 # isinstance, not `type(e).__name__`: a private subtype raised internally by a lower layer for its
 # own dispatch purposes (e.g. driver.py's `_DriveSliceExpired(RetryableError)`, BL-88) must still
 # report as its taxonomy base here, never leak its own concrete class name into this trail.
-_TAXONOMY = (TerminalError, RetryableError, UnsupportedFeatureError, ComplianceRefused)
+_TAXONOMY = (TerminalError, RetryableError, UnsupportedFeatureError, ScopeRefused)
 
 
 @dataclass
 class Attempt:
     backend: str
     # "skipped" | "terminal" (a crash outside the taxonomy) | "TerminalError" |
-    # "RetryableError" | "UnsupportedFeatureError" | "ComplianceRefused"
+    # "RetryableError" | "UnsupportedFeatureError" | "ScopeRefused"
     category: str
     code: str
     detail: str = ""
@@ -134,12 +132,6 @@ def _record_trail(resp: NormalizedResponse, trail: list[Attempt], chosen: str) -
         )
 
 
-def _record_confirmations(resp: NormalizedResponse, plan: RoutePlan, chosen: str) -> None:
-    note = plan.baa_tier_notes.get(chosen)
-    if note is not None:
-        resp.add_warning(BAA_TIER_CONFIRMED_WARNING, note, chosen)
-
-
 def execute_plan(
     plan: RoutePlan,
     req: OpenReadingRequest,
@@ -193,7 +185,6 @@ def execute_plan(
                 resp.add_warning(
                     "idempotent_replay", f"replayed cached result for {desc.id}", desc.id
                 )
-                _record_confirmations(resp, plan, desc.id)
                 _record_trail(resp, trail, desc.id)
                 return resp
 
@@ -239,7 +230,6 @@ def execute_plan(
             # request's confirmations/trail — the cached entry must stay the adapter's
             # canonical answer, or every later hit replays this caller's transient history.
             cache.put(key, resp.model_copy(deep=True), clock.now_ms())
-        _record_confirmations(resp, plan, desc.id)
         _record_trail(resp, trail, desc.id)
         return resp
 

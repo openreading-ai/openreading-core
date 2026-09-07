@@ -1,8 +1,8 @@
 """Shared test fakes: minimal backend adapters plus the factories that build their descriptors.
 
 Reach for `InlineFake`, `PollFake`, `WebhookFake` or `NeverFinishesFake` to exercise one wait mode
-through the driver. Reach for `make_backend` when a router or compliance test needs a descriptor
-with particular compliance, capability, cost or priority values. Strategy-engine tests use
+through the driver. Reach for `make_backend` when a router test needs a descriptor with
+particular capability or cost values. Strategy-engine tests use
 `ScriptedBackend`, `PollFaultBackend` and `scripted_registry`. Compare tests use `make_envelope`.
 
 Tests import this module as `tests.fakes`, which works because pyproject sets `pythonpath = ["."]`
@@ -18,7 +18,6 @@ from openreading.types import (
     BackendInfo,
     BackendType,
     Capabilities,
-    ComplianceProfile,
     Cost,
     CostReport,
     Document,
@@ -29,7 +28,6 @@ from openreading.types import (
     Provisioning,
     RawResult,
     ResponseState,
-    RouterHints,
     RuntimeProfile,
     Status,
     WaitMode,
@@ -130,13 +128,12 @@ def make_descriptor(backend_id: str, wait_modes: list[WaitMode]) -> AdapterDescr
         wait_modes=wait_modes,
         capabilities=Capabilities(ocr="claimed"),
         cost=Cost(native_unit="page", basis="estimated"),
-        compliance=ComplianceProfile(hipaa_baa="no"),
         runtime=RuntimeProfile(offline_capable=False),
     )
 
 
 class ConfigurableBackend(BackendAdapter):
-    """An INLINE adapter whose descriptor (compliance/capabilities/cost/priority) is fully
+    """An INLINE adapter whose descriptor (capabilities/cost) is fully
     parameterized — used to reproduce the `internal/design/routing_and_compliance.md` worked
     examples."""
 
@@ -184,7 +181,7 @@ def make_backend(
     page_ranges: bool = False,
     webhook: bool = False,
 ) -> ConfigurableBackend:
-    """A ConfigurableBackend whose descriptor carries the given compliance, capability and cost."""
+    """A ConfigurableBackend whose descriptor carries the given capability and cost values."""
     compliance_extra: dict = {}
     if max_retention_hours is not None:
         compliance_extra["max_retention_hours"] = max_retention_hours
@@ -213,17 +210,7 @@ def make_backend(
             usd_per_page_equiv_low=cost_low,
             usd_per_page_equiv_high=cost_high,
         ),
-        compliance=ComplianceProfile(
-            hipaa_baa=hipaa_baa,
-            soc2=soc2,
-            gdpr=gdpr,
-            trains_on_customer_data=trains,
-            data_region_options=regions or (["*"] if local else []),
-            runs_fully_local=local,
-            **compliance_extra,
-        ),
         runtime=RuntimeProfile(offline_capable=local),
-        router=RouterHints(integration_priority=priority),
     )
     return ConfigurableBackend(desc)
 

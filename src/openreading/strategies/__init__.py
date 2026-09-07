@@ -143,7 +143,7 @@ The tour: one line to full tree
 Each stage is real, minimal, and valid on its own. Start at the top; stop wherever your problem
 stops.
 
-1. One-liner preset. Opt `backend.id: "auto"` traffic into a built-in strategy:
+1. One-liner preset. Opt traffic that names no backend into a built-in strategy:
 
 ```yaml
 version: 1

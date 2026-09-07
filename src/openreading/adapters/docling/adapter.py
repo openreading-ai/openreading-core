@@ -30,7 +30,6 @@ from openreading.types.cost import CostReport, infra_only
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     ConfigField,
     Cost,
     LivenessProbe,
@@ -153,13 +152,6 @@ def _descriptor() -> AdapterDescriptor:
             input_formats=["pdf", "docx", "pptx", "xlsx", "html", "png", "jpg"],
         ),
         cost=Cost(native_unit="cpu_second", basis="infra_only", usd_per_page_equiv_low=0.0),
-        compliance=ComplianceProfile(
-            hipaa_baa="na_local",
-            trains_on_customer_data="na_local",
-            runs_fully_local=True,
-            data_region_options=["*"],
-            max_retention_hours=0,
-        ),
         runtime=RuntimeProfile(
             offline_capable=True,
             license="MIT",
@@ -183,8 +175,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="medium",
-            integration_priority="P0",
-            priority_reason="MIT complex-layout parser, no license cap; first container adapter; residency-proof floor.",
         ),
         config_spec=[
             ConfigField(

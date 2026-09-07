@@ -59,7 +59,6 @@ from openreading.types.cost import CostBasis, CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     ConfigField,
     Cost,
     CredentialField,
@@ -222,13 +221,6 @@ def _descriptor() -> AdapterDescriptor:
             usd_per_page_equiv_high=_ANNOTATED_USD_PER_PAGE,
             lossiness="none",
         ),
-        compliance=ComplianceProfile(
-            hipaa_baa="no",
-            soc2=False,
-            gdpr=False,
-            trains_on_customer_data="unverified",
-            runs_fully_local=False,
-        ),
         runtime=RuntimeProfile(offline_capable=False, license="proprietary", version_pin="api"),
         output=Output(
             paradigms=[
@@ -247,12 +239,7 @@ def _descriptor() -> AdapterDescriptor:
                 table_cells=D,
             ),
         ),
-        router=RouterHints(
-            normalization_difficulty="low",
-            integration_priority="P1",
-            priority_reason="Native OCR Markdown, layout blocks, confidence, and optional "
-            "schema annotations through one synchronous hosted endpoint.",
-        ),
+        router=RouterHints(normalization_difficulty="low"),
         credentials_spec=[
             CredentialField(key="api_key", required=True, env=["MISTRAL_API_KEY"], example="...")
         ],

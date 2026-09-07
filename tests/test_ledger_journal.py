@@ -29,7 +29,7 @@ from openreading.router.clock import FakeClock, RealClock
 from openreading.strategies import StrategyConfig
 from openreading.strategies.engine import _step_id
 from openreading.testing.sample_pdf import build_sample_pdf
-from openreading.types.errors import ComplianceRefused, RetryableError, TerminalError
+from openreading.types.errors import RetryableError, ScopeRefused, TerminalError
 from openreading.types.request import DocumentInput
 
 pytest.importorskip("fitz", reason="pymupdf not installed")
@@ -448,7 +448,7 @@ def test_l2_gate_refuses_a_backend_outside_the_pinned_set_and_a_digest_mismatch(
         )
 
     # not_in_pinned_set: backend_id absent from the pinned map entirely. Ledger T3 (round-3 F10):
-    # _gate's refusal now raises ComplianceRefused after journaling, instead of returning None for
+    # _gate's refusal now raises ScopeRefused after journaling, instead of returning None for
     # the caller to interpret — the record is journaled before the raise, so SpyJournal still
     # captures it.
     ex = InlineExecutor(
@@ -458,7 +458,7 @@ def test_l2_gate_refuses_a_backend_outside_the_pinned_set_and_a_digest_mismatch(
         clock=RealClock(),
         pinned_eligible={"other-backend": digest},
     )
-    with pytest.raises(ComplianceRefused):
+    with pytest.raises(ScopeRefused):
         asyncio.run(
             ex.exec(
                 req("fake"), run=lambda: (_ for _ in ()).throw(AssertionError("must not dispatch"))
@@ -475,7 +475,7 @@ def test_l2_gate_refuses_a_backend_outside_the_pinned_set_and_a_digest_mismatch(
         clock=RealClock(),
         pinned_eligible={"fake": "0" * 64},
     )
-    with pytest.raises(ComplianceRefused):
+    with pytest.raises(ScopeRefused):
         asyncio.run(
             ex.exec(
                 req("fake"), run=lambda: (_ for _ in ()).throw(AssertionError("must not dispatch"))

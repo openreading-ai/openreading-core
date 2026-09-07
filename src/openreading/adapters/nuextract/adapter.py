@@ -40,7 +40,6 @@ from openreading.types.cost import CostBasis, CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     ConfigField,
     Cost,
     CredentialField,
@@ -203,14 +202,6 @@ def _descriptor() -> AdapterDescriptor:
             basis="unknown",  # platform token pricing is not public — never invent a rate
             lossiness="page-def",
         ),
-        compliance=ComplianceProfile(
-            hipaa_baa="no",
-            soc2=False,
-            gdpr=False,
-            trains_on_customer_data="unverified",  # no public no-train statement → fail closed
-            data_retention="uploaded files auto-delete after 2 weeks unless linked to examples",
-            runs_fully_local=False,
-        ),
         runtime=RuntimeProfile(
             offline_capable=False,
             license="proprietary (open-weight NuExtract 2.0 [MIT 2B/8B] self-hostable via vLLM — "
@@ -234,10 +225,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="low",
-            integration_priority="P0",
-            priority_reason="Purpose-built schema-first extraction (typed templates + ICL "
-            "examples) plus NuMarkdown parse; the template contract carries over to the "
-            "self-hostable open-weight NuExtract 2.0 models.",
         ),
         credentials_spec=[
             CredentialField(

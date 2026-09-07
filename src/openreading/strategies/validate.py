@@ -32,7 +32,6 @@ from openreading.strategies.normalize import (
 )
 from openreading.strategies.plain import ADVANCED_TO_PLAIN, PlainInfo
 from openreading.types.enums import ChannelGrade
-from openreading.types.request import Compliance
 
 _COMPLIANCE_KEYS = (
     "require_baa",
@@ -123,16 +122,11 @@ class _Ctx:
         self.current_dialect: str | None = None
         self.decider_configured = config.decider is not None and config.decider.llm is not None
         self.issues: list[ValidationIssue] = []
-        # compliance context for the steps-unreachable check (built once).
-        self._compliance: Compliance | None = None
+        # The steps-unreachable check used to build a compliance context here and ask the
+        # router which backends survived stage 1. There is no stage 1, so there is nothing to
+        # make a step unreachable that the author cannot already see in their own file.
+        self._compliance = None
         self._router_config: RouterConfig | None = None
-        if policy and any(k in policy for k in _COMPLIANCE_KEYS):
-            self._compliance = Compliance(**{k: policy[k] for k in _COMPLIANCE_KEYS if k in policy})
-            self._router_config = RouterConfig(
-                allow_unverified_compliance=bool(policy.get("allow_unverified_compliance", False)),
-                train_optout_confirmed=frozenset(policy.get("train_optout_confirmed", [])),
-                baa_tier_confirmed=frozenset(policy.get("baa_tier_confirmed", [])),
-            )
 
     def policy_drop(self, desc) -> str | None:
         """Return a drop reason if the effective policy would filter this backend out, else None."""
@@ -337,7 +331,7 @@ def _use_targets(node: RawNode) -> list[str]:
 def _dispatchable(node: Any, library: dict[str, RawNode], seen: frozenset[str]) -> set[str]:
     """Concrete backend ids a node's subtree can dispatch (`auto` excluded; use refs resolved)."""
     if isinstance(node, str):
-        if node == "auto" or node.startswith("strategy:"):
+        if node.startswith("strategy:"):
             name = node[len("strategy:") :] if node.startswith("strategy:") else None
             return _dispatchable_ref(name, library, seen) if name else set()
         return {node}
@@ -347,7 +341,7 @@ def _dispatchable(node: Any, library: dict[str, RawNode], seen: frozenset[str]) 
         return set()
     if "backend" in node:
         b = node["backend"]
-        return set() if b == "auto" else {b}
+        return {b}
     if "use" in node:
         return _dispatchable_ref(node["use"], library, seen)
     out: set[str] = set()
@@ -429,8 +423,6 @@ def _min_opt(a: Any, b: Any) -> Any:
 
 def _check_leaf(node: dict[str, Any], path: str, ctx: _Ctx, eff_deadline_ms: Any) -> None:
     slug = node["backend"]
-    if slug == "auto":
-        return
     desc = _descriptor(slug)
     if desc is None:
         ctx.err(

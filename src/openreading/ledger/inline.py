@@ -8,7 +8,7 @@ T1 does not implement §5.3's full `_exec_leaf` submit/drive/emit decomposition 
 callable is the caller's already-built closure over `_execute_leaf_sync` (submit + drive-to-
 completion + normalize + cost-report as one synchronous call). Exceptions from `run()` are
 journaled as a `failed` terminal record and then re-raised unchanged, so every existing call
-site's own `except (TerminalError, RetryableError, UnsupportedFeatureError, ComplianceRefused)`
+site's own `except (TerminalError, RetryableError, UnsupportedFeatureError, ScopeRefused)`
 handling keeps working without modification — T1 wraps the existing call in a step boundary, it
 does not rewrite how the walk consumes results.
 
@@ -39,8 +39,8 @@ from openreading.ledger.step import BlobRef, ExecResult, StepError, StepRef, Ste
 from openreading.router.clock import Clock
 from openreading.types.errors import (
     AdapterError,
-    ComplianceRefused,
     RetryableError,
+    ScopeRefused,
     TerminalError,
     UnsupportedFeatureError,
 )
@@ -56,7 +56,6 @@ _TAXONOMY: tuple[type[AdapterError], ...] = (
     TerminalError,
     RetryableError,
     UnsupportedFeatureError,
-    ComplianceRefused,
 )
 _TAXONOMY_BY_NAME: dict[str, type[AdapterError]] = {cls.__name__: cls for cls in _TAXONOMY}
 
@@ -79,15 +78,15 @@ def _reconstruct_error(err: StepError) -> Exception:
     real exception from a recorded `StepError` so a replayed `"failed"` record re-raises the same
     way a live failure would (plan §4.0: "reconstructs and re-raises the recorded error the same
     way, uniformly") — every real call site's own `except (TerminalError, RetryableError,
-    UnsupportedFeatureError, ComplianceRefused)` handling then applies unmodified, live or
+    UnsupportedFeatureError, ScopeRefused)` handling then applies unmodified, live or
     replayed. An unrecognized taxonomy (defensive — `_classify_taxonomy`'s own "error" fallback for
     an exception outside the four-type taxonomy is not a real class name) reconstructs as a
     `TerminalError`, matching how the engine's own broad `except Exception` already treats that
     case identically to a `TerminalError` today (`classify_error`'s fallthrough to
     "provider_error")."""
     message = err.detail or err.code
-    if err.taxonomy == "ComplianceRefused":
-        return ComplianceRefused(message, constraint=err.code)
+    if err.taxonomy == "ScopeRefused":
+        return ScopeRefused(message, constraint=err.code)
     cls = _TAXONOMY_BY_NAME.get(err.taxonomy, TerminalError)
     return cls(message, backend_code=err.code)
 
@@ -131,7 +130,7 @@ class InlineExecutor:
     payload is suppressed iff the backend that ACTUALLY produced it is ZDR-flagged, never because
     some other, merely-eligible backend elsewhere in the registry happens to be. `ledger_root`
     (also new this round) lets a live "ok" dispatch tighten the run's own stamped retention ceiling
-"""
+    """
 
     def __init__(
         self,
@@ -185,7 +184,7 @@ class InlineExecutor:
             attempt=req.attempt,
             idempotency_key=req.idempotency_key,
             content_key=req.content_key,
-            error=StepError(code=code, taxonomy="ComplianceRefused"),
+            error=StepError(code=code, taxonomy="ScopeRefused"),
             ended_epoch_ms=int(self._clock.now_wall_ms()),
         )
 
@@ -272,12 +271,12 @@ class InlineExecutor:
         if refusal is not None:
             appended = self._journal.append(self._sanitizer_scrub(refusal))
             assert appended.error is not None
-            # The same call shape every other real `ComplianceRefused` site uses
+            # The same call shape every other real `ScopeRefused` site uses
             # (`router/router.py`, `evals/runner.py`): one positional message, `constraint=`
             # keyword-only. `_gate`'s own `code`, "not_in_pinned_set" or
             # "descriptor_digest_mismatch", becomes `constraint`. The message is synthesized from
             # it, because `_gate` never records a longer human-readable detail.
-            raise ComplianceRefused(
+            raise ScopeRefused(
                 appended.error.detail or appended.error.code, constraint=appended.error.code
             )
 

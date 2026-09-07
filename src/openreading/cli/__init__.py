@@ -376,7 +376,7 @@ Single-document exits: 0 printed; 2 selector misuse, unknown backend/strategy,
 unresolvable source; 3 cannot run (missing credentials -- the message names the
 exact vars and signup URL -- `auth_rejected` with its `check <VAR>` hint,
 `unsupported_format` for a named backend, `unsupported_feature`,
-`ComplianceRefused`, an exhausted `auto` plan, or a
+`ScopeRefused`, an exhausted `auto` plan, or a
 `RetryableError` reaching a directly-named backend: rate-limit exhaustion or a
 poll job past its deadline / `MAX_CONSECUTIVE_FAULTS`
 (`openreading.router.driver`, 120), which has no next rung to fall back to the
@@ -444,7 +444,7 @@ file, so it lands here with the same hint on stderr AND each item's `error` --
 `code: unknown_strategy` -- in the envelope); 2 unresolvable source,
 `--max-items` or `--max-jobs` exceeded; 3 cannot run at all, which on a batch
 means only a native-batch backend's one vendor call refusing before any item
-ran (missing credentials, `ComplianceRefused`, or a `RetryableError` / deadline
+ran (missing credentials, `ScopeRefused`, or a `RetryableError` / deadline
 from `submit_many`, which has no next rung and does not retry), or an
 `openreading.yaml` that will not load; 6 interrupted while
 `OPENREADING_LEDGER` was set -- per-item runs may be individually resumable,
@@ -502,16 +502,14 @@ Python: `openreading.resume(id)`.
 
 route <file|url> [--config FILE] [--run]
 ----------------------------------------
-Print the compliance-first plan; with `--run`, execute the whole chain (chosen,
-then fallbacks). The policy comes from `openreading.yaml`, found in the working
+Print the chain that would run; with `--run`, execute it (chosen, then
+fallbacks). The list comes from `openreading.yaml`, found in the working
 directory or named with `--config`.
 
     cat > openreading.yaml <<'YAML'
     version: 1
     policy:
-      require_baa: true
-      no_train_on_data: true
-      optimize_for: accuracy
+      backends: [pymupdf, tesseract, aws-textract]
     YAML
     openreading route loan.pdf
     openreading route loan.pdf --run > plan.json
@@ -519,60 +517,36 @@ directory or named with `--config`.
 
 `route --run` puts the response inside its plan's `result` field. Check the
 exit code before extracting it for `compare` or other response consumers.
-`parse` reads the same file and applies the same block, so a plan you print
-here is the plan a `parse` in that directory runs under. A different posture is
-a different file: `openreading route loan.pdf --config airgapped.yaml`.
+`parse` reads the same file and the same list, so a chain you print here is the
+chain a `parse` in that directory runs. A different list is a different file:
+`openreading route loan.pdf --config airgapped.yaml`.
 
-`policy:` keys: `require_baa`, `no_train_on_data`, `data_region`,
-`require_local`, `max_retention`, `optimize_for`,
-`allow_unverified_compliance`, `train_optout_confirmed`, `baa_tier_confirmed`.
-Those nine are the whole grammar. Any other key is refused by name (with a `did
-you mean` for a near miss), and a value of the wrong type is refused too, so a
-malformed block is exit 3 before a backend is contacted, because a compliance
-constraint that can be turned off by a typo is not a constraint. A policy never
-names a backend: it names a requirement, and each backend's descriptor either
-meets it or does not.
+`policy:` has one key, `backends`: the backend ids this deployment permits, in
+preference order. It says both which backends may run and which runs first. Any
+other key is refused by name (with a `did you mean` for a near miss), and a
+value of the wrong type is refused too, so a malformed block is exit 3 before a
+backend is contacted.
 
-When a caller ALSO sends constraints -- an HTTP request body's `compliance`, or
-a `compliance=` override from Python -- the two sources intersect and neither
-weakens the other. Booleans OR. `max_retention` keeps the LOWER ceiling, so a
-request asking for `48h` under a file requiring `zero` still gets `zero`.
-`data_region` has no ordering and a request cannot name two at once, so a file
-requiring `eu` against a request asking for `us` refuses with `region_conflict`
-rather than one of them winning. `optimize_for` is the one key the request
-takes outright, because it orders the survivors and never changes the set. No
-flag in this CLI sends compliance, so this governs `serve` and Python callers
-rather than anything typed here.
+Nine keys used to live here, asking the engine to enforce a compliance posture
+from a per-vendor table it kept in its own source: whether each vendor signs a
+BAA, trains on customer data, or retains a document for so many hours. Nothing
+in this tool can observe any of that, so a stale entry did not fail loudly. It
+routed a document to a backend the operator believed was excluded, and the run
+succeeded. You already know which vendors you hold agreements with; `backends:`
+is that conclusion, written by the one party who can reach it.
 
-Output is `{chosen, fallbacks, dropped: {id: {stage,
-code, reason}}, terminal_reason}` plus, with `--run`, a `result`. `--run` never
-widens the plan; a fallback actually used is recorded in the result's
-`warnings[]`. Exits: 0; 4 no compliant backend (the empty plan is still printed
-as JSON); 3 an unloadable config file, an unreadable document, or a
-plan-exhausted `--run` (the plan is still printed; the stderr trail names each
-backend's failure and a `check <VAR>` hint for every rejected key).
+Selection with no list is a lookup, not a guess: the backend you named, else
+`policy.backends` in order, else `pymupdf`, which needs no key and no config.
+An EMPTY list permits nothing and refuses.
 
-The last three keys are router configuration, not request fields
-(`openreading.config.router_config` folds them into `RouterConfig`, DECISIONS
-D7 / D7a), and they are two different kinds of knob.
-`allow_unverified_compliance` is a
-TOLERANCE switch (default `false` = fail closed): it admits a backend whose own
-disclosure is unverified on the axis you asked about
-(`openreading.router.compliance`) -- training posture (`trains_unverified`),
-declared regions under `data_region` (`region_unverified`) or retention under
-`max_retention` (`retention_unverified`). It asserts nothing about your
-deployment and never excuses a `max_retention` string that does not parse
-(`retention_unparseable` is a caller error and fails closed unconditionally).
-The last TWO keys are DEPLOYMENT assertions about facts the vendor makes
-conditional, and both fail closed when absent: `train_optout_confirmed` lists
-backends whose training opt-out you have applied (`trains_on_customer_data:
-opt_out`); `baa_tier_confirmed` lists backends whose BAA you have actually
-signed where the vendor gates it behind a higher plan (`hipaa_baa: tier_gated`
--- Reducto Growth+, Chunkr Enterprise, Pulse Pro). Without them `require_baa` /
-`no_train_on_data` drop those backends at stage 1; with them the run carries a
-`baa_tier_confirmed` warning naming the confirmation its compliance rests on.
-Without this, `require_baa` could route PHI to a vendor with nothing signed and
-nothing said.
+Output is `{chosen, fallbacks, dropped, terminal_reason}` plus, with `--run`, a
+`result`. `dropped` carries a backend your own allow-list excluded, never a
+judgement about a vendor. `--run` never widens the chain; a fallback actually
+used is recorded in the result's `warnings[]`. Exits: 0; 4 no backend left in
+scope (the empty plan is still printed as JSON); 3 an unloadable config file,
+an unreadable document, or a plan-exhausted `--run` (the plan is still printed;
+the stderr trail names each backend's failure and a `check <VAR>` hint for
+every rejected key).
 
 backends [--check SLUG[,SLUG...]|all] [--timeout SECONDS]
 ---------------------------------------------------------
@@ -673,7 +647,7 @@ corpus mode. Corpus mode also refuses `--baseline`, `--truth` and
 Exits: 0; 2 misuse (<2 subjects, fan-out with more than one document, <2 or
 unknown fan-out backends, `--format diff` with != 2 subjects, mixed subject
 kinds); 3 a fanned-out backend cannot run (missing credentials,
-`ComplianceRefused`, `unsupported_feature`, `RetryableError`); 5 inputs are not
+`ScopeRefused`, `unsupported_feature`, `RetryableError`); 5 inputs are not
 schema-valid responses (unreadable file, invalid envelope) or `--from` on a run
 that kept no candidates (the message explains completed parallel alternatives
 and `--keep-candidates`, DECISIONS D-v4-14); 1 anything else.
@@ -867,7 +841,7 @@ could start.
 
 A per-document fault is the publisher's to record, not this command's to raise.
 The official harness catches whatever one document's provider call throws,
-marks that case failed, and keeps going, so a `ComplianceRefused` or a missing
+marks that case failed, and keeps going, so a `ScopeRefused` or a missing
 key on document 40 of 300 surfaces as exit 1 with a failed case in the
 publisher's report, never as exit 3. Read the report to find out which
 documents fell over and why. Exit 3 is left for a fault raised outside that
@@ -910,7 +884,7 @@ presets (an unparseable config is exit 3 for every verb).
 - `plan`: the Terraform-style speculative plan -- the pruned tree for THIS
   document + policy (`{strategy, config_hash, eligible, dropped[], tree}`), no
   execution. Exit 3 on an unreadable document or config file, an unknown
-  strategy, or `ComplianceRefused`.
+  strategy, or `ScopeRefused`.
 - `show NAME`: a strategy or preset body AS WRITTEN (a Plain strategy prints
   Plain); `--longhand` prints the canonical desugared full-grammar tree
   instead. Unknown name: exit 3.
@@ -958,7 +932,7 @@ ready-to-paste `escalate_if:` RECOMMENDATION for your `--target-escalation` /
 `--max-cost-per-doc`. It PROPOSES; it never rewrites the config (DECISIONS
 D-v3-21) -- the file you commit is the authority. Each case's rung-1 run is
 gated first (the request and the file's own `policy:` block union
-most-restrictive-wins); a non-compliant case refuses with `ComplianceRefused`
+most-restrictive-wins); a non-compliant case refuses with `ScopeRefused`
 (exit 3) before the document is sent. A case whose `expected` names none of the
 scorer's five recognized dimensions is an ordinary "not labeled yet" case:
 excluded from `scorer_agreement` rather than silently required; the report's
@@ -1052,7 +1026,7 @@ Exit codes
      `unsupported_feature`, an unreadable `--config` / document / `--trace` /
      `explain` argument, a `policy:` block that is not a policy (an unknown
      key, a non-object block, or a value of the wrong type), a
-     `ComplianceRefused` refusal (from
+     `ScopeRefused` refusal (from
      `parse`, `strategy plan`, `replay`, `calibrate`, `compare`, `leaderboard`;
      under `benchmark` only when it is raised outside the publisher's own
      per-document boundary, which otherwise records the refusal as a failed

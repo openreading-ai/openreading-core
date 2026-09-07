@@ -101,7 +101,7 @@ strategies:                         # the library of named strategies
     race: [pymupdf, tesseract]      # run at once, first success wins
   both:
     compare: [pymupdf, tesseract]   # run at once, keep the one that passes more quality checks
-    then: auto                      # if the winner cannot be trusted, the router's best remaining pick
+    then: aws-textract                      # if the winner cannot be trusted, the router's best remaining pick
   fields:
     try: [pymupdf, tesseract]
     escalate_when:
@@ -143,7 +143,7 @@ WARNING …/openreading.yaml:strategies.fields.steps[0].escalate_if: missing: 'p
   …
   both: dialect: plain
       compare: [pymupdf, tesseract]
-      then: auto
+      then: aws-textract
     → Runs pymupdf and tesseract at once and keeps the better result; if they disagree or the winner looks bad, sends the document to the best available backend.
   …
   what the words mean:
@@ -215,7 +215,7 @@ cost_saver:
   steps:
   - pymupdf
   - docling
-  - auto
+  - aws-textract
   escalate_if: default
 ```
 
@@ -225,7 +225,7 @@ output is right. Fix the table.
 
 | Preset | Plain near-equivalent | Differs from Plain in |
 |---|---|---|
-| `cost_saver` | `try: [pymupdf, docling, auto]` + `escalate_when: {looks_bad: true, low_confidence: true}` | `intent:`, and a bare `scanned_pages_detected` instead of the scan pair |
+| `cost_saver` | `try: [pymupdf, docling, aws-textract]` + `escalate_when: {looks_bad: true, low_confidence: true}` | `intent:`, and a bare `scanned_pages_detected` instead of the scan pair |
 | `max_accuracy` | `try: [auto, auto]` + the same `escalate_when` | same |
 | `offline_first` | `try: [pymupdf, tesseract, docling]` + the same `escalate_when` | same, and enforcement is `policy: {require_local: true}`, not the preset |
 | `fast` | `race: [pymupdf, tesseract]` | `intent:` only |
@@ -341,7 +341,7 @@ this as `local.yaml`. The `policy:` block is compliance, and it sits outside the
 ```yaml
 version: 1
 policy:
-  require_local: true               # only fully-local backends may see the document
+  backends: [pymupdf, tesseract]
 strategies:
   onprem:
     try: [pymupdf, reducto, tesseract]

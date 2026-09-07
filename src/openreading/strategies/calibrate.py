@@ -299,12 +299,12 @@ def calibrate_strategy(
         # misleading, not merely degraded — this fails fast instead. Every failure names which case
         # and how many cases were already scored, so the already-paid-for calls are never silently
         # unaccounted for; an AdapterError (RetryableError/TerminalError/UnsupportedFeatureError/
-        # ComplianceRefused) keeps its own type — cmd_calibrate maps each to a clean, coded exit —
+        # ScopeRefused) keeps its own type — cmd_calibrate maps each to a clean, coded exit —
         # gaining only the case context submit()/normalize() themselves can't know about.
         try:
             # Gate BEFORE submit() — matching compile_strategy's own behavior for the identical
             # policy + backend pair (AGENTS.md: compliance is never relaxed by fallback). Raises
-            # ComplianceRefused, which cmd_calibrate already knows how to turn into a clean exit.
+            # ScopeRefused, which cmd_calibrate already knows how to turn into a clean exit.
             # check_eligible's only other possible exception (KeyError, unregistered backend) is
             # already unreachable here — rung1_backend was already resolved via registry.get()
             # above, before the loop.
@@ -381,8 +381,9 @@ def _descriptor_cost(desc: Any) -> float:
     `evals.leaderboard`'s `cost_per_doc` column) inherits both. Substituting the real page count
     of scored documents is not a local edit: no page count survives `evals.runner.run_case`, and
     per-backend measured denominators would make the column rank rows on different bases."""
-    if desc.compliance.runs_fully_local:
-        return 0.0
+    # A local backend used to short-circuit to zero here via `runs_fully_local`. That field
+    # was a vendor-claim struct and is gone; a backend that publishes no price falls through to
+    # the unpriced default below, which is the honest answer for a number core cannot know.
     lo = desc.cost.usd_per_page_equiv_low
     hi = desc.cost.usd_per_page_equiv_high
     rate = lo if lo is not None else (hi if hi is not None else 0.05)

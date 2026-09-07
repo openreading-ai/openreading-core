@@ -24,7 +24,6 @@ from openreading.types import (
     BlockType,
     Capabilities,
     ChannelGrade,
-    ComplianceProfile,
     Cost,
     Document,
     JobState,
@@ -85,9 +84,6 @@ def _geometry_descriptor() -> AdapterDescriptor:
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(printed_tables="verified", input_formats=["pdf"]),
         cost=Cost(native_unit="cpu_second", basis="infra_only"),
-        compliance=ComplianceProfile(
-            hipaa_baa="na_local", trains_on_customer_data="na_local", runs_fully_local=True
-        ),
         runtime=RuntimeProfile(offline_capable=True, license="AGPL-3.0", sandbox="in_process"),
         adapter_impl="in_process",
         output=Output(
@@ -576,7 +572,6 @@ def _spec_descriptor(creds, config) -> AdapterDescriptor:
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(),
         cost=Cost(),
-        compliance=ComplianceProfile(),
         runtime=RuntimeProfile(),
         credentials_spec=creds,
         config_spec=config,
@@ -672,7 +667,6 @@ def _byo_descriptor(
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(),
         cost=Cost(native_unit="page", basis="estimated"),
-        compliance=ComplianceProfile(),
         runtime=RuntimeProfile(),
         adapter_impl="http",
         output=Output(channels=OutputChannels(text=N)),

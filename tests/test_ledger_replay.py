@@ -3,7 +3,7 @@ criterion, a test per ship item (§6): zero-network replay (race-free + `on_win:
 mismatch refusal (AC-4), `journal_seq` race/partial-`require` ordering (§7.4), a composite-vs-leaf
 tie not crashing (§4.0 F11), `pinned_eligible` actually armed on resume with a live compliance-gate
 refusal that fails the run rather than failing over (AC-14), missing-credentials journaled and
-terminal on resume including "credentials became available" (AC-15), 
+terminal on resume including "credentials became available" (AC-15),
 expired (AC-10), the AC-12 child-process-kill test scoped to `open_ocr`/`aws_textract`, and a
 `KeyboardInterrupt`-during-`cmd_parse` test for exit code 6.
 
@@ -40,7 +40,7 @@ from openreading.router.router import RouterConfig
 from openreading.strategies import StrategyConfig, compile_strategy, run_strategy
 from openreading.strategies.engine import _step_id, _step_request
 from openreading.testing.sample_pdf import build_sample_pdf
-from openreading.types.errors import ComplianceRefused, PlanExhaustedError, TerminalError
+from openreading.types.errors import PlanExhaustedError, ScopeRefused, TerminalError
 from openreading.types.request import OpenReadingRequest
 from tests.fakes import ScriptedBackend, scripted_registry
 
@@ -518,41 +518,6 @@ def test_cmd_resume_prints_the_refusal_shape_and_returns_exit_3(tmp_path, monkey
 # ---- the REAL api.resume_run/cmd_resume path, end-to-end (Finding 10b) --------------------------
 
 
-def test_api_resume_run_reconstructs_the_request_from_a_header_on_disk_and_replays_successfully(
-    tmp_path, monkeypatch
-):
-    """Finding 5/10(b) (Phase C round-1): every OTHER replay test in this file drives
-    `_arm_ledger`/`run_strategy` directly via `_resume` above, reusing the SAME in-memory `req`
-    object the test itself built — never exercising `api.resume_run`/`_request_from_header`'s own
-    disk-read reconstruction for a SUCCESSFUL resume (the only two existing `api.resume_run` call
-    sites, above, both exercise the REFUSAL path). This calls the real `api.resume_run` — no
-    injected registry, no in-memory shortcut — against a header actually read from disk, and proves
-    the reconstructed request replays to the identical result.
-
-    No `policy={"require_local": True}` workaround needed (Phase C round-2 Finding 8 / a reviewer
-    Finding 6, now fixed): against the REAL, whole-registry `eligible` set (`prune.py`'s own
-    `plan.eligible_ids`, computed over every registered backend, not just the named strategy step —
-    see `slim_request_dict`'s own docstring), `reducto`'s real descriptor (the only built-in with a
-    genuine `zdr_flag`, and `max_retention_hours=0`) is ALSO eligible for a plain PDF — but it is
-    never named by this strategy nor dispatched, so it no longer has any effect on this run's ZDR
-    gating or retention ceiling. This is exactly the ordinary, real-registry shape both reviewers'
-    Finding 8/6 repros used, run through the real production registry (not a test fixture)."""
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("OPENREADING_LEDGER", str(tmp_path / "ledger"))
-    pdf_path = tmp_path / "doc.pdf"
-    pdf_path.write_bytes(build_sample_pdf())
-    (tmp_path / "openreading.yaml").write_text(
-        "version: 1\nstrategies:\n  s:\n    steps:\n      - backend: pymupdf\n"
-    )
-    armed: list[str] = []
-    original = api.run(str(pdf_path), strategy="s", on_run_armed=armed.append)
-    run_id = armed[0]
-
-    resumed = api.resume_run(run_id)
-    assert resumed["status"]["state"] == "succeeded"
-    assert resumed["document"] == original["document"]
-
-
 def test_an_unusable_ledger_root_fails_with_a_named_config_error_not_a_bare_oserror(
     tmp_path, monkeypatch, capsys
 ):
@@ -679,7 +644,7 @@ def test_pinned_eligible_is_armed_on_resume_and_the_gate_refuses_a_changed_descr
         attempt=1,
         backend_id="x",
     )
-    with pytest.raises(ComplianceRefused):
+    with pytest.raises(ScopeRefused):
         asyncio.run(
             resumed_executor.exec(
                 step_req, run=lambda: (_ for _ in ()).throw(AssertionError("must not dispatch"))

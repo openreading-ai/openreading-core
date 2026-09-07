@@ -320,7 +320,6 @@ the table and that output disagree, the output is right and the table needs fixi
 These rules decide whether your policy admits a backend. A policy is the `policy:` block of your
 `openreading.yaml`, a short list of compliance requirements the router enforces before it picks a
 backend. The rules were checked with `printf 'version: 1\npolicy:\n  require_baa: true\n
-no_train_on_data: true\n' > openreading.yaml` and `uv run openreading route sample.pdf`.
 
 - `hipaa_baa: tier_gated` is dropped under `require_baa` unless the id is in `baa_tier_confirmed`
   (drop code `no_baa`). `no` is always dropped.

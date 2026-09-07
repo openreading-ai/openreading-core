@@ -76,15 +76,15 @@ L1  Zero delta. No ledger configured => every surface's bytes (stdout, stderr, e
     permissions, and unset the variable rather than let a bad volume take parsing down with it.
 L2  The compliance gate exists exactly once, orchestration-side; its OUTPUT (the eligible set
     plus descriptor digests) is pinned. An executor does a digest-equality check at `exec`,
-    before any I/O: a backend outside the pinned set is `ComplianceRefused(not_in_pinned_set)`,
-    a drifted descriptor is `ComplianceRefused(descriptor_digest_mismatch)` -- never `skipped`.
+    before any I/O: a backend outside the pinned set is `ScopeRefused(not_in_pinned_set)`,
+    a drifted descriptor is `ScopeRefused(descriptor_digest_mismatch)` -- never `skipped`.
     Staleness detection, not a second eligibility decision. The full pin has TWO terms,
     `sha256(desc.to_schema_dict()) ‖ sha256(operator_runtime_config[backend_id])`; the second
     covers `runtime.endpoint`, the one `backend.runtime` field that is env-only operator config
     (refused from a request body; `mode`/`image`/`device`/`system_deps_ok` stay request-settable
     because they control local execution, not a network destination). A worker whose resolved
     endpoint for `backend_id` differs from the pinned one refuses with
-    `ComplianceRefused(endpoint_mismatch)`. Shipped: `InlineExecutor._gate` checks membership
+    `ScopeRefused(endpoint_mismatch)`. Shipped: `InlineExecutor._gate` checks membership
     and the descriptor term only; the endpoint term is designed, not built. Why `exec` is the
     ONLY site: `strategies.engine._resolve_backend` stays as-is and is not a gate -- a literal
     `backend:` slug pruned by the compliance gate never reaches the walk because `prune.py`
@@ -327,7 +327,7 @@ carries the live registry and broker.
 `ExecResult` (what `exec` returns): `payload` (exactly `run()`'s own object on a live "ok"; JSON
 resolved through the blob store on a replayed one), `status` in `ok | skipped | cancelled` only,
 `journal_seq`, `replayed`. A `failed` outcome -- live or replayed -- always RAISES, the recorded
-`StepError` reconstructed into its taxonomy class (`ComplianceRefused` with `constraint=`, else
+`StepError` reconstructed into its taxonomy class (`ScopeRefused` with `constraint=`, else
 `TerminalError`/`RetryableError`/`UnsupportedFeatureError` by name, unknown => `TerminalError`),
 with the ORIGINAL exception's message as the reconstructed exception's own message
 (`StepError.detail`, falling back to `code` -- the taxonomy class name -- when a record predates
@@ -370,7 +370,7 @@ non-idempotent submit (a hosted adapter whose `AdapterDescriptor` sets
 table row for `RetryableError` is "retried in place, 5 attempts, 500 ms -> 30 s, honour
 `retry_after`, fail over after exhaustion" -- the in-place budget for `submit` lands only once
 idempotency exists. `TerminalError` no retry, fail over; `UnsupportedFeatureError` neither;
-`ComplianceRefused` neither, never -- retrying it is the one construct that widens the
+`ScopeRefused` neither, never -- retrying it is the one construct that widens the
 compliance set; `MissingCredentialsError` is a routing signal on dispatch and, on resume, its
 recorded skip is replayed as final rather than re-checked (the cascade still falls over; see
 above).

@@ -395,8 +395,8 @@ from openreading.credentials import EnvCredentialBroker
 from openreading.router.registry import Registry
 from openreading.router.router import Router, RouterConfig
 from openreading.strategies.model import DeciderLLM
-from openreading.types.errors import ComplianceRefused
-from openreading.types.request import Compliance, OpenReadingRequest
+from openreading.types.errors import ScopeRefused
+from openreading.types.request import OpenReadingRequest
 
 # The env key of the second enablement key (decider.md §1). Truthy → decider enabled; a backend-id
 # value both enables it and overrides `decider.llm.backend`.
@@ -571,7 +571,6 @@ def _backend_eligible(
     backend: str,
     req: OpenReadingRequest,
     registry: Registry,
-    effective_compliance: Mapping[str, Any],
     router_config: RouterConfig,
     broker: EnvCredentialBroker | None = None,
 ) -> str | None:
@@ -582,12 +581,9 @@ def _backend_eligible(
     `broker` is the walk's own credential broker. Stage 1 resolves a container backend's endpoint
     through it, so gating with a different broker would check an endpoint this walk never dispatches
     to."""
-    check_req = req
-    if effective_compliance:
-        check_req = req.model_copy(update={"compliance": Compliance(**dict(effective_compliance))})
     try:
-        Router(registry, router_config, broker=broker).check_eligible(check_req, backend)
-    except ComplianceRefused:
+        Router(registry, router_config, broker=broker).check_eligible(req, backend)
+    except ScopeRefused:
         return "compliance"
     except KeyError:
         # Unknown backend id: `validate` never checks the decider or judge backend against
@@ -601,7 +597,6 @@ def resolve_decider_status(
     decider: DeciderLLM | None,
     req: OpenReadingRequest,
     registry: Registry,
-    effective_compliance: Mapping[str, Any],
     router_config: RouterConfig,
     env: Mapping[str, str],
     port: DeciderPort | None,
@@ -627,7 +622,7 @@ def resolve_decider_status(
         # the whole walk over an out-of-scope JUDGE would be a bigger hammer than the caller's
         # scope asks for — the backends that actually process the document are bounded elsewhere.
         return DeciderStatus("engine", "scope_denied", backend)
-    reason = _backend_eligible(backend, req, registry, effective_compliance, router_config, broker)
+    reason = _backend_eligible(backend, req, registry, router_config, broker)
     if reason is not None:
         return DeciderStatus("engine", reason, backend)
     if port is None:
@@ -641,7 +636,6 @@ def resolve_judge_status(
     judge_backend: str,
     req: OpenReadingRequest,
     registry: Registry,
-    effective_compliance: Mapping[str, Any],
     router_config: RouterConfig,
     env: Mapping[str, str],
     port: JudgePort | None,
@@ -663,7 +657,7 @@ def resolve_judge_status(
         # the whole walk over an out-of-scope JUDGE would be a bigger hammer than the caller's
         # scope asks for — the backends that actually process the document are bounded elsewhere.
         return DeciderStatus("engine", "scope_denied", backend)
-    reason = _backend_eligible(backend, req, registry, effective_compliance, router_config, broker)
+    reason = _backend_eligible(backend, req, registry, router_config, broker)
     if reason is not None:
         return DeciderStatus("engine", reason, backend)
     if port is None:

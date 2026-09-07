@@ -12,7 +12,6 @@ import pytest
 from openreading import schemas
 from openreading.batch.runner import (
     JobsLimitError,
-    assemble_result,
     batch_state,
     bound_jobs,
     item_idempotency_key,

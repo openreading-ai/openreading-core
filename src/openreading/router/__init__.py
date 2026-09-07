@@ -44,6 +44,7 @@ from openreading.router.registry import Registry
 from openreading.router.router import RoutePlan, Router
 
 __all__ = [
+    "DropReason",
     "await_result",
     "run_to_completion",
     "backoff_ms",
@@ -57,5 +58,4 @@ __all__ = [
     "Router",
     "RoutePlan",
     "RouterConfig",
-    "DropReason",
 ]

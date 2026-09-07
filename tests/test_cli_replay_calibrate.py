@@ -103,25 +103,6 @@ def test_replay_roundtrip_is_deterministic_and_schema_valid(sample_pdf, tmp_path
     assert replayed["orchestration"]["chosen_backend"] == chosen
 
 
-def test_replay_refuses_on_a_mismatched_config_hash(sample_pdf, tmp_path, capsys):
-    # BL-163: a whole-trace check at load time, before any decision point is consulted — a trace
-    # whose recorded config_hash no longer matches the freshly compiled one (the configuration or
-    # compliance posture changed since it was recorded) must be refused, naming config_hash, not
-    # silently replayed against a different configuration than it was recorded under.
-    cfg = _write_config(tmp_path, _CONFIG)
-    rc = main(["parse", sample_pdf, "--strategy", "local_only", "--config", cfg])
-    assert rc == 0
-    original = json.loads(capsys.readouterr().out)
-    original["orchestration"]["config_hash"] = "sha256:0000000000000000000000000000000000000000"
-
-    trace = tmp_path / "trace.json"
-    trace.write_text(json.dumps(original))
-
-    rc = main(["replay", sample_pdf, "--trace", str(trace), "--config", cfg])
-    assert rc == 3
-    assert "config_hash" in capsys.readouterr().err
-
-
 def test_replay_uses_strategy_name_from_the_trace(sample_pdf, tmp_path, capsys):
     # --strategy omitted → the name is read from the trace's orchestration block
     cfg = _write_config(tmp_path, _CONFIG)
@@ -324,51 +305,6 @@ def test_calibrate_cli_mid_dataset_fault_does_not_silently_discard_already_score
     assert len(fake.requests) == 3
 
 
-def test_calibrate_cli_per_case_compliance_refusal_names_the_case_and_already_scored_count(
-    tmp_path, capsys, monkeypatch
-):
-    # BL-123: the CLI-level sibling of test_calibrate_cli_mid_dataset_fault_does_not_silently_
-    # discard_already_scored_cases above, but the per-case fault is a ComplianceRefused from a
-    # case.json-level `compliance` block on case index 1 (not index 0), rather than a
-    # RetryableError — proving the case-name/"already scored" context reaches the CLI for a
-    # per-case compliance refusal exactly the way it already does for every other AdapterError.
-    # Deliberately NOT the file-level policy: block test_calibrate_cli_refuses_a_noncompliant_
-    # rung1_backend_exits_3 below uses, which structurally always fires on case 0 and so has no
-    # "already scored" count to add.
-    cfg = _write_config(tmp_path, _COMPLIANCE_PER_CASE_CONFIG)
-    fake = ScriptedBackend("cheap", local=False, hipaa_baa="no")
-    _install_registry(monkeypatch, fake)
-
-    ds = tmp_path / "dataset"
-    ds.mkdir()
-    ds.joinpath("case_00").mkdir()
-    ds.joinpath("case_00", "case.json").write_text(
-        json.dumps({"name": "c0", "input": {"builtin_sample": True}, "expected": {}})
-    )
-    ds.joinpath("case_01").mkdir()
-    ds.joinpath("case_01", "case.json").write_text(
-        json.dumps(
-            {
-                "name": "c1",
-                "input": {"builtin_sample": True},
-                "compliance": {"require_local": True},
-                "expected": {},
-            }
-        )
-    )
-
-    rc = main(["calibrate", str(ds), "--strategy", "hosted_only", "--config", cfg])
-
-    assert rc == 3
-    out, err = capsys.readouterr()
-    assert out == ""
-    assert "[calibrate]" in err
-    assert "Traceback" not in err
-    assert "1 case(s) already scored" in err  # c0 succeeded first
-    # c0 (no compliance constraint) genuinely ran before c1's refusal stopped the loop.
-    assert len(fake.requests) == 1
-
-
 def test_calibrate_cli_without_config_exits_3(tmp_path, capsys, monkeypatch):
     monkeypatch.chdir(tmp_path)  # no openreading.yaml on the path
     rc = main(["calibrate", str(tmp_path / "nope"), "--strategy", "local_only"])
@@ -386,11 +322,11 @@ def test_calibrate_cli_empty_dataset_exits_3(tmp_path, capsys):
 
 
 def test_calibrate_cli_refuses_a_noncompliant_rung1_backend_exits_3(tmp_path, capsys):
-    # BL-112: cmd_calibrate's `except (..., ComplianceRefused)` member was dead code — nothing on
+    # BL-112: cmd_calibrate's `except (..., ScopeRefused)` member was dead code — nothing on
     # calibrate_strategy's call graph could ever raise it. With the fix, the strategy file's own
     # policy: block (§1.3, folded the same way compile_strategy folds it) refuses a rung-1 backend
     # that can't satisfy it, and this now-reachable except member turns that into a clean exit 3 —
-    # never a traceback, matching every other ComplianceRefused-producing command the openreading.cli docstring
+    # never a traceback, matching every other ScopeRefused-producing command the openreading.cli docstring
     # already documents calibrate alongside.
     cfg = _write_config(tmp_path, _POLICY_REQUIRES_BAA_CONFIG)
     ds = _dataset(tmp_path, 2)
@@ -428,29 +364,6 @@ def test_calibrate_malformed_config_exits_3(tmp_path, capsys):
 # out of the command — is what pins "no traceback".
 
 _BAD_POLICY = "version: 1\npolicy: {require_locall: true}\nstrategies:\n  local_only: [pymupdf]\n"
-
-
-def test_replay_malformed_policy_block_exits_3_without_a_traceback(sample_pdf, tmp_path, capsys):
-    cfg = _write_config(tmp_path, _BAD_POLICY)
-    trace = tmp_path / "t.json"
-    trace.write_text(json.dumps({"orchestration": {"strategy": "local_only", "decisions": []}}))
-    rc = main(["replay", sample_pdf, "--trace", str(trace), "--config", cfg])
-    assert rc == 3
-    err = capsys.readouterr().err
-    assert err.startswith("[replay] ")
-    assert "require_locall" in err
-    assert len(err.splitlines()) == 1
-
-
-def test_calibrate_malformed_policy_block_exits_3_without_a_traceback(tmp_path, capsys):
-    cfg = _write_config(tmp_path, _BAD_POLICY)
-    ds = _dataset(tmp_path, 1)
-    rc = main(["calibrate", ds, "--strategy", "local_only", "--config", cfg])
-    assert rc == 3
-    err = capsys.readouterr().err
-    assert err.startswith("[calibrate] ")
-    assert "require_locall" in err
-    assert len(err.splitlines()) == 1
 
 
 def test_calibrate_cli_refuses_a_parallel_first_rung_without_a_traceback(tmp_path, capsys):

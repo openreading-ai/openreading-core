@@ -20,7 +20,6 @@ from openreading.router.driver import run_to_completion
 from openreading.testing.sample_pdf import build_sample_pdf
 from openreading.types import JobState, NormalizedResponse
 from openreading.types.batch import BatchItemError
-from openreading.types.errors import ComplianceRefused
 from openreading.types.request import OpenReadingRequest
 from openreading.types.runtime import ResolvedCredentials, RunContext
 
@@ -303,55 +302,3 @@ def _one_doc_corpus(tmp_path) -> Path:
     d.mkdir()
     (d / "a.pdf").write_bytes(build_sample_pdf())
     return d
-
-
-def test_run_batch_native_refuses_compliance_override_before_create_batch(tmp_path, monkeypatch):
-    # anthropic-claude's own descriptor declares runs_fully_local=False, so require_local always
-    # fails it — the `compliance=` override spelling (a raw request_overrides kwarg, not the named
-    # `policy` parameter) must refuse before create_batch is ever called.
-    client = FakeBatchClient(_results_ok_and_error())
-    monkeypatch.setitem(
-        BUILTIN_ADAPTERS, "anthropic-claude", lambda: AnthropicClaudeAdapter(client=client)
-    )
-    with pytest.raises(ComplianceRefused):
-        run_batch(
-            [str(_one_doc_corpus(tmp_path))],
-            backend="anthropic-claude",
-            compliance={"require_local": True},
-        )
-    assert client.created is None  # create_batch (the real vendor-submission call) never reached
-
-
-def test_run_batch_native_refuses_policy_before_create_batch(tmp_path, monkeypatch):
-    # The documented spelling of a policy (a `policy:` block, here passed inline as `config=`)
-    # must refuse identically to a raw `compliance=` override. This was a structurally-broken
-    # path: the policy never reached build_request on the native branch at all.
-    client = FakeBatchClient(_results_ok_and_error())
-    monkeypatch.setitem(
-        BUILTIN_ADAPTERS, "anthropic-claude", lambda: AnthropicClaudeAdapter(client=client)
-    )
-    with pytest.raises(ComplianceRefused):
-        run_batch(
-            [str(_one_doc_corpus(tmp_path))],
-            backend="anthropic-claude",
-            config={"version": 1, "policy": {"require_local": True}},
-        )
-    assert client.created is None
-
-
-def test_run_batch_native_dispatches_when_compliance_compatible(tmp_path, monkeypatch):
-    # positive control: a constraint anthropic-claude actually satisfies (hipaa_baa="yes") must
-    # still dispatch natively, unchanged — the new gate doesn't widen into refusing good requests.
-    client = FakeBatchClient(_results_ok_and_error())
-    monkeypatch.setitem(
-        BUILTIN_ADAPTERS, "anthropic-claude", lambda: AnthropicClaudeAdapter(client=client)
-    )
-    env = run_batch(
-        [str(_one_doc_corpus(tmp_path))],
-        backend="anthropic-claude",
-        config={"version": 1, "policy": {"require_baa": True}},
-    )
-    assert client.created is not None  # create_batch WAS reached
-    schemas.validate_batch_result(env)
-    assert env["summary"]["succeeded"] == 1
-    assert all(i["transport"] == "native" for i in env["items"])

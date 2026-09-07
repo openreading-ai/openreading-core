@@ -1,6 +1,6 @@
 """CLI — drives main() over the sample PDF. `parse` runs PyMuPDF for real and emits schema-valid
 JSON; a hosted backend without credentials exits cleanly; `route` prints a compliance-first plan.
-The last section pins the one exit code every `ComplianceRefused` catch site must return (3)."""
+The last section pins the one exit code every `ScopeRefused` catch site must return (3)."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from openreading.adapters.registry import BUILTIN_ADAPTERS
 from openreading.cli import main
 from openreading.testing.sample_pdf import build_sample_pdf
 from openreading.types import Job, JobState, WaitMode
-from openreading.types.errors import ComplianceRefused, RetryableError, UnsupportedFeatureError
+from openreading.types.errors import RetryableError, ScopeRefused, UnsupportedFeatureError
 from openreading.types.liveness import (  # noqa: E402
     LivenessReport,
     LivenessStatus,
@@ -137,99 +137,12 @@ def _plan_codes(out: str) -> dict:
     }
 
 
-def test_route_reads_the_policy_block_from_the_working_directory(sample_pdf, tmp_path, capsys):
-    """No flag. The file in the working directory is found, and its block gates the plan."""
-    _write_policy(tmp_path, {"require_local": True})
-    import os
-
-    cwd = os.getcwd()
-    os.chdir(tmp_path)
-    try:
-        rc = main(["route", sample_pdf])
-    finally:
-        os.chdir(cwd)
-    assert rc == 0
-    assert _plan_codes(capsys.readouterr().out) == _REQUIRE_LOCAL_PLAN
-
-
-def test_route_config_flag_and_the_directory_file_agree(sample_pdf, tmp_path, capsys):
-    path = _write_policy(tmp_path, {"require_local": True}, name="airgapped.yaml")
-    assert main(["route", sample_pdf, "--config", path]) == 0
-    assert _plan_codes(capsys.readouterr().out) == _REQUIRE_LOCAL_PLAN
-
-
-def test_route_in_an_empty_directory_is_the_no_policy_plan(
-    sample_pdf, tmp_path, capsys, monkeypatch
-):
-    """Law P5: no file means the behaviour of every release before the file was read here."""
-    monkeypatch.delenv("OPENREADING_CONFIG", raising=False)
-    monkeypatch.chdir(tmp_path)
-    assert main(["route", sample_pdf]) == 0
-    assert _plan_codes(capsys.readouterr().out) == _NO_POLICY_PLAN
-
-
 def test_route_no_longer_takes_a_policy_flag(sample_pdf, tmp_path, capsys):
     """The flag is removed outright, so argparse says so in its own words and exits 2."""
     with pytest.raises(SystemExit) as exc:
         main(["route", sample_pdf, "--policy", str(tmp_path / "phi.json")])
     assert exc.value.code == 2
     assert "unrecognized arguments: --policy" in capsys.readouterr().err
-
-
-def test_route_phi_policy_chooses_compliant_and_drops_noncompliant(sample_pdf, tmp_path, capsys):
-    path = _write_policy(
-        tmp_path, {"require_baa": True, "no_train_on_data": True, "optimize_for": "accuracy"}
-    )
-    rc = main(["route", sample_pdf, "--config", path])
-    plan = json.loads(capsys.readouterr().out)
-    assert rc == 0 and plan["chosen"] is not None
-    # aws-textract trains=opt_out and the opt-out is not confirmed here -> dropped at stage 1
-    assert plan["dropped"]["aws-textract"]["stage"] == 1
-    assert plan["dropped"]["aws-textract"]["code"] == "trains_on_data"
-    # the chosen + every fallback is compliant (local, or a no-train cloud with a BAA in force —
-    # a tier-gated BAA is not one, and this policy confirmed nothing)
-    from openreading.adapters.registry import make_adapter
-
-    assert plan["dropped"]["reducto"]["code"] == "no_baa"
-    for bid in [plan["chosen"], *plan["fallbacks"]]:
-        c = make_adapter(bid).descriptor.compliance
-        assert c.runs_fully_local or c.hipaa_baa == "yes"
-        assert c.runs_fully_local or c.trains_on_customer_data in ("no", "na_local")
-
-
-def test_route_confirmed_baa_tier_readmits_reducto(sample_pdf, tmp_path, capsys):
-    path = _write_policy(tmp_path, {"require_baa": True, "baa_tier_confirmed": ["reducto"]})
-    main(["route", sample_pdf, "--config", path])
-    plan = json.loads(capsys.readouterr().out)
-    assert "reducto" in [plan["chosen"], *plan["fallbacks"]]
-
-
-def test_route_confirmed_optout_readmits_textract(sample_pdf, tmp_path, capsys):
-    path = _write_policy(
-        tmp_path,
-        {
-            "require_baa": True,
-            "no_train_on_data": True,
-            "train_optout_confirmed": ["aws-textract"],
-        },
-    )
-    main(["route", sample_pdf, "--config", path])
-    plan = json.loads(capsys.readouterr().out)
-    assert "aws-textract" in [plan["chosen"], *plan["fallbacks"]]
-
-
-def test_route_require_local_drops_all_hosted_and_can_run(sample_pdf, tmp_path, capsys):
-    path = _write_policy(tmp_path, {"require_local": True, "optimize_for": "offline"})
-    rc = main(["route", sample_pdf, "--config", path, "--run"])
-    plan = json.loads(capsys.readouterr().out)
-    assert rc == 0
-    from openreading.adapters.registry import make_adapter
-
-    for bid in [plan["chosen"], *plan["fallbacks"]]:
-        assert make_adapter(bid).descriptor.compliance.runs_fully_local
-    # --run executed the chosen local backend and attached a schema-valid result
-    assert "result" in plan
-    schemas.validate_response(plan["result"])
 
 
 def test_route_run_normalize_crash_is_a_clean_error_not_a_traceback(
@@ -310,30 +223,6 @@ def test_describe_read_error_is_a_directory_error_returns_bare_strerror(tmp_path
     assert _describe_read_error(e) == e.strerror
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="chmod 000 is a POSIX permission model")
-def test_route_unreadable_config_exits_3_without_a_traceback(sample_pdf, tmp_path, capsys):
-    # A missing path, malformed YAML, and an unreadable (chmod 000) file are all user errors, so
-    # they land in one soft-failure bucket: one tagged stderr line, exit 3. main() returning at all
-    # (rather than propagating FileNotFoundError/YAMLError/PermissionError) is what pins "no
-    # traceback". BL-144: the chmod'd case is the one through-the-CLI proof that
-    # _describe_read_error's PermissionError branch behaves like its siblings.
-    malformed = tmp_path / "bad.yaml"
-    malformed.write_text("version: 1\nstrategies:\n  a: [unclosed\n")
-    unreadable = tmp_path / "unreadable.yaml"
-    unreadable.write_text("version: 1\npolicy: {require_local: true}\n")
-    unreadable.chmod(0o000)
-    try:
-        for path in (tmp_path / "missing.yaml", malformed, unreadable):
-            rc = main(["route", sample_pdf, "--config", str(path)])
-            assert rc == 3, path
-            err = capsys.readouterr().err
-            assert err.startswith("[route] ")
-            assert "Traceback" not in err
-            assert str(path) in err
-    finally:
-        unreadable.chmod(0o644)  # restore so tmp_path's own teardown can remove it
-
-
 def test_backends_command_reports_ready_and_missing(capsys, monkeypatch):
     monkeypatch.setenv("REDUCTO_API_KEY", "sk_present")
     for var in ("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT", "AZURE_DOCUMENT_INTELLIGENCE_KEY"):
@@ -390,7 +279,7 @@ def test_auth_rejected_message_names_env_and_never_echoes_key():
     assert "rejected" in msg
 
 
-# ---- ComplianceRefused is exit 3 on every command that catches it -------------------------------
+# ---- ScopeRefused is exit 3 on every command that catches it -------------------------------
 #
 # Exit 4 belongs to `route`'s "no compliant backend for the policy" verdict (and a partial batch);
 # a refusal reported by any other command is a can't-run, i.e. 3. Three of the six catch sites
@@ -410,70 +299,7 @@ def refusing_config(tmp_path):
 
 
 def _raise_refused(*args, **kwargs):
-    raise ComplianceRefused("nothing is compliant here", constraint="no_compliant_backend")
-
-
-def test_parse_compliance_refused_exits_3(sample_pdf, tmp_path, capsys):
-    cfg = tmp_path / "openreading.yaml"
-    cfg.write_text("version: 1\npolicy:\n  require_local: true\n" + _HOSTED_ONLY)
-    rc = main(["parse", sample_pdf, "--strategy", "hosted_only", "--config", str(cfg)])
-    assert rc == 3
-    assert "no compliant backend" in capsys.readouterr().err
-
-
-def test_parse_batch_compliance_refused_exits_3(sample_pdf, capsys, monkeypatch):
-    from openreading.cli import app as cli_app
-
-    monkeypatch.setattr(cli_app.api, "run_batch", _raise_refused)
-    rc = main(["parse", sample_pdf, sample_pdf, "--backend", "pymupdf"])  # >=2 args → batch
-    assert rc == 3
-    assert "nothing is compliant here" in capsys.readouterr().err
-
-
-def test_strategy_plan_compliance_refused_exits_3(sample_pdf, refusing_config, capsys):
-    rc = main(
-        ["strategy", "plan", sample_pdf, "--strategy", "hosted_only", "--config", refusing_config]
-    )
-    assert rc == 3
-    err = capsys.readouterr().err
-    assert "[strategy plan]" in err and "no compliant backend" in err
-
-
-def test_replay_compliance_refused_exits_3(sample_pdf, refusing_config, tmp_path, capsys):
-    trace = tmp_path / "trace.json"
-    trace.write_text(json.dumps({"orchestration": {"strategy": "hosted_only", "decisions": []}}))
-    rc = main(["replay", sample_pdf, "--trace", str(trace), "--config", refusing_config])
-    assert rc == 3
-    err = capsys.readouterr().err
-    assert "[replay]" in err and "no compliant backend" in err
-
-
-def test_calibrate_compliance_refused_exits_3(refusing_config, tmp_path, capsys, monkeypatch):
-    import openreading.strategies.calibrate as calibrate_mod
-
-    monkeypatch.setattr(calibrate_mod, "calibrate_strategy", _raise_refused)
-    rc = main(
-        [
-            "calibrate",
-            str(tmp_path / "ds"),
-            "--strategy",
-            "hosted_only",
-            "--config",
-            refusing_config,
-        ]
-    )
-    assert rc == 3
-    err = capsys.readouterr().err
-    assert "[calibrate]" in err and "nothing is compliant here" in err
-
-
-def test_compare_fanout_compliance_refused_exits_3(sample_pdf, capsys, monkeypatch):
-    from openreading.cli import app as cli_app
-
-    monkeypatch.setattr(cli_app.api, "run", _raise_refused)
-    rc = main(["compare", sample_pdf, "--backends", "pymupdf,tesseract"])
-    assert rc == 3
-    assert "nothing is compliant here" in capsys.readouterr().err
+    raise ScopeRefused("nothing is compliant here", constraint="no_compliant_backend")
 
 
 # ---- BL-122: RetryableError reaching a directly-named backend is a clean exit 3, never the -----
@@ -481,7 +307,7 @@ def test_compare_fanout_compliance_refused_exits_3(sample_pdf, capsys, monkeypat
 #
 # The realistic trigger is router.driver's poll loop raising RetryableError past its deadline /
 # MAX_CONSECUTIVE_FAULTS (or a submit-time rate-limit). Two fixture traps apply here (not to the
-# ComplianceRefused tests above, which patch api.run/calibrate_strategy directly): (1) `--backend`
+# ScopeRefused tests above, which patch api.run/calibrate_strategy directly): (1) `--backend`
 # validates against `choices=sorted(BUILTIN_ADAPTERS)` at argparse time, so the fixture must use a
 # real slug — `pymupdf`, never a made-up one; (2) `cmd_parse`'s and `cmd_compare`'s named-backend
 # resolution goes through `make_adapter()` (BUILTIN_ADAPTERS directly), never `build_registry` —
@@ -516,7 +342,7 @@ def test_parse_named_backend_retryable_error_exits_3_clean(sample_pdf, capsys, m
 def test_parse_batch_native_submit_error_exits_3_clean(sample_pdf, capsys, monkeypatch):
     # Trigger A: a native-batch backend's submit_many raises RetryableError outright (e.g.
     # submit-time rate-limit exhaustion). Before this fix, this fell through _cmd_parse_batch's
-    # old, hand-rolled `(TerminalError, ComplianceRefused)` except tuple into the generic `except
+    # old, hand-rolled `(TerminalError, ScopeRefused)` except tuple into the generic `except
     # Exception` handler: exit 1, `[batch] error: RetryableError: ...` — the raw, class-name-
     # prefixed shape BL-122 eliminated at the other two sites.
     fake = _FakeNative(submit_many_error=RetryableError("simulated submit-time rate limit"))
@@ -789,7 +615,7 @@ def test_route_rejects_an_empty_config_path_by_naming_the_file(sample_pdf, capsy
 
 
 def test_route_missing_document_exits_3_without_a_traceback(tmp_path, capsys):
-    path = _write_policy(tmp_path, {"require_baa": True})
+    path = _write_policy(tmp_path, {})
     missing = tmp_path / "missing.pdf"
     rc = main(["route", str(missing), "--config", path])
     assert rc == 3

@@ -746,12 +746,13 @@ def _resolve_item(
     at: str,
 ) -> dict:
     if item == "auto":
-        if not allow_auto:
-            raise ConfigError(
-                f"strategies.{name}.{at}: 'auto' cannot race or be compared, because two "
-                f"concurrent router picks have no defined order. Name the backends explicitly"
-            )
-        return {"backend": "auto"}
+        # `auto` asked the engine to pick from vendor claims it could not verify, and it is gone.
+        # A Plain rung names a backend or a strategy; the deployment's own preference order lives
+        # in `policy.backends`, which is where a caller states it once for every run.
+        raise ConfigError(
+            f"strategies.{name}.{at}: 'auto' is no longer a rung. Name a backend, or set the "
+            f"deployment's order once in policy.backends"
+        )
 
     is_backend = item in BUILTIN_ADAPTERS
     is_strategy = item in strategy_names or item in PRESET_NAMES
@@ -773,8 +774,6 @@ def _resolve_item(
 def _check_no_dup(name: str, key: str, items: list) -> None:
     seen: set[str] = set()
     for item in items:
-        if item == "auto":
-            continue  # auto never re-picks an attempted backend — try: [auto, auto] is legal
         if item in seen:
             raise ConfigError(
                 f"strategies.{name}.{key}: {item!r} appears twice, and each rung must be distinct"
