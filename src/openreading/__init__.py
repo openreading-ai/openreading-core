@@ -521,6 +521,14 @@ switch and its reason; time and cost with honest unknowns) is spread across `war
 strategy `orchestration`, the batch summary and an armed ledger, with no common carrier
 (design record: `design/run-stats-analytics.md`).
 
+Under review, and unlike the gaps above these propose REMOVING behaviour this package ships
+today, so read the record before relying on either feature: the compliance filter and the
+per-vendor compliance table leave core entirely, because core cannot verify a claim about a
+vendor and must not appear to enforce one (design records: `design/compliance-removal.md`,
+`product/specs/compliance-removal.product-spec.md`); the stage-2 format gate goes the same way,
+and the several extension-to-MIME tables collapse into one resolver that answers "unknown"
+instead of guessing PDF (design record: `design/format-agnostic-intake.md`).
+
 Extending it (agent-executable)
 ===============================
 Adding a backend: read the `openreading.adapters` docstring, then pick the closest
