@@ -131,6 +131,11 @@ tesseract                      oss_library        no          tesseract binary (
 
 ## Your first parse
 
+> **Want the guided version?** [`examples/tutorial.md`](examples/tutorial.md) walks the whole tool
+> in seventeen steps, from this first parse to a policy, a self-escalating strategy, a folder run
+> and the HTTP server. It uses the documents in [`examples/`](examples/README.md) and needs no key.
+> The sections below are the short tour.
+
 Your first JSON is one command away, because the documents are already in the clone.
 [`examples/`](examples/README.md) holds two synthetic one-page bank statements, with an invented
 name, an invented bank and invented balances. Each has a header, an account block, a balance
@@ -502,6 +507,7 @@ command.
 | You want to know… | Run / open |
 |---|---|
 | **the full documentation, every guide, and how an agent uses it** | [`src/openreading/README.md`](src/openreading/README.md), then `uv run openreading --help` and `uv run openreading <cmd> --help` for every flag |
+| **how to get from a fresh clone to a working strategy, one step at a time** | [`examples/tutorial.md`](examples/tutorial.md), the guided walkthrough over the shipped documents |
 | what the shipped example documents contain and where they came from | [`examples/README.md`](examples/README.md) |
 | each backend's variables and compliance posture, and the env-var precedence rules | [`src/openreading/adapters/README.md`](src/openreading/adapters/README.md), then `uv run python -m pydoc openreading.credentials` |
 | the exact JSON shapes (the contract) | [`src/openreading/schemas/README.md`](src/openreading/schemas/README.md), then the `*.json` files beside it |

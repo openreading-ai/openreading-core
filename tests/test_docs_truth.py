@@ -40,7 +40,14 @@ _MODULES = (
 )
 # The two subsystem guides that carry strategy YAML. A guide is prose a reader copies, so a block
 # it prints has to survive the same gate as a docstring block.
-_GUIDES = ("src/openreading/strategies/README.md", "src/openreading/comparison/README.md")
+_GUIDES = (
+    "src/openreading/strategies/README.md",
+    "src/openreading/comparison/README.md",
+    # The tutorial builds an `openreading.yaml` step by step, so a reader pastes every block in
+    # it. A block that the grammar rejects would break the walkthrough at the exact point a
+    # newcomer has nothing else to fall back on.
+    "examples/tutorial.md",
+)
 ROOT = Path(__file__).resolve().parent.parent
 
 _NODE_KEYS = {"steps", "parallel", "route", "decide"}

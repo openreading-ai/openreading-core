@@ -35,6 +35,14 @@ them.
   stage reads it and a key that does nothing in a file that gates compliance is one a reader will
   try to rely on. The config `version` const stays `1`: no file that was valid and meaningful
   becomes invalid.
+- **`examples/tutorial.md`, the guided walkthrough.** Seventeen steps from `uv sync` to a
+  policy, a self-escalating strategy, a folder run and `openreading serve`, over the documents in
+  `examples/`. It needs no key and no network, because it runs on `pymupdf` and `tesseract` only.
+  Three IRS forms join the two bank statements there: `schedule_a_2024.pdf` and `1040_2024.pdf`
+  are born-digital and come back as table blocks, and `1040-1988.pdf` is a five-page scan with no
+  text layer, which is what makes an escalating strategy demonstrable on a shipped document.
+  `tests/test_docs_truth.py` executes every strategy block in the tutorial, and
+  `tests/test_docs_policy.py` allowlists the file by exact path.
 - **`openreading help [TOPIC]`.** The CLI now carries its own manual. `openreading help` prints a
   topic index grouped by what you are trying to do, and `openreading help batch` prints one
   chapter. The chapters are sections of the `openreading.cli` package docstring, located by
