@@ -697,3 +697,31 @@ def test_canary_masked_field_never_leaks_anywhere():
     import json as _json
 
     assert CANARY not in _json.dumps(res.orchestration, default=str)
+
+
+def test_judge_out_of_scope_backend_downgrades_to_engine_traced():
+    """A `judge:` block names a backend that gets CALLED, with the operator's vendor key.
+
+    Restored after the removal set deleted it. It was gated only by compliance and routing before
+    the caller's allow-list was added, and the allow-list is now the only hard boundary this
+    package has, so this is the test that keeps a scoped request from reaching a judge backend its
+    token cannot name.
+
+    No port is passed, deliberately: the refusal must come from the scope gate itself, not from
+    the `port is None` fallback that happens to make the whole path inert today.
+    """
+    reg = scripted_registry(
+        ScriptedBackend("reducto", text=GARBLED_SHORT),
+        ScriptedBackend("aws-textract", text=CLEAN),
+        ScriptedBackend("pymupdf", local=True, text=CLEAN),  # the judge backend, and out of scope
+    )
+
+    res = _run(
+        _judge_cfg(),
+        reg,
+        env={"OPENREADING_LLM_DECIDER": "1"},
+        backend_allowlist=frozenset({"reducto", "aws-textract"}),
+    )
+
+    jd = [d for d in _decisions(res) if d["point"] == "judge"][0]
+    assert jd["decider"] == "engine" and jd["downgraded"] == "scope_denied"

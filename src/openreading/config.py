@@ -90,7 +90,6 @@ from typing import Any
 
 from openreading import schemas
 from openreading.router.compliance import RouterConfig
-from openreading.types.errors import ScopeRefused
 from openreading.types.policy import Policy, coerce_policy
 from openreading.types.request import OpenReadingRequest
 
@@ -274,24 +273,6 @@ def router_config(policy: Policy | dict | None) -> RouterConfig:
     if policy is None:
         return RouterConfig()
     return RouterConfig(backends=None if policy.backends is None else tuple(policy.backends))
-
-
-def _one_region(request: str | None, file: str | None) -> str | None:
-    """The single region both sources agree on, or a refusal naming both.
-
-    Regions are names rather than quantities, so there is no stricter one to pick and no value
-    that means "both". Fabricating one would teach the router a region no backend declares; taking
-    either side would let that side overrule the other. A refusal is the honest intersection.
-    """
-    if request is None or file is None:
-        return request if file is None else file
-    if request.strip().lower() == file.strip().lower():
-        return request
-    raise ScopeRefused(
-        f"data_region conflict: the request asks for {request!r} and openreading.yaml requires "
-        f"{file!r}, and no backend can satisfy both",
-        constraint="region_conflict",
-    )
 
 
 def merge_router_config(base: RouterConfig, policy: Policy | dict | None) -> RouterConfig:

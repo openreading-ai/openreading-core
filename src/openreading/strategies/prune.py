@@ -19,7 +19,6 @@ import json
 from dataclasses import dataclass, field, fields
 from typing import Any
 
-from openreading.adapters.registry import BUILTIN_ADAPTERS
 from openreading.config import apply as apply_policy
 from openreading.credentials import EnvCredentialBroker
 from openreading.router.compliance import DropReason
@@ -338,14 +337,10 @@ def _prune_node(
     """Return the node with dropped-backend leaves removed, or None if it collapses entirely."""
     if "backend" in node:
         slug = node["backend"]
-        if slug == "auto":
-            # Bounded by `eligible`, which compile_strategy has already intersected with the
-            # allow-list — an `auto` leaf can only resolve to something in it.
-            return node
         if backend_allowlist is not None and slug not in backend_allowlist:
             # Checked against the allow-list DIRECTLY, not against `eligible`: an id the router
             # never ranked (an unknown slug, or one dropped for an unrelated reason) must still
-            # not survive as a leaf the walk would dispatch. Ahead of the compliance branch below
+            # not survive as a leaf the walk would dispatch. Ahead of the drop-reason branch below
             # only so the drop carries the reason that is actually actionable for the caller.
             _record_drop(slug, _SCOPE_DROP, dropped_records)
             return None
@@ -428,7 +423,3 @@ def _record_drop(slug: str, reason: Any, dropped_records: dict[str, DropRecord])
     code = getattr(reason, "code", "dropped")
     detail = getattr(reason, "detail", "")
     dropped_records[slug] = DropRecord(backend=slug, stage=stage, code=code, detail=detail)
-
-
-def is_known_backend(slug: str) -> bool:
-    return slug in BUILTIN_ADAPTERS

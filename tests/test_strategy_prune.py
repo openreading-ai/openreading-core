@@ -116,3 +116,22 @@ def _bare_walk_ctx():
         trees={},
         eligible=[],
     )
+
+
+def test_allowlist_that_empties_the_tree_refuses_as_scope_not_compliance():
+    """Which exception this is decides which file the operator goes and edits.
+
+    Restored after the removal set deleted it. It was swept up with the compliance tests because
+    its name says "not compliance", but its subject is the API-key scope, which is now the ONLY
+    hard boundary in this package. `ComplianceRefused` is gone, so the contrast it drew is simply
+    that the refusal is `ScopeRefused` and names the backend the token cannot reach.
+    """
+    registry = build_registry()
+    config = StrategyConfig(version=1, strategies={"s": {"steps": ["pymupdf"]}})
+
+    with pytest.raises(ScopeRefused) as e:
+        compile_strategy(
+            _req(), "s", config, registry, RouterConfig(), backend_allowlist=frozenset({"docling"})
+        )
+
+    assert e.value.backend_code == "pymupdf"
