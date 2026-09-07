@@ -1,9 +1,13 @@
 """Docs-truth test. Every fenced ```yaml strategy block in the `openreading.strategies` module
-docstrings (the cookbook in `presets.py` above all), and in the strategies and comparison guides,
+docstrings (the cookbook in `presets.py` above all), the strategies and comparison guides,
+and `examples/tutorial.md`,
 must parse and pass `strategy validate` with NO errors — the cookbook is executable truth, not
 prose, so a docstring edit that breaks the grammar fails `make verify`. Documentation lives in
 code (AGENTS.md); this is what keeps the strategy documentation honest now that it lives next to
 the engine.
+
+Tutorial configurations must also keep their named backends reachable under their own policy.
+A pruned hosted fallback would otherwise pass grammar validation while defeating the walkthrough's escalation example.
 
 Blocks come in several shapes: full configs (`version` + `strategies`), a bare `strategies:` map,
 a single node body, a deployment block, or a preset showcase. Each config-like block is wrapped
@@ -165,3 +169,7 @@ def test_doc_yaml_passes_strategy_validate(name, i, cfg):
     assert not errors, f"{name}#{i} has validate errors: " + "; ".join(
         f"{e.path}: {e.message}" for e in errors
     )
+    if name == "examples/tutorial.md":
+        # A valid tree can still prune the fallback the walkthrough promises to run.
+        unreachable = [x for x in issues if "filtered out by the policy" in x.message]
+        assert not unreachable, "; ".join(x.message for x in unreachable)

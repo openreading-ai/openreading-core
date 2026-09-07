@@ -2,13 +2,14 @@
 
 <sub>[Root README](../README.md) · [Docs home](../src/openreading/README.md) · [What these documents are](README.md)</sub>
 
-> **What you get.** By the end of this page you will have parsed five real documents, watched two
+> **What you get.** By the end of this page you will have parsed five example documents, watched two
 > backends disagree on the same page, written an `openreading.yaml` that keeps a document on your
 > own machine, built a strategy that escalates a scan to OCR by itself, run a whole folder in one
 > command, and served the same engine over HTTP.
 
-Everything here runs with two backends that need no key, no account, and no network. A backend is
-the thing that does the reading, such as PyMuPDF on your machine or Reducto's hosted API. The two
+After installation, the main walkthrough runs with two backends that need no key, account, or network.
+Installation downloads dependencies, and the optional hosted-backend step needs a vendor account and network access.
+A backend is the thing that does the reading, such as PyMuPDF on your machine or Reducto's hosted API. The two
 local ones are PyMuPDF, which lifts a PDF's own text layer, and Tesseract, which renders each page
 to a bitmap and runs OCR over the pixels. Every hosted backend is optional, and
 [step 14](#14-bring-your-own-key) shows how to add one when you want it.
@@ -43,9 +44,10 @@ one document is the reason the second half of this page exists.
 | 17 | [Where to go next](#17-where-to-go-next) | the guide for each deeper question | nothing |
 | A | [The whole file you built](#appendix-the-whole-openreadingyaml-you-built) | one `openreading.yaml` to keep | nothing |
 
-Work from the root of your clone, because every command names a path under `examples/`. The clone
+Use a fresh clone for this walkthrough, because later commands replace `openreading.yaml` and clean up generated files.
+Work from the root of that clone, because every command names a path under `examples/`. The clone
 root ignores `*.json`, `*.yaml` and `*.pdf`, so nothing you write here shows up in `git status`.
-[Step 17](#17-where-to-go-next) ends with the one command that deletes it all.
+[Step 17](#17-where-to-go-next) provides cleanup commands and explains which files remain afterwards.
 
 ---
 
@@ -60,11 +62,11 @@ cd openreading-core
 uv sync --all-extras --dev
 ```
 
-Tesseract is a system binary rather than a Python package, and you install it once:
+Tesseract performs OCR, which means recognizing text in images. Install it alongside `jq`, the tool used below to inspect JSON:
 
 ```bash
-brew install tesseract           # macOS
-sudo apt install tesseract-ocr   # Debian or Ubuntu
+brew install tesseract jq           # macOS
+sudo apt install tesseract-ocr jq   # Debian or Ubuntu
 ```
 
 Now ask OpenReading what this machine can actually run:
@@ -94,9 +96,12 @@ reducto                        hosted_api         no          REDUCTO_API_KEY
 tesseract                      oss_library        yes         -
 ```
 
-Every `no` in that table is a backend waiting for a key you have not brought yet. The MISSING
-column names the exact variables, and [step 14](#14-bring-your-own-key) adds one. This tutorial
+Each `no` identifies a missing key, endpoint configuration, package, or system binary. The MISSING
+column names what you need, and [step 14](#14-bring-your-own-key) adds a key. This tutorial
 uses only the two `yes` rows, so you can read all seventeen steps before you sign up for anything.
+
+The outputs below were captured with the locked Python dependencies and one Tesseract installation.
+OCR text, confidence scores, block counts, comparison findings, and timings can vary across installations.
 
 If `tesseract` says `no`, its MISSING column names the binary rather than a variable:
 
@@ -140,14 +145,15 @@ Consider using the pymupdf_layout package for a greatly improved page layout ana
 
 That line is PyMuPDF's own advice, and it is not an error. It arrives on stderr, which is why the
 redirect above left it on your screen and kept `sa.json` pure JSON. Three streams carry three kinds
-of news, and the split is the same for every command:
+of news on `parse`:
 
 | Stream | Carries | Read it with |
 |---|---|---|
-| stdout | the JSON envelope, and nothing else | `> out.json`, then `jq` |
+| stdout | the JSON envelope | `> out.json`, then `jq` |
 | stderr | progress, backend chatter, error lines | `2> run.log` |
 | exit code | whether a script should continue | `echo $?`, or [step 16](#16-when-something-stops) |
 
+Other commands can print text, such as `backends`, `explain`, and `compare --format table`.
 Confirm the run, then look at the shape:
 
 ```bash
@@ -169,7 +175,7 @@ of them. Here is where each thing lives.
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif","fontSize":"14px","lineColor":"#94a3b8","textColor":"#334155","primaryTextColor":"#0f172a","edgeLabelBackground":"#eef2f7","clusterBkg":"#f8fafc","clusterBorder":"#cbd5e1","titleColor":"#334155"},"flowchart":{"curve":"basis","nodeSpacing":30,"rankSpacing":40,"padding":8,"useMaxWidth":true}}}%%
 flowchart LR
-  E(["one response envelope"]):::hero --> A["status.state<br>succeeded or failed"]:::gate
+  E(["one response envelope"]):::hero --> A["status.state<br>succeeded · partial · failed · processing"]:::gate
   E --> B["backend.id · backend.type<br>who read it"]:::work
   E --> C["document<br>text · markdown · pages[]"]:::out
   E --> D["usage<br>pages_processed · cost_basis"]:::work
@@ -292,8 +298,7 @@ point of this tutorial.
 ## 4. The CLI is its own manual
 
 You do not have to come back to this page for a flag. The command line carries the manual, and
-every page of it is generated from the same reference the maintainers read, so it cannot drift from
-what the code does.
+its chapters come from the module docstring that maintainers edit alongside the implementation.
 
 ```bash
 uv run openreading help                  # the topic index, grouped by what you want to do
@@ -445,7 +450,7 @@ uv run openreading compare examples/schedule_a_2024.pdf --backends pymupdf,tesse
 ```
 
 `table_shape_mismatch` is the finding that matters on a tax form. PyMuPDF found one table and
-Tesseract found none, because OCR reads lines of text and has no notion of a grid.
+Tesseract found none, because this adapter returns text lines without table structure.
 
 To see the disagreement line by line rather than as a list of findings, use `--format diffs`:
 
@@ -541,8 +546,8 @@ So you now have two backends and a real problem.
 
 | | `1040_2024.pdf` and `schedule_a_2024.pdf` | `1040-1988.pdf` |
 |---|---|---|
-| PyMuPDF | exact text, tables, milliseconds | 8 characters, useless |
-| Tesseract | OCR errors, no tables, seconds | the only thing that reads it |
+| PyMuPDF | text-layer extraction, tables, milliseconds | 8 characters, useless |
+| Tesseract | OCR errors, no tables, seconds | recovers text from the scan |
 
 Naming a backend per document by hand does not scale past a folder you can count. The next steps
 build the thing that decides for you: first the rules about which backends may run at all, then the
@@ -613,6 +618,9 @@ Eleven hosted backends dropped, four local ones left, and no document was read. 
 would run, and `fallbacks` is the order to try next if it fails. A dropped backend never joins that
 list, because a fallback that readmits it would leak the return silently.
 
+Eligibility does not mean readiness: Docling and Qwen-VL remain candidates even when their endpoints are unset.
+Use the `backends` table from step 1 to check which candidates can run here.
+
 No flag named the policy. Every command finds `./openreading.yaml` in the directory you run it
 from, which is why the same rules apply to `parse`, `compare`, `strategy` and the rest without you
 repeating yourself.
@@ -622,21 +630,23 @@ repeating yourself.
 The whole policy grammar is nine keys, and a key the router does not recognise is refused rather
 than ignored. A typo therefore cannot leave you with a clean exit code and no filter.
 
+A business associate agreement (BAA) is an agreement you arrange with a vendor for handling regulated health data.
+
 | Key | Value | What it does |
 |---|---|---|
 | `require_local` | `true` | keeps only backends that run entirely inside your environment |
-| `require_baa` | `true` | keeps only vendors that publish a business associate agreement, the HIPAA contract for regulated data |
-| `no_train_on_data` | `true` | drops vendors that train on your inputs without an opt-out |
+| `require_baa` | `true` | keeps local backends and vendors with `hipaa_baa: yes`, or `tier_gated` with your confirmation |
+| `no_train_on_data` | `true` | keeps local backends and vendors that do not train, or whose required opt-out you confirmed |
 | `data_region` | `"us"`, `"eu"`, … | keeps only vendors that process in that region |
 | `max_retention` | `"zero"`, `"48h"`, … | keeps only vendors that hold your document no longer than this |
 | `optimize_for` | `accuracy`, `cost`, `latency`, `offline` | reorders the survivors, and never changes the set |
-| `allow_unverified_compliance` | `true` | admits a backend whose own disclosure is silent on the axis asked about, never one that says no |
+| `allow_unverified_compliance` | `true` | accepts unverified claims on supported axes, such as training or retention. Explicit negatives still fail |
 | `train_optout_confirmed` | a list of backend ids | you attest that you applied that vendor's training opt-out yourself |
 | `baa_tier_confirmed` | a list of backend ids | you attest that you hold a signed BAA with that vendor |
 
-The last three widen the eligible set, and they are the only keys that can. Each one records a
-fact about paperwork you arranged rather than a preference about a vendor, which is why a policy
-never names a backend it likes.
+The last three can admit additional backends under the constraints you set, but they have different meanings.
+`allow_unverified_compliance` accepts uncertainty on supported axes, such as a descriptor's unverified training claim.
+The two confirmation lists record conditions you have fulfilled, such as applying a training opt-out.
 
 Try a looser policy and watch the drop reasons change:
 
@@ -747,7 +757,7 @@ One backend ran, and the document never reached OCR. Now the scan:
 
 ```bash
 uv run openreading parse examples/1040-1988.pdf --strategy scan_aware > run-1988.json
-jq -r '.backend.id, .document.text | length' run-1988.json
+jq -r '.backend.id, (.document.text | length)' run-1988.json
 ```
 ```text
 tesseract
@@ -783,7 +793,8 @@ strategies:
 
 ## 10. Reading the trace with `explain`
 
-Every strategy run writes an `orchestration` block onto the envelope. That block is the trace, and
+Every strategy run writes an `orchestration` block onto the envelope.
+A gate checks a result against conditions that can trigger escalation. That block is the trace, and
 it records every attempt, every gate with its observed value and threshold, every backend dropped
 by compliance, and every decision taken. `explain` renders it:
 
@@ -840,7 +851,9 @@ jq -c '[.warnings[].code]' run-1988.json
 ["quality_escalated"]
 ```
 
-This is the ladder a `try` with `escalate_when` walks, one rung at a time:
+This diagram shows the general cascade, including what happens when the final rung has a gate.
+Plain leaves its final rung ungated, so `scan_aware` accepts Tesseract's successful result without another quality check.
+Step 12 shows how longhand lets you add that final check.
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif","fontSize":"14px","lineColor":"#94a3b8","textColor":"#334155","primaryTextColor":"#0f172a","edgeLabelBackground":"#eef2f7","clusterBkg":"#f8fafc","clusterBorder":"#cbd5e1","titleColor":"#334155"},"flowchart":{"curve":"basis","nodeSpacing":36,"rankSpacing":44,"padding":8,"useMaxWidth":true}}}%%
@@ -866,8 +879,10 @@ A result that fails a gate is kept rather than thrown away. When the rungs run o
 retained result comes back with `orchestration.outcome: degraded` and a `quality_below_threshold`
 warning. Silence is never an outcome.
 
-Two more verbs read the same trace. `replay` re-runs the document taking the choices the trace
-logged, which is how you reproduce a run offline. `resume` picks an interrupted run back up, and
+`replay` executes the strategy again using recorded decisions, and it calls the selected backends again.
+It needs no LLM call, but it is offline only when those backends are local.
+Hosted backends can incur fresh charges, and replay refuses a trace whose configuration hash has changed.
+`resume` instead uses the run journal to pick an interrupted run back up, and
 [step 16](#16-when-something-stops) arms it.
 
 ---
@@ -929,11 +944,12 @@ strategy quickest  →  pymupdf (ok)
 `raced_lost` means Tesseract was cancelled once PyMuPDF finished. A race has no gates, so no gate
 rows appear. Use it when latency is what you are buying.
 
-`compare:` runs both to completion and keeps the better one. Better means "passes more of the
-default quality bundle", which asks four questions: is this a scan, is the text garbled, are too
+`compare:` runs both to completion and keeps the result with the highest fraction of applicable quality checks passed.
+The default quality bundle asks four questions: is this a scan, is the text garbled, are too
 many pages near-empty, and is the backend's own confidence low. None of the four checks the output
 against what the document actually says, so two clean results tie. A tie goes to the cheaper
-backend, and then to whichever you listed first.
+backend by its descriptor's estimated rate, and then to whichever you listed first.
+An unavailable measurement is excluded from the fraction, so missing confidence does not penalize PyMuPDF.
 
 The interesting flag here is `--keep-candidates`, which retains the loser so you can diff the pair
 from one run:
@@ -972,10 +988,10 @@ The four presets are strategies you can run by name without writing a file at al
 
 | Preset | What it does |
 |---|---|
-| `offline_first` | never leaves the machine: PyMuPDF, then Tesseract, then Docling |
-| `cost_saver` | local parse first, escalate to the router's best remaining pick only on bad quality |
+| `offline_first` | PyMuPDF, then Tesseract, then Docling when gates fire or attempts fail. Keep `require_local: true` to enforce locality |
+| `cost_saver` | PyMuPDF, then Docling, then the router's best remaining pick when gates fire or attempts fail |
 | `fast` | race the two local parsers, keep the first success |
-| `max_accuracy` | the best eligible backend, with a second opinion from the next best |
+| `max_accuracy` | the best eligible backend, then the next best when quality gates fire or the first attempt fails |
 
 ```bash
 uv run openreading parse examples/1040-1988.pdf --strategy offline_first | jq -r '.backend.id'
@@ -1011,14 +1027,14 @@ scan_aware:
 Four facts jump out of that listing.
 
 **`looks_bad` is four predicates.** A predicate is one named check with a threshold, such as
-`empty_pages_over: 0.2`. They sit under one `any_of`, so any one of them escalates.
+`empty_pages_over: 0.2`. Its three alternatives sit under `any_of`: the scan pair, garbled text, or too many empty pages.
 
 **The scan pair is bound together.** `scanned_pages_detected` and `chars_per_page_below` sit under
 an `all_of`, so a scan counts only when the page also came back near-empty. A scanned page that
 still yielded plenty of text is not a failure.
 
 **The gate hangs on `pymupdf` only.** Plain puts its gate on every rung but the last, so a Plain
-cascade always accepts whatever its final backend returned. Write the gate on the last rung in
+cascade accepts its final backend's successful result without a quality gate. Write the gate on the last rung in
 longhand and it does fire.
 
 **`max_time` became a `budget:` on the root.** The budget covers the whole strategy rather than one
@@ -1209,43 +1225,62 @@ compares the two runs.
 
 ## 14. Bring your own key
 
-Everything so far ran on your machine. A hosted backend works as soon as its vendor key is in
-`.env`, and the charge lands on your own account with that vendor. OpenReading stores no key and
-keeps none between calls.
+This step is optional. Skip to step 15 to finish the walkthrough without a vendor account.
 
-Ask for one you do not hold, and the command tells you exactly what is missing:
+Everything so far ran on your machine. A hosted backend works as soon as its vendor key is in
+`.env` and your policy permits it. Charges land on your own account with that vendor.
+Your `.env` file persists on disk, and the credential broker reads it into the process environment.
+
+Try the hosted backend under the local policy you already wrote, and the command refuses it:
 
 ```bash
 uv run openreading parse examples/schedule_a_2024.pdf --backend reducto
 ```
 ```text
-[reducto] missing required credentials/config: REDUCTO_API_KEY. Sign up / configure: https://platform.reducto.ai
+[reducto] require_local set but backend is not fully local
 ```
 
-The exit code is 3, meaning "cannot run", and nothing was sent anywhere. To fix it, append the one
-key you hold:
+The exit code is 3, and nothing was sent anywhere. Check credentials independently of that policy:
 
 ```bash
-echo 'REDUCTO_API_KEY=sk_…' >> .env
+uv run openreading backends --check reducto
+```
+```text
+BACKEND                        PROBE      STATUS                 MEASURED  LATENCY   DETAIL
+reducto                        none       not_configured         no        -         not configured: set REDUCTO_API_KEY
+```
+
+That is the result without a key. With a key already set, the probe can contact the vendor.
+Create a private `.env` file, then open it in your editor to keep the key out of shell history:
+
+```bash
+touch .env
 chmod 600 .env
+```
+
+Add your actual key in the editor, replacing the placeholder in this line:
+
+```dotenv
+REDUCTO_API_KEY=your-actual-key
+```
+
+Then check readiness:
+
+```bash
 uv run openreading backends | grep reducto
 ```
 ```text
 reducto                        hosted_api         yes         -
 ```
 
-Three things about that command are worth knowing before you run it.
+Two things about that file are worth knowing before you use it.
 
 - **`.env` is already in this repository's `.gitignore`**, so a file you write inside a clone is not
   committed by accident.
-- **Your shell records the line itself**, which puts the key in `~/.zsh_history` or
-  `~/.bash_history` in plain text. Prefix the command with a space if your shell skips those, or
-  open `.env` in an editor and type the key there instead.
 - **Never run `cp .env.example .env`.** That file ships `DOCLING_SERVE_URL` and `QWEN_VL_ENDPOINT`
   with values rather than blanks, so a copy marks two backends configured on a machine where
-  neither is running. Under a `require_local` policy the copy makes the router send your document
-  to `http://localhost:5001` and record a connection error, where without the copy the same command
-  records `docling skipped (missing_credentials)` and the document never reaches a socket.
+  neither is running. A strategy that reaches Docling then attempts `http://localhost:5001` and
+  records a connection error. Without that endpoint configured, it skips Docling for missing credentials.
 
 [`.env.example`](../.env.example) is the per-variable reference, one commented block per backend
 with the signup URL in its header:
@@ -1262,10 +1297,15 @@ with the signup URL in its header:
 # --- google-document-ai (signup: https://cloud.google.com/document-ai, BYO GCP project + ADC) ---
 ```
 
-Two of the fifteen backends belong to no vendor. `docling` and `qwen-vl` are services you run
+`docling` and `qwen-vl` are services you run
 yourself, so their variables point at your own container or endpoint and there is no signup link.
 
-Once a key is in place, a hosted backend is a name in the same places every other name goes:
+The local policy from step 11 still blocks Reducto even after readiness says `yes`.
+The following separate configuration applies only if you hold a signed Reducto BAA on the required plan.
+Its `baa_tier_confirmed` entry attests to that agreement, so do not copy it before that condition holds.
+Without that confirmation, `require_baa` prunes Reducto with `no_baa` and the hosted fallback cannot run.
+
+If that condition holds, save this as `hosted.yaml`. Keep `openreading.yaml` from step 11 for the remaining local exercises:
 
 ```yaml
 version: 1
@@ -1273,6 +1313,7 @@ version: 1
 policy:
   require_baa: true                # a hosted rung is allowed, but only a compliant one
   no_train_on_data: true
+  baa_tier_confirmed: [reducto]     # only when your signed agreement is in force
 
 strategies:
   cheap_first:
@@ -1280,6 +1321,14 @@ strategies:
     escalate_when: looks_bad
 ```
 
+Inspect that file explicitly, without running either backend:
+
+```bash
+uv run openreading strategy validate --config hosted.yaml
+uv run openreading strategy plan examples/1040-1988.pdf --strategy cheap_first --config hosted.yaml
+```
+
+To execute it later, use `parse --strategy cheap_first --config hosted.yaml` with your document path.
 Before you run something billable, ask what it would cost:
 
 ```bash
@@ -1411,15 +1460,17 @@ The exit code is the stream a script reads. Branch on it before parsing anything
 
 | Code | Means | Typical cause here |
 |---|---|---|
-| `0` | success | anything above |
+| `0` | success | a completed local parse |
 | `1` | unexpected error, or a batch where nothing succeeded | a bug, or an empty folder |
 | `2` | usage | an unknown `--backend`, a path that does not exist, more files than `--max-items` |
 | `3` | cannot run | a missing key, a refused feature, an unreadable config, a compliance refusal |
 | `4` | `route` found no compliant backend; a batch was partial | a policy nothing satisfies, or one failed document |
 | `5` | `compare` inputs are not valid responses | comparing the wrong files |
 | `6` | interrupted and resumable | Ctrl-C during a strategy run with the journal armed |
+| `130` | interrupted without a journal | Ctrl-C before you arm the ledger |
+| `143` | terminated without a resumable run | SIGTERM before you arm the ledger |
 
-Three failures you can reproduce right now, each exiting 3:
+Two failures you can reproduce right now, each exiting 3:
 
 ```bash
 uv run openreading parse examples/README.md --backend pymupdf
@@ -1428,9 +1479,6 @@ uv run openreading parse examples/README.md --backend pymupdf
 uv run openreading parse examples/schedule_a_2024.pdf --backend pymupdf --extract
 # [pymupdf] unsupported feature (custom_schema_extraction): pymupdf cannot perform schema-driven
 # field extraction; route to an extraction-capable backend (e.g. google-document-ai, reducto)
-
-uv run openreading parse examples/schedule_a_2024.pdf --backend reducto
-# [reducto] missing required credentials/config: REDUCTO_API_KEY. Sign up / configure: …
 ```
 
 Each message names the thing that is missing rather than failing generically. The second one is
@@ -1442,14 +1490,15 @@ returning less than you asked for.
 
 ### Making a long run resumable
 
+A journal stores a strategy run's events and payloads so interrupted work can resume.
 Set `OPENREADING_LEDGER` to a directory and every step of a strategy run is journaled there. There
 is no flag for this on purpose, because arming a journal writes document payloads to disk and that
 is an environment decision rather than a per-run one.
 
 ```bash
-export OPENREADING_LEDGER=./.openreading
+export OPENREADING_LEDGER=./.openreading/tutorial
 uv run openreading parse examples/1040-1988.pdf --strategy scan_aware > run.json
-ls .openreading
+ls .openreading/tutorial
 ```
 ```text
 <run-id>.header.json   <run-id>.jsonl   blobs/   keys/   retention/
@@ -1459,8 +1508,13 @@ Interrupt a run while that is armed, with Ctrl-C or a supervisor's SIGTERM, and 
 and prints a run id. Pick it back up with that id:
 
 ```bash
-uv run openreading resume 7dbf6b71-adb5-4e90-9188-a184fdba9d05
+uv run openreading resume RUN_ID > resumed.json   # replace RUN_ID with your printed run id
+uv run openreading explain resumed.json
 ```
+
+Resume reuses recorded step outcomes, including cancellations, so inspect the resumed trace and its quality warnings.
+Interrupting this example during OCR can leave Tesseract recorded as cancelled. Resume then returns the retained PyMuPDF result with `outcome: degraded`.
+Start a new `parse --strategy scan_aware` run on the scan when you need the cancelled OCR attempt to run again.
 
 Two limits are worth knowing before you rely on it. A `--backend` run journals nothing, because
 only a strategy dispatch has decisions worth replaying. A batch prints no single run id, so
@@ -1477,7 +1531,7 @@ uv run openreading help exit-codes   # every code, in full
 
 ## 17. Where to go next
 
-You have now used every verb this tool has except the evaluation ones. Each question below leads to
+You have now parsed, compared, routed, and orchestrated documents through the main user surfaces. Each question below leads to
 one guide, and each guide demonstrates rather than restates.
 
 | You want to… | Read |
@@ -1497,20 +1551,24 @@ one guide, and each guide demonstrates rather than restates.
 | look up any flag, ever | `uv run openreading help`, then `uv run openreading <cmd> --help` |
 | add a backend of your own | `uv run python -m pydoc openreading.adapters`, then `scripts/new_adapter.py` |
 
-Clean up everything this tutorial wrote:
+After stopping the server and finishing any resumable run, remove the tutorial outputs:
 
 ```bash
-rm -f openreading.yaml sa.json sa-ocr.json mu.json te.json scan-mu.json scan-ocr.json \
+unset OPENREADING_LEDGER
+rm -f openreading.yaml hosted.yaml sa.json sa-ocr.json mu.json te.json scan-mu.json scan-ocr.json \
       run-2024.json run-1988.json race.json duel.json batch.json batch-strat.json \
-      mu-corpus.json te-corpus.json run.json all.json
-rm -rf .openreading
+      mu-corpus.json te-corpus.json run.json resumed.json all.json
+rm -rf .openreading/tutorial
 ```
+
+Your optional `.env` file remains, including any key you added. Remove that file separately if you no longer need those credentials.
 
 ---
 
 ## Appendix: the whole `openreading.yaml` you built
 
 One file, one policy, three strategies. This is the file steps 8 through 13 assembled.
+Save it as `openreading.yaml` before running the appendix commands, including if you already ran cleanup.
 
 ```yaml
 version: 1
