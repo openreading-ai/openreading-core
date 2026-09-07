@@ -62,7 +62,7 @@ from typing import Any
 
 from openreading.adapters.registry import BUILTIN_ADAPTERS, make_adapter
 from openreading.ledger.inline import descriptor_digest
-from openreading.ledger.retention import VALID_RUN_ID
+from openreading.ledger.localfs import VALID_RUN_ID
 from openreading.ledger.sanitizer import Sanitizer
 from openreading.ledger.step import BlobRef
 from openreading.types.request import OpenReadingRequest

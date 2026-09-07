@@ -13,7 +13,6 @@ import asyncio
 import contextlib
 import hashlib
 import json
-import secrets
 from pathlib import Path
 
 import pydantic
@@ -22,15 +21,7 @@ import pytest
 from openreading import api, schemas
 from openreading.ledger.inline import InlineExecutor, NullJournal
 from openreading.ledger.jsonl import JsonlJournal
-from openreading.ledger.localfs import (
-    _FORMAT_AEAD,
-    LocalFsBlobStore,
-    LocalFsKeyStore,
-    _keystream,
-    _xor,
-)
-from openreading.ledger.ports import PayloadExpired
-from openreading.ledger.retention import compute_retention_ceiling_hours, reap, stamp_run
+from openreading.ledger.localfs import LocalFsBlobStore
 from openreading.ledger.sanitizer import Sanitizer
 from openreading.ledger.step import BlobRef, StepRef, StepRequest, StepResult
 from openreading.router.cache import document_digest
@@ -205,59 +196,13 @@ def test_unarmed_inline_executor_journal_is_a_true_no_op():
 # ---- G3 clause 3: shredding a run's key makes content unrecoverable, record stays readable -----
 
 
-def test_shredding_key_makes_payload_unrecoverable_journal_stays_readable(tmp_path):
-    root = tmp_path
-    journal = JsonlJournal(root / "run1.jsonl")
-    keys = LocalFsKeyStore(root / "keys")
-    blobs = LocalFsBlobStore(root / "blobs", keys)
-    ex = InlineExecutor(journal=journal, blobs=blobs, registry=None, clock=RealClock())
-
-    class FakeResp:
-        def to_schema_dict(self):
-            return {"secret_bearing": "content", "n": 7}
-
-    req = StepRequest(
-        step_id="s1",
-        run_id="run1",
-        kind="submit",
-        step_path="root",
-        step_seq=0,
-        attempt=1,
-        backend_id="fake",
-    )
-    asyncio.run(ex.exec(req, run=lambda: FakeResp()))
-
-    recs = journal.get(StepRef(run_id="run1", step_path="root", step_seq=0))
-    assert [r.status for r in recs] == ["attempted", "ok"]
-    ref = recs[1].payload
-    assert isinstance(ref, BlobRef)
-    assert (
-        blobs.get(ref) == json.dumps({"secret_bearing": "content", "n": 7}, sort_keys=True).encode()
-    )
-
-    keys.destroy("run1")
-
-    with pytest.raises(PayloadExpired):
-        blobs.get(ref)
-
-    # (a) the journal itself is still fully readable
-    recs_after = journal.get(StepRef(run_id="run1", step_path="root", step_seq=0))
-    assert [r.status for r in recs_after] == ["attempted", "ok"]
-
-    # (c) the plaintext is genuinely gone, not merely flagged: the key file backing it no longer
-    # exists at all, so there is no key left anywhere to decrypt the still-present ciphertext with.
-    assert not (root / "keys" / "run1.key").exists()
-    assert (root / "blobs" / "run1").exists()  # ciphertext itself is untouched by a shred
-
-
 # ---- plan §8: the T3-consumer-test — something reads the journal back --------------------------
 
 
 def test_journal_get_round_trips_a_leafs_full_attempted_then_terminal_history(tmp_path):
     path = tmp_path / "run1.jsonl"
     writer = JsonlJournal(path)
-    keys = LocalFsKeyStore(tmp_path / "keys")
-    blobs = LocalFsBlobStore(tmp_path / "blobs", keys)
+    blobs = LocalFsBlobStore(tmp_path / "blobs")
     ex = InlineExecutor(journal=writer, blobs=blobs, registry=None, clock=RealClock())
 
     class FakeResp:
@@ -323,317 +268,34 @@ def test_sanitizer_is_a_no_op_with_no_secret_values():
 # ---- Retention (§9.4, plan §7) ---------------------------------------------------------------
 
 
-def test_retention_ceiling_is_min_over_hosted_excluding_local_and_flags_unverified():
-    from openreading.types.descriptor import ComplianceProfile
-
-    class D:
-        def __init__(self, **kw):
-            self.compliance = ComplianceProfile(**kw)
-
-    hosted_a = D(max_retention_hours=48, runs_fully_local=False)
-    hosted_b = D(max_retention_hours=12, runs_fully_local=False)
-    local = D(max_retention_hours=0, runs_fully_local=True)  # excluded — vendor holds nothing
-    ceiling, unverified, zdr = compute_retention_ceiling_hours(
-        [hosted_a, hosted_b, local], default_hours=999
-    )
-    assert ceiling == 12
-    assert unverified is False
-    assert zdr is False
-
-
-def test_retention_ceiling_falls_back_to_default_and_flags_unverified_when_hosted_hours_unknown():
-    from openreading.types.descriptor import ComplianceProfile
-
-    class D:
-        def __init__(self, **kw):
-            self.compliance = ComplianceProfile(**kw)
-
-    unverified_hosted = D(max_retention_hours=None, runs_fully_local=False)
-    ceiling, unverified, zdr = compute_retention_ceiling_hours(
-        [unverified_hosted], default_hours=24
-    )
-    assert ceiling == 24
-    assert unverified is True
-    assert zdr is False
-
-
-def test_retention_ceiling_zdr_flag_propagates():
-    from openreading.types.descriptor import ComplianceProfile
-
-    class D:
-        def __init__(self, **kw):
-            self.compliance = ComplianceProfile(**kw)
-
-    zdr_hosted = D(max_retention_hours=48, runs_fully_local=False, zdr_flag="vendor-zdr")
-    _ceiling, _unverified, zdr = compute_retention_ceiling_hours([zdr_hosted])
-    assert zdr is True
-
-
-def test_reap_destroys_keys_and_blobs_for_stamped_runs_past_their_ceiling_only():
-    root = Path
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as td:
-        root = Path(td)
-        keys = LocalFsKeyStore(root / "keys")
-        blobs = LocalFsBlobStore(root / "blobs", keys)
-        blobs.put("expired-run", "sha256:" + "0" * 64, b"data", "application/json")
-        blobs.put("fresh-run", "sha256:" + "1" * 64, b"data", "application/json")
-        stamp_run(root, "expired-run", expires_epoch_ms=1000, zdr=False)
-        stamp_run(root, "fresh-run", expires_epoch_ms=99_999_999_999, zdr=False)
-
-        reaped = reap(root, keys, root / "blobs", now_epoch_ms=50_000)
-
-        assert reaped == ["expired-run"]
-        assert not (root / "keys" / "expired-run.key").exists()
-        assert (root / "keys" / "fresh-run.key").exists()
-        assert not (root / "blobs" / "expired-run").exists()
-        assert (root / "blobs" / "fresh-run").exists()
-
-
-def test_reap_refuses_traversal_run_id(tmp_path):
-    """A stamp whose run_id escapes blobs_root must be skipped, never deleted."""
-    root = tmp_path / "ledger"
-    blobs = root / "blobs"
-    (root / "retention").mkdir(parents=True)
-    blobs.mkdir(parents=True)
-    keys = LocalFsKeyStore(root / "keys")
-    victim = tmp_path / "victim"
-    victim.mkdir()
-    (victim / "keep.txt").write_text("x")
-    for bad in ("../../victim", str(victim)):
-        (root / "retention" / "evil.json").write_text(
-            json.dumps({"run_id": bad, "expires_epoch_ms": 0})
-        )
-        reaped = reap(root, keys, blobs, now_epoch_ms=10)
-        assert bad not in reaped
-        assert (victim / "keep.txt").exists()
-
-
 def test_blobstore_path_refuses_traversal(tmp_path):
-    keys = LocalFsKeyStore(tmp_path / "keys")
-    store = LocalFsBlobStore(tmp_path / "blobs", keys)
+    store = LocalFsBlobStore(tmp_path / "blobs")
     with pytest.raises(ValueError):
         store.put("../escape", "sha256:" + "a" * 64, b"data", "application/octet-stream")
 
 
 def test_blobstore_path_refuses_malformed_digest(tmp_path):
-    """A run_id alone passing validation is not enough: the above test's malformed run_id makes
-    `LocalFsKeyStore._path` (via `get_or_create`) raise before `LocalFsBlobStore._path`'s own
-    digest check is ever reached. Here run_id is well-formed so the digest regex is the thing
-    that must do the refusing."""
-    keys = LocalFsKeyStore(tmp_path / "keys")
-    store = LocalFsBlobStore(tmp_path / "blobs", keys)
+    """run_id is well-formed here, so the digest regex is the thing that must do the refusing.
+    Both guards survive the removal of encryption: they keep a crafted id or digest from escaping
+    the blob root, which has nothing to do with whether the bytes were encrypted."""
+    store = LocalFsBlobStore(tmp_path / "blobs")
     with pytest.raises(ValueError):
         store.put("fine-run-id", "sha256:../../evil", b"x", "application/octet-stream")
 
 
-# ---- Task 14 / M6: AES-256-GCM authenticated encryption for ledger blobs -----------------------
+# ---- blobs are written as-is (design/ledger-policy-removal.md) --------------------------------
 
 
-def test_blobstore_put_writes_aead_format_and_get_roundtrips_the_plaintext(tmp_path):
-    keys = LocalFsKeyStore(tmp_path / "keys")
-    store = LocalFsBlobStore(tmp_path / "blobs", keys)
+def test_blobstore_put_and_get_round_trip_the_bytes(tmp_path):
+    store = LocalFsBlobStore(tmp_path / "blobs")
     digest = "sha256:" + "a" * 64
 
-    ref = store.put("run1", digest, b"authenticated plaintext", "text/plain")
+    ref = store.put("run1", digest, b"the document, in the clear", "text/plain")
 
-    on_disk = store._path("run1", digest).read_bytes()
-    assert on_disk[:1] == _FORMAT_AEAD  # new blobs are tagged with the AEAD format byte
-    assert store.get(ref) == b"authenticated plaintext"
-
-
-def test_blobstore_get_raises_payload_expired_when_ciphertext_bytes_are_tampered(tmp_path):
-    """Corruption/tampering on disk must be detected, not silently decrypted into garbage — the
-    entire point of moving off the old unauthenticated XOR stream (M6)."""
-    keys = LocalFsKeyStore(tmp_path / "keys")
-    store = LocalFsBlobStore(tmp_path / "blobs", keys)
-    digest = "sha256:" + "b" * 64
-    ref = store.put("run1", digest, b"authenticated plaintext", "text/plain")
-
-    path = store._path("run1", digest)
-    tampered = bytearray(path.read_bytes())
-    tampered[-1] ^= 0xFF  # flip one on-disk byte, inside the GCM tag appended to the ciphertext
-    path.write_bytes(bytes(tampered))
-
-    with pytest.raises(PayloadExpired):
-        store.get(ref)
-
-
-def test_blobstore_get_raises_payload_expired_not_valueerror_on_a_truncated_aead_blob(tmp_path):
-    """A 0x02-leading blob truncated short enough that even the nonce slice (`raw[1:13]`) comes
-    out under 8 bytes makes `AESGCM.decrypt` raise `ValueError` ("Nonce must be between 8 and 128
-    bytes") rather than `InvalidTag` -- verified empirically for every raw length from 1 to 8
-    bytes; 9+ bytes already raises `InvalidTag` on its own. Left uncaught, that `ValueError` would
-    contradict this module's own docstring, which says on-disk corruption is caught and re-raised
-    as `PayloadExpired` -- it still fails closed either way, but as the wrong, undocumented type.
-    """
-    keys = LocalFsKeyStore(tmp_path / "keys")
-    store = LocalFsBlobStore(tmp_path / "blobs", keys)
-    digest = "sha256:" + "d" * 64
-    ref = store.put("run1", digest, b"authenticated plaintext", "text/plain")
-
-    store._path("run1", digest).write_bytes(_FORMAT_AEAD + b"\x00\x00\x00")  # 4 bytes total
-
-    with pytest.raises(PayloadExpired):
-        store.get(ref)
-
-
-def test_blobstore_get_still_reads_a_legacy_xor_blob_written_before_the_aead_upgrade(tmp_path):
-    """A blob written by T1's pre-AEAD stream cipher (`nonce + _xor(data, _keystream(...))`, never
-    produced by today's `put` any more) must stay readable after the upgrade, so a run already
-    in flight when a deploy swaps the binary is not left holding blobs it can no longer open."""
-    keys = LocalFsKeyStore(tmp_path / "keys")
-    store = LocalFsBlobStore(tmp_path / "blobs", keys)
-    run_id = "run1"
-    key = keys.get_or_create(run_id)
-    data = b"pre-upgrade legacy plaintext"
-    # The REAL plaintext digest, not a placeholder: `get` now verifies it on the legacy path
-    # (the only integrity signal a pre-AEAD blob has), so a stand-in value would be a mismatch.
-    digest = "sha256:" + hashlib.sha256(data).hexdigest()
-    # First byte forced off 0x02 (`_FORMAT_AEAD`): a fully random 16-byte nonce collides with the
-    # AEAD marker ~1/256 of the time, which is exactly the documented "unreadable either way"
-    # case (see localfs.py's own comment on `_FORMAT_AEAD`) -- this test exercises the ordinary
-    # legacy-read path, not that intentionally-unreadable edge, so it must not be flaky on it.
-    nonce = b"\x00" + secrets.token_bytes(15)
-    legacy_blob = nonce + _xor(data, _keystream(key, nonce, len(data)))
-    store._path(run_id, digest).write_bytes(legacy_blob)
-
-    ref = BlobRef(
-        run_id=run_id, digest=digest, size_bytes=len(data), media_type="text/plain", store="localfs"
-    )
-    assert store.get(ref) == data
-
-
-def test_blobstore_get_rejects_a_legacy_xor_blob_whose_plaintext_digest_does_not_match(tmp_path):
-    """The legacy XOR cipher cannot fail — any ciphertext XOR a same-length keystream "succeeds"
-    — so without this check a tampered pre-AEAD blob is handed back as silently altered
-    plaintext, which is the whole failure mode the AEAD upgrade exists to close. The BlobRef's
-    own digest is the only integrity signal that format carries; `get` must actually check it."""
-    keys = LocalFsKeyStore(tmp_path / "keys")
-    store = LocalFsBlobStore(tmp_path / "blobs", keys)
-    run_id = "run1"
-    key = keys.get_or_create(run_id)
-    data = b"pre-upgrade legacy plaintext"
-    digest = "sha256:" + hashlib.sha256(data).hexdigest()
-    nonce = b"\x00" + secrets.token_bytes(15)  # off 0x02 — see the legacy-read test above
-    blob = bytearray(nonce + _xor(data, _keystream(key, nonce, len(data))))
-    blob[-1] ^= 0xFF  # flip one ciphertext bit: decodes cleanly, to the WRONG plaintext
-
-    store._path(run_id, digest).write_bytes(bytes(blob))
-    ref = BlobRef(
-        run_id=run_id, digest=digest, size_bytes=len(data), media_type="text/plain", store="localfs"
-    )
-
-    with pytest.raises(PayloadExpired):
-        store.get(ref)
-
-
-def test_blobstore_get_rejects_a_truncated_legacy_xor_blob(tmp_path):
-    """Truncation is the other way a legacy blob goes bad on disk, and it too decodes without
-    error (to a short plaintext) — the digest check is what turns it into a refusal rather than
-    a silently shortened payload."""
-    keys = LocalFsKeyStore(tmp_path / "keys")
-    store = LocalFsBlobStore(tmp_path / "blobs", keys)
-    run_id = "run1"
-    key = keys.get_or_create(run_id)
-    data = b"pre-upgrade legacy plaintext"
-    digest = "sha256:" + hashlib.sha256(data).hexdigest()
-    nonce = b"\x00" + secrets.token_bytes(15)
-    blob = nonce + _xor(data, _keystream(key, nonce, len(data)))
-
-    store._path(run_id, digest).write_bytes(blob[:-4])
-    ref = BlobRef(
-        run_id=run_id, digest=digest, size_bytes=len(data), media_type="text/plain", store="localfs"
-    )
-
-    with pytest.raises(PayloadExpired):
-        store.get(ref)
-
-
-def test_reap_refuses_run_id_whose_blobs_entry_resolves_outside_blobs_root(tmp_path):
-    """A run_id can be well-formed (passes VALID_RUN_ID, so the regex alone lets it through) and
-    still escape if the entry it names under blobs_root is a symlink to somewhere else — proves
-    the resolve()/is_relative_to containment check earns its keep independent of the regex."""
-    root = tmp_path / "ledger"
-    blobs = root / "blobs"
-    (root / "retention").mkdir(parents=True)
-    blobs.mkdir(parents=True)
-    keys = LocalFsKeyStore(root / "keys")
-    victim = tmp_path / "victim"
-    victim.mkdir()
-    (victim / "keep.txt").write_text("x")
-    (blobs / "goodname").symlink_to(victim)
-    (root / "retention" / "goodname.json").write_text(
-        json.dumps({"run_id": "goodname", "expires_epoch_ms": 0})
-    )
-    reaped = reap(root, keys, blobs, now_epoch_ms=10)
-    assert "goodname" not in reaped
-    assert (victim / "keep.txt").exists()
-
-
-def test_reap_expired_now_is_a_noop_without_a_configured_ledger_root(monkeypatch):
-    """`api.reap_expired_now` is the server-startup counterpart to `_arm_ledger`'s at-run-start
-    sweep (M7) — it must stay silent, not raise, on a deployment with no `OPENREADING_LEDGER`."""
-    monkeypatch.delenv("OPENREADING_LEDGER", raising=False)
-    assert api.reap_expired_now() == []
-
-
-def test_reap_expired_now_reaps_stamped_runs_past_their_ceiling(tmp_path, monkeypatch):
-    """Same destroy-key-and-blobs behavior as `reap()` itself (proven above), reached through the
-    path a server actually calls: an idle process that arms no new run still enforces expiry."""
-    ledger_root = tmp_path / "ledger"
-    monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
-    keys = LocalFsKeyStore(ledger_root / "keys")
-    blobs = LocalFsBlobStore(ledger_root / "blobs", keys)
-    blobs.put("expired-run", "sha256:" + "0" * 64, b"data", "application/json")
-    blobs.put("fresh-run", "sha256:" + "1" * 64, b"data", "application/json")
-    stamp_run(ledger_root, "expired-run", expires_epoch_ms=1, zdr=False)
-    # Unlike reap() above, this goes through the real wall clock (RealClock), not an injected fake
-    # `now_epoch_ms` — "fresh" has to outlast the actual time this test runs, not just outlast 10.
-    stamp_run(ledger_root, "fresh-run", expires_epoch_ms=4_102_444_800_000, zdr=False)  # 2100-01-01
-
-    reaped = api.reap_expired_now()
-
-    assert reaped == ["expired-run"]
-    assert not (ledger_root / "keys" / "expired-run.key").exists()
-    assert (ledger_root / "keys" / "fresh-run.key").exists()
-    assert not (ledger_root / "blobs" / "expired-run").exists()
-    assert (ledger_root / "blobs" / "fresh-run").exists()
-
-
-def test_reap_skips_a_malformed_stamp_without_crashing_the_whole_sweep(tmp_path):
-    """M7 review finding: a stamp is untrusted input, same thesis as the run_id containment checks
-    above — one that fails to parse must be skipped, not raised, or moving retention enforcement
-    into `server.app.create_app` at startup would mean one corrupted `retention/*.json` takes the
-    entire server down at boot instead of just failing a single run-arm request. Sorted glob order
-    ("corrupted.json" < "expired-run.json") puts the bad stamp first, so this also proves a bad
-    stamp doesn't stop the sweep from reaching the ones after it."""
-    root = tmp_path / "ledger"
-    keys = LocalFsKeyStore(root / "keys")
-    blobs = LocalFsBlobStore(root / "blobs", keys)
-    blobs.put("expired-run", "sha256:" + "0" * 64, b"data", "application/json")
-    stamp_run(root, "expired-run", expires_epoch_ms=1, zdr=False)
-    bad_stamp = root / "retention" / "corrupted.json"
-    bad_stamp.write_text("{not valid json", encoding="utf-8")
-
-    reaped = reap(root, keys, root / "blobs", now_epoch_ms=50_000)
-
-    assert reaped == ["expired-run"]  # the valid, expired stamp is still reaped
-    assert bad_stamp.read_text(encoding="utf-8") == "{not valid json"  # left for a human, untouched
-
-
-def test_reap_expired_now_is_a_noop_when_the_configured_root_is_a_file(tmp_path, monkeypatch):
-    """M7 review finding: a misconfigured `OPENREADING_LEDGER` pointing at a FILE rather than a
-    directory must not crash server startup either. `LocalFsKeyStore.__init__`'s own mkdir raises
-    `NotADirectoryError` when a path component is a file, so the guard must run before that
-    construction, not around it. A missing root is already a no-op (existing behavior); this
-    covers the file-instead-of-directory misconfiguration alongside it."""
-    not_a_dir = tmp_path / "ledger-is-a-file"
-    not_a_dir.write_text("oops", encoding="utf-8")
-    monkeypatch.setenv("OPENREADING_LEDGER", str(not_a_dir))
-
-    assert api.reap_expired_now() == []
+    # Readable with `open()`, which is the plainest statement of what the ledger stores. The key
+    # that used to protect this sat one directory away from it.
+    assert store._path("run1", digest).read_bytes() == b"the document, in the clear"
+    assert store.get(ref) == b"the document, in the clear"
 
 
 def test_header_path_refuses_traversal_run_id(tmp_path):
@@ -962,65 +624,6 @@ def test_step_result_payload_rejects_a_set_rather_than_silently_coercing_to_a_li
         StepResult(step_id="s1", status="ok", attempt=1, payload={1, 2, 3})
 
 
-def test_zdr_flagged_backend_suppresses_the_blob_write_entirely():
-    # review High 1: (rescoped Phase C round-2, Findings 8 and 6): a ZDR-flagged
-    # backend's OWN step must retain zero content — InlineExecutor must never call blobs.put for a
-    # step whose OWN `backend_id` resolves to a ZDR-flagged descriptor. The whole-run `zdr=`
-    # boolean this test used to arm directly is gone; the gate is now a per-step registry lookup
-    # off `req.backend_id`, so this test arms a real registry with a ZDR-flagged "reducto" instead.
-    from tests.fakes import ScriptedBackend, scripted_registry
-
-    class FailingBlobs:
-        def put(self, *a, **kw):
-            raise AssertionError("blobs.put must never be called on a ZDR step")
-
-        def get(self, ref):
-            raise AssertionError("not exercised")
-
-    class FakeResp:
-        def to_schema_dict(self):
-            return {"sensitive": "phi content"}
-
-    class SpyJournal:
-        def __init__(self):
-            self.results = []
-
-        def append(self, result):
-            self.results.append(result)
-            return result
-
-        def get(self, ref):
-            return []
-
-    reducto = ScriptedBackend("reducto", local=False)
-    reducto.descriptor = reducto.descriptor.model_copy(
-        update={
-            "compliance": reducto.descriptor.compliance.model_copy(
-                update={"zdr_flag": "zdr_tier_gated"}
-            )
-        }
-    )
-    registry = scripted_registry(reducto)
-
-    journal = SpyJournal()
-    ex = InlineExecutor(journal=journal, blobs=FailingBlobs(), registry=registry, clock=RealClock())
-    req = StepRequest(
-        step_id="s1",
-        run_id="r1",
-        kind="submit",
-        step_path="root",
-        step_seq=0,
-        attempt=1,
-        backend_id="reducto",
-    )
-    result = asyncio.run(ex.exec(req, run=lambda: FakeResp()))
-    assert result is not None
-    assert result.status == "ok"
-    terminal = journal.results[-1]
-    assert terminal.status == "ok"
-    assert terminal.payload is None  # journal metadata only — no content retained
-
-
 def test_arm_ledger_populates_the_sanitizer_with_real_resolved_secret_values(tmp_path, monkeypatch):
     # review High 2: a static, empty Sanitizer() never has anything to scrub against — _arm_ledger
     # must feed it every eligible descriptor's actually-resolved secret values.
@@ -1047,36 +650,6 @@ def test_arm_ledger_populates_the_sanitizer_with_real_resolved_secret_values(tmp
     assert isinstance(executor, InlineExecutor)
     assert "sk-live-canary-value" in executor._sanitizer._secret_values
     assert executor._sanitizer.scrub_text("token=sk-live-canary-value end") == "token=*** end"
-
-
-def test_shredded_run_leaves_no_key_byte_anywhere_under_journal_or_blob_directories(tmp_path):
-    # a reviewer Medium: the design's own named T1 acceptance test for §9.4 — scan every byte under the
-    # journal/blob directories for the key material, not just check the key file's own existence.
-    root = tmp_path
-    journal = JsonlJournal(root / "run1.jsonl")
-    keys = LocalFsKeyStore(root / "keys")
-    blobs = LocalFsBlobStore(root / "blobs", keys)
-    ex = InlineExecutor(journal=journal, blobs=blobs, registry=None, clock=RealClock())
-
-    class FakeResp:
-        def to_schema_dict(self):
-            return {"n": 1, "text": "some response content"}
-
-    key_bytes = keys.get_or_create("run1")  # mint the key before dispatch, as put() would anyway
-    req = StepRequest(
-        step_id="s1",
-        run_id="run1",
-        kind="submit",
-        step_path="root",
-        step_seq=0,
-        attempt=1,
-        backend_id="fake",
-    )
-    asyncio.run(ex.exec(req, run=lambda: FakeResp()))
-
-    for path in [*root.glob("*.jsonl"), *root.glob("blobs/**/*.bin")]:
-        data = path.read_bytes()
-        assert key_bytes not in data, f"key material leaked into {path}"
 
 
 def test_planted_canaries_in_password_and_webhook_url_never_reach_disk(
@@ -1271,61 +844,12 @@ def _arm(root, run_id, clock):
     return api._arm_ledger(run_id, req, _null_registry(), EnvCredentialBroker(), clock, [])
 
 
-def test_retention_stamp_is_an_absolute_utc_epoch(tmp_path, monkeypatch):
-    """The stamp outlives the process that wrote it, so it may only hold a clock whose zero point
-    outlives the process too. A monotonic reading is uptime: written to disk it reads as 1970 and
-    is meaningless to the next process that compares against it."""
-    import time
-
-    root = tmp_path / "ledger"
-    monkeypatch.setenv("OPENREADING_LEDGER", str(root))
-    monkeypatch.delenv("OPENREADING_LEDGER_RETENTION_HOURS", raising=False)
-    _arm(root, "run-A", RealClock())
-
-    stamp = json.loads((root / "retention" / "run-A.json").read_text())
-    now_wall = time.time() * 1000.0
-    assert now_wall < stamp["expires_epoch_ms"] <= now_wall + 24 * 3600_000 + 60_000, (
-        "expires_epoch_ms must be `wall now + the retention window`, per .env.example's own "
-        "'absolute UTC epoch'"
-    )
-
-
-def test_a_run_past_its_retention_window_is_reaped_after_a_reboot(tmp_path, monkeypatch):
-    """`time.monotonic()`'s reference point is the boot, and Python leaves it formally undefined.
-    Stamped with a monotonic reading, a run armed on a machine 16 days into its uptime records an
-    expiry ~17 days out; after a reboot the reaper's own `now` is minutes, so the comparison says
-    "not yet" and the key survives for as long as the next boot session takes to reach 17 days of
-    uptime. That is PHI held past a retention window an operator attested to."""
-    root = tmp_path / "ledger"
-    monkeypatch.setenv("OPENREADING_LEDGER", str(root))
-    monkeypatch.setenv("OPENREADING_LEDGER_RETENTION_HOURS", "24")
-
-    day_ms = 24 * 3600_000
-    wall_at_arm = 1_700_000_000_000.0
-
-    # A machine 16 days into its uptime arms a run and mints its content key.
-    _arm(root, "phi-run", FakeClock(start_ms=16 * day_ms, wall_start_ms=wall_at_arm))
-    LocalFsKeyStore(root / "keys").get_or_create("phi-run")
-    assert (root / "keys" / "phi-run.key").exists()
-
-    # --- reboot --- uptime restarts near zero; 25 wall-clock hours have passed, so the 24-hour
-    # window is over. The next armed run runs the sweep (there is no cron; see ledger/README.md).
-    _arm(root, "next-run", FakeClock(start_ms=120_000, wall_start_ms=wall_at_arm + 25 * 3600_000))
-
-    assert not (root / "keys" / "phi-run.key").exists(), (
-        "an expired run must be reaped after a reboot — the stamp and the reaper's `now` must "
-        "share a clock base whose zero point survives one"
-    )
-    assert not (root / "retention" / "phi-run.json").exists()
-
-
 def test_journal_timestamps_are_absolute_utc_epochs(tmp_path):
     """`started_epoch_ms`/`ended_epoch_ms` are the journal's only answer to "when did this run".
     Holding a monotonic reading they load as 1970-01-17 in every audit row, silently."""
     root = tmp_path
     journal = JsonlJournal(root / "run1.jsonl")
-    keys = LocalFsKeyStore(root / "keys")
-    blobs = LocalFsBlobStore(root / "blobs", keys)
+    blobs = LocalFsBlobStore(root / "blobs")
     wall_start = 1_700_000_000_000.0
     ex = InlineExecutor(
         journal=journal,

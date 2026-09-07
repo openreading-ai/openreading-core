@@ -456,6 +456,24 @@ and `tests/test_schema_evolution.py` pins every released file byte for byte.
 - **`compare <missing.pdf> --backends a,b` is usage, not an errno.** `parse` refused a mistyped
   filename at exit 2 with a sentence; fan-out returned a raw `SourceNotFoundError: [Errno 2]` at
   exit 1.
+- **The ledger keeps no policy about your disk.** Retention, the reaper, the expiry stamp,
+  `OPENREADING_LEDGER_RETENTION_HOURS`, `OPENREADING_RETENTION_SWEEP_S` and the server's sweep
+  loop are all removed, and so is encryption at rest. Retention was a destructor whose only job
+  was deleting the caller's data on a timer, defaulting to a number its own source marked
+  `# placeholder`, with a ceiling derived from `min(max_retention_hours)` across vendor
+  descriptors: an unverifiable claim about somebody else's servers decided when files on your
+  machine were destroyed. Encryption kept `keys/<run_id>.key` in the same directory tree as the
+  ciphertext it protected, so it bought one narrow scenario at the cost of a native dependency on
+  every install. **`cryptography` is no longer a dependency.** Erasure is `rm`, on whatever
+  schedule your own policy sets.
+- **`OPENREADING_LEDGER` says what it copies.** Arming it means "copy every document I process,
+  and every full response, into this directory, in the clear". The response blob is written
+  whatever `include_backend_raw` / `typed_fields` / `image` the request asked for, so the ledger
+  can hold data a caller excluded from their own response. That disclosure is now in the
+  `openreading.ledger` docstring, where the variable is documented.
+- **A run journaled by an older build cannot be read by this one.** Its blobs are encrypted and
+  nothing here decrypts them. The content is reproducible by re-running, and the ledger is
+  arming-gated and pre-release, so no decryptor ships.
 - **The router no longer decides what a backend can read.** The stage-2 format gate dropped a
   backend when the request's MIME type fell outside its descriptor's `input_formats`. Measured
   before removal: `.docx` dropped nine backends and `.svg` dropped none, because an unknown

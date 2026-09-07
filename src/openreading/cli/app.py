@@ -68,7 +68,6 @@ from openreading.batch.sources import (
 from openreading.cli.help import cmd_help
 from openreading.credentials import EnvCredentialBroker, load_dotenv
 from openreading.ledger.header import HeaderMismatch
-from openreading.ledger.ports import PayloadExpired
 from openreading.liveness import check_liveness, probe_kind
 from openreading.readiness import (
     auth_rejected_backends,
@@ -513,9 +512,6 @@ def cmd_resume(args) -> int:
         )
         return 3
     except LookupError as e:
-        print(f"[resume] {e}", file=sys.stderr)
-        return 3
-    except PayloadExpired as e:
         print(f"[resume] {e}", file=sys.stderr)
         return 3
     except PlanExhaustedError as e:

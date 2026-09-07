@@ -59,7 +59,7 @@ Environment variables this module reads. Server-only (the CLI and Python API ign
 OPENREADING_API_KEYS, OPENREADING_API_KEY_SCOPES, OPENREADING_SERVER_PATH_ROOT,
 OPENREADING_JOB_TTL_S, OPENREADING_MAX_ASYNC_JOBS, OPENREADING_MAX_JOBS_PER_PRINCIPAL,
 OPENREADING_MAX_BODY_BYTES, OPENREADING_MAX_COMPARE_BYTES,
-OPENREADING_ALLOW_UNSIGNED_WEBHOOKS, OPENREADING_RETENTION_SWEEP_S and the three
+OPENREADING_ALLOW_UNSIGNED_WEBHOOKS and the three
 compliance attestation knobs. OPENREADING_CONFIG and the backend credential vars are shared with
 the CLI / Python API, which read them through the same strategy loader and EnvCredentialBroker.
   OPENREADING_API_KEYS — comma-separated bearer tokens (_load_api_key_config, once at startup).
@@ -87,74 +87,10 @@ the CLI / Python API, which read them through the same strategy loader and EnvCr
     implied type ride along as `mime_type`. The CLI and Python API never read this var —
     `document.path` there names a file the SAME process already trusts, which is why the gate is
     HTTP-only.
-  OPENREADING_RETENTION_SWEEP_S — seconds between ledger retention sweeps while serving
-    (default 3600; `0` disables the timer). The reaper otherwise fires only when a run arms and
-    once at startup, so a server that goes idle holds expired content past its retention ceiling
-    for as long as it stays idle. Parsed at `create_app` — a malformed value is a startup failure,
-    not a silent fall back to the default, because a retention timer nobody noticed had reverted
-    is a policy failure rather than an inconvenience (`_retention_sweep_seconds`).
-  OPENREADING_MAX_COMPARE_BYTES — bytes ceiling on a POST /v1/compare body (default 8 MB), read
-    once at import. Separate from OPENREADING_MAX_BODY_BYTES because compare is the one endpoint
-    whose work is not linear in its input: it runs a pairwise SequenceMatcher matrix, so an
-    oversized body is CPU amplification rather than merely a large parse. Over the ceiling is 400,
-    never a truncated comparison — whatever is accepted is compared in full.
-  OPENREADING_ALLOW_UNSIGNED_WEBHOOKS — `1`/`true`/`yes` accepts an inbound event from a backend
-    that cannot sign (chunkr, open-ocr) WITHOUT the per-job callback token the server appended to
-    the URL it registered — i.e. on the vendor's task id alone, which is what anyone who saw that
-    id can forge. Unset (the default) refuses it with 401. The hatch exists for a vendor that
-    strips query parameters from the callback URL it is given; it buys working webhooks at the
-    price of forgeable completions (`_allow_unsigned_webhooks`).
-  OPENREADING_CONFIG — path to the openreading.yaml, loaded once in create_app with
-    allow_cwd=False. Its `policy:` block is this deployment's compliance posture, folded into
-    EVERY request before it routes, whether or not the request names a strategy
-    (`openreading.config.apply`). Unset ⇒ no policy and no user-defined strategies: the presets
-    (`openreading.strategies.presets`) still run configless through api.run_request; any other
-    `strategy:<name>` → 400 unknown_strategy. The server never sniffs `./openreading.yaml` in its
-    cwd (D-v3-5), so this is the only non-flag way to load one. A file that fails the config
-    schema, or whose `policy:` block is not a policy, fails startup: an operator learns the file
-    is wrong from the process that will not start, not from one caller's 500. Also discovery step
-    2 for the CLI / Python API (`openreading.config`).
-  Backend credential vars (REDUCTO_API_KEY, the AWS_* chain, REDUCTO_WEBHOOK_SECRET, ...) —
-    resolved per request through EnvCredentialBroker (`openreading.credentials`), never taken
-    from a body. A missing key on a named backend ⇒ 424 naming the var; a missing
-    REDUCTO_WEBHOOK_SECRET ⇒ reducto webhooks 401 (fail closed).
-  OPENREADING_LEDGER — NOT read here: arming the ledger covers CLI/Python `parse`/`resume` and a
-    /v1/parse strategy run via api.run_request, but the /v1/jobs store stays in-memory,
-    per-process, with no server-side resume (internal/design/ledger.md §10).
-  OPENREADING_JOB_TTL_S / OPENREADING_MAX_ASYNC_JOBS — bound the /v1/jobs store (M4): a TERMINAL
-    record (`Job.is_terminal()`) older than OPENREADING_JOB_TTL_S seconds, measured from its own
-    `created_ms`, is deleted the next time ANY submit or GET touches the store (`_sweep_jobs`) —
-    lazily, since this server has no scheduler thread; a non-terminal record is never swept
-    regardless of age, so a still-running job can never be reaped out from under a caller
-    mid-poll. Unset ⇒ 3600s / 1000 jobs. A submit at or over the cap is refused with 429
-    `rate_limited` before its body is even parsed, let alone an adapter resolved or called.
-    `DELETE /v1/jobs/{job_id}` (204, or 404 `unknown_job` — the same envelope GET's own 404 uses)
-    frees a slot immediately on any job regardless of state, without waiting on the TTL.
-  OPENREADING_MAX_JOBS_PER_PRINCIPAL — how many of those records ONE configured API key may hold
-    (default 100). `OPENREADING_MAX_ASYNC_JOBS` alone is a single shared counter, so the caller who
-    fills it 429s everyone else; this bounds each key within it. Only in force when
-    OPENREADING_API_KEYS is set — with auth off every request is the same anonymous principal, and
-    metering that would only restate the global cap. The identity metered is a digest of the key
-    (`_principal_id`), never the key.
-  OPENREADING_MAX_BODY_BYTES — bytes ceiling for `_BodyLimitMiddleware` (M2), read once at module
-    import into the module-level `_MAX_BODY_BYTES` (same pattern as OPENREADING_JOB_TTL_S /
-    OPENREADING_MAX_ASYNC_JOBS above) — setting the env var after this module is already imported
-    has no effect, which is why tests monkeypatch `_MAX_BODY_BYTES` itself rather than the env
-    var. Unset ⇒ 150 MiB (157286400): the 100 MB document cap, base64-inflated by ~4/3, plus
-    headroom for the surrounding JSON envelope. A declared Content-Length over the cap
-    ⇒ 413 before the app reads any of the body; a chunked/undeclared-length body is only cut off
-    mid-stream once the running total passes the cap, which degrades to whatever the app does with
-    a disconnected receive rather than a clean 413 (best-effort — see `_BodyLimitMiddleware`).
-  OPENREADING_JOB_TTL_S, OPENREADING_MAX_ASYNC_JOBS, OPENREADING_MAX_JOBS_PER_PRINCIPAL,
-  OPENREADING_MAX_COMPARE_BYTES and OPENREADING_MAX_BODY_BYTES are parsed with `int()` at module
-  import, before `create_app` runs. A value that is not a decimal integer, the empty string
-  included, raises `ValueError` there. `openreading serve` prints that as a traceback, not as the
-  tagged `[serve]` line a `ServerConfigError` gets.
 """
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import contextlib
 import hashlib
@@ -921,62 +857,6 @@ class _BodyLimitMiddleware:
         await send({"type": "http.response.body", "body": body})
 
 
-_RETENTION_SWEEP_DEFAULT_S = 3600.0
-
-
-def _retention_sweep_seconds() -> float:
-    """Seconds between retention sweeps while the server is serving (default 1 hour; `0` off).
-
-    Read per `create_app`, not once at import, so a test or an embedder can set it before building
-    an app. A malformed value raises `ServerConfigError` from `create_app` — the same fail-at-boot
-    contract `_load_api_key_config` gives the key settings, for the same reason: a retention timer
-    that silently fell back to a default would be a policy failure nobody noticed."""
-    raw = os.environ.get("OPENREADING_RETENTION_SWEEP_S", "").strip()
-    if not raw:
-        return _RETENTION_SWEEP_DEFAULT_S
-    try:
-        return max(0.0, float(raw))
-    except ValueError:
-        raise ServerConfigError(
-            "OPENREADING_RETENTION_SWEEP_S must be a number of seconds (0 disables the sweep)"
-        ) from None
-
-
-async def _sweep_retention_forever(interval: float) -> None:
-    """Call `api.reap_expired_now()` every `interval` seconds until cancelled.
-
-    M7's remaining half. The reaper fired when a run armed and (since the first pass) once at
-    startup, so a server that went idle held content past its retention ceiling until something
-    happened to wake it — indefinitely, on a deployment that gets no traffic for a while.
-    Retention is a promise about elapsed time, so something has to watch the clock.
-
-    Every exception is swallowed and the loop continues: a sweep that failed once — an
-    unreachable ledger root, a transient filesystem error — must not silently end retention
-    enforcement for the life of the process, which is exactly what letting the task die would do.
-    `reap_expired_now` already fails open internally on OSError; this is the backstop for
-    everything else. The sweep itself is filesystem work, so it runs off the event loop.
-    """
-    while True:
-        await asyncio.sleep(interval)
-        with contextlib.suppress(Exception):
-            await run_in_threadpool(api.reap_expired_now)
-
-
-@contextlib.asynccontextmanager
-async def _lifespan(app: FastAPI):
-    """Owns the retention sweeper for as long as the process is serving, and cancels it on
-    shutdown so a test client (or a reloading dev server) does not leave one running per app."""
-    interval = app.state.retention_sweep_s
-    task = asyncio.create_task(_sweep_retention_forever(interval)) if interval > 0 else None
-    try:
-        yield
-    finally:
-        if task is not None:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-
-
 def create_app(*, cors_origins: list[str] | None = None):
     """Build the FastAPI app that `openreading serve` runs.
 
@@ -984,26 +864,16 @@ def create_app(*, cors_origins: list[str] | None = None):
     once, from the process environment. A malformed value raises `ServerConfigError` before the
     app binds a socket, so a broken setting fails at startup rather than on a later request.
     Pass `cors_origins` to allow those browser origins, or leave it None to keep CORS off. The
-    returned app owns the in-memory job store, the `auto` result cache and the retention sweeper
-    for as long as it lives. The full endpoint contract is the `openreading.server` package
+    returned app owns the in-memory job store and the `auto` result cache for as long as it
+    lives. The full endpoint contract is the `openreading.server` package
     docstring, and this module's docstring above lists the settings.
     """
-    app = FastAPI(title="OpenReading", version=__version__, lifespan=_lifespan)
-    # Parsed here so a malformed value fails at app construction (AC-7's contract), even though
-    # the sweeper it configures only starts once something actually serves the app.
-    app.state.retention_sweep_s = _retention_sweep_seconds()
+    app = FastAPI(title="OpenReading", version=__version__)
     jobs: dict[str, JobRecord] = {}
     app.state.jobs = jobs  # exposed for tests to seed async/webhook jobs offline
     # Idempotency cache for the /v1/parse `auto` chain: one per app, so it lives as long as the
     # server process and never crosses into another app instance (D-v3-3).
     app.state.result_cache = BoundedResultCache()
-
-    # M7: the ledger's own reap only fires when a NEW run arms (`_arm_ledger`), so a server that
-    # goes idle after its last request would otherwise hold expired content past its retention
-    # ceiling until something else happened to run. This is the sweep at boot; `_lifespan` keeps
-    # one running on a timer thereafter, which is what covers a server that never goes busy again.
-    # A no-op when OPENREADING_LEDGER is unset.
-    api.reap_expired_now()
 
     # The openreading.yaml is loaded ONLY from OPENREADING_CONFIG — the server never sniffs its
     # cwd (spec §1.2). A broken file fails fast at startup, and so does a `policy:` block that is

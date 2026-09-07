@@ -158,8 +158,8 @@ DEFAULT_NATIVE_BATCH_DEADLINE_MS for native batch); callers convert it via
 Ledger per-run keys: with `OPENREADING_LEDGER` armed, the ledger root holds `<run_id>.jsonl` (the
 journal: one line per StepResult, append-only), `blobs/` (payloads, encrypted under a per-run key)
 and `keys/` (dir 0700, one 0600 key file per run). Exclude `keys/` from every backup, replica or
-snapshot of the ledger root: crypto-shredding a run (the key-destroy path or the at-arm-time
-retention reaper) deletes that one file, which erases the run's content O(1) across every replica
+snapshot of the ledger root: the run's blobs are the run's content, and deleting that directory
+is how an operator erases it
 and backup at once — the reason erasure is key destruction rather than blob deletion — and the
 guarantee holds only to the degree no other copy of the key survives. A shredded run is
 permanently non-replayable by design (`openreading resume RUN_ID` / `openreading.resume(...)`

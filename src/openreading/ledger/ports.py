@@ -25,30 +25,6 @@ from openreading.ledger.step import BlobRef, ExecResult, StepRef, StepRequest, S
 from openreading.types.errors import TerminalError
 
 
-class PayloadExpired(Exception):
-    """Raised by `BlobStore.get` for a payload it cannot hand back, in any of three disjoint
-    cases: the run's key has been destroyed (`KeyStore.destroy`) — the journal record survives,
-    the plaintext does not (§9.4's "third terminal state"); or, since the AES-256-GCM upgrade
-    (M6), the stored ciphertext fails authentication or is truncated/malformed (tampering or
-    on-disk corruption; `get` catches `cryptography`'s `InvalidTag` and, for a blob truncated
-    short enough that even the nonce is malformed, `ValueError`, re-raising either as this same
-    type); or a LEGACY (pre-M6) blob's decoded plaintext does not match the digest its `BlobRef`
-    carries — that format has no authentication tag, so the separately-recorded digest is the only
-    integrity signal it has, and checking it there is what keeps a tampered legacy blob from
-    coming back as silently altered bytes. All three are "this store cannot produce a trustworthy
-    plaintext for this ref," and every existing caller already treats `PayloadExpired` as one
-    undifferentiated terminal condition (see `InlineExecutor._resolve_replay_payload`'s
-    `except PayloadExpired`) — a new cause reuses the type and supplies a distinguishing `reason`
-    rather than forking the taxonomy.
-    """
-
-    def __init__(
-        self, run_id: str, *, reason: str = "key destroyed, payload unrecoverable"
-    ) -> None:
-        super().__init__(f"run {run_id!r}: {reason}")
-        self.run_id = run_id
-
-
 class LedgerArmingError(TerminalError):
     """`$OPENREADING_LEDGER` names a path this process cannot journal to.
 
@@ -111,14 +87,13 @@ class Journal(Protocol):
 
 
 class BlobStore(Protocol):
-    """Content-addressed payload store keyed by `(run_id, digest)`. `get` raises `PayloadExpired`
+    """Content-addressed payload store keyed by `(run_id, digest)`. `get` raises `FileNotFoundError`
     once the run's key is gone."""
 
     def put(self, run_id: str, digest: str, data: bytes, media_type: str) -> BlobRef: ...
 
     def get(self, ref: BlobRef) -> bytes:
-        """Raises `PayloadExpired` once the run's key is destroyed, or if the stored ciphertext
-        fails authentication (tampering or on-disk corruption)."""
+        """Raises `FileNotFoundError` when no blob was stored for this ref."""
         ...
 
 

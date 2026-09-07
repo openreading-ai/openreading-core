@@ -528,9 +528,7 @@ vendor and must not appear to enforce one (design records: `design/compliance-re
 `product/specs/compliance-removal.product-spec.md`); the stage-2 format gate goes the same way,
 and the several extension-to-MIME tables collapse into one resolver that answers "unknown"
 instead of guessing PDF (design record: `design/format-agnostic-intake.md`); the ledger stops
-holding any policy about the caller's own disk, so retention, the reaper and encryption at rest
-all leave, because a directory on your own machine is yours to keep or delete (design record:
-`design/ledger-policy-removal.md`); `optimize_for`, the stage-3 scorer, the capability gate and
+`optimize_for`, the stage-3 scorer, the capability gate and
 `auto` itself go with them, so choosing a backend becomes a lookup rather than an inference, the
 one the caller wrote (design records: `design/explicit-backends.md`,
 `design/unverifiable-claims-sweep.md`). Vendor pricing goes the same way, so `usage` keeps the

@@ -114,7 +114,7 @@ plain KeyError never escapes as an undocumented crash — BL-99/BL-106) · `Retr
 directly-named backend's rate-limit exhaustion or a poll loop past its deadline — it has no next
 rung, so it surfaces under its own type; the `auto` path folds the same condition into
 `PlanExhaustedError` via D-v2-7.2) · `batch.runner.JobsLimitError` (`jobs > max_jobs`) ·
-`LookupError` / `ledger.header.HeaderMismatch` / `PayloadExpired` (resume, below).
+`LookupError` / `ledger.header.HeaderMismatch` (resume, below).
 
 Time budgets
 ------------
@@ -168,17 +168,6 @@ Environment variables read by this module
   while appearing armed — know which row you are on before relying on a run being resumable.
   Back up `*.jsonl` and `blobs/`, never `keys/` alongside them: erasure works by destroying the
   per-run key, and holds only to the degree no other copy survives.
-- `OPENREADING_LEDGER_RETENTION_HOURS` — float hours a run's payloads live before the reaper
-  crypto-shreds the key. Default `ledger.retention.DEFAULT_RETENTION_HOURS` (24.0, a provisional
-  default rather than a policy recommendation). Read once at arm time and stamped as an absolute
-  epoch. A value `float()` cannot parse fails the run at arm time, at exit 1, with a `ValueError`
-  that does not name this variable. It is only the STARTING ceiling — `InlineExecutor` tightens it
-  per step from each DISPATCHED backend's own `max_retention_hours` and never widens it (a
-  merely-eligible backend that never dispatches has zero effect; earlier it could collapse the
-  whole run's ceiling to its own strict limit). A ZDR backend on the path suppresses blobs
-  entirely. Raise it BEFORE the run: after the key is reaped, replay reports `payload_expired` and
-  nothing brings the content back. A fresh run also sweeps the whole ledger root at arm time, so
-  stale runs are collected by ordinary use.
 - `OPENREADING_ALLOW_PRIVATE_URLS` — read by `_download` (`materialize_document`'s own URL
   fetch). Unset (default): before any request leaves this process, `_assert_public_http_url`
   refuses a non-http(s) scheme and a host that resolves to a loopback/private/link-local/reserved
@@ -216,7 +205,7 @@ terminal replays byte-identical with zero network; anything unreached executes f
 request is rebuilt from the header's encrypted `document` blob + plaintext `slim_request`
 (`document.url` is treated as a secret — routinely a presigned URL — and lives in the blob store,
 never the sidecar; `document.password` / `async.webhook_url` are never persisted). `LookupError`
-when `OPENREADING_LEDGER` is unset or no header exists (CLI exit 3 for both); `PayloadExpired`
+when `OPENREADING_LEDGER` is unset or no header exists (CLI exit 3 for both)
 propagates once the run's key is shredded.
 
 Decisions recorded for this module (durable, one line each)
@@ -280,13 +269,8 @@ from openreading.ledger.header import (
 )
 from openreading.ledger.inline import InlineExecutor, descriptor_digest
 from openreading.ledger.jsonl import JsonlJournal
-from openreading.ledger.localfs import LocalFsBlobStore, LocalFsKeyStore
+from openreading.ledger.localfs import LocalFsBlobStore
 from openreading.ledger.ports import Executor, LedgerArmingError
-from openreading.ledger.retention import (
-    DEFAULT_RETENTION_HOURS,
-    reap,
-    stamp_run,
-)
 from openreading.ledger.sanitizer import Sanitizer
 from openreading.readiness import auth_hinted, missing_required
 from openreading.router.clock import RealClock
@@ -546,7 +530,7 @@ def _arm_ledger(*args, **kwargs) -> Executor | None:
     ledger's, by name.
 
     Arming is entirely filesystem work under `$OPENREADING_LEDGER` — creating the key and blob
-    stores, the reaper sweep, the retention stamp, the header, the document blob — and it happens
+    stores, the header, the document blob — and it happens
     before any backend runs, so nothing else in this call can raise an OSError to be confused with
     it. Left bare, an unwritable or non-directory ledger root surfaced as `[strategy:s] error:
     PermissionError: [Errno 13] ...` at exit 1, the "unexpected error" rung, naming a path and an
@@ -577,23 +561,12 @@ def _arm_ledger_unguarded(
     `NullJournal` + `blobs=None`) applies — the L1 zero-delta path (internal/design/ledger.md, plan §6).
 
     Also runs the at-run-start reaper sweep and stamps this run's own retention ceiling (Open
-    Questions §9 item 2's recommendation (a); plan §7). `OPENREADING_LEDGER_RETENTION_HOURS`
-    overrides the T1 provisional default. The choice of a real default is tracked in
-    `internal/eng-council/FOUNDER-INBOX.md` and is not settled here.
-
     Ledger T3: a FRESH run's stamp is the operator default ALONE — nothing has dispatched yet, so
     nothing narrows it. Earlier, this stamped `compute_retention_ceiling_hours` over `eligible`
     (the request's WHOLE registry-wide compliance/capability survivor set, `Router.route`'s own
     stage-1/2 output — correct and appropriately broad for the `Sanitizer` arming below, where
     over-inclusion is harmless, but not for this) — so a backend merely eligible for the document
     type, never named by the compiled strategy nor dispatched, could collapse the ceiling (and
-    force `zdr`) to its own strict limit for a run that never went near it. `InlineExecutor` now
-    tightens (never widens) this stamp itself, per step, from each backend's own descriptor, ONLY
-    as it actually dispatches (`ledger/retention.py`'s `tighten_retention`, called from
-    `ledger/inline.py`'s live "ok" branch) — a backend that stays merely eligible has zero effect
-    on the stamp. The same rescoping applies to ZDR blob suppression
-    (`InlineExecutor._is_zdr_backend`, a per-step registry lookup replacing the old whole-run
-    `zdr=` boolean this function used to compute and pass in).
 
     The `Sanitizer` backstop (§9.3) is still armed with every ELIGIBLE descriptor's
     actually-resolved secret values (unchanged, unaffected by the above) — a static, no-value
@@ -612,29 +585,12 @@ def _arm_ledger_unguarded(
     if not root:
         return None
     ledger_root = Path(root)
-    keys = LocalFsKeyStore(ledger_root / "keys")
-    blobs = LocalFsBlobStore(ledger_root / "blobs", keys)
+    blobs = LocalFsBlobStore(ledger_root / "blobs")
     journal = JsonlJournal(ledger_root / f"{run_id}.jsonl")
 
-    # Wall clock, never `now_ms()`: the stamp is read back by a LATER process, and a monotonic
-    # reading's zero point is the boot (`openreading.router.clock`). The reaper's own `now` must
-    # come from the same base as the stamp it compares against, so both read `now_wall_ms()`.
-    now_ms = int(clock.now_wall_ms())
-    if not resume:
-        reap(ledger_root, keys, ledger_root / "blobs", now_epoch_ms=now_ms)
     descriptors = [
         registry.get(bid).descriptor for bid in eligible if registry.get(bid) is not None
     ]
-    default_hours = float(
-        os.environ.get("OPENREADING_LEDGER_RETENTION_HOURS", DEFAULT_RETENTION_HOURS)
-    )
-    if not resume:
-        # Nothing has dispatched yet — the sane, un-narrowed starting point (see this function's
-        # own docstring). `InlineExecutor` tightens this per step, per backend, as the walk
-        # actually runs; a merely-eligible backend that never dispatches never touches it.
-        stamp_run(
-            ledger_root, run_id, expires_epoch_ms=now_ms + int(default_hours * 3600_000), zdr=False
-        )
 
     secrets_seen: set[str] = set()
     for desc in descriptors:
@@ -705,54 +661,6 @@ def _arm_ledger_unguarded(
         sanitizer=sanitizer,
         ledger_root=ledger_root,
     )
-
-
-def reap_expired_now() -> list[str]:
-    """Reap every expired stamped run immediately, independent of any run arming (finding M7).
-
-    `_arm_ledger_unguarded`'s own sweep only runs when a NEW run arms, so a server that has gone
-    idle since its last request would otherwise hold that run's expired content (encrypted
-    document blobs, and the key that unlocks them) past its retention ceiling indefinitely —
-    nothing else in this module ever revisits the ledger root unprompted. `server.app.create_app`
-    calls this once at startup, and `server.app._sweep_retention_forever` keeps calling it on a
-    timer for as long as the server serves, so a process that never goes busy again still enforces
-    expiry on schedule rather than only when something happens to wake it; a fully idle CLI-only
-    install still only enforces on its next run.
-
-    Mirrors `_arm_ledger_unguarded`'s own path construction exactly — keys at `<root>/keys`, blobs
-    at `<root>/blobs`, the wall clock for the epoch `reap` compares stamps against — so the two
-    sweeps can never disagree about where a run's content lives. No-op (`[]`) when
-    `OPENREADING_LEDGER` is unset, the same "arming is env-only, no flag" contract documented on
-    `_arm_ledger_unguarded` — equally a no-op when it is SET but names something other than a
-    directory, and equally a no-op on ANY other `OSError` while constructing the key store or
-    reaping (M7 review finding): `keys` or `blobs` existing as a plain file one level down still
-    makes `LocalFsKeyStore.__init__`'s `mkdir(exist_ok=True)` raise `FileExistsError` (`exist_ok`
-    only suppresses the case where the target is already a directory), and a permissions error is
-    always possible under a root this process doesn't fully control. Fail open: this is a
-    best-effort startup cleanup, not a request a caller is waiting on, so it must never be the
-    reason `create_app` fails to boot — the one attacker-reachable vector, a malformed
-    `retention/*.json` stamp, is already handled inside `reap()` itself and never raises here.
-
-    Deliberately outside this module's documented Python API surface (no `__all__` entry, no row
-    in the "Exports and return shapes" section above): it is a server operational concern, not a
-    document-processing recipe, and its only caller is `create_app`.
-    """
-    root = os.environ.get("OPENREADING_LEDGER")
-    if not root:
-        return []
-    ledger_root = Path(root)
-    if ledger_root.exists() and not ledger_root.is_dir():
-        return []
-    try:
-        keys = LocalFsKeyStore(ledger_root / "keys")
-        return reap(
-            ledger_root, keys, ledger_root / "blobs", now_epoch_ms=int(RealClock().now_wall_ms())
-        )
-    except OSError:
-        # Fail open (see docstring): keys/blobs existing as a file (FileExistsError from mkdir),
-        # a permissions error under the ledger root, or any other filesystem surprise here must
-        # not take the whole server down over a best-effort startup cleanup.
-        return []
 
 
 def _run_strategy_request(
@@ -1157,8 +1065,6 @@ def _request_from_header(header: RunHeader, blobs: LocalFsBlobStore) -> OpenRead
     body: dict[str, Any] = dict(header.slim_request)
     doc = dict(body.get("document") or {})
     if header.document is not None:
-        # BlobStore.get raises PayloadExpired once the run's key is shredded — left to propagate
-        # uncaught: the whole-run analog of AC-10's "resume reports expired" per-step signal.
         raw = blobs.get(header.document)
         if header.document_is_url:
             doc["url"] = raw.decode("utf-8")
@@ -1205,8 +1111,7 @@ def resume_run(run_id: str) -> dict[str, Any]:
     from openreading.strategies.loader import build_config
     from openreading.strategies.model import StrategyConfig
 
-    keys = LocalFsKeyStore(ledger_root / "keys")
-    blobs = LocalFsBlobStore(ledger_root / "blobs", keys)
+    blobs = LocalFsBlobStore(ledger_root / "blobs")
     req = _request_from_header(header, blobs)
 
     loaded = load_config_file(None)

@@ -33,8 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from openreading.ledger.descriptor import ExecutorCapabilities, ExecutorDescriptor, ExecutorLimits
-from openreading.ledger.ports import BlobStore, Journal, PayloadExpired
-from openreading.ledger.retention import tighten_retention
+from openreading.ledger.ports import BlobStore, Journal
 from openreading.ledger.sanitizer import Sanitizer
 from openreading.ledger.step import BlobRef, ExecResult, StepError, StepRef, StepRequest, StepResult
 from openreading.router.clock import Clock
@@ -132,9 +131,7 @@ class InlineExecutor:
     payload is suppressed iff the backend that ACTUALLY produced it is ZDR-flagged, never because
     some other, merely-eligible backend elsewhere in the registry happens to be. `ledger_root`
     (also new this round) lets a live "ok" dispatch tighten the run's own stamped retention ceiling
-    (`retention.tighten_retention`) from that backend's own declared limit — the ceiling's
-    equivalent fix, since the same registry-wide-eligible-set conflation collapsed it too (see
-    `ledger/retention.py`'s module docstring)."""
+"""
 
     def __init__(
         self,
@@ -155,26 +152,6 @@ class InlineExecutor:
         self._sanitizer = sanitizer or Sanitizer()
         self._ledger_root = ledger_root
 
-    def _is_zdr_backend(self, backend_id: str | None) -> bool:
-        """Whether the backend
-        that ACTUALLY dispatched this step (not the run's whole eligible set) is itself ZDR-flagged.
-        `backend_id is None` (a composite step) or an unregistered/unresolvable id are both treated
-        as "not ZDR" — the same as before this fix, since neither ever populated `descriptors` under
-        the old whole-run computation either. Mirrors `retention.compute_retention_ceiling_hours`'s
-        own guard exactly (`runs_fully_local` skipped before `zdr_flag` is even consulted) — AC-11's
-        own text is "a HOSTED backend flagged zero-data-retention"; a local backend already retains
-        nothing at any vendor by construction, so its own `zdr_flag` (if ever set) adds nothing."""
-        if backend_id is None or self._registry is None:
-            return False
-        adapter = self._registry.get(backend_id)
-        if adapter is None:
-            return False
-        profile = getattr(adapter.descriptor, "compliance", None)
-        if profile is None or profile.runs_fully_local:
-            return False
-        return profile.zdr_flag is not None
-
-    @property
     def descriptor(self) -> ExecutorDescriptor:
         return ExecutorDescriptor(
             id="inline",
@@ -248,28 +225,9 @@ class InlineExecutor:
         object reconstructs it from this JSON itself, exactly as it would from any other
         `ctx.exec` payload).
 
-        `BlobStore.get` raises `PayloadExpired` once the run's key has been shredded (AC-10). Every
-        real call site (`_run_branch`/`_run_leaf`/`_eval_paged_cascade`) already carries `except
-        (TerminalError, RetryableError, UnsupportedFeatureError, ComplianceRefused) as e:` around
-        `ctx.exec` — letting the bare `PayloadExpired` (not a member of that taxonomy) propagate
-        would fall through to the engine's OWN broad `except Exception`, which reclassifies it as
-        an ordinary `provider_error` with no trace of "payload_expired" anywhere a caller can name
-        it, exactly the "reports expired... rather than crashing" failure mode AC-10 exists to
-        rule out. Re-raised as a `TerminalError` instead — `backend_code="payload_expired"`
-        preserved verbatim in the exception (and, via `str(exc)`, in the resulting Attempt's own
-        `detail`) — so the walk degrades through the SAME graceful, already-handled path a live
-        permanent failure takes, naming the real reason rather than crashing OR papering over it.
-
-        A ZDR-flagged backend's own "ok" record is the other reason `payload` can legitimately be
-        absent: §9.4's "zero retained content" means
-        `exec`'s own dispatch branch below never calls `blobs.put` for a ZDR run, so the journaled
-        `"ok"` record's `payload` is `None` by design, not a missing write. Before this fix, that
-        `None` reached `engine.py`'s `_response_payload` unchanged and crashed with an uncaught
-        `pydantic.ValidationError` trying `NormalizedResponse.model_validate(None)`. Byte-identical
-        replay is structurally impossible here — the content was never retained anywhere to
-        reconstruct, a genuine, disclosed tension between AC-3 and §9.4, not a bug in the retention
-        decision itself — so this degrades through the exact same named, typed-error path
-        `PayloadExpired` above already uses, rather than crashing."""
+        `BlobStore.get` raises `OSError` when the blob is not on disk, which now means only that
+        someone pruned the ledger root. It is turned into a TerminalError carrying
+        `payload_missing`, so a resume reports it rather than crashing."""
         if result.status == "ok" and result.payload is None:
             raise TerminalError(
                 "zdr_payload_not_retained: a ZDR-flagged backend's response body is never "
@@ -280,9 +238,11 @@ class InlineExecutor:
             assert self._blobs is not None, "a recorded BlobRef payload needs an armed blob store"
             try:
                 raw = self._blobs.get(result.payload)
-            except PayloadExpired as exc:
+            except OSError as exc:
+                # The blob is not on disk. Nothing expires it any more, so this means the ledger
+                # root was pruned by whoever owns that directory, which is their business.
                 raise TerminalError(
-                    f"payload_expired: {exc}", backend_code="payload_expired"
+                    f"payload_missing: {exc}", backend_code="payload_missing"
                 ) from exc
             return json.loads(raw)
         return result.payload
@@ -405,32 +365,11 @@ class InlineExecutor:
             )
             raise
 
-        # The retention ceiling: this
-        # step's own backend just genuinely dispatched — tighten (never widen) the run's stamped
-        # ceiling from THIS descriptor's own declared limit, if it's stricter than what's already
-        # recorded. A backend that stays merely eligible never reaches this line at all, so it can
-        # never affect the stamp — see `retention.tighten_retention`'s own docstring for why this
-        # replaces the old arm-time, whole-eligible-set computation.
-        # `now_wall_ms()`, matching the base `_arm_ledger` stamped with: `tighten_retention` takes
-        # `min(recorded, now + hours)`, so feeding it the other clock would make a monotonic
-        # reading (~1e9) win against a wall-clock stamp (~1e12) every time and shred the run on its
-        # first hosted dispatch. Mixing the two bases in one comparison is the defect, either way.
-        if self._ledger_root is not None and req.backend_id is not None:
-            adapter = self._registry.get(req.backend_id) if self._registry is not None else None
-            if adapter is not None:
-                tighten_retention(
-                    self._ledger_root,
-                    req.run_id,
-                    adapter.descriptor,
-                    now_epoch_ms=int(self._clock.now_wall_ms()),
-                )
-
         # The full response body is retained as one blob whenever the ledger is armed, whatever
         # include_backend_raw/typed_fields/image settings the request itself asked for. There is
         # no separate opt-out for the highest-sensitivity fields short of not arming the ledger.
         payload = None
-        zdr = self._is_zdr_backend(req.backend_id)
-        if self._blobs is not None and not zdr and hasattr(result, "to_schema_dict"):
+        if self._blobs is not None and hasattr(result, "to_schema_dict"):
             body = self._sanitizer.scrub_bytes(
                 json.dumps(result.to_schema_dict(), sort_keys=True, default=str).encode("utf-8")
             )

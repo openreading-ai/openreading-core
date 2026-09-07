@@ -1,4 +1,4 @@
-"""The Ledger execution plane: ports, journal contract, replay/resume, retention, and the
+"""The Ledger execution plane: ports, journal contract, replay/resume, and the
 decisions behind them. Open core, zero new required third-party dependencies.
 
 A run leaves a record, and the record is what makes the run repeatable. That record is the
@@ -26,18 +26,19 @@ Arming (env only, no CLI flag)
   enablement: no request field can arm it). Armed, the root fills with `<run_id>.jsonl` (the
   journal, one line per `StepResult`, append-only), `<run_id>.header.json` (the run header),
   `blobs/<run_id>/<digest>.bin` (payloads, encrypted under a per-run key), `keys/<run_id>.key`
-  (dir 0700, file 0600), and `retention/<run_id>.json` (the expiry stamp).
-- `OPENREADING_LEDGER_RETENTION_HOURS` -- hours a run's payloads live before the reaper shreds
-  its key. Default `retention.DEFAULT_RETENTION_HOURS` (24.0, a placeholder rather than a tuned
-  value, so set the variable to whatever your own retention policy requires). Read once at arm
-  time and stamped as an absolute epoch. Raise it BEFORE the run: after the key is reaped nothing
-  brings the content back.
+**What arming copies.** `OPENREADING_LEDGER=<dir>` means "copy every document I process, and
+every full response, into this directory, in the clear". A parse of one 117 KB PDF writes about
+356 KB: the journal, the header, the input document and the response body. The response blob is
+written whatever `include_backend_raw` / `typed_fields` / `image` settings the request itself
+asked for, so the ledger can hold data a caller deliberately excluded from their own response.
+Nothing encrypts it and nothing expires it. Point the variable somewhere you are willing to keep
+documents, and delete that directory on whatever schedule your own retention policy requires.
 
 What arming covers: `api._arm_ledger` is called from the strategy path and from `resume` only.
 Four entry points journal a run: `parse --strategy X`, `parse` with `defaults.strategy`, `POST
 /v1/parse` resolving to a strategy, and `POST /v1/jobs` with a `strategy:<name>` body. The whole
 walk runs through `api.run_request` -> `_run_strategy_request` -> `_arm_ledger`, so each of the
-four writes `<run_id>.jsonl`, a header, blobs and a retention stamp exactly as `/v1/parse` does.
+four writes `<run_id>.jsonl`, a header and blobs exactly as `/v1/parse` does.
 Only the `JobRecord` itself is unjournaled, because it is in-memory and per-process with no
 server-side resume. Five journal nothing: `--backend <id>`, `parse` with no default strategy,
 `strategy:none`, a named-backend `POST /v1/jobs`, and native `submit_many` batches. A batch
@@ -55,7 +56,7 @@ neither ever 6 -- on the single-document path, which keys on a run having actual
 batch path is looser: `parse <dir>` returns 6 on either signal whenever `OPENREADING_LEDGER`
 is merely set, whether or not any item armed (a `--backend <id>` batch journals nothing and still
 exits 6). A refused resume, an unknown `RUN_ID`, `OPENREADING_LEDGER` unset on
-`resume`, and a resume whose recorded payloads have expired (`PayloadExpired`, the shredded-key
+`resume` (a resume whose blobs were deleted from the ledger root raises `FileNotFoundError`, the
 state) are all the existing `3` -- "replay refused" and "blobs expired" share it; `6` is the only
 new code. `[resume] refused: ...` lines follow `[tag] line` + hint.
 
@@ -105,18 +106,18 @@ L7  The journal holds references; payloads hold content. Anything over the execu
     `limits.max_inline_payload_bytes` travels as a content-addressed `BlobRef` (`None` = no
     size-based spill); secret-class fields spill by classification regardless of size. The inline
     executor declares `None` and, armed, puts every step payload in the blob store anyway.
-L8  Time is absolute across a boundary: every deadline, poll schedule and retention stamp is
+L8  Time is absolute across a boundary: every deadline and poll schedule is
     epoch millis. `Job.next_poll_at` is monotonic and never crosses a step. Enforced by the two
     clocks on `openreading.router.clock`: `now_wall_ms()` for anything that leaves the process
     (`started/ended_epoch_ms`, `expires_epoch_ms`), `now_ms()` for anything measured inside one
     (deadlines, backoff, TTLs). The ledger shipped with `now_ms()` in all four positions, which is
-    what this law exists to forbid -- see `openreading.ledger.retention` for what it cost.
+    what this law exists to forbid.
 L9  A step is idempotent or it is not a step. At-least-once is the contract; a step that bills
     twice is a defect, not a tradeoff.
 
 The port surface (`openreading.ledger.*`)
 -----------------------------------------
-- `ports`      -- `Executor`, `Journal`, `BlobStore`, `KeyStore` (Protocols); `PayloadExpired`.
+- `ports`      -- `Executor`, `Journal`, `BlobStore` (Protocols).
 - `step`       -- `StepRequest`, `StepResult`, `StepRef`, `BlobRef`, `ExecResult`, `StepError`,
                   `StepCost`; mirrors `schemas/step.v0.1.json` and `journal.v0.1.json`.
 - `descriptor` -- `ExecutorDescriptor{id, limits, capabilities}`.
@@ -125,7 +126,6 @@ The port surface (`openreading.ledger.*`)
 - `localfs`    -- `LocalFsBlobStore` + `LocalFsKeyStore`: per-run key, crypto-shred erasure.
 - `header`     -- `RunHeader`, `write_header`/`read_header`/`compare_header`, `HeaderMismatch`,
                   `registry_fingerprint`, `plan_hash`, `slim_request`.
-- `retention`  -- ceiling computation, expiry stamps, `tighten_retention`, `reap`.
 - `sanitizer`  -- `Sanitizer`, the single redaction chokepoint for journal/blob writes.
 
 Core ships one real implementation of every port so `make verify` stays offline and the CLI
@@ -342,7 +342,7 @@ the original run still replay the original skip). `asyncio.CancelledError` out o
 `parallel:` branch) gets its own `cancelled` terminal record and is re-raised: without it the step
 is indistinguishable on resume from a crash-before-dispatch and would re-dispatch for real. A
 replayed `BlobRef` whose key was shredded raises `TerminalError(backend_code="payload_expired")` --
-not the bare `PayloadExpired`, which the engine's broad `except Exception` would reclassify as an
+not a bare `OSError`, which the engine's broad `except Exception` would reclassify as an
 anonymous `provider_error`. A ZDR backend's recorded `ok` has `payload=None` by design and replays
 as `TerminalError(zdr_payload_not_retained)` rather than crashing on `validate(None)`.
 
@@ -402,59 +402,21 @@ executor id and its descriptor digest in the header so L5 covers a substrate cha
 recorded rather than key bytes, `replay_degraded` records when a v2 reader meets a v1 journal, and
 residency queues with the `residency_changed` refusal.
 
-Retention, ZDR, erasure
------------------------
-Once openreading retains, it holds itself to the bar it enforces on vendors: the ceiling is
-`min(max_retention_hours)` over the HOSTED backends on the run's path. `runs_fully_local`
-descriptors are excluded -- their `0` says the vendor holds nothing, not that openreading may; read
-literally every default cascade would have a zero-hour ceiling and `resume` could never serve
-anything. A hosted `None` (an UNVERIFIED vendor limit) contributes no term;
-`compute_retention_ceiling_hours` reports it as a `retention_unverified` flag, but nothing records
-that flag on the run today (`tighten_retention` discards it; the design has it in the header). With
-no term at all `OPENREADING_LEDGER_RETENTION_HOURS` is the limit. The stamp is written at arm time
-from the operator default ALONE and then only ever tightened, per step, from the descriptor of a
-backend that actually dispatched (`retention.tighten_retention`, called from the live "ok" branch).
-It was once computed over the whole eligible set, and a strict backend that was merely eligible --
-never named, never dispatched -- collapsed unrelated runs' ceilings and forced ZDR on them. The
-reaper runs at every fresh arm, once at `openreading serve` startup, and then on the server's
-`OPENREADING_RETENTION_SWEEP_S` timer (`server.app._sweep_retention_forever`, default one hour). A
-CLI-only install has no timer, so it enforces expiry on its next run and the operator owns that
-schedule. The reaper calls `KeyStore.destroy` and removes the run's blob directory and its
-retention stamp, the exact mechanism a manual shred uses, so a reaped run and a shredded one leave
-the identical `payload_expired` state. The journal file stays, so audit survives erasure.
+Retention and erasure
+---------------------
+The ledger keeps no policy about the directory it writes to. It used to: a ceiling computed from
+`min(max_retention_hours)` over the hosted backends on the run's path, an expiry stamp, a reaper
+that crypto-shredded the run's key at every fresh arm and on a server timer, and a ZDR branch that
+skipped the blob write entirely for a backend whose descriptor carried `zdr_flag`.
 
-ZDR: a hosted backend whose `zdr_flag` is set implies zero retained CONTENT for its step -- the
-ordinary `attempted`/terminal records are written (topology, digests, cost) but `blobs.put` is
-never called. Scoped per dispatching backend (`InlineExecutor._is_zdr_backend`), for the same
-eligible-vs-on-path reason as the ceiling. The design (internal/design/ledger.md 9.4) asks for
-more, and it is NOT built: a ZDR-flagged backend implies zero retention for the WHOLE path, not
-just the vendor leg -- journal metadata only, no blob, no `backend_raw`, no page text for ANY step,
-or refuse the run. Shipped is per-step only: `_is_zdr_backend` is consulted once per step at the
-blob-put site, so a non-ZDR backend dispatched on the same path still stores its blob;
-`tighten_retention` records a `zdr` flag on the retention stamp that `reap` never reads (it acts on
-`expires_epoch_ms` alone); nothing refuses the run. Journaling inverts the response defaults:
-`backend_raw`, page images and `typed_fields` are never journaled inline, only as a blob,
-retention-capped. Today the whole response body is one blob whenever armed; there is no per-field
-opt-out short of not arming.
+All of it is gone, for one reason: the directory is the operator's. Two of those inputs were
+vendor claims this package cannot verify, so an unverifiable number about somebody else's servers
+decided when files on the caller's own disk were destroyed. And the default was never chosen; its
+own source called it a placeholder.
 
-Erasure is crypto-shredding, not tombstones plus compaction (deletion latency would become a
-function of compaction scheduling, and residue survives in replicas and backups). Every payload
-lives in the blob store encrypted under a per-run key; erasure destroys the key, O(1) across
-every replica and backup at once. The key is never written to the journal or blob store (it
-would sit in every backup) -- hence the fourth port, `KeyStore`, whose local form is one
-0600 file per run under a 0700 `keys/` directory that operators must exclude from whatever backs
-up `*.jsonl` and `blobs/`. Blobs are addressed `(run_id, digest)`, never globally: cross-run
-dedup is forbidden so replay can never serve another run's bytes and shredding one run's key
-affects exactly that run. Duplicate plaintext across runs is the accepted price of O(1) erasure.
-The port rule on the read side: `BlobStore.get` must reject a `BlobRef` whose `run_id` differs
-from the requesting run. `LocalFsBlobStore.get(ref)` takes no requesting-run argument today; it
-decrypts under `ref.run_id`'s own key, so isolation comes from the addressing, and the explicit
-cross-run rejection is unbuilt. `LocalFsBlobStore` encrypts every blob with AES-256-GCM (M6):
-tampering or on-disk corruption fails the AEAD tag check instead of decrypting to altered
-plaintext (a blob written by the original unauthenticated XOR stream that shipped in T1 still
-reads back correctly, and is checked against the digest its ref carries because that format has
-no tag of its own -- see `localfs`'s own module docstring). A shredded run is permanently
-non-replayable; the journal still answers WHAT happened, just not WITH WHAT content.
+Erasure is `rm`. The ledger writes where `OPENREADING_LEDGER` points and then leaves what it wrote
+alone, so a run stays resumable until its owner decides otherwise, on whatever schedule their own
+retention policy sets. Nothing here expires, sweeps or encrypts.
 
 `Sanitizer` is the backstop, not the primary defense: one instance per run, armed with the
 resolved secret VALUES of every eligible descriptor (a value-less `Sanitizer()` has nothing to
