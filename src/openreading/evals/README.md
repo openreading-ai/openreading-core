@@ -553,18 +553,18 @@ case names, rules included, so a case asserting both kinds gets one mean over bo
 
 ### Recipes
 
-**Rank under a compliance policy.**
+**Rank a backend this machine cannot run.**
 ```bash
-printf 'version: 1\npolicy:\n  require_local: true\n' > local.yaml
-uv run openreading leaderboard mydata --backends pymupdf,tesseract,reducto --config local.yaml
+uv run openreading leaderboard mydata --backends pymupdf,tesseract,reducto
 ```
 ```text
    3  reducto                           —     0/3       3  
 …
   first: winner=pymupdf  (pymupdf=1.00, tesseract=0.50, reducto=—)
 ```
-A backend the policy refuses is counted as an error in its own tally and excluded from its mean,
-never silently skipped. `scored 0/3` with three errors is how you read that reducto never ran.
+A backend that cannot run, here because no `REDUCTO_API_KEY` is set, is counted as an error in
+its own tally and excluded from its mean, never silently skipped. `scored 0/3` with three errors
+is how you read that reducto never ran.
 That is a different row from a backend that ran and scored zero. The table used to carry a
 `cost/doc` column beside those measurements. It was not measured by the benchmark at all: it took
 the low end of the backend's declared per-page rate and multiplied it by a fixed assumption of 25

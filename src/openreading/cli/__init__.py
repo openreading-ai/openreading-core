@@ -451,12 +451,10 @@ from `submit_many`, which has no next rung and does not retry), or an
 `OPENREADING_LEDGER` was set -- per-item runs may be individually resumable,
 but batch-level resume is not supported, so no single run id is named.
 
-Exit 0 does NOT mean every document was read. A file a backend does not accept
-is SKIPPED, not failed, so a folder of 40 PDFs and one stray `.txt` exits 0
-with `summary.skipped: 1` and `status.state: succeeded`. Skipped is a decision,
-taken before the document is sent, and each item carries its own reason; failed
-is an attempt that did not come back. Only the second moves the exit code.
-Branch on `summary.failed` and `summary.skipped`, never on exit 0 alone.
+Exit 0 does NOT mean every document was read. Every source is dispatched, so a
+folder of 40 PDFs and one stray `.txt` sends all 41 and the `.txt` comes back
+as a FAILED item carrying the backend's own reason. That batch is `partial` and
+exits 4. Branch on `summary.failed`, never on exit 0 alone.
 
 The same missing key that exits 3 on one file exits 1 on a folder. Per-item
 isolation is the point of a batch: one item's failure never stops the rest, so

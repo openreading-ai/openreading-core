@@ -61,13 +61,6 @@ the literal on the emitted `FactRecord` is `status: "unavailable"`, next to `"ma
   the materialized bytes. PDF inputs with bytes materialized only; otherwise unavailable.
 - `size_over_mb` / `size_under_mb` — byte length above / below N MB. Free once bytes exist.
 - `filename_matches` — regex over `document.filename`. Free; only when a filename was supplied.
-- `compliance: { <field>: <value> }` — a **nested object**, every listed field must equal its
-  value — the **post-union effective** compliance constraint (request ∪ file
-  `policy:`, most-restrictive-wins); a file `policy:` key makes its fact constant for every
-  request. Free; **always** computable. The spec wrote this fact as a dotted key
-  `compliance.<field>`; **that spelling is not in the shipped grammar** — the schema's `when` is
-  `additionalProperties: false` with `compliance` as an object, so a dotted key is rejected at
-  load, and `facts._eval_fact` handles only `key == "compliance"` with a `{field: value}` map.
 - `sample_percent` — true for N% of inputs: a sha256(document bytes) bucket, stable per input.
   One hash; always once bytes are materialized; unavailable for a deliberately
   un-materialized URL pass-through. Deterministic per input by design (the AWS A2I `Sampling`
@@ -88,17 +81,15 @@ route:
       use: strategy:cheap_first
     - when: { filename_matches: "(?i)payslip" }
       use: strategy:forms
-    - when: { compliance.require_local: true }
-      use: strategy:local_only
     - when: { sample_percent: 5 }
       use: strategy:audited
   default: strategy:general
 ```
 
-**Stale example:** the block above is the spec's, preserved verbatim; its
-`when: { compliance.require_local: true }` rule is **rejected by the shipped grammar** (verified
-with `loader.parse_config`: "is not valid under any of the given schemas"). Write it as
-`when: { compliance: { require_local: true } }`, which loads.
+A `compliance` fact used to sit in this list, matching the request's effective compliance
+constraint. It went with the compliance filter: it read a posture core computed from a per-vendor
+table it could not verify, so a rule keyed on it branched on a guess. Route on the document
+instead, which is what every fact above does.
 
 §3 Tier-1 engine-computed signals
 ---------------------------------

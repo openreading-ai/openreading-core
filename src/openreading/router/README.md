@@ -30,9 +30,15 @@ Selection is a lookup with no inference in it. Three rules, in order:
 An empty list permits nothing and refuses with `scope_denied`. An absent list is not an empty one:
 absent means no restriction from that source.
 
-Every source of an allow-list intersects and none widens. The file's list, a caller's own
-argument, and the server's API-key scope are all restrictions, so what survives is what all of
-them permit.
+Two kinds of statement, and they differ in kind. `policy.backends` is the chain an unnamed request
+resolves to, and `routing.fallback` reorders within it and never adds to it. Naming a backend
+(`--backend reducto`, `backend.id`, a strategy step) is an explicit act by the caller and runs that
+backend, list or no list: on one machine the operator and the caller are the same person, and
+refusing what they just typed helps nobody.
+
+The enforcement boundary, where those are two different people, is the server's API-key scope. A
+scoped key refuses a backend outside its scope with `scope_denied` before any credential is
+resolved, whatever the body named.
 
 ### Why there is no filter
 

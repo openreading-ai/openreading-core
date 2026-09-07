@@ -31,14 +31,6 @@ from openreading.strategies.normalize import (
 from openreading.strategies.plain import ADVANCED_TO_PLAIN, PlainInfo
 from openreading.types.enums import ChannelGrade
 
-_COMPLIANCE_KEYS = (
-    "require_baa",
-    "no_train_on_data",
-    "data_region",
-    "require_local",
-    "max_retention",
-)
-
 _SECRET_KEY_RE = re.compile(
     r"(?i)(api[_-]?key|secret|token|password|passwd|access[_-]?key|credential|private[_-]?key)"
 )
@@ -149,14 +141,12 @@ def validate_config(
     except NormalizeError as e:
         return [ValidationIssue("error", "strategies", str(e))]
 
-    # The effective policy is validated here, not just at run time, because this command exists to
-    # find a broken config BEFORE a run does — and because `_Ctx` builds its own Compliance +
-    # RouterConfig out of this same raw dict for the steps-unreachable check. An unvalidated block
-    # makes that advice wrong in the direction that reads as reassurance: a typo'd key produces no
-    # unreachable-step warning at all, and a quoted `allow_unverified_compliance: "false"` coerces
-    # truthy and reports a `trains_on_customer_data: unverified` backend as reachable. When the
-    # policy is refused the context is dropped rather than built from a dict we do not trust, so
-    # the rest of the file is still checked and this error is the only thing said about the policy.
+    # The policy is validated here, not just at run time, because this command exists to find a
+    # broken config BEFORE a run does. The failure it catches reads as reassurance: `backend:` for
+    # `backends:` is refused as an unknown key here, where an unvalidated block would drop it in
+    # silence and run with no restriction at all. When the policy is refused the context is
+    # dropped rather than built from a dict we do not trust, so the rest of the file is still
+    # checked and this error is the only thing said about the policy.
     checked_policy, policy_issue = _checked_policy(config)
     ctx = _Ctx(config, library, checked_policy, plain_info)
     if policy_issue is not None:

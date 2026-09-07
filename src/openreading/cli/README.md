@@ -145,22 +145,23 @@ uv run openreading parse notes.txt --backend pymupdf; echo "exit=$?"
 exit=3
 ```
 
-A file with a supported extension whose bytes are corrupt still reads `PyMuPDF failed: Failed to
-open stream`, because the extension is all this check can see.
+A file with a supported extension whose bytes are corrupt reads `PyMuPDF failed: Failed to open
+stream`. The backend refuses either way, first-hand, and says which.
 
-The same file inside a folder is not an error at all:
+The same file inside a folder does not stop the run:
 
 ```bash
 mkdir -p mixed && cp sample.pdf notes.txt mixed/
-uv run openreading parse mixed/ --backend pymupdf 2>/dev/null | jq -c '[.items[] | {relpath: .source.relpath, state, skip_reason}]'; echo "exit=$?"
+uv run openreading parse mixed/ --backend pymupdf 2>/dev/null | jq -c '[.items[] | {relpath: .source.relpath, state, code: .error.code}]'; echo "exit=$?"
 ```
 
 ```json
-[{"relpath":"notes.txt","state":"skipped","skip_reason":"unsupported_format"},{"relpath":"sample.pdf","state":"succeeded","skip_reason":null}]
-exit=0
+[{"relpath":"notes.txt","state":"failed","code":"unsupported_format"},{"relpath":"sample.pdf","state":"succeeded","code":null}]
+exit=4
 ```
 
-**You should see** the same file refused at exit 3 alone and skipped at exit 0 in a folder.
+**You should see** the same file refused at exit 3 on its own, and a failed item at exit 4 inside a
+folder. Every source is dispatched, so the count you get back accounts for every file you named.
 [Backend adapters](../adapters/README.md) lists the formats each backend reads.
 
 ### 4. Pull what you need with jq, then compose verbs
@@ -372,9 +373,9 @@ with an answer you may not want, so a script reading only the code will not see 
   `budget_exhausted` for the deadline, `quality_below_threshold` for the gate. Branch on
   `orchestration.outcome` rather than the code. A deadline wants a longer budget or a faster
   backend, while a quality miss wants a stronger one.
-- **An unreadable file inside a folder.** The item is `skipped` with
-  `skip_reason: unsupported_format` and the batch still exits 0, as step 3 shows. Count
-  `summary.skipped` rather than trusting the code.
+- **An unreadable file inside a folder.** The item is `failed`, carrying the backend's own
+  `unsupported_format` reason, and the batch exits 4 as partial, as step 3 shows. Count
+  `summary.failed` rather than trusting the code.
 
 ### Pin a version, and go back
 

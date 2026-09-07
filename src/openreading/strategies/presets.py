@@ -143,7 +143,7 @@ The judged variant — a `judge:` block on the same node makes the comparison LL
       excerpt_chars: 4000
 ```
 
-The judge is itself a backend: it must pass the request's stage-1 compliance filter, its call is
+The judge is itself a backend: it must be inside the caller's own backend list, its call is
 recorded as a `judge_call` attempt with its billed cost, and comparison is pairwise in both
 orderings. Like every decision point it requires the operator's `OPENREADING_LLM_DECIDER` env
 gate (`openreading.strategies.decider`); an ungated, unavailable, or ineligible judge downgrades
@@ -290,7 +290,7 @@ strategies:
 ```
 
 What happens: the cascade-level gate is copied onto pymupdf and docling; the final `auto` rung
-stays ungated and takes the router's stage-3 best among backends not yet attempted in this walk
+stays ungated and takes the next backend not yet attempted in this walk
 (none left → `Err(exhausted)`, reason `no_untried_backend`). On exhaustion — the ladder ran out
 or the `max_duration` deadline ended the walk — keep-best returns the best retained `Deficient`
 result — ties keep the EARLIEST-retained rung, the comparison being strict-greater (engine Law

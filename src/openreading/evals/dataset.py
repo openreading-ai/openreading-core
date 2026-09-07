@@ -5,7 +5,6 @@
       "name": "loan_page1",
       "input": {"builtin_sample": true, "pages": [1]},   // or "path", "bytes_base64", or "url"
       "backend": {"operation": "..."},                    // optional per-case backend overrides
-      "compliance": {"require_local": true},              // optional per-case compliance (BL-112)
       "expected": { "text_contains": [...], "tables": [[...]], "typed_fields": {...},
                     "text_absent": ["..."], "rules": [{"type": "absent", "text": "..."}] }
     }
@@ -91,11 +90,6 @@ def load_case(case_json: Path, *, backend_id: str) -> EvalCase:
         body["outputs"] = spec["outputs"]
     if "extraction_schema" in spec:
         body["extraction_schema"] = spec["extraction_schema"]
-    if "compliance" in spec:
-        # BL-112: forward a per-case compliance requirement into request_body so
-        # calibrate_strategy's per-case Router.check_eligible gate has a real request-level
-        # channel to see (previously always None — evals/dataset.py never forwarded this key).
-        body["compliance"] = spec["compliance"]
     return EvalCase(
         name=spec.get("name", case_dir.name),
         request_body=body,

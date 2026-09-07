@@ -30,7 +30,7 @@ Laws (non-negotiable)
   ``additionalProperties: true``.
 - L3 no influence: report output never feeds routing, ranking, gating or ``pick: best``. ``pick``
   decides during a run; compare explains after it. No feedback loop is built here and none is
-  ambient, so a comparison can never widen the compliance-eligible set.
+  ambient, so a comparison can never widen the resolved backend set.
 - L4 determinism: same inputs => byte-identical report. No timestamps, randomness, network or
   LLM; fixed iteration order (page asc, reading_order asc, subjects in given order); fixed
   documented thresholds. Determinism is what makes drift detection on top of it sound.

@@ -129,23 +129,22 @@ so the no-file path never imports this package (the no-change law — package do
   before (formally the desugared cascade of §7 rule 7).
 
 Precedence, highest first: **request wire fields → CLI flags → config `defaults:` → built-ins.**
-Compliance is outside precedence: constraints from the request and the file's
-`policy:` block are **intersected, most-restrictive-wins** — neither source can weaken the other.
-D-v3-12 fixes the union (`openreading.config.apply`, applied before dispatch and again defensively
-in `prune.compile_strategy`): the boolean PHI constraints `require_baa` / `no_train_on_data` /
-`require_local` OR to True; `max_retention` keeps the LOWER of the two ceilings; `data_region` has
-no ordering and a request cannot name two regions at once, so two different values refuse with
-`region_conflict` rather than pick a winner; deployment keys map to `RouterConfig`
-(`allow_unverified_compliance` ORs; `train_optout_confirmed` / `baa_tier_confirmed` union). The
-effective compliance is what prunes the tree AND what the route `compliance` facts read.
-`optimize_for` is the one key where the request wins outright, because it orders the survivors and
-never changes the set: it is a preference, and a preference is not a constraint.
+`policy.backends` is outside precedence: it is an allow-list, and every source of one intersects
+while none widens (`openreading.config.apply`, applied before dispatch and again defensively in
+`prune.compile_strategy`). A caller's own argument and the server's API-key scope intersect with
+it the same way, so what survives is what all of them permit. An EMPTY list permits nothing; an
+absent list is not an empty one.
+
+The block used to carry nine keys instead, five of them compliance constraints core enforced from
+a per-vendor table it could not verify. `policy.backends` replaced all nine, because an operator
+who cares about compliance already knows which vendors they hold agreements with, and that list is
+a statement core can honour exactly.
 
 The block is refused whole (`ConfigError`, from `openreading.config.load`) if it names a key
-outside those nine or gives one the wrong type. `strategy-config` v0.3 declares this sub-object
-`additionalProperties: false` with every key typed, which is what stands between a typo and a run
-with no constraint: `require_locall` used to be dropped in silence, and a quoted
-`allow_unverified_compliance: "false"` was truthy enough to switch the fail-closed tolerance ON.
+outside it or gives one the wrong type. `strategy-config` v0.4 declares this sub-object
+`additionalProperties: false` with the key typed, which is what stands between a typo and a run
+with no restriction at all: `backend: [pymupdf]` would otherwise be dropped in silence and mean
+"every backend" rather than "only this one".
 
 
 2. The node grammar — five node types, closed, recursive
@@ -154,8 +153,7 @@ with no constraint: `require_locall` used to be dropped in silence, and a quoted
 A strategy is a **node**: one of five map forms, discriminated by exactly one key, or a
 shorthand (§7):
 
-- leaf (`backend:`) — Run one backend (or `auto` = router's stage-3 pick among still-eligible,
-  not-yet-attempted backends).
+- leaf (`backend:`) — Run one backend, named by its registry slug.
 - cascade (`steps:`) — Serial escalation: run steps in order; gates on each step decide accept vs
   escalate; errors advance per `on_error`.
 - parallel (`parallel:`) — Fan-out: run children concurrently; `pick:` selects the result (race /
@@ -203,10 +201,8 @@ with:                         # optional per-leaf request overrides
   outputs:  { tables: html }
 ```
 
-- `backend` — Registry slug, or `auto` = the router's stage-3 scoring (honoring the request's
-  `optimize_for`) picks among backends that are (a) still compliance/capability-eligible and (b) not
-  yet attempted anywhere in this walk — including parallel branches and quality-escalated rungs. An
-  `auto` leaf can therefore never re-run a backend the walk already tried.
+- `backend` — Registry slug. There is no `auto`: it asked the engine to pick from vendor claims
+  it could not verify, and naming the backend you want is the whole grammar now.
 - `with` — Designed to shallow-merge over the request for this leaf only. Closed allow-list:
   exactly `features`, `outputs`, `pages`, `extraction_schema`; any other key is a load-time
   error — in particular `compliance`, `document`, and `backend` can never appear (a strategy may
@@ -331,11 +327,11 @@ require: all                   # pick best/merge: how many non-shadow branches m
   decision point like any other: it requires the `OPENREADING_LLM_DECIDER` env gate (a `decider:`
   block is *not* required for judge-only configs), and an unavailable/ineligible/ungated judge
   downgrades to the engine score with a `decider_downgraded` trace. A judge is itself a backend and
-  must pass the stage-1 compliance filter for the request.
+  must be inside the request's own resolved backend set.
 - `on_win` [`cancel` or `drain`; default `cancel`] — Losers: `cancel` = `adapter.cancel()` + task
-  cancellation. `drain` = losers finish; results land in the trace, cost in `usage`. Whether
-  `cancel` actually stops vendor-side billing depends on the backend's own `cancel_supported`
-  descriptor field — honest per-backend semantics, not always a cost difference from `drain`.
+  cancellation. `drain` = losers finish and their results land in the trace. Whether `cancel`
+  actually stops work at the vendor depends on the backend's own `cancel_supported` descriptor
+  field, so `cancel` is not always cheaper than `drain` in practice.
 - `start_after` (per branch) [duration; default `0s`] — Delayed start: the branch launches after
   this delay unless the node has already resolved. Under `pick: fastest` this is a true hedge (a
   winner cancels the launch); under `best`/`merge` the node cannot resolve early, so it is a pure
@@ -490,7 +486,7 @@ fast:                  # race the local parsers; first success wins
   pick: fastest
   on_win: cancel
 
-offline_first:         # local-only cascade — pair with policy require_local to ENFORCE locality
+offline_first:         # local-only cascade — the policy list below is what ENFORCES locality
   intent: "Never leave the machine. Enforcement belongs to policy: { backends: [pymupdf, tesseract] }."
   steps: [pymupdf, tesseract, docling]
   escalate_if: default
@@ -845,10 +841,10 @@ contract. Every shorthand round-trips: `normalize(shorthand) = longhand`;
    fixed point (D-v3-7: a second pass would re-distribute to the grandchildren). Leaf, reference,
    and parallel/route/decide steps distribute normally.
 6. `escalate_if: default` → the §4.4 bundle
-7. request `routing.fallback: [a, b]` (no strategy engaged) → `{steps: [a, b, <remaining eligible
-   backends in stage-3 score order>], escalate_if: off}` — listed ids move to the front *within* the
-   eligible set and the rest of the chain follows, exactly the legacy `_apply_explicit_fallback` +
-   executor walk. The formal statement that the legacy chain is a point in this design, not a second
+7. request `routing.fallback: [a, b]` (no strategy engaged) → `{steps: [a, b, <the rest of the
+   resolved set, in written order>], escalate_if: off}` — listed ids move to the front *within*
+   the resolved set and the rest of the chain follows, exactly the legacy
+   `_apply_explicit_fallback` + executor walk. The formal statement that the legacy chain is a point in this design, not a second
    engine
 8. `extends:` → resolved at normalize time into the expanded tree (schema-rejected in a file,
    §2.8); `use:` refs stay by name
@@ -865,7 +861,7 @@ NO code reads it as shipped: the block is schema-validated and then ignored. Con
   consecutive-failure breaker (design intent: 5 fails / 30s multiplicative cooldown, one half-open
   probe, an open breaker turning a leaf into a `skipped(circuit_open)` attempt that advances like
   a credential skip and is not routable via `on_error`, and an ejection floor of one so the last
-  compliance-eligible backend is never benched). Not implemented: `skipped(circuit_open)` is
+  backend in the chain is never benched). Not implemented: `skipped(circuit_open)` is
   reserved trace vocabulary (`openreading.strategies.trace`) the engine never emits.
 - `attempt_timeout` — Reserved for a default per-attempt timeout on leaves that set none. Not
   implemented — and neither is the leaf `timeout:` it would default (§2.1): every leaf is bounded

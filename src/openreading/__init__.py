@@ -96,7 +96,7 @@ Parse one document. `source` is a path, an http(s) URL, or raw bytes (NOT a requ
 
     import openreading
     resp = openreading.run("doc.pdf", backend="pymupdf")   # -> dict, the response envelope
-    resp = openreading.run("doc.pdf", backend="auto")      # compliance-first router chooses
+    resp = openreading.run("doc.pdf")                      # the policy's chain, else pymupdf
     resp = openreading.run("scan.png", backend="tesseract",
                            pages={"ranges": [{"start": 1, "end": 2}]})
     # CLI: openreading parse doc.pdf --backend pymupdf     (URL sources work; --pages 1 2)
@@ -160,12 +160,11 @@ Route with compliance (HIPAA / no-train / local-only). A plan, no execution:
     plan.chosen, plan.fallbacks, plan.dropped     # dropped = {backend_id: DropReason, ...}
     # CLI: openreading route doc.pdf --run        # plan + WHY each drop, then run
 
-Compliance is a hard filter never relaxed by fallback; an unverified claim fails closed (the
-backend is dropped). So does a CONDITIONAL one: a training opt-out you have not applied
-(`trains_on_customer_data: opt_out`) or a BAA the vendor sells only on a higher plan
-(`hipaa_baa: tier_gated`). Assert those per deployment with `train_optout_confirmed` /
-`baa_tier_confirmed` (lists of backend ids) in the `policy:` block; the run then carries a
-warning naming the confirmation it rests on.
+`policy.backends` is the whole of it: the backends this deployment permits, in the order you want
+them tried, and `routing.fallback` reorders within it and never adds to it. An EMPTY list permits
+nothing, so a request that names no backend refuses. Naming a backend runs it, list or no list:
+that is an explicit act, and on one machine the operator and the caller are the same person. The
+enforcement boundary, where they are not, is the server's API-key scope.
 
 Strategies (optional `openreading.yaml` orchestration):
 
@@ -244,9 +243,8 @@ Required: `document` + `backend`. `document` is EXACTLY ONE of `bytes_base64` | 
 text / blocks / typed_fields / tables / chunking / include_backend_raw), `extraction_schema`
 (`json_schema`, `instructions`, `citations`), `features` (`ocr`, `ocr_languages`, `layout`,
 `tables`, `forms_key_value`, `handwriting`, ..), `pages` (`ranges`, `max_pages`), `routing`
-(`doc_type_hint`, `optimize_for`, `fallback`), `compliance` (`require_baa`, `no_train_on_data`,
-`data_region`, `require_local`, `max_retention`), `async`, `idempotency_key`. `backend` =
-`{"id": "<slug>|auto|strategy:<name>", "operation"?, "version"?}`. The CLI and Python build it
+(`doc_type_hint`, `fallback`), `async`, `idempotency_key`. `backend` =
+`{"id": "<slug>|null|strategy:<name>", "operation"?, "version"?}`. The CLI and Python build it
 from a source + flags; you construct it by hand only for the server. Extra keyword arguments to
 `run()` / `run_batch()` are these top-level request fields.
 
@@ -308,16 +306,13 @@ Rules a caller must not get wrong
 =================================
 - Never fabricate a channel. No confidence / blocks / tables from a backend means absent plus a
   `warnings[]` code saying why. Do not tell the user to expect it.
-- Compliance fails closed, and the policy is the ONLY thing that sets the eligible set. Exactly
-  three policy keys widen it, each an attestation about paperwork the router cannot see:
-  `allow_unverified_compliance` (admits backends that stayed SILENT on a fact, never one that
-  answered no), `baa_tier_confirmed` (named backends whose tier-gated BAA you signed) and
-  `train_optout_confirmed` (named backends whose training opt-out you applied). Nothing after the
-  policy widens the set again: not a fallback, not a named `--backend`, not a strategy rung, not a
-  decider. So never propose a construct that widens it, and treat
-  `allow_unverified_compliance` as the operator's call rather than yours, because it waives
-  verification for every vendor at once while the other two assert a checked fact about named
-  ones. `route` prints the reason each backend was dropped.
+- `policy.backends` sets the chain an unnamed request resolves to, and no fallback reorders its
+  way out of it. A named backend is the caller's own explicit act and runs; the server's API-key
+  scope is the boundary that refuses one. Never propose a construct that lets a request slip past
+  that scope. Core also holds no fact it cannot verify, so never propose that it decide from one: a
+  vendor's terms, its retention, or what it can read are all claims core cannot check, and a
+  constraint core cannot check is one it must not appear to enforce. `route` prints the resolved
+  chain and the reason for any backend the caller's own list excluded.
 - Batch is decided by input FORM, not count. Do not add `--jobs` / `--max-items` to a
   single-file parse (batch-only flags).
 - `--jobs` vs native batch: most hosted APIs are one-document-per-call, so a batch is N
@@ -518,20 +513,11 @@ switch and its reason; time and cost with honest unknowns) is spread across `war
 strategy `orchestration`, the batch summary and an armed ledger, with no common carrier
 (design record: `design/run-stats-analytics.md`).
 
-Under review, and unlike the gaps above these propose REMOVING behaviour this package ships
-today, so read the record before relying on either feature: the compliance filter and the
-per-vendor compliance table leave core entirely, because core cannot verify a claim about a
-vendor and must not appear to enforce one (design records: ,
-`product/specs/compliance-removal.product-spec.md`); the stage-2 format gate goes the same way,
-and the several extension-to-MIME tables collapse into one resolver that answers "unknown"
-instead of guessing PDF (design record: ); the ledger stops
-`optimize_for`, the stage-3 scorer, the capability gate and
-`auto` itself go with them, so choosing a backend becomes a lookup rather than an inference, the
-one the caller wrote (design records: ,
-`design/unverifiable-claims-sweep.md`). Vendor pricing goes the same way, so `usage` keeps the
-counters a backend reported and stops converting them into dollars core cannot verify (design
-record: ). `design/README.md` states the test all six apply, the order
-they land in, and what each one deletes.
+Recently removed, and worth knowing if you read older material about this package: the compliance
+filter and its per-vendor table, the capability gate, the stage-3 scorer, `optimize_for`, `auto`,
+ledger retention and encryption at rest, and every dollar figure. Each was a fact core could not
+verify deciding what core did. `CHANGELOG.md` under Unreleased carries the account, and the law
+that replaced them is in this file: core holds no fact it cannot verify.
 
 Extending it (agent-executable)
 ===============================

@@ -97,9 +97,9 @@ def run_case(
         req, router_config = apply_policy(req, policy, router_config or RouterConfig())
         run_ctx = ctx or build_run_context(req, adapter.descriptor)
         clock = RealClock()
-        # Compliance gate (BL-121), mirroring calibrate_strategy's identical BL-112 fix: run_case
-        # drives adapter.submit() directly, with no Router in front of it to apply the stage-1
-        # hard-filter, so req.compliance vs. this adapter's descriptor is never checked otherwise.
+        # Scope gate (BL-121), mirroring calibrate_strategy's identical BL-112 fix: run_case
+        # drives adapter.submit() directly, with no Router in front of it, so a backend outside
+        # the caller's own list would otherwise never be refused on this path.
         with auth_hinted(adapter.descriptor, run_ctx.credentials):
             job = adapter.submit(req, run_ctx)
             job = run_to_completion(

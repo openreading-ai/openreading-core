@@ -3,10 +3,9 @@ docs push you off polling (CODE 2000 excessive-polling), so async prefers webhoo
 the degrade path. Parse returns chunks[] of typed blocks (Text/Table/Title/Signature/...) with
 normalized bbox; /extract returns typed_fields with per-field citations.
 
-BYO API key (Bearer). HIPAA/ZDR are tier-gated (Growth+), so hipaa_baa=tier_gated — a require_baa
-request drops Reducto unless the deployment lists it in `baa_tier_confirmed` (fail closed).
-Credit-based cost (~1 credit/page, ~$0.015). resolve_webhook verifies the Svix signature and is
-idempotent by job id (duplicate deliveries are no-ops).
+BYO API key (Bearer). Reducto meters credits, roughly one per page, and `report_cost` forwards
+the count it reported. resolve_webhook verifies the Svix signature and is idempotent by job id
+(duplicate deliveries are no-ops).
 """
 
 from __future__ import annotations
@@ -316,7 +315,7 @@ def _descriptor() -> AdapterDescriptor:
             Source(
                 url="https://docs.reducto.ai/",
                 accessed="2026-07-21",
-                supports="parse chunks/blocks shape, webhooks, credit pricing, tier-gated BAA",
+                supports="parse chunks/blocks shape, webhooks, credit metering",
             ),
             # BL-166's finding is deliberately uncited here. Its only write-up is in the company
             # repo, and `sources[]` ships to every caller through `GET /v1/backends`, where a

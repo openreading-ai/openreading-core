@@ -1,14 +1,16 @@
-"""The one reader of `openreading.yaml`: discovery, reading, schema validation, and the union of
-a request's own constraints with the file's `policy:` block.
+"""The one reader of `openreading.yaml`: discovery, reading, schema validation, and the
+intersection of a request's own allow-list with the file's `policy:` block.
 
-A policy is the short list of things a backend must declare before it may read your document, such
-as a signed business associate agreement (BAA) or a European data region. A backend is one parser,
-either a local library or a hosted API. Its descriptor is the static record in which it declares
-what it reads, what it needs, and its compliance posture. `openreading.yaml` is the only file you
-write, and its `policy:` block is the only place a policy is spelled. Nine keys make up the whole
-grammar: `require_baa`, `no_train_on_data`, `data_region`, `require_local`, `max_retention`,
-`optimize_for`, `allow_unverified_compliance`, `train_optout_confirmed` and `baa_tier_confirmed`.
-A malformed block is refused before a backend is contacted, and the CLI reports it as exit 3.
+A policy is the list of backends this deployment permits, in the order you want them tried. A
+backend is one parser, either a local library or a hosted API. `openreading.yaml` is the only file
+you write, and its `policy:` block is the only place a policy is spelled. One key makes up the
+whole grammar: `backends`. A malformed block is refused before a backend is contacted, and the CLI
+reports it as exit 3.
+
+Nine keys came before it, five of them compliance constraints core enforced against a per-vendor
+table it could not verify. They are gone, and `backends` is what replaced them: an operator who
+cares about compliance already knows which vendors they hold agreements with, and core holds no
+fact it cannot verify.
 
 Discovery order (first hit wins; sources are NEVER merged):
   1. an explicit path or an inline dict — CLI `--config PATH`, Python `openreading.run(config=…)`;
@@ -39,30 +41,27 @@ P4 to P6 by this one.
 - **P2. No hand-written JSON input.** JSON remains as output, as the wire, and as the schema
   language. Nothing a person authors is JSON. Failure prevented: a policy file with no schema
   behind it, which is what the removed `--policy` flag took.
-- **P3. A policy never names a backend.** It names a requirement, and the descriptor meets it or
-  does not. A strategy names backends and runs inside the survivors. Failure prevented: a
-  per-backend exception that widens the set by naming its way around a constraint. The three
-  attestation keys are the deliberate exception, and each one asserts a fact about paperwork
-  rather than a preference about a vendor.
-- **P4. The union never widens.** Request constraints and file constraints combine
-  most-restrictive-wins, in `apply()`, once per request, on every path. It is an INTERSECTION, so
-  neither source can weaken the other. Booleans OR to true. `max_retention` keeps the lower of the
-  two ceilings. `data_region` has no ordering and a request cannot name two regions, so two
-  different values refuse rather than pick a winner. The three attestation keys union into the
-  `RouterConfig`. Failure prevented: a path that forgot to union. The server's non-strategy path
-  was that path, so a request naming a backend by name reached it carrying none of the operator's
-  constraints. A precedence rule where the request simply won was the same failure wearing a
-  reasonable face: a file demanding `max_retention: zero` and a request asking for `48h` produced
-  `48h`, so the deployment's ceiling was whatever the caller last said.
+- **P3. A policy names the backends, and nothing else.** It used to name a requirement instead,
+  and the descriptor met it or did not. Every one of those requirements was a claim about a vendor
+  core could not check, so being wrong excluded a backend the operator believed was included and
+  the run succeeded anyway. A list of ids is a statement core can honour exactly, forever, with no
+  table to rot. A strategy names backends and runs inside that list.
+- **P4. The intersection never widens.** A request's own allow-list and the file's combine in
+  `apply()`, once per request, on every path, and what survives is what both permit. An EMPTY list
+  permits nothing; an absent list is not an empty one. Failure prevented: a path that forgot to
+  intersect. The server's non-strategy path was that path, so a request naming a backend by name
+  reached it carrying none of the operator's restrictions. A precedence rule where the request
+  simply won was the same failure wearing a reasonable face: the deployment's list would be
+  whatever the caller last said.
 - **PF2. A public call is safe on its own.** `apply()`, `router_config()` and
   `strategies.compile_strategy` enforce the policy they are handed without relying on an earlier
   loader call, and validate a mapping into `openreading.types.policy.Policy` before reading a
   field. The schema guards file text; only this guards a dict a caller built in Python, where
   `bool("false")` is `True` and `frozenset("aws-textract")` is a set of characters.
 - **PF3. Resume compares the policy as written, not only its effect.** The ledger stores the
-  request after this fold, so removing a file constraint used to leave the stored request carrying
-  it and the run identity unchanged. `prune._compute_config_hash` folds in the block as written,
-  so both adding and removing a constraint refuse the resume.
+  request after this fold, so removing a restriction from the file used to leave the stored request
+  carrying it and the run identity unchanged. `prune._compute_config_hash` folds in the block as
+  written, so adding and removing both refuse the resume.
 - **P5. No file is byte-identical to today.** A directory with no `openreading.yaml` and no
   `OPENREADING_CONFIG` routes exactly as it did before this module existed, because `load()`
   returns `None` and `apply()` hands the request straight back. Failure prevented: a silent change

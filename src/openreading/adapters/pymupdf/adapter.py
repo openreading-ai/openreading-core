@@ -1,5 +1,5 @@
 """PyMuPDF (fitz) adapter — the first InProcessAdapter. Born-digital PDF text/tables/layout,
-executed in-process with zero data egress (the local compliance floor).
+executed in-process with zero data egress.
 
 License: PyMuPDF is AGPL-3.0. It is isolated in the `pymupdf` optional extra, imported lazily
 INSIDE this module (never by core), and flagged in the descriptor so the router can surface it.
@@ -226,8 +226,8 @@ class PyMuPDFAdapter(BackendAdapter):
         """Refuse a file this backend does not read, by name, before PyMuPDF is asked to open it.
 
         A .txt, a .docx and a truncated PDF all come back from PyMuPDF as `Failed to open stream`,
-        which names neither the problem nor the fix. The folder path already answers honestly, with
-        `skip_reason: unsupported_format`, so the single-document path answers the same way. The
+        which names neither the problem nor the fix. This raises `unsupported_format` naming the
+        formats this backend reads, and a batch reports that as the item's own failure reason. The
         format list is read from the descriptor rather than restated here, so the message cannot
         drift from the catalog. A supported extension whose bytes are corrupt still falls through
         to the generic PyMuPDF error below, because the extension is all this check can see.

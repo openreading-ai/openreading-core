@@ -1,6 +1,6 @@
 """Docling adapter — the first ContainerAdapter. Talks to a self-hosted docling-serve container
 over HTTP; because the container runs in the caller's own infra, data never leaves the environment
-(runs_fully_local=True — a compliance answer by construction). MIT-licensed.
+(it runs on hardware you control, so no document leaves it). MIT-licensed.
 
 The DoclingDocument is a tree: `body.children` are JSON-pointer refs (`#/texts/0`, `#/tables/0`,
 `#/groups/1`) that we walk to linearize reading order. Each item's provenance carries a bbox with

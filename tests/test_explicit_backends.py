@@ -158,3 +158,30 @@ def test_compliance_refused_is_gone_and_scope_refused_remains():
 
     assert not hasattr(errors, "ComplianceRefused")
     assert hasattr(errors, "ScopeRefused"), "a caller-declared allow-list is still a caller's law"
+
+
+def test_config_hash_is_computable_when_a_policy_names_backends():
+    """`strategy plan` with a `policy.backends` list crashed with a TypeError.
+
+    `_canonical_router_config` dispatches on field type so a future `RouterConfig` field cannot
+    fall through to a nondeterministic `default=str`. `backends` is a TUPLE, which the dispatch
+    did not recognise, so every strategy compile under a written policy raised at the hash rather
+    than routing. Two ordered lists must also hash differently: the order IS the chain.
+    """
+    from openreading.router.compliance import RouterConfig
+    from openreading.strategies import StrategyConfig, compile_strategy
+    from openreading.types.request import OpenReadingRequest
+
+    cfg = StrategyConfig.model_validate(
+        {"version": 1, "strategies": {"s": {"steps": ["pymupdf", "tesseract"]}}}
+    )
+    req = OpenReadingRequest.model_validate(
+        {"document": {"bytes_base64": "eA=="}, "backend": {"id": "strategy:s"}}
+    )
+    reg = api.build_registry()
+
+    forward = compile_strategy(req, "s", cfg, reg, RouterConfig(backends=("pymupdf", "tesseract")))
+    reverse = compile_strategy(req, "s", cfg, reg, RouterConfig(backends=("tesseract", "pymupdf")))
+
+    assert forward.config_hash.startswith("sha256:")
+    assert forward.config_hash != reverse.config_hash

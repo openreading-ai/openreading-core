@@ -222,8 +222,6 @@ def _describe_when(when: dict[str, Any]) -> str:
             parts.append(f"documents over {value} pages")
         elif key == "mime":
             parts.append(f"{value} files")
-        elif key == "compliance":
-            parts.append("compliance-constrained documents")
         else:
             parts.append(f"documents matching {key}")
     return " and ".join(parts) if parts else "any document"

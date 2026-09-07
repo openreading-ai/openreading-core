@@ -1,15 +1,15 @@
 """The compile pipeline (integration.md §2): request + config -> a pruned tree the engine walks.
 
-1. **Route once, up front.** Run the existing 3-stage `Router.route` for the eligible set + drop
-   reasons. When a strategy engages, `routing.fallback` is stripped first so `auto` leaves see
-   pure stage-3 order (integration.md §2a).
+1. **Route once, up front.** Run `Router.route` for the resolved set + drop reasons. When a
+   strategy engages, `routing.fallback` is stripped first so the resolved set is the caller's
+   own list in its own written order (integration.md §2a).
 2. **Normalize** each strategy (extends resolved, shorthand expanded).
-3. **Prune** every leaf whose backend the router dropped, carrying the `DropReason`; collapse a
-   composite whose children all vanish; a fully-pruned root is today's terminal
-   `no_compliant_backend` refusal — never a silent downgrade.
+3. **Prune** every leaf whose backend is outside that set, carrying the `DropReason`; collapse a
+   composite whose children all vanish; a fully-pruned root is a terminal refusal — never a
+   silent downgrade.
 
 The executor consumes only pruned trees — the current executor invariant ("consumes ONLY the
-RoutePlan, can never widen eligibility") lifted to trees.
+RoutePlan, can never widen the resolved set") lifted to trees.
 """
 
 from __future__ import annotations
@@ -67,10 +67,9 @@ class CompiledPlan:
     # run_strategy tags gate records with their Plain source word for `explain` grouping.
     plain_sourced: bool = False
     # the file `decider.llm` block (M4) + the effective RouterConfig, so run_strategy can run the
-    # two-key enablement + compliance gate on the decider backend (decider.md §1, §3.5).
+    # two-key enablement + scope gate on the decider backend (decider.md §1, §3.5).
     decider: DeciderLLM | None = None
     router_config: RouterConfig = field(default_factory=RouterConfig)
-    # RoutePlan.baa_tier_notes, carried through so the engine can warn on the responding backend.
     # The caller's backend allow-list, carried so the engine can re-check every id it actually
     # dispatches. Belt and braces on purpose: the prune above bounds `auto` by SHORTENING a
     # list, and a list is not a filter — nothing downstream re-reads it, so a future node type
@@ -135,7 +134,7 @@ def compile_strategy(
     route_req = req.model_copy(update=updates) if updates else req
 
     plan = Router(registry, router_config, broker=broker).route(route_req)
-    eligible = plan.eligible_ids  # chosen + fallbacks, in stage-3 order
+    eligible = plan.eligible_ids  # chosen + fallbacks, in the caller's own written order
     drop_reasons = plan.dropped  # id -> DropReason
 
     # (1b) subtract the caller's allow-list. Order matters: this runs AFTER the router, over the
@@ -227,23 +226,21 @@ def _compute_config_hash(
     plan: RoutePlan,
     file_policy=None,
 ) -> str:
-    """BL-163: `config_hash` must change whenever the COMPLIANCE POSTURE changes eligibility, not
-    only when the pruned tree's shape happens to change. Hashing `root` alone let three mutually
-    exclusive constraints (`require_baa`, `require_local`, `data_region`) share one digest with
-    "no compliance at all" whenever they happened to prune the same leaves — and since
+    """BL-163: `config_hash` must change whenever the POLICY changes which backends can run, not
+    only when the pruned tree's shape happens to change. Hashing `root` alone let two different
+    allow-lists share one digest whenever they happened to prune the same leaves — and since
     `decision_id = sha256(config_hash|node_path|seq)` and `openreading replay` uses `config_hash`
-    as its match key, that meant a trace recorded under one compliance posture could silently
-    replay into a run executing under another (`_replay_decision`'s `trace_missing` downgrade is
+    as its match key, that meant a trace recorded under one policy could silently replay into a
+    run executing under another (`_replay_decision`'s `trace_missing` downgrade is
     NOT changed here — that per-decision fallback is documented behavior, out of this item's
     scope; this closes the WHOLE-TRACE mismatch at load time instead, in `cli/app.py`).
 
     `file_policy` is the `policy:` block AS WRITTEN, and it is folded in beside the effect it had
     (law PF3). The effect alone is not enough for a resume. The ledger stores the request after
-    the block was folded into it, so REMOVING a constraint from the file left the stored request
-    still carrying it, the recomputed effective compliance identical, and the digest unchanged:
-    the resume ran under a policy the file no longer asked for and reported no mismatch. Adding a
-    constraint was always caught, because it changes the effect. Hashing the source catches both
-    directions. It is the parsed block rather than the file's bytes, so reindenting or reordering
+    the block was folded into it, so REMOVING a restriction from the file left the stored request
+    still carrying it, the recomputed effect identical, and the digest unchanged: the resume ran
+    under a policy the file no longer asked for and reported no mismatch. Adding a restriction was
+    always caught, because it changes the effect. Hashing the source catches both directions. It is the parsed block rather than the file's bytes, so reindenting or reordering
     keys is not a different run.
 
     Folds `root`, `router_config`, the file policy, and a descriptor
@@ -255,18 +252,12 @@ def _compute_config_hash(
     sorted to lists first, or the digest would inherit BL-168's exact nondeterminism.
 
     What is deliberately NOT in here: the ordered eligible ids. They are an OUTPUT of routing over
-    the live registry rather than an input an operator controls, and they reorder when an
-    `integration_priority` changes, when an install extra is added or removed, and when a
-    descriptor is edited. None of those is a policy change, and each would refuse every in-flight
-    resume on the machine. Every input that produces the order is already here: the descriptor
-    digests catch a changed descriptor, the effective compliance catches a changed constraint, and
-    the written block catches a changed file. An order that moves with no input change would be a
-    stage-3 bug rather than a reason to widen the identity.
-
-    The effective `optimize_for` is not here either, and does not need to be. A resume takes no
-    request, so a caller-supplied preference comes from the stored header and cannot move. A
-    file-supplied one lives in `file_policy`, so changing or removing it already changes the
-    digest.
+    the live registry rather than an input an operator controls, and they move when an install
+    extra is added or removed and when a descriptor is edited. Neither is a policy change, and
+    each would refuse every in-flight resume on the machine. Every input that produces the order
+    is already here: the descriptor digests catch a changed descriptor, and the written block
+    catches a changed file. An order that moved with no input change would be a routing bug rather
+    than a reason to widen the identity.
 
     Never include `credentials_ref`, resolved credentials, or anything secret-bearing — every
     input here is either the pruned tree (backend ids/config, no secrets), the compliance posture,
@@ -298,6 +289,12 @@ def _canonical_router_config(router_config: RouterConfig) -> dict[str, Any]:
         value = getattr(router_config, f.name)
         if isinstance(value, (frozenset, set)):
             canonical[f.name] = sorted(value)
+        elif isinstance(value, tuple | list):
+            # `backends` is ORDERED, so it is kept in written order rather than sorted: the order
+            # is the fallback chain, and two lists naming the same ids in different orders are two
+            # different runs. Sorting here would give them one digest and let a resume cross
+            # between them.
+            canonical[f.name] = list(value)
         elif isinstance(value, (bool, str, int, float, type(None))):
             canonical[f.name] = value
         else:

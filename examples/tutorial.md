@@ -619,8 +619,8 @@ from, so the same list applies to `parse`, `compare`, `strategy` and the rest.
 
 ### Why one key and not nine
 
-Earlier versions had nine keys: `require_baa`, `no_train_on_data`, `data_region`, `require_local`,
-`max_retention` and three attestations. They asked the engine to enforce a compliance posture by
+Earlier versions had nine keys, five of them compliance constraints and three attestations. They
+asked the engine to enforce a compliance posture by
 reading a per-vendor table it kept in its own source, recording whether each vendor signs a
 business associate agreement, trains on customer data, or retains a document for so many hours.
 
@@ -1040,13 +1040,10 @@ uv run openreading strategy plan examples/1040-1988.pdf --strategy scan_aware
 }
 ```
 
-`eligible` is what your `policy:` block left standing. Add a hosted backend to the `try:` list
-while `require_local: true` is in force, and validation warns you before the plan prunes it:
-
-```text
-WARNING …:strategies.scan_aware.steps[1].backend: 'reducto' is filtered out by the policy
-  (not_local). This step can never run in that compliance context. Remove it or relax the policy
-```
+`eligible` is the chain your `policy:` block resolves to, and `dropped` is empty because nothing
+excluded a backend. A strategy step that names a backend outside that list still runs: naming is
+an explicit act, and the list is the default chain rather than a wall. `openreading backends` is
+how you check the named one can actually run here.
 
 That is the ordering rule of the whole system, stated by the tool itself. Compliance prunes the
 tree before anything runs, and no rung, fallback or preset can put a dropped backend back.
@@ -1209,16 +1206,16 @@ Everything so far ran on your machine. A hosted backend works as soon as its ven
 `.env` and your policy permits it. Charges land on your own account with that vendor.
 Your `.env` file persists on disk, and the credential broker reads it into the process environment.
 
-Try the hosted backend under the local policy you already wrote, and the command refuses it:
+Try the hosted backend without a key and the command stops before anything is sent:
 
 ```bash
 uv run openreading parse examples/schedule_a_2024.pdf --backend reducto
 ```
 ```text
-[reducto] require_local set but backend is not fully local
+[reducto] missing required credentials/config: REDUCTO_API_KEY. Sign up / configure: https://platform.reducto.ai
 ```
 
-The exit code is 3, and nothing was sent anywhere. Check credentials independently of that policy:
+The exit code is 3, and nothing left the machine. Check credentials for every backend at once:
 
 ```bash
 uv run openreading backends --check reducto
@@ -1278,18 +1275,18 @@ with the signup URL in its header:
 `docling` and `qwen-vl` are services you run
 yourself, so their variables point at your own container or endpoint and there is no signup link.
 
-The local policy from step 11 still blocks Reducto even after readiness says `yes`.
-The following separate configuration applies only if you hold a signed Reducto BAA on the required plan.
-Its `baa_tier_confirmed` entry attests to that agreement, so do not copy it before that condition holds.
-Without that confirmation, `require_baa` prunes Reducto with `no_baa` and the hosted fallback cannot run.
+Your `openreading.yaml` from step 8 lists only local backends, so a request that names none will
+never reach Reducto. Read Reducto's own terms and confirm your own agreements before you send it
+anything, because core makes no claim about a vendor and never did.
 
-If that condition holds, save this as `hosted.yaml`. Keep `openreading.yaml` from step 11 for the remaining local exercises:
+When you are ready, save this as `hosted.yaml`. Keep `openreading.yaml` from step 8 for the
+remaining local exercises:
 
 ```yaml
 version: 1
 
 policy:
-  backends: [pymupdf, tesseract]
+  backends: [pymupdf, reducto]     # this file's chain: local first, hosted second
 strategies:
   cheap_first:
     try: [pymupdf, reducto]        # local first, hosted only when the local read is bad
@@ -1368,19 +1365,25 @@ pymupdf
 ```
 
 That is the envelope from step 3, field for field, over HTTP. The policy question answers over
-HTTP too, and `compliance` in the body does the work your `policy:` block did on the
-command line:
+HTTP too. The server reads one `openreading.yaml`, from `OPENREADING_CONFIG`, and never sniffs its
+working directory: a stray file next to a long-running process must not change which backends it
+reaches. Point it at the file from step 8 and ask for the chain with no backend named:
 
 ```bash
+OPENREADING_CONFIG="$PWD/openreading.yaml" OPENREADING_SERVER_PATH_ROOT="$PWD" \
+  uv run openreading serve
 curl -s -X POST http://127.0.0.1:8787/v1/route \
   -H 'content-type: application/json' \
   -d '{"document": {"path": "'"$PWD"'/examples/1040_2024.pdf"},
-       "backend": {"id": "auto"},
-       "compliance": {"require_local": true}}' | jq '{chosen, fallbacks}'
+       "backend": {"id": null}}' | jq '{chosen, fallbacks}'
 ```
 ```json
-{ "chosen": "pymupdf", "fallbacks": ["docling", "tesseract", "qwen-vl"] }
+{ "chosen": "pymupdf", "fallbacks": ["tesseract"] }
 ```
+
+That is your file's list, over the wire. `backend.id: null` means "resolve the chain"; naming a
+backend runs that backend. The boundary that refuses one is `OPENREADING_API_KEY_SCOPES`, covered
+by `openreading help serve`.
 
 The endpoints you will use first:
 

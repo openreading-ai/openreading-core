@@ -188,9 +188,8 @@ Client: a `Protocol` + a real httpx class.
   a boto3 profile) may declare an empty `credentials_spec`. The env broker handles the
   `OPENREADING_<SLUG>_<KEY>` override form automatically -- do not hand-roll env reading.
   DECISIONS D-v2-6.1a: the kit demands a spec whenever the backend is PROVISIONED (`auth != none`
-  or an endpoint/container `byo_mode`), not on `runs_fully_local` -- docling/qwen-vl are
-  compliance-local yet still need an endpoint URL; the compliance flag and "needs env config"
-  are orthogonal. D-v2-6.1b: IAM keypairs and ADC are `byo_mode="cloud_credential"`, not
+  or an endpoint/container `byo_mode`) -- docling and qwen-vl run on your own hardware and still
+  need an endpoint URL, so "runs locally" and "needs env config" are orthogonal. D-v2-6.1b: IAM keypairs and ADC are `byo_mode="cloud_credential"`, not
   `api_key`; `byo_mode` is a coarse hint, `credentials_spec` is the per-key truth.
 - `signup_url` (mandatory for `hosted_api`), `accepts_url` (True only for native URL intake),
   `live_gate_env` (the vars gating the live test), `sources` (with access dates).
@@ -407,7 +406,7 @@ Hard rules, all enforceable in review:
 - Never accept an `OpenReadingRequest`. The signature has no document parameter on purpose, so a
   probe can never become a data path; and no `router`/`strategies`/`comparison`/`evals`/`batch`
   module imports `openreading.liveness` (pinned by a test), so a pulse can never widen the
-  compliance-eligible set (D-v7-6).
+  resolved backend set (D-v7-6).
 - Tests: offline against an injected fake client, live against the real thing. A probe test in
   the offline suite that opens a socket is a defect -- `make verify` must stay network-free.
   Copy `tests/test_liveness.py`'s adapter-probe tests for the offline half, and add one

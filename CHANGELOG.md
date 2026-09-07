@@ -577,6 +577,36 @@ and `tests/test_schema_evolution.py` pins every released file byte for byte.
 - **`config_hash` moves again.** Deleting `cost` from every descriptor changes the per-descriptor
   digest it folds (BL-163), so a run journaled before this release cannot be resumed after it.
   Same remedy as the `page_range_selection` change above: finish in-flight runs first, or re-run.
+- **`policy.backends` is a default chain, and the API-key scope is the boundary.** The removal set
+  left the documentation claiming that nothing widens the list, "not a fallback, not a named
+  `--backend`, not a strategy rung". Two of those three were never true of the code. A request that
+  names NO backend resolves through the list and `routing.fallback` reorders within it; naming a
+  backend, on the command line or as a rung inside your own strategy file, runs that backend, list
+  or no list. On one machine the operator and the caller are the same person, and refusing what
+  they just typed helps nobody. Where they are two different people, the server's API-key scope
+  (`OPENREADING_API_KEY_SCOPES`) is the boundary: it refuses an out-of-scope backend with
+  `scope_denied` before any credential is resolved, whatever the request named, and prunes a
+  strategy's rungs to what the token may reach. Behaviour is unchanged; every page that said
+  otherwise now says this.
+- **`openreading strategy plan` crashed under any written policy.** `_canonical_router_config`
+  dispatches on field type so a future `RouterConfig` field cannot fall through to a
+  nondeterministic `default=str` (BL-163). `backends` is a TUPLE, which the dispatch did not
+  recognise, so every strategy compile under a `policy.backends` list raised `TypeError:
+  RouterConfig.backends is a tuple` at the hash rather than routing. Ordered types are now hashed
+  in written order, never sorted: the order IS the chain, and two lists naming the same ids in
+  different orders are two different runs.
+- **The `compliance` decider downgrade reason is removed** from the closed `DOWNGRADE_REASONS` set.
+  Its only producer was a `ScopeRefused` from the compliance filter, and the filter is gone, so it
+  could never be emitted. `scope_denied` remains and is the reason a decider or judge backend
+  outside the caller's allow-list is refused. Also gone with it: `evals.dataset`'s forwarding of a
+  per-case `compliance` block into `request_body`, which the request schema now rejects outright;
+  the `compliance` route fact, which matched on a posture core computed from that same table; and
+  the `strategy validate` unreachable-step warning, whose evaluator row 4 deleted underneath it.
+- **Every page that described the removed machinery is rewritten**, not annotated: the `router`,
+  `config`, `api`, `schemas`, `batch`, `server`, `strategies` and `openreading` package docstrings,
+  the adapters catalog (its compliance table is replaced by where each backend runs, its license
+  and its signup page), the strategies guide's policy walkthrough, the CLI manual, the tutorial and
+  the root README. `openreading help cost` is `openreading help usage`.
 - **`--pages` explains the argparse trap it falls into.** `parse --pages 1 doc.pdf` feeds the
   file to `--pages`, and the error named a private function at the reader.
 - **`anthropic-claude` sends an image as an image.** A PNG or JPEG was labeled `application/pdf`

@@ -28,9 +28,8 @@ request body. Every deployment env var, with its unset behaviour, is listed on
 Endpoints
 ---------
 POST /v1/parse
-    Body: vendored request; `backend.id` names a backend, or "auto" runs the compliance-first
-    router and executes the chain (add `compliance` {require_baa, no_train_on_data, data_region,
-    require_local, max_retention} and/or `routing.optimize_for`; fallbacks land in `warnings[]`).
+    Body: vendored request; `backend.id` names a backend, or is null to resolve the chain from
+    the deployment's `policy.backends` and execute it (fallbacks land in `warnings[]`).
     Optional extra key `keep_candidates: true` keeps a strategy run's discarded branches under
     `orchestration.candidates[]` (popped before schema validation; no effect on a direct run).
     Response: vendored response.
@@ -309,17 +308,13 @@ comparison is constant-time (`hmac.compare_digest`).
 What this does NOT add: rate limiting, spend accounting, transport encryption. A scoped caller can
 still submit a large batch within its backends, and a token over plain HTTP is readable on the
 wire — terminate TLS in front of this like any other credential-bearing endpoint.
-The deployment's compliance policy is the `policy:` block of the `openreading.yaml` at
+The deployment's backend list is the `policy:` block of the `openreading.yaml` at
 `OPENREADING_CONFIG`, read once at startup and applied to every request, whether or not it names a
-strategy (`openreading.config`). The three attestation keys in it come from that file and never
-from a request body (DECISIONS D7: the operator attests an account-level fact, not a per-document
-one, and the wire schema is `extra=forbid`). A request body may still carry `compliance` and
-`routing`, and those INTERSECT with the file: neither source can weaken the other. Booleans OR.
-`max_retention` keeps the lower ceiling, so a body asking for `48h` under a file requiring `zero`
-is held to `zero`. `data_region` has no ordering and a body cannot name two regions at once, so a
-body asking for `us` under a file requiring `eu` is a 403 `compliance_refused` carrying
-`backend_code: "region_conflict"` rather than one side winning. `optimize_for` is the exception the
-body takes outright, because it orders the survivors and never changes the set.
+strategy (`openreading.config`). It comes from that file and never from a request body (DECISIONS
+D7: the operator states which backends this deployment permits, and the wire schema is
+`extra=forbid`). It INTERSECTS with the API key's own scope, so what a caller reaches is what both
+permit. An EMPTY list permits nothing and refuses with `scope_denied`; an absent list is not an
+empty one.
 """
 
 from __future__ import annotations

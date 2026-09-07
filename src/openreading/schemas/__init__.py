@@ -43,19 +43,19 @@ Validate anything programmatically with ``validate_request`` / ``validate_respon
 on the way in and responses on the way out; the CLI validates before printing. Inspect any
 backend's descriptor with ``make_adapter(id).descriptor.to_schema_dict()``.
 
-Request (``request.v0.2.json``)
+Request (``request.v0.3.json``)
 -------------------------------
 Required: ``document`` and ``backend``; ``additionalProperties: false`` at the top level AND at
 every nested object node — ``document``, ``backend``, ``backend.runtime``, ``outputs``,
 ``outputs.chunking``, ``extraction_schema``, ``features``, ``pages``, ``pages.ranges[]``,
-``routing``, ``compliance``, ``async`` (unknown keys are rejected — D7: deployment knobs such as
-``allow_unverified_compliance`` therefore live on ``RouterConfig``, never on the wire). The one
+``routing``, ``async`` (unknown keys are rejected — D7: a deployment knob such as the backend
+allow-list therefore lives on ``RouterConfig``, never on the wire). The one
 deliberate exception is ``extraction_schema.json_schema``'s VALUE, an arbitrary caller-supplied
 JSON Schema the wire contract does not shape. Nested strictness is v0.2 (M12): v0.1 closed the
 top level only, so a misspelled nested field such as ``document.mim_type`` passed schema
 validation and failed only later, at the pydantic layer (``openreading.types.request``, already
 ``extra="forbid"`` throughout) — the vendored schema stopped being the source of truth exactly
-where nesting began. Optional blocks: ``schema_version`` (const ``"0.2"``), ``outputs``,
+where nesting began. Optional blocks: ``schema_version`` (const ``"0.3"``), ``outputs``,
 ``features``, ``pages``, ``extraction_schema``, ``routing``, ``compliance``, ``async``,
 ``idempotency_key``.
 
@@ -66,7 +66,7 @@ where nesting began. Optional blocks: ``schema_version`` (const ``"0.2"``), ``ou
   downloaded to bytes first for the rest), ``path`` (local backends only), ``file_id`` (a
   previously uploaded file, e.g. a reused Chunkr task). Plus ``mime_type`` (inferred from the
   extension by CLI/Python, default ``application/pdf``), ``filename``, ``password``.
-- ``backend``: ``id`` (registry slug, or ``"auto"`` for the compliance-first router), ``type``
+- ``backend``: ``id`` (registry slug, or ``null`` to resolve the chain from the policy), ``type``
   (``hosted_api`` | ``oss_library`` | ``framework_loader`` | ``self_hosted_model``,
   informational), ``operation`` (Textract ``DetectDocumentText``/``AnalyzeDocument``/
   ``AnalyzeExpense``/``AnalyzeID``/``AnalyzeLending``, Azure model ids, reducto/chunkr
@@ -95,19 +95,10 @@ where nesting began. Optional blocks: ``schema_version`` (const ``"0.2"``), ``ou
   rather than silently returning geometry-only (D13).
 - ``pages``: ``ranges`` of 1-based inclusive ``{start, end?}``, ``max_pages``; applied natively
   where supported, else by the normalizer.
-- ``routing`` (for ``backend.id = "auto"``): ``doc_type_hint`` (bank_statement, paystub, w2,
+- ``routing`` (for ``backend.id = null``): ``doc_type_hint`` (bank_statement, paystub, w2,
   1003_loan_app, 1040_tax, invoice, id_document, medical_form, clinical_pdf, generic),
-  ``optimize_for`` (accuracy | cost | latency | offline — stage-3 weights), ``fallback`` (ordered
-  ids, honored WITHIN the eligible set only — routing never re-admits a compliance-dropped
-  backend).
-- ``compliance`` (the stage-1 filter; hard constraints, never traded off; unverified vendor
-  claims fail closed): ``require_baa`` (BAA path, or fully-local where PHI never leaves),
-  ``no_train_on_data`` (unconfirmed opt-outs and unverified no-train claims excluded too),
-  ``data_region`` (e.g. ``"us"``, ``"eu"``; enforced against the descriptor's
-  ``data_region_options``), ``require_local``, ``max_retention`` (``"zero"``, ``"48h"``). These
-  also bind
-  a directly named backend: a non-compliant request is refused (``ScopeRefused`` / HTTP
-  403), never silently run.
+  ``fallback`` (ordered ids, honored WITHIN the resolved set only — routing reorders a
+  restriction and never widens one).
 - ``async``: ``mode`` auto (default; router picks per backend and document) | sync | async;
   ``webhook_url`` (always caller-supplied; without it async polls).
 - ``idempotency_key``: when omitted, defaults to a deterministic key over the document content,
@@ -198,9 +189,7 @@ backend cannot produce is ABSENT with a ``warnings[]`` entry — never fabricate
     Those last three are separate codes because escalating is right for a gate and wrong for
     an exhausted budget. An agent triage playbook branches on them to separate "escalate"
     from "consume".
-  - the deployment or the vendor said so: ``baa_tier_confirmed`` (``require_baa`` satisfied
-    only by the deployment's tier-gated confirmation), ``backend_warning`` (the vendor's own
-    warning text, passed through).
+  - the vendor said so: ``backend_warning`` (the vendor's own warning text, passed through).
 
   ``unsupported_feature`` is NOT a warning code. It is an ``on_error`` map key, an exception
   category and an HTTP ``error.category``, each documented elsewhere in this file. Grouping the
@@ -282,8 +271,8 @@ keeps every older descriptor valid) and no in-band version — filename + ``$id`
   ambient-chain backends like
   Textract). The broker, ``openreading backends``, ``/v1/backends`` and missing-credential errors
   are all generated from these — no per-backend logic anywhere else. The kit requires them of
-  every backend with ``auth != none`` OR an endpoint/container ``byo_mode`` (NOT keyed on
-  ``runs_fully_local``: docling/qwen-vl are compliance-local yet still need an endpoint URL).
+  every backend with ``auth != none`` OR an endpoint/container ``byo_mode``: docling and qwen-vl
+  run on your own hardware and still need an endpoint URL.
 - ``batch`` (v0.4): ``native`` (verified | claimed | false), ``max_items``, ``max_concurrency``,
   ``notes``. Absent means platform batching (the runner fans out single-document runs).
 - ``liveness`` (v0.5): ``probe`` (none | local | endpoint | vendor), ``method``, ``timeout_s``,

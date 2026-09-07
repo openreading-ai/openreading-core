@@ -62,14 +62,12 @@ Each mechanism below holds on every surface, and each links to the guide that de
   test on each result that decides whether to accept it or move on. Every attempt carries
   one category from a closed vocabulary. `explain` renders the trace, and `replay --trace`
   re-executes its decisions. [Strategies](strategies/README.md).
-- **Compliance-first routing, widened only by your policy.** The router picks a backend in three
-  stages. Stage 1 drops backends for policy, and stages 2 and 3 only filter and reorder the
-  survivors. An unverified claim, such as a vendor that lists no regions, counts as no. Your policy
-  is the one thing that sets the eligible set, and exactly three of its keys enlarge it:
-  `allow_unverified_compliance`, `baa_tier_confirmed` and `train_optout_confirmed`. Nothing after
-  the policy enlarges it again. No fallback, named backend, or strategy step readmits a dropped
-  vendor. A decider, the optional LLM call at a strategy's decision points, cannot readmit one
-  either. [Routing and keys](router/README.md).
+- **You name the backends; selection is a lookup.** Three rules, in order: the backend you named,
+  else `policy.backends` in written order, else `pymupdf`. Nothing is inferred, because core holds
+  no fact it cannot verify. The router used to filter on a per-vendor compliance table, gate on a
+  capability table and score on a "quality" number that was this project's own build priority;
+  every input to all three was a claim it could not check, and being wrong routed a document to a
+  backend the operator believed was excluded. [Routing and keys](router/README.md).
 - **Ledger resume.** With `OPENREADING_LEDGER` set, a strategy run journals every step, meaning it
   writes each step to disk as it completes. `resume <run_id>` replays the recorded steps and runs
   the rest. [The run ledger](ledger/README.md).

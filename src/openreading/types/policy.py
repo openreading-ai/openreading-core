@@ -8,8 +8,8 @@ The nine keys before it asked core to enforce a compliance posture from a per-ve
 package keeps in its own source: whether each vendor signs a BAA, trains on customer data, or
 retains a document for so many hours. Nothing here can observe any of that, so a stale entry did
 not fail loudly, it routed a document to a backend the operator believed was excluded and the run
-succeeded. has the argument; the short version is that core holds
-no fact it cannot verify, and a constraint core cannot check is one it must not appear to enforce.
+succeeded. Core holds no fact it cannot verify, and a constraint core cannot check is one it must
+not appear to enforce.
 
 An operator who cares about compliance already knows their own posture and which vendors they
 hold agreements with. `backends: [aws-textract, pymupdf]` is that conclusion, written by the one
@@ -30,28 +30,18 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
-# The five keys that become `request.compliance`, in schema order. Read by
-# `openreading.config.union_compliance` and by the parity test, and never re-typed beside either.
-# The keys that become `request.routing`. A deliberate subset: `fallback` is chain order, not a
-# constraint, so a policy can never reorder someone's chain by naming backends.
-# The keys that become a `RouterConfig`. These three are the only ones that WIDEN the eligible
-# set, and each asserts a fact about paperwork rather than a preference about a vendor.
-
 
 class Policy(BaseModel):
-    """The nine keys, typed.
+    """The one key, typed.
 
     Three settings, each closing a different door into the same object. `extra="forbid"` so a
-    misspelling is an error rather than a silently dropped constraint. `strict=True` so the
-    CONSTRUCTOR does not coerce: pydantic's default accepts `"yes"` for a bool, which is the
-    widening the schema refuses on the file path, and `Policy(...)` is the shortest way anyone
-    embedding this package will build one. `validate_assignment=True` so a field set after
-    construction is checked too: the model outlives the call that made it, and an unvalidated
-    assignment is a second door into an object the first door already checked.
-
-    The assignment case is the one that bites hardest. `bool("false")` is `True`, so writing the
-    string `"false"` onto `allow_unverified_compliance` turned the fail-closed posture ON, with a
-    value whose plain-English intent is off.
+    misspelling is an error rather than a silently dropped constraint, which is what matters most
+    here: `backend: [pymupdf]` for `backends:` would otherwise mean "no restriction" instead of
+    "only pymupdf". `strict=True` so the CONSTRUCTOR does not coerce, because `Policy(...)` is the
+    shortest way anyone embedding this package will build one and it must not accept a shape the
+    file path rejects. `validate_assignment=True` so a field set after construction is checked
+    too: the model outlives the call that made it, and an unvalidated assignment is a second door
+    into an object the first door already checked.
     """
 
     model_config = ConfigDict(extra="forbid", strict=True, validate_assignment=True)
@@ -67,9 +57,9 @@ def coerce_policy(policy: Policy | dict | None) -> Policy | None:
     """Return a validated `Policy`, or None for "no policy".
 
     `strict=True` rather than pydantic's default coercion: the HTTP surface type-checks the same
-    values against `request.v0.2.json` before pydantic sees them, and JSON Schema does not coerce.
-    Without it, `require_baa: "yes"` would be accepted here and rejected over the wire, which is
-    the same divergence between two spellings of one policy in a new place.
+    values against the request schema before pydantic sees them, and JSON Schema does not coerce.
+    Without it a value would be accepted here and rejected over the wire, which is one policy
+    meaning two things depending on which door it came through.
     """
     if policy is None:
         return None

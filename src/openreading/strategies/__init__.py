@@ -108,7 +108,7 @@ The map — what each module documents
   collisions) and the warning set, located by node path (D-v3-8). Run by `strategy validate`
   only. The run path loads the schema and compiles the tree, and it never calls
   `validate_config` (`model` §9).
-- `prune` — the compile pipeline: route once, normalize, prune compliance-dropped leaves,
+- `prune` — the compile pipeline: route once, normalize, prune out-of-list leaves,
   union the file `policy:` into the effective compliance (D-v3-12); `CompiledPlan`.
 - `facts` — pre-parse route facts (`doc_type`, `mime`, page/size probes, `filename_matches`,
   `compliance`, `sample_percent`); an uncomputable fact means "rule doesn't match", never error.

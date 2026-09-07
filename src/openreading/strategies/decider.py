@@ -27,7 +27,7 @@ flips an explicit arm switch — env gate + `decider:` block + an installed key 
 §1 One tree, two walkers
 ------------------------
 The engine compiles the strategy file into one normalized tree (config hash recorded), prunes it
-against the request's compliance-eligible set, and walks it. Walking is deterministic except at
+against the request's resolved backend set, and walks it. Walking is deterministic except at
 declared decision points, of which there are exactly three kinds (§2). Every decision point carries
 mandatory, schema-enforced engine semantics (`review_default` on a gate band, `otherwise:` on a
 decide node, the deterministic composite score behind a judge), so a deployment with no LLM
@@ -60,8 +60,8 @@ Enablement is two-key, and never a wire field. The decider runs only when BOTH h
 Either key alone leaves the engine in charge: a `decider:` block without the env gate resolves
 every decision point to its engine default, traced `decider_downgraded: env_disabled`. There is no
 per-request wire field that can enable the decider — enablement is a deployment posture, the same
-split as `allow_unverified_compliance`, so a caller can never talk a service into consulting an LLM
-its operator did not deploy. The verdict (`resolve_decider_status` → `DeciderStatus`) is computed
+split as every other deployment posture, so a caller can never talk a service into consulting an
+LLM its operator did not deploy. The verdict (`resolve_decider_status` → `DeciderStatus`) is computed
 ONCE per walk at `run_strategy` entry and binds every decision point in the request identically
 (D-v3-15); `env` is `os.environ` unless overridden via `run_strategy(env=...)` for tests.
 
@@ -211,11 +211,9 @@ resolves the decision point to its engine default with the reason traced as
   this reason today — §3.3 rail 4).
 - `malformed` — output fails schema validation or engine re-validation (§3.2), or the port raised.
 - `refusal` — the model declines to choose (`action: None`).
-- `compliance` — the decider/judge backend was dropped by the request's compliance filter (§3.5).
 - `scope_denied` — the decider/judge backend is outside the CALLER's backend allow-list. A
-  `decider:`/`judge:` backend is CALLED, with the operator's vendor key, so the same per-token
-  ceiling that bounds every dispatched backend bounds it. Checked ahead of `compliance` because
-  the caller can act on it, and reported instead of it when both apply.
+  `decider:`/`judge:` backend is CALLED, with the operator's vendor key, so the same allow-list
+  that bounds every dispatched backend bounds it.
 - `env_disabled` — a `decider:` (or `judge:`) block exists but `OPENREADING_LLM_DECIDER` is not
   set (§1).
 - `unavailable` — enabled and eligible, but no executor port is wired into this runtime; also
@@ -234,26 +232,25 @@ resolves the decision point to its engine default with the reason traced as
 substituted `otherwise`, independent of whether any `decider:`/`judge:` block is configured or
 enabled — pruning, not decision-making, drives it — and never clobbers a real decider-level
 downgrade already on the record. Engine-mode priority for a configured block: env off →
-`env_disabled`; backend compliance-dropped → `compliance`; no port → `unavailable`; a config with
-no block at all is pure engine mode with no annotation. An LLM outage can never fail a parse: the
-decision point degrades, the walk continues, the trace says why.
+`env_disabled`; the backend unknown to the registry → `unavailable`; no port → `unavailable`; a
+config with no block at all is pure engine mode with no annotation. An LLM outage can never fail a
+parse: the decision point degrades, the walk continues, the trace says why.
 
-§3.5 The decider is itself a compliance-checked backend. `decider.llm.backend` (and
-`judge.backend`) names an ordinary registry backend, resolved like any other. Per request it passes
-`Router.check_eligible` against the EFFECTIVE (request ∪ policy) compliance BEFORE any decision
-point runs (`_backend_eligible`). If it is dropped (`require_local` and the decider is hosted;
-`no_train_on_data` and the model trains on inputs), every decision point in that request resolves
-via engine semantics, traced `decider_downgraded: compliance`, and the port is never called. An LLM
-that trains on data can therefore never see a `no_train_on_data` document — structurally, not
-contractually. Compliance is never widened here.
+§3.5 The decider is itself a gated backend. `decider.llm.backend` (and `judge.backend`) names an
+ordinary registry backend, resolved like any other, and it is checked against the CALLER's own
+allow-list BEFORE any decision point runs. Outside it, every decision point in that request
+resolves via engine semantics, traced `decider_downgraded: scope_denied`, and the port is never
+called.
 
-The same backend is checked against the CALLER's allow-list on the same pass, ahead of compliance,
-traced `decider_downgraded: scope_denied`. A `decider:`/`judge:` backend is one that gets CALLED,
-with the operator's vendor key, so the per-token ceiling that bounds every dispatched backend has
-to bound it too. Nothing spends on this path today (no port is wired into any shipped surface, so
-the status resolves to `unavailable` before a call), which is exactly why the gate is here now:
-the day the wire executor lands, this would otherwise be a backend a scoped request reaches with
-no check at all.
+A `decider:`/`judge:` backend is one that gets CALLED, with the operator's vendor key, so the
+allow-list that bounds every dispatched backend has to bound it too. No port is wired into any
+shipped surface, so the status resolves to `unavailable` before a call today, which is exactly why
+the gate is here now: the day the wire executor lands, this would otherwise be a backend a scoped
+request reaches with no check at all.
+
+This gate used to be a compliance check as well, against a per-vendor table core kept in its own
+source. That table is gone, and with it the `compliance` downgrade reason: a check core cannot
+perform must not be advertised in a closed vocabulary a reader will branch on.
 
 §4 LLM-as-judge
 ---------------
@@ -394,7 +391,6 @@ from openreading.credentials import EnvCredentialBroker
 from openreading.router.registry import Registry
 from openreading.router.router import Router, RouterConfig
 from openreading.strategies.model import DeciderLLM
-from openreading.types.errors import ScopeRefused
 from openreading.types.request import OpenReadingRequest
 
 # The env key of the second enablement key (decider.md §1). Truthy → decider enabled; a backend-id
@@ -410,15 +406,13 @@ DOWNGRADE_REASONS = frozenset(
         "timeout",  # 14.2 — no decision within decider.llm.timeout
         "malformed",  # 14.2 — output fails schema / engine re-validation
         "refusal",  # 14.2 — the model declines to choose
-        "compliance",  # the decider backend was dropped by the request compliance filter (§3.5)
         "env_disabled",  # a decider is configured but OPENREADING_LLM_DECIDER is not set (§1)
         "trace_missing",  # 14.3 — replay: a decision point has no logged choice
         "unavailable",  # enabled + eligible, but no LLM executor deployed in this runtime (D-v3-15)
-        "scope_denied",  # the decider/judge backend is outside the CALLER's allow-list. Distinct
-        # from "compliance": that one's fix is the policy, this one's is the token's allow-list.
-        "otherwise_pruned",  # BL-54 — a decide node's own otherwise: was pruned by compliance and
-        # dispatch resolved through the substituted among[0] survivor (integration.md §2c), not the
-        # operator's configured default
+        "scope_denied",  # the decider/judge backend is outside the CALLER's allow-list
+        "otherwise_pruned",  # BL-54 — a decide node's own otherwise: was outside the resolved
+        # set and dispatch went through the substituted among[0] survivor (integration.md §2c),
+        # not the operator's configured default
     }
 )
 
@@ -571,17 +565,17 @@ def _backend_eligible(
     router_config: RouterConfig,
     broker: EnvCredentialBroker | None = None,
 ) -> str | None:
-    """Compliance-check a decider/judge backend against the effective (request ∪ policy) compliance
-    (decider.md §3.5), BEFORE any decision point runs. Returns a downgrade reason ("compliance" |
-    "unavailable") or None when eligible. Compliance is never widened here.
+    """Resolve a decider/judge backend against the registry (decider.md §3.5), BEFORE any decision
+    point runs. Returns `"unavailable"` for a backend no registry entry matches, else None.
 
-    `broker` is the walk's own credential broker. Stage 1 resolves a container backend's endpoint
-    through it, so gating with a different broker would check an endpoint this walk never dispatches
-    to."""
+    It used to also compliance-check the backend and return `"compliance"`. There is no compliance
+    filter, so the only thing `check_eligible` can still refuse is an id nothing is registered
+    under.
+
+    `broker` is the walk's own credential broker, so resolution sees the same endpoint this walk
+    would dispatch to."""
     try:
         Router(registry, router_config, broker=broker).check_eligible(req, backend)
-    except ScopeRefused:
-        return "compliance"
     except KeyError:
         # Unknown backend id: `validate` never checks the decider or judge backend against
         # the registry, so a misspelling first surfaces here. Treat it as unavailable.
@@ -600,10 +594,10 @@ def resolve_decider_status(
     backend_allowlist: frozenset[str] | None = None,
     broker: EnvCredentialBroker | None = None,
 ) -> DeciderStatus:
-    """The two-key enablement + compliance gate, computed once per walk (§3.5: the verdict binds
-    every decision point in the request identically). Priority: no block → pure engine; block but
-    env off → env_disabled; block + env but backend compliance-dropped → compliance; enabled +
-    eligible but no executor wired → unavailable; otherwise → llm."""
+    """The two-key enablement + scope gate, computed once per walk (§3.5: the verdict binds every
+    decision point in the request identically). Priority: no block → pure engine; block but env
+    off → env_disabled; block + env but the backend outside the caller's allow-list →
+    scope_denied; enabled and in scope but no executor wired → unavailable; otherwise → llm."""
     if decider is None:
         return DeciderStatus("engine")  # pure engine mode; decisions carry no downgrade annotation
 

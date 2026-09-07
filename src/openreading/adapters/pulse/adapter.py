@@ -5,12 +5,7 @@ shapes the adapter must handle: (a) inline JSON, and (b) for large docs (>5MB / 
 resolves it before normalizing. Sync (`async: false`) → INLINE; async → POLL.
 
 BYO API key (`x-api-key`; PULSE_API_KEY). Pulse exposes NO per-element confidence → block
-confidence is channel X and never fabricated (a warning says so). Compliance: SOC 2 Type II,
-HIPAA BAA on Pro only (`hipaa_baa="tier_gated"`: a require_baa request drops Pulse unless the
-deployment lists it in `baa_tier_confirmed`), GDPR — and the no-train posture is UNVERIFIED, so
-`trains_on_customer_data="unverified"`: a no-train request drops Pulse unless the deployment sets
-`allow_unverified_compliance` (internal/research/openreading/routing_and_compliance.md §3/§4 —
-fail closed). Sources:
+confidence is channel X and never fabricated (a warning says so). Sources:
 https://docs.runpulse.com/api-reference/endpoint/extract, runpulse.com/security (accessed 2026-07-21).
 """
 

@@ -197,7 +197,7 @@ class AdapterDescriptor(BaseModel):
     batch: BatchIntake | None = None
     # v0.5 — liveness-probe declaration (Pulse). None ⇒ no probe; the platform infers a status
     # from configuration instead. Never read by the router: liveness is a diagnostic, never
-    # routing input, so it cannot widen the compliance-eligible set (internal/design/liveness.md §7).
+    # routing input, so it cannot widen the resolved backend set (internal/design/liveness.md §7).
     liveness: LivenessProbe | None = None
     # v0.2 — BYO-credential declaration (drives the env broker + readiness UI; the router never
     # branches on backend type, and the broker never hard-codes per-adapter keys).

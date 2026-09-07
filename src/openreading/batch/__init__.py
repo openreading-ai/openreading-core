@@ -26,9 +26,8 @@ single-document pipeline without touching it. Three load-bearing choices:
    one corpus report answering "which backend is better on MY corpus".
 
 Principles shared with the channel contract (`openreading.derive`): deliver-or-warn per item (the
-batch never silently shrinks); compliance is never relaxed by batching (per-item routing runs the
-same compliance-first
-elimination as a single run -- no side door); determinism (same inputs => same envelope modulo
+batch never silently shrinks); the backend list is never widened by batching (per-item routing
+resolves exactly as a single run does -- no side door); determinism (same inputs => same envelope modulo
 backend nondeterminism: item order is input order, directory expansion is sorted, identity
 hashes are content-based); honesty over convenience (native-batch claims are graded, never
 assumed).
@@ -87,7 +86,7 @@ so every adapter batches correctly on day one.
 - M7 per-item compliance and routing: each item is routed exactly as a single run would be,
   including per-item backend choice under `auto` (a PNG may legitimately route to a different
   backend than a PDF in the same batch; each inner response carries `backend.id`). No batch-level
-  cache of routing decisions that could widen the compliance-eligible set.
+  cache of routing decisions that could widen the resolved backend set.
 - M8 honest aggregation: `summary` carries `total / succeeded / failed`, `duration_ms`,
   `pages_processed` (summed over the items that reported one, absent if none did), and
   `backends` (a per-item backend tally). It carries no money. `cost_usd` and `cost_bases` were

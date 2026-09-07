@@ -226,8 +226,8 @@ output is right. Fix the table.
 | Preset | Plain near-equivalent | Differs from Plain in |
 |---|---|---|
 | `cost_saver` | `try: [pymupdf, docling, aws-textract]` + `escalate_when: {looks_bad: true, low_confidence: true}` | `intent:`, and a bare `scanned_pages_detected` instead of the scan pair |
-| `max_accuracy` | `try: [auto, auto]` + the same `escalate_when` | same |
-| `offline_first` | `try: [pymupdf, tesseract, docling]` + the same `escalate_when` | same, and enforcement is `policy: {require_local: true}`, not the preset |
+| `max_accuracy` | `try:` naming the two backends you trust most + the same `escalate_when` | same |
+| `offline_first` | `try: [pymupdf, tesseract, docling]` + the same `escalate_when` | same, and what keeps a run local is `policy: {backends: [pymupdf, tesseract, docling]}`, not the preset |
 | `fast` | `race: [pymupdf, tesseract]` | `intent:` only |
 
 ### 3. Run a strategy and read the explanation
@@ -332,11 +332,10 @@ is missing. The gate fires, and the document climbs to `tesseract`. `jq -c '[.wa
 fields.json` prints `["quality_escalated"]`. An escalation is a warning on the envelope, never an
 error.
 
-### 6. Prune a rung with a policy inside the file
+### 6. Say which backends this deployment permits
 
-A policy inside the file removes a backend from the tree before anything runs. Compliance is the
-set of rules about which backends may see a document, such as requiring a fully local one. Save
-this as `local.yaml`. The `policy:` block is compliance, and it sits outside the strategy tree.
+The `policy:` block names the backends this deployment permits, in the order you want them tried,
+and it sits outside the strategy tree. Save this as `local.yaml`:
 
 ```yaml
 version: 1
@@ -349,32 +348,40 @@ strategies:
 ```
 
 ```bash
-uv run openreading strategy validate --config local.yaml
+uv run openreading route sample.pdf --config local.yaml
 uv run openreading strategy plan sample.pdf --config local.yaml --strategy onprem
 ```
-```text
-WARNING local.yaml:strategies.onprem.steps[1].backend: 'reducto' is filtered out by the policy (not_local). This step can never run in that compliance context. Remove it or relax the policy
-…
+```json
+{ "chosen": "pymupdf", "fallbacks": ["tesseract"], "dropped": {}, "terminal_reason": null }
 ```
 ```json
 { "strategy": "onprem", "config_hash": "sha256:…",
-  "eligible": ["pymupdf", "docling", "tesseract", "qwen-vl"],
-  "dropped": [ { "backend": "reducto", "stage": 1, "code": "not_local", "detail": "require_local set but backend is not fully local" } ],
-  "tree": { "steps": [ { "backend": "pymupdf", "escalate_if": { "any_of": [ "…" ] } }, { "backend": "tesseract" } ] } }
+  "eligible": ["pymupdf", "tesseract"],
+  "dropped": [],
+  "tree": { "steps": [ { "backend": "pymupdf", "escalate_if": { "any_of": [ "…" ] } },
+                       { "backend": "reducto" }, { "backend": "tesseract" } ] } }
 ```
 
-**You should see** a two-rung tree where you wrote three. `plan` prints the pruned tree for this
-document and policy, with no execution. Run it with `parse sample.pdf --config local.yaml --strategy
-onprem > onprem.json`. `explain onprem.json` ends with the line `dropped reducto (stage 1:
-not_local)`, and `jq -c '.orchestration.dropped' onprem.json` prints the same record. Every verb
-reads the same block from the same file, so `strategy plan`, `replay`, `calibrate` and a plain
-`parse` all prune against one policy.
+**You should see** your two-name list as the chain in `route`, and all three rungs still standing
+in the plan. That is the distinction worth learning here, and it is not a bug.
+
+`policy.backends` is the chain a request that names NO backend resolves to. `routing.fallback`
+reorders within it and never adds to it. But naming a backend, whether with `--backend reducto` or
+as a rung inside your own strategy, is an explicit act by the author of that file, and it runs. On
+one machine the operator and the caller are the same person, and refusing what they just wrote
+helps nobody. What stops the reducto rung here is that no `REDUCTO_API_KEY` is set, which the
+attempt reports as `skipped (missing_credentials)` before anything leaves the machine.
 
 > [!IMPORTANT]
-> Nothing in the file can re-admit a dropped backend. A later rung, `then:`, `auto`, and an
-> `intent:` line all leave the drop in place. A BAA is the signed agreement that lets a vendor
-> handle protected health data. Drop codes and how to attest one are in
-> [Routing and keys](../router/README.md).
+> The enforcement boundary, for the case where the operator and the caller are two different
+> people, is the server's API-key scope. `OPENREADING_API_KEY_SCOPES` refuses a backend outside a
+> token's scope with `scope_denied` before any credential is resolved, whatever the request named,
+> and prunes a strategy's rungs to what that token may reach. [The HTTP
+> server](../server/README.md) has the walkthrough.
+>
+> This file used to prune a rung against a compliance policy instead: `require_local: true`
+> dropped `reducto` with `not_local`, from a per-vendor table core kept in its own source. Core
+> holds no fact it cannot verify, and it could verify none of that.
 
 ### 7. Declare a decision point, run it without an LLM, replay it
 

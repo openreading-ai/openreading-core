@@ -233,18 +233,18 @@ HTTP — `POST /v1/backends/{backend_id}/liveness` (D-v7-5)
 
 Diagnostic, never routing input (D-v7-6)
 ----------------------------------------
-Compliance is never relaxed by liveness. Three structural guarantees, none relying on remembering
-a rule:
+The caller's own backend list is never widened by liveness. Three structural guarantees, none
+relying on remembering a rule:
 
 1. A probe carries no caller data — `probe_liveness(ctx, *, timeout_s)` takes no
-   `OpenReadingRequest`; there is no document, page or extraction schema for the compliance gate
-   to protect. Enforced by the signature, not by discipline.
-2. Nothing in routing, compliance or fallback reads a `LivenessReport`. No module under
-   `router/`, `strategies/`, `comparison/`, `evals/` or `batch/` imports this one (pinned by a
-   test), so the compliance-eligible set is computed from descriptors exactly as before and
-   liveness cannot widen it: a backend the gate refuses stays refused, whatever its pulse.
+   `OpenReadingRequest`; there is no document, page or extraction schema to protect. Enforced by
+   the signature, not by discipline.
+2. Nothing in routing or fallback reads a `LivenessReport`. No module under `router/`,
+   `strategies/`, `comparison/`, `evals/` or `batch/` imports this one (pinned by a test), so the
+   resolved backend set comes from the caller's own list exactly as before and liveness cannot
+   widen it: a backend outside that list stays outside it, whatever its pulse.
 3. Liveness is a diagnostic read by operators and UIs, not a capability. Making it routing input
-   would be a different feature with a different compliance analysis — explicitly out of scope.
+   would be a different feature — explicitly out of scope.
 
 Scope enforcement above is the one existing gate liveness does inherit, because there it is the
 caller-authorization question, not the compliance question.
@@ -309,8 +309,8 @@ Decisions (internal/decisions/DECISIONS.md)
   legitimise the forbidden thing.
 - D-v7-5 — POST, one backend per call, always 200 with a report; avoids prefetch-spent rate
   limits, the 15-vendor fan-out, and conflating "backend down" with "API failed".
-- D-v7-6 — diagnostic, never routing input; a `LivenessReport` cannot widen the
-  compliance-eligible set, and the probe cannot become a data path.
+- D-v7-6 — diagnostic, never routing input; a `LivenessReport` cannot widen the resolved backend
+  set, and the probe cannot become a data path.
 
 Also rejected: reusing `Health` (an offline, dependency-oriented dataclass with `missing_deps` /
 `cold` that `readiness` consumes and that is deliberately not schema-bound; overloading it would

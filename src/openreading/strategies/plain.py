@@ -36,7 +36,7 @@ The whole language
     disagree           the compared backends produced materially different output
                        (`compare` only; `true` = 0.3)
 
-1 reserved word: `auto` — "openreading's best remaining pick", the router's stage-3 choice among
+1 reserved word once existed: `auto`, meaning "openreading's best remaining pick" among
 eligible, not-yet-attempted backends — usable as a `try` rung or a `then:` target.
 
 That is the entire surface. No signal catalog, no thresholds with units, no wrappers or
@@ -57,7 +57,7 @@ A strategy body is Plain iff it is one of:
 * `try`: a list of items, or a single item. An item is a backend id, `auto`, or the name of
   another strategy or preset in scope.
 * `race` / `compare`: a list of 2 or more items. `auto` is not an item here: two concurrent
-  stage-3 picks have no defined distinctness — name the backends you race.
+  such picks had no defined distinctness — name the backends you race.
 * `escalate_when`: the scalar `looks_bad` (the only legal scalar), or a non-empty flat map with
   keys among {looks_bad, low_confidence, missing, disagree}:
   - `looks_bad: true` — all members at defaults; or a member map (below). Member maps OVERLAY

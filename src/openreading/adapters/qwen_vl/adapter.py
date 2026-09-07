@@ -1,6 +1,6 @@
 """Qwen-VL adapter — a self-hosted VLM behind a BYO OpenAI-compatible endpoint (vLLM / Ollama /
 SGLang). Because the endpoint runs in the caller's own infra, data never leaves the environment
-(runs_fully_local=True). Token-stream paradigm: the model GENERATES the output — there are no
+(it runs on your own hardware). Token-stream paradigm: the model GENERATES the output — there are no
 calibrated per-element scores, so block_confidence is X and never fabricated; generation is
 non-deterministic (conformance runs with deterministic=False).
 

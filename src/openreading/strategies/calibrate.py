@@ -269,7 +269,7 @@ def calibrate_strategy(
     for i, case in enumerate(cases):
         req = OpenReadingRequest.model_validate(case.request_body)
         # The shared fold, not a local rebuild of it. Assembling the compliance half by hand here
-        # meant the file's `optimize_for` reached every other surface and not this one, and any
+        # meant the file's own policy reached every other surface and not this one, and any
         # key added later would have reached this one last. `merged_router_config` above already
         # carries the attestations, so this call is idempotent over them.
         req, _ = apply_policy(req, config_policy, merged_router_config)

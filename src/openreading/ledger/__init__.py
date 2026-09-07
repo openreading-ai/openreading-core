@@ -405,7 +405,7 @@ residency queues with the `residency_changed` refusal.
 Retention and erasure
 ---------------------
 The ledger keeps no policy about the directory it writes to. It used to: a ceiling computed from
-`min(max_retention_hours)` over the hosted backends on the run's path, an expiry stamp, a reaper
+a ceiling derived from vendor descriptors, an expiry stamp, a reaper
 that crypto-shredded the run's key at every fresh arm and on a server timer, and a ZDR branch that
 skipped the blob write entirely for a backend whose descriptor carried `zdr_flag`.
 

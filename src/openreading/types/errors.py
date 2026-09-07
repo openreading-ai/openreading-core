@@ -122,9 +122,10 @@ class ScopeRefused(AdapterError):
     scope refuses because the CALLER did not permit it. Core cannot answer the first honestly, so
     only the second remains, and it is the one whose fix is in the caller's own hands.
 
-    Every source of an allow-list intersects and none widens: the file's `policy.backends`, a
-    caller's argument, and the server's API-key scope. A run with any permitted backend left is
-    pruned rather than refused, so this is raised only when the intersection leaves nothing.
+    Two sources raise it. `policy.backends` on an unnamed request, when the declared list leaves
+    no registered backend to resolve to. And the server's API-key scope, which is the enforcement
+    boundary and refuses a backend outside it whatever the body named. A run with any permitted
+    backend left is pruned rather than refused, so this is raised only when nothing is left.
     `backend_code` names one backend that was denied, so the message is actionable, never the
     token, which is the secret.
     """

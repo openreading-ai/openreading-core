@@ -42,9 +42,9 @@ OPENREADING_API_KEYS configured behaves byte-for-byte like every prior release. 
 every endpoint except GET /healthz and POST /v1/webhooks/{backend_id} (the two endpoints intended
 to stay reachable unauthenticated — a health check and a vendor callback carry no bearer) requires
 a valid `Authorization: Bearer <token>`; a key's optional backend allow-list is enforced upstream
-of, and independent from, the existing stage-1 compliance filter — a scope-denied request never
+of, and independent from, the deployment's own `policy.backends` — a scope-denied request never
 reaches make_adapter/build_run_context, so no vendor credential is ever resolved for a backend the
-caller isn't scoped to (the same "gate before spend" discipline compliance itself already gets).
+caller isn't scoped to. Every source of an allow-list intersects and none widens.
 Configured key values are read ONCE at process startup, from the environment ONLY — the same
 deploy-knob pattern OPENREADING_CONFIG follows, never a request body or a CLI flag, so a token
 never appears in `ps`, shell history, or a request the schema/compliance layer touches. Bind 127.0.0.1 by default; CORS off unless --cors-origin is passed (and, when both are
@@ -497,8 +497,8 @@ class ApiKeyConfig:
     """Parsed OPENREADING_API_KEYS / OPENREADING_API_KEY_SCOPES (BL-159). `keys` empty means
     caller auth is OFF: every endpoint behaves exactly as it does with zero configuration (AC-1).
     `scopes` maps a configured key to the backend ids it may reach; a key absent from `scopes` is
-    unscoped — it reaches every backend the deployment's existing stage-1 compliance filter and
-    router already allow it (AC-4)."""
+    unscoped — it reaches every backend the deployment's own `policy.backends` already allows
+    (AC-4)."""
 
     keys: frozenset[str] = frozenset()
     scopes: dict[str, frozenset[str]] = field(default_factory=dict)

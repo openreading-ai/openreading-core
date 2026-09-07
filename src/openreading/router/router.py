@@ -80,7 +80,7 @@ class RoutePlan:
         Only ever a subtraction, over a list the compliance filter has already produced, so no
         allow-list can readmit a backend compliance dropped (the never-relaxed invariant above).
         The `fallbacks[1:]` reshuffle is not a re-rank: removing a member promotes the next
-        surviving one in the router's own stage-3 order, which is what "try the next fallback"
+        surviving one in the caller's own written order, which is what "try the next fallback"
         already means.
 
         An emptied chain is a `chosen=None` plan, and the caller decides what that means — for a

@@ -369,10 +369,11 @@ billed to your account.
 
 Never run `cp .env.example .env`. That file ships `DOCLING_SERVE_URL` and `QWEN_VL_ENDPOINT` with
 values rather than blanks. A copy therefore marks `docling` and `qwen-vl` configured on a machine
-where neither is running. The cost is a different data path rather than extra configuration. Under
-a `require_local` policy the copy makes the router send your scan to `http://localhost:5001`, and
-the envelope records `docling TerminalError (ConnectError)`. Without the copy the same command
-records `docling skipped (missing_credentials)` and the document never reaches a socket.
+where neither is running. What it costs you is a different data path rather than extra
+configuration. Put `docling` in your `policy.backends` after that copy and the router sends your
+scan to `http://localhost:5001`, and the envelope records `docling TerminalError (ConnectError)`.
+Without the copy the same command records `docling skipped (missing_credentials)` and the document
+never reaches a socket.
 
 Two things about that `echo`. `.env` is already in this repo's `.gitignore`, so the file you just
 wrote inside a clone is not committed by accident. Your shell records the line itself, which puts

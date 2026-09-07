@@ -3,7 +3,7 @@ credentials from the environment (`.env` / process env), dispatches to a backend
 and prints the one response schema.
 
     openreading parse   <file> --backend reducto        # run one backend
-    openreading route   <file> --run                    # compliance-first plan (+ execute chain)
+    openreading route   <file> --run                    # the resolved chain (+ execute it)
     openreading backends                                # which backends are configured, and why not
     openreading backends --check docling                # ...and is it actually answering? (probes)
     openreading benchmark list                          # public corpora and their terms lanes
@@ -519,7 +519,7 @@ def cmd_resume(args) -> int:
 
 
 def cmd_route(args) -> int:
-    """`openreading route`: print the compliance-first plan as JSON, and with `--run` execute the
+    """`openreading route`: print the routing plan as JSON, and with `--run` execute the
     whole chain. The plan is still printed when the chain is exhausted."""
     try:
         loaded = config.load(args.config)
@@ -1996,18 +1996,16 @@ expired, or a refusal because openreading.yaml changed since the first run.
 More: openreading help resume, openreading help exit-codes""",
     "route": """\
 Examples:
-  printf 'version: 1\\npolicy: {require_baa: true, no_train_on_data: true}\\n' \\
+  printf 'version: 1\\npolicy: {backends: [pymupdf, tesseract]}\\n' \\
     > openreading.yaml
   openreading route examples/john_smith_1000_2026_01.pdf
   openreading route doc.pdf --run > out.json
 
-A policy is the policy: block of your openreading.yaml, and these nine keys
-are the whole grammar. An unknown key is refused by name, at exit 3:
-  require_baa   no_train_on_data   data_region   require_local
-  max_retention   optimize_for
-  allow_unverified_compliance   train_optout_confirmed   baa_tier_confirmed
-Nothing widens the set a policy allows. The plan prints as JSON either way,
-naming every dropped backend with the stage and code that dropped it.
+A policy is the policy: block of your openreading.yaml, and one key is the
+whole grammar: backends, a list of ids in the order you want them tried. An
+unknown key is refused by name, at exit 3. The list is the chain a request that
+names no backend resolves to, and --fallback reorders within it. Naming a
+backend runs that backend, list or no list. The plan prints as JSON either way.
 
 Then:
   openreading backends --check pymupdf   # is the chosen backend answering
@@ -2016,7 +2014,7 @@ Exits: 0 a plan. 4 an empty plan, also with --run. The plan still prints.
 3 an openreading.yaml that will not load, an unreadable document, or --run on
 a plan every backend in which failed.
 
-More: openreading help compliance, openreading help backends""",
+More: openreading help backends-policy, openreading help backends""",
     "backends": """\
 Examples:
   openreading backends                   # what runs here, offline and free
@@ -2177,7 +2175,7 @@ Then:
 Exits: 0 ok. 3 an unreadable document or policy, an unknown strategy, no
 openreading.yaml found, or a compliance refusal.
 
-More: openreading help strategy, openreading help compliance""",
+More: openreading help strategy, openreading help backends-policy""",
     "compare": """\
 Examples:
   openreading compare a.json b.json --format table   # two saved responses
@@ -2748,7 +2746,7 @@ def build_parser() -> argparse.ArgumentParser:
     route = sub.add_parser(
         "route",
         parents=[common],
-        help="show the compliance-first routing plan for a document",
+        help="show the routing plan for a document",
         description="Show which backends your compliance policy allows for a document, and why "
         "the rest were dropped, before anything runs.",
     )

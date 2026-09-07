@@ -5,10 +5,10 @@
 one place a strategy file's semantics turn into backend calls: cascades (`steps:`), `route:`,
 `parallel:` with race / best / merge + hedge / shadow / drain, `decide:` nodes and gate bands
 through the decision layer (`openreading.strategies.decider`), `use:` references, single-leaf
-strategies, and `granularity: page` cascades. It consumes ONLY pruned trees: compliance and
-capability filtering happened once in compile, dropped backends do not exist in the tree it sees,
-so execution is structurally incapable of widening eligibility. "The eligible set" below is the
-router's stage-1/2 survivors for this request, computed once, up front. Pruning collapses upward
+strategies, and `granularity: page` cascades. It consumes ONLY pruned trees: resolution happened
+once in compile, a backend outside the caller's own list does not exist in the tree it sees, so
+execution is structurally incapable of widening the set. "The eligible set" below is that resolved
+set for this request, computed once, up front. Pruning collapses upward
 (`prune._prune_node` returns `None`): a composite whose children all vanish — a cascade with no
 rungs, a parallel with no branches, a route rule whose target is gone, a decide whose `among:`
 empties — disappears and its parent re-evaluates; a route whose `default:` target is fully
@@ -58,13 +58,12 @@ Hook point and surfaces (wiring facts)
   strategy job wraps the whole walk as one synthetic `JobRecord` — the walk runs to completion
   inside the POST itself (threadpool-offloaded `api.run_request`, exactly as `/v1/parse`) and the
   record is created already `succeeded` with the response and its `orchestration` attached; there
-  is no worker task and no observable `processing` state. `"auto"` / `strategy:none` on `/v1/jobs`
-  stay rejected.
-- When a strategy engages, compile strips `routing.fallback` before calling `Router.route` so
-  `auto` leaves see pure stage-3 score order (warning `strategy_overrides_fallback`).
-  `optimize_for` keeps exactly its role: stage-3 weights at `auto` leaves and the comparator's
-  tiebreak input; it never overrides a named leaf. `limits:` binds only here (strategy runs),
-  never a direct-named request.
+  is no worker task and no observable `processing` state. A null `backend.id` and `strategy:none`
+  on `/v1/jobs` stay rejected.
+- When a strategy engages, compile strips `routing.fallback` before calling `Router.route`, so
+  the resolved set is the caller's own list in its own written order (warning
+  `strategy_overrides_fallback`). `limits:` binds only here (strategy runs), never a
+  direct-named request.
 
 Value domain: Outcomes
 ----------------------
@@ -108,9 +107,8 @@ fixed point).
 - Law 3 (recovery): if any step is `Ok`, the cascade is `Ok`; earlier failures and escalations
   become `warnings[]` (`fallback_used`, `quality_escalated`), never errors.
 - Attempted set (T12): one request-wide set of backend ids shared across rungs, parallel
-  branches (shadows and losers included) and nested strategies. `backend: auto` picks the first
-  not-yet-attempted backend in stage-3 order; none left → `Err(exhausted)` with detail
-  `no_untried_backend`. Scoping the set per node would silently re-run backends at `auto` leaves.
+  branches (shadows and losers included) and nested strategies. It is what keeps a `route`
+  default or a repeated reference from re-running a backend the walk already tried.
 - Law 4 (keep-best): when the steps run out or the deadline ends the walk, a retained
   `Deficient` is returned — highest quality wins; ties keep the earliest-retained rung (the
   comparison is strict-greater). The spec asks for the opposite tiebreak — highest rung index
@@ -246,7 +244,7 @@ Decision layer, judge, masking, replay
 - Enablement is two keys, resolved ONCE per walk so every decision point binds identically: a
   file `decider:` block AND `OPENREADING_LLM_DECIDER`. No request field can enable it. Downgrade
   reasons, in priority: no block → pure engine (no annotation); block but env off →
-  `env_disabled`; env on but the decider backend compliance-dropped (checked via
+  `env_disabled`; env on but the decider the decider backend outside the resolved set (checked via
   `Router.check_eligible` against request ∪ policy compliance) → `compliance`; enabled + eligible
   but no `DeciderPort` wired → `unavailable`; at call time `malformed` (port raised, or an
   out-of-set action) or `refusal` (`None`). `timeout` is a member of the decider's
@@ -376,7 +374,7 @@ or `signal_unavailable`. Closed category vocabulary: `succeeded` · `error(<clas
 `merge_base` · `merge_source` · `decider_call` · `judge_call`. `skipped(circuit_open)` is
 reserved vocabulary (`openreading.strategies.trace`) with NO emitter: no circuit breaker exists
 anywhere in `src/` — `defaults.advanced.circuit_breaker` is schema-accepted and unread — so the
-spec's T6 floor (never bench a request's last compliance-eligible backend) is designed, not
+spec's T6 floor (never bench the last backend in a request's chain) is designed, not
 shipped. Warnings this module puts on the final response: the compile-time warnings
 (`strategy_overrides_fallback` among them),
 `fallback_used` and `quality_escalated` (one per rung walked past, naming from → to),
@@ -417,7 +415,7 @@ Edge-case catalog
    bundle degrades by design. Bindability checks skip `auto` leaves (no fixed descriptor).
 3. Outer 3 s remaining, inner `max_duration` 10 s — the inner clamps to 3 s; a hedge past it is
    `deadline_pruned`; a deadline ending a walk with nothing retained is `budget_exhausted`.
-4. Escalation target compliance-dropped — the cascade simply has one fewer rung (the drop is in
+4. Escalation target outside the resolved set — the cascade simply has one fewer rung (the drop is in
    `orchestration.dropped[]`); every rung pruned → terminal `no_compliant_backend` before any
    attempt, never a silent downgrade.
 5. WEBHOOK backend in a race — one Job state machine; a cancelled loser's late delivery is

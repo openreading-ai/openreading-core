@@ -54,10 +54,11 @@ network I/O.
 
 Backend resolution
 ------------------
-`backend` is a registry slug, `"auto"`, or `"strategy:<name>"` — a reserved prefix on the free-
+`backend` is a registry slug, `None`, or `"strategy:<name>"` — a reserved prefix on the free-
 string `backend.id`, not a wire-schema change (D-v3-2); `strategy=` is sugar for it and
-`"strategy:none"` is the escape hatch to the plain router. `"auto"` runs the compliance-first
-router and executes the resulting chain (`router.executor.execute_plan`); an empty plan raises
+`"strategy:none"` is the escape hatch to the plain router. `None` resolves through the three
+selection rules (`policy.backends` in written order, else `pymupdf`) and executes the resulting
+chain (`router.executor.execute_plan`); an empty plan raises
 `ScopeRefused` (the router eliminated every backend — a refusal, not a runtime failure;
 `PlanExhaustedError` is reserved for a non-empty plan whose backends all failed). An
 `openreading.yaml` is discovered on EVERY request (explicit `config=` -> `OPENREADING_CONFIG` ->
@@ -73,28 +74,20 @@ A directly-named backend is still compliance-gated against the request (`Router.
 plus the descriptor's signup URL) — naming a backend never bypasses the request's own
 constraints, on the single, native-batch, or server path alike.
 
-The `policy:` block of that file is where a compliance policy is written, and it is the only
-place. Compliance keys `require_baa`, `no_train_on_data`, `data_region`, `require_local`,
-`max_retention` become `request.compliance`; `optimize_for` becomes `request.routing`; `allow_unverified_compliance` (default False = fail closed),
-`train_optout_confirmed` and `baa_tier_confirmed` (lists of backend ids) become the
-deployment-level `RouterConfig` (D7/D7a: the request schema is `extra="forbid"` and these assert
-an account-level fact — an opt-out applied, a tier-gated BAA signed — not a property of one
-document; a confirmation that carried eligibility is echoed as a `baa_tier_confirmed` warning).
-A caller who builds a policy in memory passes the file's own shape,
-`config={"version": 1, "policy": {...}}`, and gets the identical validation a file gets.
+The `policy:` block of that file is where a deployment's backend list is written, and it is the
+only place. One key: `backends`, a flat list of ids in preference order, which becomes the
+deployment-level `RouterConfig`. A caller who builds a policy in memory passes the file's own
+shape, `config={"version": 1, "policy": {"backends": [...]}}`, and gets the identical validation
+a file gets.
 
-`openreading.config` carries the discovery order and the union rule, and the `strategy-config`
-v0.3 schema carries the grammar: the block is a closed, typed object, so an unknown key or a
-value of the wrong type is refused before a single key is read. A block that fails raises
-`ConfigError` from `openreading.config.load`, exit 3, naming the file and the key. An HTTP caller
-spells the same constraints as `request.compliance` / `request.routing`, which the request schema
-and `Compliance`/`Routing` (`extra="forbid"`) already refuse identically, and one parity test
-pins the five compliance keys equal across the two schemas. This is validation of SHAPE only. It
-matters because the alternative is silent: the split into `compliance` / `routing` /
-`RouterConfig` used to happen before anything validated the dict, so an unrecognised key
-(`require_baaa`, `hipaa`, `gdpr`) was dropped without a word and the constraint the operator wrote
-did not exist — every backend eligible, `dropped` empty, exit 0. A compliance gate that can be
-turned off by a typo is not a gate.
+`openreading.config` carries the discovery order and the intersection rule, and the
+`strategy-config` v0.4 schema carries the grammar: the block is a closed, typed object, so an
+unknown key or a value of the wrong type is refused before a single key is read. A block that
+fails raises `ConfigError` from `openreading.config.load`, exit 3, naming the file and the key.
+This is validation of SHAPE only, and it matters because the alternative is silent: the split
+used to happen before anything validated the dict, so a misspelled key was dropped without a word
+and the restriction the operator wrote did not exist. `backend: [pymupdf]` for `backends:` would
+mean every backend rather than one, with `dropped` empty and exit 0.
 
 Exceptions
 ----------
@@ -219,9 +212,8 @@ Decisions recorded for this module (durable, one line each)
 - D-v3-3: no idempotency cache outside the server (footgun + phantom batch cost, above).
 - D-v2-7.2: a `RetryableError` reaching the executor means "backend exhausted" -> next rung;
   retry policy lives in one place (`router.driver`), not duplicated per caller.
-- D7 / D7a: `allow_unverified_compliance` / `train_optout_confirmed` / `baa_tier_confirmed` are
-  router config, not request fields, and `tier_gated` BAAs fail closed until confirmed — so the
-  compliance-eligible set only ever narrows.
+- D7: `policy.backends` is router config, not a request field. Every source of an allow-list
+  intersects and none widens, so the resolved set only ever narrows.
 - Guardrail T10: no strategy import on the named-backend path (verified in a subprocess test).
 """
 
@@ -514,9 +506,9 @@ def route(
     operation: str | None = None,
     mime_type: str | None = None,
 ) -> RoutePlan:
-    """The compliance-first routing plan for a document (no execution). `config` is a path to an
-    openreading.yaml or a dict of its shape, and without it `./openreading.yaml` is discovered.
-    The file's `policy:` block gates the plan."""
+    """The routing plan for a document (no execution): the chain that would be tried, in order.
+    `config` is a path to an openreading.yaml or a dict of its shape, and without it
+    `./openreading.yaml` is discovered. The file's `policy.backends` IS the plan."""
     loaded = load_config_file(config)
     req = build_request(source, None, operation=operation, mime_type=mime_type)
     req, cfg = apply_config(req, loaded.policy if loaded else None, RouterConfig())
@@ -558,15 +550,7 @@ def _arm_ledger_unguarded(
     no flag, per L1). Unset ⇒ `None`, and `run_strategy`'s own default (an unarmed InlineExecutor,
     `NullJournal` + `blobs=None`) applies — the L1 zero-delta path (internal/design/ledger.md, plan §6).
 
-    Also runs the at-run-start reaper sweep and stamps this run's own retention ceiling (Open
-    Ledger T3: a FRESH run's stamp is the operator default ALONE — nothing has dispatched yet, so
-    nothing narrows it. Earlier, this stamped `compute_retention_ceiling_hours` over `eligible`
-    (the request's WHOLE registry-wide compliance/capability survivor set, `Router.route`'s own
-    stage-1/2 output — correct and appropriately broad for the `Sanitizer` arming below, where
-    over-inclusion is harmless, but not for this) — so a backend merely eligible for the document
-    type, never named by the compiled strategy nor dispatched, could collapse the ceiling (and
-
-    The `Sanitizer` backstop (§9.3) is still armed with every ELIGIBLE descriptor's
+    The `Sanitizer` backstop (§9.3) is armed with every RESOLVED descriptor's
     actually-resolved secret values (unchanged, unaffected by the above) — a static, no-value
     `Sanitizer()` never has anything to scrub against.
 
@@ -987,8 +971,8 @@ def run(
     on_run_armed: Callable[[str], None] | None = None,
     **request_overrides: Any,
 ) -> dict[str, Any]:
-    """Run one document through a named backend, the compliance-first router (`backend="auto"`),
-    or a strategy, and return a `response.v0.3` envelope. `strategy="<name>"` is sugar for
+    """Run one document through a named backend, the resolved chain (`backend=None`), or a
+    strategy, and return a `response.v0.3` envelope. `strategy="<name>"` is sugar for
     `backend="strategy:<name>"`. `source` is a path, an http(s) URL, or raw bytes. `config` points
     at an openreading.yaml, and without it `./openreading.yaml` is discovered. It also accepts a
     `LoadedFile` already read by `openreading.config.load`, which is how `run_batch` gives every
