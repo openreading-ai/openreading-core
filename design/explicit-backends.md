@@ -56,13 +56,12 @@ three rules above into an ordered list.
 `restrict_to` are still exactly right. Its `dropped` map becomes permanently empty and should be
 deleted from the type rather than left as an always-`{}` field that a reader will try to use.
 
-**Open, and worth a decision before implementation:** `openreading route` and `POST /v1/route`
-exist to show the plan before running it. With nothing dropped and nothing scored, that plan is
-the list the caller just wrote, so the verb degenerates into echoing the config back. Two honest
-options: delete it, or repoint it at readiness so it answers "here is your chain, and here is
-which of these are actually configured on this machine", which is a real question with a
-verifiable answer. Recommend the second; it is the diagnostic `route` was informally being used
-for anyway.
+**Decided (Akshay, 2026-09-07): `route` is repointed at readiness, not deleted.** With nothing
+dropped and nothing scored, the plan is the list the caller just wrote, so echoing it back earns
+nothing. Answering "here is your chain, and here is which of these are actually configured on this
+machine" is a real question with a verifiable answer, and it is the diagnostic `route` was
+informally being used for anyway. `RoutePlan.dropped` still goes: a permanently empty map is worse
+than an absent one.
 
 ## 2. The capability gate is deleted
 

@@ -533,8 +533,10 @@ all leave, because a directory on your own machine is yours to keep or delete (d
 `design/ledger-policy-removal.md`); `optimize_for`, the stage-3 scorer, the capability gate and
 `auto` itself go with them, so choosing a backend becomes a lookup rather than an inference, the
 one the caller wrote (design records: `design/explicit-backends.md`,
-`design/unverifiable-claims-sweep.md`). `design/README.md` states the test all five apply, the
-order they land in, and what each one deletes.
+`design/unverifiable-claims-sweep.md`). Vendor pricing goes the same way, so `usage` keeps the
+counters a backend reported and stops converting them into dollars core cannot verify (design
+record: `design/cost-removal.md`). `design/README.md` states the test all six apply, the order
+they land in, and what each one deletes.
 
 Extending it (agent-executable)
 ===============================

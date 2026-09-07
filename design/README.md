@@ -8,7 +8,7 @@ prevent.
 
 ## The removal set (2026-09-07)
 
-Five records, one argument. They were written together and share a single test:
+Six records, one argument. They were written together and share a single test:
 
 > **A fact core cannot verify must not change what core does.** It may be documentation, clearly
 > marked and dated. It may not be a routing input, a gate, or a default.
@@ -31,6 +31,7 @@ Each row is independently shippable and green on its own. Later rows assume earl
 | 2 | [`format-agnostic-intake.md`](format-agnostic-intake.md) part 1 | delete the format gate, `batch-result` v0.2 | 1 |
 | 3 | [`ledger-policy-removal.md`](ledger-policy-removal.md) | delete retention, the reaper and encryption at rest; drop `cryptography` | nothing |
 | 4 | [`compliance-removal.md`](compliance-removal.md) + [`explicit-backends.md`](explicit-backends.md) | **one atomic change**: the compliance filter, `optimize_for` and the scorer, the capability gate, `auto`, and the `policy.backends` that replaces all of them | 3 |
+| 5 | [`cost-removal.md`](cost-removal.md) | delete the price tables and every dollar figure; keep the counters the vendor returned | 4 |
 
 Row 4 is deliberately not split. Every intermediate state is a repository that lies in a new way:
 a half-removed filter, or a replacement that exists while the thing it replaces still runs. The
@@ -60,24 +61,33 @@ Selection afterwards is a lookup with no inference in it: the backend the caller
 | schema | from | to | why |
 |---|---|---|---|
 | `request` | v0.2 | v0.3 | remove `compliance`, `optimize_for`, `auto` |
-| `adapter-descriptor` | v0.7 | v0.8 | remove `compliance`, `integration_priority`, `priority_reason`, the unread fields |
+| `adapter-descriptor` | v0.7 | v0.8 | remove `compliance`, `cost`, `integration_priority`, `priority_reason`, the unread fields |
 | `strategy-config` | v0.3 | v0.4 | `policy` drops eight keys and gains `backends`; `when` drops the `compliance` fact |
-| `batch-result` | v0.1 | v0.2 | remove `skip_reason`, `skipped` state, `summary.skipped` |
+| `batch-result` | v0.1 | v0.2 | remove `skip_reason`, `skipped` state, `summary.skipped`, `cost_usd`, `cost_bases[]` |
+| `response` | v0.3 | v0.4 | remove `usage.cost_usd`, `usage.cost_basis` |
+| `comparison-report` | v0.2 | v0.3 | remove `cost_outlier` from the closed finding enum, drop the cost facts row |
+
+If rows 1 to 5 ship in one release, bump each schema **once** and carry every change. Shipping
+`adapter-descriptor` v0.8 and then v0.9 a week apart costs two migrations for one intent.
 
 Frozen historical files stay on disk byte for byte (`tests/test_schema_evolution.py`), so they
 still contain the removed properties. No acceptance check may be a blanket `grep` over `src/`.
 
 ### Not decided yet
 
-- **`Cost`**: fifteen hand-copied price ranges whose own `basis` field admits most are estimates.
-  Recommendation is to keep what a vendor returns for a call and delete what we typed off a
-  pricing page, but `compare`, the leaderboard and the cookbook all read it, so it is its own
-  record. [`unverifiable-claims-sweep.md`](unverifiable-claims-sweep.md) section A2.
-- **`openreading route` and `POST /v1/route`**: with nothing dropped or scored they echo the
-  caller's own list back. Recommendation is to repoint them at readiness rather than delete them.
 - **Twelve descriptor fields read at zero sites**
   ([`unverifiable-claims-sweep.md`](unverifiable-claims-sweep.md) section B). Mechanical, no
   behaviour change, can ride along with any row above.
+
+### Settled since the first draft
+
+- **`Cost`** is row 5, deleted ([`cost-removal.md`](cost-removal.md)). Core keeps the counters a
+  vendor returned and never converts them to money, because the price that is true for a caller is
+  the one on their own invoice.
+- **`openreading route` and `POST /v1/route`** are repointed at readiness rather than deleted
+  (Akshay, 2026-09-07). With nothing dropped or scored they would only echo the caller's list
+  back; answering "here is your chain, and here is which of these are configured on this machine"
+  is a real question with a verifiable answer.
 
 ## Older records
 
