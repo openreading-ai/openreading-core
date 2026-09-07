@@ -134,11 +134,14 @@ publishes it and nothing rots: pymupdf is an in-process library, tesseract is a 
 whether an adapter opens a socket is a structural fact about this repository's own code. It is
 sitting in the wrong struct.
 
-Proposed: move it to `AdapterDescriptor.router` (or `cost`, whichever reads better next to
-`integration_priority`) as `runs_fully_local`, keep the scoring untouched, and let it die as a
-compliance concept while surviving as a cost one. `optimize_for: offline` then keeps meaning what
-it says. The alternative, inferring "local" from `cost.usd_per_page_equiv_low == 0`, conflates a
-free hosted tier with an offline one and should not be taken.
+**Superseded (Akshay, 2026-09-07):** `optimize_for` is deleted too, along with
+`integration_priority` and the whole scorer, per
+[`unverifiable-claims-sweep.md`](unverifiable-claims-sweep.md) section A1. With no scorer there is
+no `offline` value to preserve and no cost term to zero, so `runs_fully_local` does not need to
+survive anywhere. It leaves with the rest of `ComplianceProfile` and `descriptor.router` keeps
+only `normalization_difficulty`, itself a candidate in section B of that record.
+
+What replaces the ordering is `policy.backends`, in the order the caller writes it.
 
 **Per-case compliance in eval datasets.** `evals/dataset.py:94` forwards a case's own
 `compliance` key into the request body. Dataset files carrying that key become invalid. Since
@@ -254,10 +257,11 @@ old code is still present.
 
 ## 8. What this record does not decide
 
-1. The `policy.backends` grammar: a flat list, or per-operation. A flat list is enough for the
-   stated need and is what PR C should ship.
+1. ~~The `policy.backends` grammar.~~ Settled: a flat list (Akshay, 2026-09-07). A per-verb
+   mapping can only express "this vendor may parse but not extract", which is a belief about
+   vendor behaviour and the exact thing this change removes. A flat list can widen to a mapping
+   later without a break; the reverse cannot.
 2. Whether `openreading backends` keeps showing any compliance-ish column. It should not, but the
    command's output shape is user-visible and worth a separate look.
-3. Where `runs_fully_local` lands once it leaves `ComplianceProfile`: `descriptor.router` beside
-   `integration_priority`, or `descriptor.cost`. Section 3 argues it must survive somewhere; which
-   struct is a naming call for the reviewer.
+3. With the scorer gone, what orders a chain when `policy.backends` does not say. It must be a
+   documented deterministic order, not an incidental one, and it needs a test either way.

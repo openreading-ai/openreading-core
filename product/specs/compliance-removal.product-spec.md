@@ -90,16 +90,17 @@ In scope:
 - Delete `openreading.router.compliance` and the router's stage 1.
 - Delete `ComplianceProfile` from `AdapterDescriptor` and from all fifteen adapters.
 - Delete the `compliance` block from the request schema and `OpenReadingRequest`.
-- Reduce the `policy:` block from nine keys to two: `optimize_for`, and a new `backends`
-  allow-list (see below). The allow-list is part of this change, not an assumption of it.
+- Reduce the `policy:` block from nine keys to one: a new `backends` allow-list, a flat list of
+  ids in preference order. `optimize_for` goes too (see below). The allow-list is part of this
+  change, not an assumption of it.
 - Delete `ComplianceRefused`, `compliance_refused`, `BAA_TIER_CONFIRMED_WARNING` and the nine
   stage-1 drop codes.
-- Decide what replaces `compliance.runs_fully_local` in stage-3 scoring, which is a separate
-  question from the filter and is easy to miss. Today `router.py:196` reads it three ways: a local
-  backend is scored at zero cost, it earns a `+0.25` bonus under `optimize_for: cost` or
-  `offline`, and `optimize_for: offline` is a documented request enum whose whole meaning rests on
-  it. Deleting the field without a replacement silently changes routing for every caller and
-  quietly guts one of four `optimize_for` values.
+- Delete `optimize_for` and the stage-3 scorer with it. `router.py:196` reads
+  `compliance.runs_fully_local` three ways, so the filter and the scorer cannot be separated, and
+  the scorer turns out to rest entirely on facts core cannot verify: a "quality" score that is
+  really our own P0/P1/P2 build priority, and vendor price ranges. `optimize_for: latency` reads no
+  latency figure at all, because none exists. See
+  `design/unverifiable-claims-sweep.md` section A1.
 - Retention leaves core entirely, along with encryption at rest
   (`design/ledger-policy-removal.md`).
 - Bump `request`, `adapter-descriptor` and `strategy-config` to new major-breaking versions.
@@ -145,8 +146,12 @@ After, the operator writes the conclusion that posture leads to, which only they
 
 ```yaml
 policy:
-  backends: [aws-textract, azure-document-intelligence, pymupdf]
+  backends: [aws-textract, azure-document-intelligence, pymupdf]   # tried in this order
 ```
+
+A flat list, in preference order. It replaces both halves of what was removed: which backends may
+run, and which runs first. A caller who cares about latency has measured it on their own
+documents, and their ordering beats a weight table core computed from data it never verified.
 
 The second is shorter, needs no attestation keys, cannot silently drift, and says a true thing.
 The work of deciding which three vendors belong in that list is work the operator was always
@@ -165,9 +170,8 @@ test is what the code does, not what words appear in it.
    full registry.
 3. A request carrying a `compliance` block is refused by the current request schema as an unknown
    field, not silently ignored. Frozen older request schemas still accept it, by design.
-4. `optimize_for: offline` still selects a different backend than `optimize_for: accuracy` on a
-   registry containing both local and hosted backends, proving the scoring replacement works
-   rather than that the enum still parses.
+4. `optimize_for` is refused by the current request schema as an unknown field, and the chain
+   order for a request naming no backends is deterministic and pinned by a test.
 5. The effective allow-list is the intersection of file, caller and API key on every public
    execution surface, an empty list permits nothing, and an absent one restricts nothing. One test
    per surface.
@@ -184,7 +188,7 @@ test is what the code does, not what words appear in it.
 - Live source files reading a vendor compliance claim: 64 to 0. Frozen historical schemas under
   `src/openreading/schemas/` still contain the word and are excluded by definition, since changing
   them is forbidden.
-- `policy:` keys: 9 to 2 (`optimize_for`, `backends`).
+- `policy:` keys: 9 to 1 (`backends`).
 - Test lines asserting on vendor claims: 842 to 0, while the duration-limit, malformed-config and
   resume coverage living in the same files is kept.
 
