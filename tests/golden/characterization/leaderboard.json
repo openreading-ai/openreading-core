@@ -1,0 +1,35 @@
+{
+  "backends": [
+    {
+      "backend_id": "pymupdf",
+      "cost_per_doc": 0.0,
+      "dimensions": {
+        "table_cell_accuracy": 1.0,
+        "text_contains": 1.0
+      },
+      "errors": 0,
+      "mean_score": 1.0,
+      "n_cases": 1,
+      "n_scored": 1,
+      "non_deterministic": false,
+      "rank": 1
+    }
+  ],
+  "cases": [
+    {
+      "name": "loan_page1",
+      "scores": {
+        "pymupdf": 1.0
+      },
+      "winner": "pymupdf"
+    }
+  ],
+  "dataset": {
+    "case_count": 1,
+    "case_names": [
+      "loan_page1"
+    ],
+    "path": "src/openreading/evals/sample"
+  },
+  "schema_version": "0.1"
+}

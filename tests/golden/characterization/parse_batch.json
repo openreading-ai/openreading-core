@@ -1,0 +1,991 @@
+{
+  "items": [
+    {
+      "response": {
+        "backend": {
+          "id": "pymupdf",
+          "output_paradigm": [
+            "block_tree"
+          ],
+          "type": "oss_library"
+        },
+        "backend_raw": {
+          "encoding": "json_serialized_object",
+          "media_type": "application/vnd.openreading.pymupdf+json",
+          "object_class": "fitz.Page.get_text.dict",
+          "payload": {
+            "metadata": {
+              "author": "C:DC:TS:CAR:MP",
+              "creationDate": "D:20241206124604-06'00'",
+              "creator": "Designer 6.5",
+              "encryption": null,
+              "format": "PDF 1.7",
+              "keywords": "Fillable",
+              "modDate": "D:20241206124604-06'00'",
+              "producer": "Designer 6.5",
+              "subject": "Itemized Deductions",
+              "title": "Itemized Deductions",
+              "trapped": ""
+            },
+            "page_count": 1,
+            "pages": [
+              {
+                "blocks": {
+                  "<list>": 45,
+                  "first": {
+                    "bbox": [
+                      36.0,
+                      35.8900146484375,
+                      103.43000793457031,
+                      58.82001495361328
+                    ],
+                    "lines": [
+                      {
+                        "bbox": [
+                          36.0,
+                          35.8900146484375,
+                          103.43000793457031,
+                          47.82001495361328
+                        ],
+                        "spans": [
+                          {
+                            "bbox": [
+                              36.0,
+                              35.8900146484375,
+                              103.43000793457031,
+                              47.82001495361328
+                            ],
+                            "font": "HelveticaNeueLTStd-Bd",
+                            "size": 10.0,
+                            "text": "SCHEDULE A "
+                          }
+                        ]
+                      },
+                      {
+                        "bbox": [
+                          36.0,
+                          46.8900146484375,
+                          94.70999145507812,
+                          58.82001495361328
+                        ],
+                        "spans": [
+                          {
+                            "bbox": [
+                              36.0,
+                              46.8900146484375,
+                              94.70999145507812,
+                              58.82001495361328
+                            ],
+                            "font": "HelveticaNeueLTStd-Bd",
+                            "size": 10.0,
+                            "text": "(Form 1040) "
+                          }
+                        ]
+                      }
+                    ],
+                    "number": 0,
+                    "type": 0
+                  }
+                },
+                "height": 792.0,
+                "number": 0,
+                "tables": [
+                  {
+                    "bbox": [
+                      35.75,
+                      35.75,
+                      576.125,
+                      719.75
+                    ],
+                    "cells": {
+                      "<list>": 80,
+                      "first": [
+                        35.75,
+                        35.75,
+                        122.4000015258789,
+                        84.00002034505208
+                      ]
+                    },
+                    "col_count": 7,
+                    "extract": {
+                      "<list>": 41,
+                      "first": [
+                        "SCHEDULE A\n(Form 1040)\nDepartment of the Treasury\nInternal Revenue Service",
+                        "<str:231>",
+                        null,
+                        null,
+                        null,
+                        "OMB No. 1545-0074",
+                        null
+                      ]
+                    },
+                    "header": {
+                      "cells": [
+                        [
+                          35.75,
+                          35.75,
+                          122.4000015258789,
+                          84.00002034505208
+                        ],
+                        [
+                          122.4000015258789,
+                          35.75,
+                          489.6000061035156,
+                          84.00002034505208
+                        ],
+                        [
+                          489.6000061035156,
+                          35.75,
+                          576.125,
+                          47.9990234375
+                        ]
+                      ],
+                      "external": false,
+                      "names": [
+                        "SCHEDULE A\n(Form 1040)\nDepartment of the Treasury\nInternal Revenue Service",
+                        "<str:231>",
+                        null,
+                        null,
+                        null,
+                        "OMB No. 1545-0074",
+                        null
+                      ]
+                    },
+                    "row_count": 41
+                  }
+                ],
+                "text": "<str:4205>",
+                "width": 612.0
+              }
+            ]
+          }
+        },
+        "channel_provenance": {
+          "block_bbox": "native",
+          "blocks": "native",
+          "markdown": "derived",
+          "table_cells": "native",
+          "text": "native"
+        },
+        "document": {
+          "markdown": "<str:5266>",
+          "page_count": 1,
+          "pages": [
+            {
+              "blocks": [
+                {
+                  "bbox": {
+                    "bbox_native": {
+                      "coords": [
+                        35.75,
+                        35.75,
+                        576.125,
+                        719.75
+                      ],
+                      "origin": "top_left",
+                      "unit": "pdf_point"
+                    },
+                    "h": 0.8636363636363636,
+                    "page": 1,
+                    "w": 0.8829656862745098,
+                    "x": 0.05841503267973856,
+                    "y": 0.04513888888888889
+                  },
+                  "markdown": "<str:5142>",
+                  "native_type": "table",
+                  "reading_order": 0,
+                  "table": {
+                    "cells": {
+                      "<list>": 80,
+                      "first": {
+                        "bbox": {
+                          "bbox_native": {
+                            "coords": [
+                              35.75,
+                              35.75,
+                              122.4000015258789,
+                              84.00002034505208
+                            ],
+                            "origin": "top_left",
+                            "unit": "pdf_point"
+                          },
+                          "h": 0.06092174285991424,
+                          "page": 1,
+                          "w": 0.1415849698135276,
+                          "x": 0.05841503267973856,
+                          "y": 0.04513888888888889
+                        },
+                        "col": 0,
+                        "col_span": 1,
+                        "is_header": true,
+                        "row": 0,
+                        "row_span": 1,
+                        "text": "SCHEDULE A\n(Form 1040)\nDepartment of the Treasury\nInternal Revenue Service"
+                      }
+                    },
+                    "n_cols": 7,
+                    "n_rows": 41,
+                    "rows": {
+                      "<list>": 41,
+                      "first": [
+                        "SCHEDULE A\n(Form 1040)\nDepartment of the Treasury\nInternal Revenue Service",
+                        "<str:231>",
+                        null,
+                        null,
+                        null,
+                        "OMB No. 1545-0074",
+                        null
+                      ]
+                    }
+                  },
+                  "text": "<str:4268>",
+                  "type": "table"
+                },
+                {
+                  "bbox": {
+                    "bbox_native": {
+                      "coords": [
+                        36.0,
+                        722.510986328125,
+                        576.001220703125,
+                        732.0549926757812
+                      ],
+                      "origin": "top_left",
+                      "unit": "pdf_point"
+                    },
+                    "h": 0.012050513065222538,
+                    "page": 1,
+                    "w": 0.8823549357894199,
+                    "x": 0.058823529411764705,
+                    "y": 0.9122613463738952
+                  },
+                  "markdown": "<str:122>",
+                  "native_type": "text",
+                  "reading_order": 1,
+                  "text": "<str:117>",
+                  "type": "text"
+                }
+              ],
+              "height": 792.0,
+              "markdown": "<str:5266>",
+              "page_number": 1,
+              "text": "<str:4204>",
+              "unit": "pdf_point",
+              "width": 612.0
+            }
+          ],
+          "text": "<str:4204>"
+        },
+        "schema_version": "0.3",
+        "status": {
+          "state": "succeeded"
+        },
+        "usage": {
+          "cost_basis": "infra_only",
+          "pages_processed": 1
+        },
+        "warnings": [
+          {
+            "code": "confidence_unavailable",
+            "field": "block_confidence",
+            "message": "PyMuPDF is a deterministic parser; per-element confidence does not exist"
+          }
+        ]
+      },
+      "source": {
+        "filename": "schedule_a_2024.pdf",
+        "format": "pdf",
+        "path": "<str:94>",
+        "relpath": "schedule_a_2024.pdf",
+        "sha256": "f5c675c3279abd9dcf0e1fec416356553c6fbdd1fc342397c747415a47583eba",
+        "size_bytes": 117336
+      },
+      "state": "succeeded",
+      "transport": "platform"
+    },
+    {
+      "response": {
+        "backend": {
+          "id": "pymupdf",
+          "output_paradigm": [
+            "block_tree"
+          ],
+          "type": "oss_library"
+        },
+        "backend_raw": {
+          "encoding": "json_serialized_object",
+          "media_type": "application/vnd.openreading.pymupdf+json",
+          "object_class": "fitz.Page.get_text.dict",
+          "payload": {
+            "metadata": {
+              "author": "C:DC:TS:CAR:MP",
+              "creationDate": "D:20241206103921-06'00'",
+              "creator": "Designer 6.5",
+              "encryption": null,
+              "format": "PDF 1.7",
+              "keywords": "Fillable",
+              "modDate": "D:20241206103921-06'00'",
+              "producer": "Designer 6.5",
+              "subject": "U.S. Individual Income Tax Return",
+              "title": "1040 2024",
+              "trapped": ""
+            },
+            "page_count": 2,
+            "pages": [
+              {
+                "blocks": {
+                  "<list>": 59,
+                  "first": {
+                    "bbox": [
+                      34.9340934753418,
+                      38.58100128173828,
+                      43.095977783203125,
+                      54.91900634765625
+                    ],
+                    "lines": [
+                      {
+                        "bbox": [
+                          34.9340934753418,
+                          38.58100128173828,
+                          43.095977783203125,
+                          54.91900634765625
+                        ],
+                        "spans": [
+                          {
+                            "bbox": [
+                              34.9340934753418,
+                              38.58100128173828,
+                              43.095977783203125,
+                              54.91900634765625
+                            ],
+                            "font": "HelveticaNeueLTStd-Roman",
+                            "size": 6.999949932098389,
+                            "text": "Form"
+                          }
+                        ]
+                      }
+                    ],
+                    "number": 0,
+                    "type": 0
+                  }
+                },
+                "height": 792.0,
+                "number": 0,
+                "tables": {
+                  "<list>": 4,
+                  "first": {
+                    "bbox": [
+                      28.799999237060547,
+                      35.875,
+                      583.2000122070312,
+                      738.0
+                    ],
+                    "cells": {
+                      "<list>": 126,
+                      "first": [
+                        28.799999237060547,
+                        35.875,
+                        93.31385585239956,
+                        725.5721261160714
+                      ]
+                    },
+                    "col_count": 22,
+                    "extract": {
+                      "<list>": 39,
+                      "first": [
+                        "<str:700>",
+                        null,
+                        "<str:85>",
+                        null,
+                        null,
+                        null,
+                        "2024",
+                        null,
+                        null,
+                        null,
+                        "OMB No. 1545-0074",
+                        null,
+                        null,
+                        null,
+                        "IRS Use Only\u2014Do not write or staple in this space.",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null
+                      ]
+                    },
+                    "header": {
+                      "cells": {
+                        "<list>": 5,
+                        "first": [
+                          28.799999237060547,
+                          35.875,
+                          93.31385585239956,
+                          725.5721261160714
+                        ]
+                      },
+                      "external": false,
+                      "names": [
+                        "<str:700>",
+                        null,
+                        "<str:85>",
+                        null,
+                        null,
+                        null,
+                        "2024",
+                        null,
+                        null,
+                        null,
+                        "OMB No. 1545-0074",
+                        null,
+                        null,
+                        null,
+                        "IRS Use Only\u2014Do not write or staple in this space.",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null
+                      ]
+                    },
+                    "row_count": 39
+                  }
+                },
+                "text": "<str:5160>",
+                "width": 612.0
+              },
+              {
+                "blocks": {
+                  "<list>": 35,
+                  "first": {
+                    "bbox": [
+                      36.0,
+                      22.3900146484375,
+                      576.0,
+                      59.57001495361328
+                    ],
+                    "lines": {
+                      "<list>": 4,
+                      "first": {
+                        "bbox": [
+                          36.0,
+                          25.393983840942383,
+                          90.99200439453125,
+                          33.55598449707031
+                        ],
+                        "spans": [
+                          {
+                            "bbox": [
+                              36.0,
+                              25.393983840942383,
+                              90.99200439453125,
+                              33.55598449707031
+                            ],
+                            "font": "HelveticaNeueLTStd-Roman",
+                            "size": 7.0,
+                            "text": "Form 1040 (2024)"
+                          }
+                        ]
+                      }
+                    },
+                    "number": 0,
+                    "type": 0
+                  }
+                },
+                "height": 792.0,
+                "number": 1,
+                "tables": [
+                  {
+                    "bbox": [
+                      28.799999237060547,
+                      24.0009765625,
+                      583.2000122070312,
+                      594.0
+                    ],
+                    "cells": {
+                      "<list>": 113,
+                      "first": [
+                        28.799999237060547,
+                        24.0009765625,
+                        583.2000122070312,
+                        36.54518821022727
+                      ]
+                    },
+                    "col_count": 25,
+                    "extract": {
+                      "<list>": 40,
+                      "first": [
+                        "Form 1040 (2024) Page 2",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null
+                      ]
+                    },
+                    "header": {
+                      "cells": [
+                        [
+                          28.799999237060547,
+                          24.0009765625,
+                          583.2000122070312,
+                          36.54518821022727
+                        ]
+                      ],
+                      "external": false,
+                      "names": [
+                        "Form 1040 (2024) Page 2",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null
+                      ]
+                    },
+                    "row_count": 40
+                  },
+                  {
+                    "bbox": [
+                      86.25,
+                      216.0,
+                      100.79999542236328,
+                      227.99901326497397
+                    ],
+                    "cells": [
+                      [
+                        86.25,
+                        216.0,
+                        91.5989990234375,
+                        227.99901326497397
+                      ],
+                      [
+                        91.5989990234375,
+                        216.0,
+                        100.79999542236328,
+                        227.99901326497397
+                      ]
+                    ],
+                    "col_count": 2,
+                    "extract": [
+                      [
+                        "",
+                        "27"
+                      ]
+                    ],
+                    "header": {
+                      "cells": [
+                        [
+                          86.25,
+                          216.0,
+                          91.5989990234375,
+                          227.99901326497397
+                        ],
+                        [
+                          91.5989990234375,
+                          216.0,
+                          100.79999542236328,
+                          227.99901326497397
+                        ]
+                      ],
+                      "external": false,
+                      "names": [
+                        "",
+                        "27"
+                      ]
+                    },
+                    "row_count": 1
+                  }
+                ],
+                "text": "<str:3697>",
+                "width": 612.0
+              }
+            ]
+          }
+        },
+        "channel_provenance": {
+          "block_bbox": "native",
+          "blocks": "native",
+          "markdown": "derived",
+          "table_cells": "native",
+          "text": "native"
+        },
+        "document": {
+          "markdown": "<str:13421>",
+          "page_count": 2,
+          "pages": [
+            {
+              "blocks": {
+                "<list>": 4,
+                "first": {
+                  "bbox": {
+                    "bbox_native": {
+                      "coords": [
+                        28.799999237060547,
+                        35.875,
+                        583.2000122070312,
+                        738.0
+                      ],
+                      "origin": "top_left",
+                      "unit": "pdf_point"
+                    },
+                    "h": 0.8865214646464646,
+                    "page": 1,
+                    "w": 0.905882374133939,
+                    "x": 0.04705882228277867,
+                    "y": 0.04529671717171717
+                  },
+                  "markdown": "<str:6828>",
+                  "native_type": "table",
+                  "reading_order": 0,
+                  "table": {
+                    "cells": {
+                      "<list>": 126,
+                      "first": {
+                        "bbox": {
+                          "bbox_native": {
+                            "coords": [
+                              28.799999237060547,
+                              35.875,
+                              93.31385585239956,
+                              725.5721261160714
+                            ],
+                            "origin": "top_left",
+                            "unit": "pdf_point"
+                          },
+                          "h": 0.8708297046920094,
+                          "page": 1,
+                          "w": 0.10541479839107681,
+                          "x": 0.04705882228277867,
+                          "y": 0.04529671717171717
+                        },
+                        "col": 0,
+                        "col_span": 1,
+                        "is_header": true,
+                        "row": 0,
+                        "row_span": 1,
+                        "text": "<str:700>"
+                      }
+                    },
+                    "n_cols": 22,
+                    "n_rows": 39,
+                    "rows": {
+                      "<list>": 39,
+                      "first": [
+                        "<str:700>",
+                        null,
+                        "<str:85>",
+                        null,
+                        null,
+                        null,
+                        "2024",
+                        null,
+                        null,
+                        null,
+                        "OMB No. 1545-0074",
+                        null,
+                        null,
+                        null,
+                        "IRS Use Only\u2014Do not write or staple in this space.",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null
+                      ]
+                    }
+                  },
+                  "text": "<str:4618>",
+                  "type": "table"
+                }
+              },
+              "height": 792.0,
+              "markdown": "<str:6951>",
+              "page_number": 1,
+              "text": "<str:5159>",
+              "unit": "pdf_point",
+              "width": 612.0
+            },
+            {
+              "blocks": [
+                {
+                  "bbox": {
+                    "bbox_native": {
+                      "coords": [
+                        28.799999237060547,
+                        24.0009765625,
+                        583.2000122070312,
+                        594.0
+                      ],
+                      "origin": "top_left",
+                      "unit": "pdf_point"
+                    },
+                    "h": 0.71969573666351,
+                    "page": 2,
+                    "w": 0.905882374133939,
+                    "x": 0.04705882228277867,
+                    "y": 0.0303042633364899
+                  },
+                  "markdown": "<str:6443>",
+                  "native_type": "table",
+                  "reading_order": 0,
+                  "table": {
+                    "cells": {
+                      "<list>": 113,
+                      "first": {
+                        "bbox": {
+                          "bbox_native": {
+                            "coords": [
+                              28.799999237060547,
+                              24.0009765625,
+                              583.2000122070312,
+                              36.54518821022727
+                            ],
+                            "origin": "top_left",
+                            "unit": "pdf_point"
+                          },
+                          "h": 0.015838651070362718,
+                          "page": 2,
+                          "w": 0.905882374133939,
+                          "x": 0.04705882228277867,
+                          "y": 0.0303042633364899
+                        },
+                        "col": 0,
+                        "col_span": 1,
+                        "is_header": true,
+                        "row": 0,
+                        "row_span": 1,
+                        "text": "Form 1040 (2024) Page 2"
+                      }
+                    },
+                    "n_cols": 25,
+                    "n_rows": 40,
+                    "rows": {
+                      "<list>": 40,
+                      "first": [
+                        "Form 1040 (2024) Page 2",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null
+                      ]
+                    }
+                  },
+                  "text": "<str:4055>",
+                  "type": "table"
+                },
+                {
+                  "bbox": {
+                    "bbox_native": {
+                      "coords": [
+                        86.25,
+                        216.0,
+                        100.79999542236328,
+                        227.99901326497397
+                      ],
+                      "origin": "top_left",
+                      "unit": "pdf_point"
+                    },
+                    "h": 0.01515026927395703,
+                    "page": 2,
+                    "w": 0.02377450232412301,
+                    "x": 0.1409313725490196,
+                    "y": 0.2727272727272727
+                  },
+                  "markdown": "|  | 27 |\n| --- | --- |",
+                  "native_type": "table",
+                  "reading_order": 1,
+                  "table": {
+                    "cells": [
+                      {
+                        "bbox": {
+                          "bbox_native": {
+                            "coords": [
+                              86.25,
+                              216.0,
+                              91.5989990234375,
+                              227.99901326497397
+                            ],
+                            "origin": "top_left",
+                            "unit": "pdf_point"
+                          },
+                          "h": 0.01515026927395703,
+                          "page": 2,
+                          "w": 0.008740194482741014,
+                          "x": 0.1409313725490196,
+                          "y": 0.2727272727272727
+                        },
+                        "col": 0,
+                        "col_span": 1,
+                        "is_header": true,
+                        "row": 0,
+                        "row_span": 1,
+                        "text": ""
+                      },
+                      {
+                        "bbox": {
+                          "bbox_native": {
+                            "coords": [
+                              91.5989990234375,
+                              216.0,
+                              100.79999542236328,
+                              227.99901326497397
+                            ],
+                            "origin": "top_left",
+                            "unit": "pdf_point"
+                          },
+                          "h": 0.01515026927395703,
+                          "page": 2,
+                          "w": 0.015034307841381996,
+                          "x": 0.14967156703176063,
+                          "y": 0.2727272727272727
+                        },
+                        "col": 1,
+                        "col_span": 1,
+                        "is_header": true,
+                        "row": 0,
+                        "row_span": 1,
+                        "text": "27"
+                      }
+                    ],
+                    "n_cols": 2,
+                    "n_rows": 1,
+                    "rows": [
+                      [
+                        "",
+                        "27"
+                      ]
+                    ]
+                  },
+                  "text": "\t27",
+                  "type": "table"
+                }
+              ],
+              "height": 792.0,
+              "markdown": "<str:6468>",
+              "page_number": 2,
+              "text": "<str:3696>",
+              "unit": "pdf_point",
+              "width": 612.0
+            }
+          ],
+          "text": "<str:8857>"
+        },
+        "schema_version": "0.3",
+        "status": {
+          "state": "succeeded"
+        },
+        "usage": {
+          "cost_basis": "infra_only",
+          "pages_processed": 2
+        },
+        "warnings": [
+          {
+            "code": "confidence_unavailable",
+            "field": "block_confidence",
+            "message": "PyMuPDF is a deterministic parser; per-element confidence does not exist"
+          }
+        ]
+      },
+      "source": {
+        "filename": "1040_2024.pdf",
+        "format": "pdf",
+        "path": "<str:88>",
+        "relpath": "1040_2024.pdf",
+        "sha256": "a5f34adb22fb328053932e0cd0770942fe420590ca8537ddd21df167d838d0ec",
+        "size_bytes": 299329
+      },
+      "state": "succeeded",
+      "transport": "platform"
+    }
+  ],
+  "request": {
+    "backend": "pymupdf",
+    "jobs": 1,
+    "source_args": [
+      "<str:94>",
+      "<str:88>"
+    ]
+  },
+  "schema_version": "0.1",
+  "status": {
+    "state": "succeeded"
+  },
+  "summary": {
+    "backends": {
+      "pymupdf": 2
+    },
+    "cost_bases": [
+      "infra_only"
+    ],
+    "failed": 0,
+    "pages_processed": 3,
+    "skipped": 0,
+    "succeeded": 2,
+    "total": 2
+  }
+}

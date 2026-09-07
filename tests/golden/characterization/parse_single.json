@@ -1,0 +1,291 @@
+{
+  "backend": {
+    "id": "pymupdf",
+    "output_paradigm": [
+      "block_tree"
+    ],
+    "type": "oss_library"
+  },
+  "backend_raw": {
+    "encoding": "json_serialized_object",
+    "media_type": "application/vnd.openreading.pymupdf+json",
+    "object_class": "fitz.Page.get_text.dict",
+    "payload": {
+      "metadata": {
+        "author": "C:DC:TS:CAR:MP",
+        "creationDate": "D:20241206124604-06'00'",
+        "creator": "Designer 6.5",
+        "encryption": null,
+        "format": "PDF 1.7",
+        "keywords": "Fillable",
+        "modDate": "D:20241206124604-06'00'",
+        "producer": "Designer 6.5",
+        "subject": "Itemized Deductions",
+        "title": "Itemized Deductions",
+        "trapped": ""
+      },
+      "page_count": 1,
+      "pages": [
+        {
+          "blocks": {
+            "<list>": 45,
+            "first": {
+              "bbox": [
+                36.0,
+                35.8900146484375,
+                103.43000793457031,
+                58.82001495361328
+              ],
+              "lines": [
+                {
+                  "bbox": [
+                    36.0,
+                    35.8900146484375,
+                    103.43000793457031,
+                    47.82001495361328
+                  ],
+                  "spans": [
+                    {
+                      "bbox": [
+                        36.0,
+                        35.8900146484375,
+                        103.43000793457031,
+                        47.82001495361328
+                      ],
+                      "font": "HelveticaNeueLTStd-Bd",
+                      "size": 10.0,
+                      "text": "SCHEDULE A "
+                    }
+                  ]
+                },
+                {
+                  "bbox": [
+                    36.0,
+                    46.8900146484375,
+                    94.70999145507812,
+                    58.82001495361328
+                  ],
+                  "spans": [
+                    {
+                      "bbox": [
+                        36.0,
+                        46.8900146484375,
+                        94.70999145507812,
+                        58.82001495361328
+                      ],
+                      "font": "HelveticaNeueLTStd-Bd",
+                      "size": 10.0,
+                      "text": "(Form 1040) "
+                    }
+                  ]
+                }
+              ],
+              "number": 0,
+              "type": 0
+            }
+          },
+          "height": 792.0,
+          "number": 0,
+          "tables": [
+            {
+              "bbox": [
+                35.75,
+                35.75,
+                576.125,
+                719.75
+              ],
+              "cells": {
+                "<list>": 80,
+                "first": [
+                  35.75,
+                  35.75,
+                  122.4000015258789,
+                  84.00002034505208
+                ]
+              },
+              "col_count": 7,
+              "extract": {
+                "<list>": 41,
+                "first": [
+                  "SCHEDULE A\n(Form 1040)\nDepartment of the Treasury\nInternal Revenue Service",
+                  "<str:231>",
+                  null,
+                  null,
+                  null,
+                  "OMB No. 1545-0074",
+                  null
+                ]
+              },
+              "header": {
+                "cells": [
+                  [
+                    35.75,
+                    35.75,
+                    122.4000015258789,
+                    84.00002034505208
+                  ],
+                  [
+                    122.4000015258789,
+                    35.75,
+                    489.6000061035156,
+                    84.00002034505208
+                  ],
+                  [
+                    489.6000061035156,
+                    35.75,
+                    576.125,
+                    47.9990234375
+                  ]
+                ],
+                "external": false,
+                "names": [
+                  "SCHEDULE A\n(Form 1040)\nDepartment of the Treasury\nInternal Revenue Service",
+                  "<str:231>",
+                  null,
+                  null,
+                  null,
+                  "OMB No. 1545-0074",
+                  null
+                ]
+              },
+              "row_count": 41
+            }
+          ],
+          "text": "<str:4205>",
+          "width": 612.0
+        }
+      ]
+    }
+  },
+  "channel_provenance": {
+    "block_bbox": "native",
+    "blocks": "native",
+    "markdown": "derived",
+    "table_cells": "native",
+    "text": "native"
+  },
+  "document": {
+    "markdown": "<str:5266>",
+    "page_count": 1,
+    "pages": [
+      {
+        "blocks": [
+          {
+            "bbox": {
+              "bbox_native": {
+                "coords": [
+                  35.75,
+                  35.75,
+                  576.125,
+                  719.75
+                ],
+                "origin": "top_left",
+                "unit": "pdf_point"
+              },
+              "h": 0.8636363636363636,
+              "page": 1,
+              "w": 0.8829656862745098,
+              "x": 0.05841503267973856,
+              "y": 0.04513888888888889
+            },
+            "markdown": "<str:5142>",
+            "native_type": "table",
+            "reading_order": 0,
+            "table": {
+              "cells": {
+                "<list>": 80,
+                "first": {
+                  "bbox": {
+                    "bbox_native": {
+                      "coords": [
+                        35.75,
+                        35.75,
+                        122.4000015258789,
+                        84.00002034505208
+                      ],
+                      "origin": "top_left",
+                      "unit": "pdf_point"
+                    },
+                    "h": 0.06092174285991424,
+                    "page": 1,
+                    "w": 0.1415849698135276,
+                    "x": 0.05841503267973856,
+                    "y": 0.04513888888888889
+                  },
+                  "col": 0,
+                  "col_span": 1,
+                  "is_header": true,
+                  "row": 0,
+                  "row_span": 1,
+                  "text": "SCHEDULE A\n(Form 1040)\nDepartment of the Treasury\nInternal Revenue Service"
+                }
+              },
+              "n_cols": 7,
+              "n_rows": 41,
+              "rows": {
+                "<list>": 41,
+                "first": [
+                  "SCHEDULE A\n(Form 1040)\nDepartment of the Treasury\nInternal Revenue Service",
+                  "<str:231>",
+                  null,
+                  null,
+                  null,
+                  "OMB No. 1545-0074",
+                  null
+                ]
+              }
+            },
+            "text": "<str:4268>",
+            "type": "table"
+          },
+          {
+            "bbox": {
+              "bbox_native": {
+                "coords": [
+                  36.0,
+                  722.510986328125,
+                  576.001220703125,
+                  732.0549926757812
+                ],
+                "origin": "top_left",
+                "unit": "pdf_point"
+              },
+              "h": 0.012050513065222538,
+              "page": 1,
+              "w": 0.8823549357894199,
+              "x": 0.058823529411764705,
+              "y": 0.9122613463738952
+            },
+            "markdown": "<str:122>",
+            "native_type": "text",
+            "reading_order": 1,
+            "text": "<str:117>",
+            "type": "text"
+          }
+        ],
+        "height": 792.0,
+        "markdown": "<str:5266>",
+        "page_number": 1,
+        "text": "<str:4204>",
+        "unit": "pdf_point",
+        "width": 612.0
+      }
+    ],
+    "text": "<str:4204>"
+  },
+  "schema_version": "0.3",
+  "status": {
+    "state": "succeeded"
+  },
+  "usage": {
+    "cost_basis": "infra_only",
+    "pages_processed": 1
+  },
+  "warnings": [
+    {
+      "code": "confidence_unavailable",
+      "field": "block_confidence",
+      "message": "PyMuPDF is a deterministic parser; per-element confidence does not exist"
+    }
+  ]
+}

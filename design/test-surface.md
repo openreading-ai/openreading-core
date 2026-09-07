@@ -28,20 +28,29 @@ nobody thought to mention. Does deleting `descriptor.cost` change a ledger heade
 the capability gate change what `compare` reports? Nothing in the records answers that, because
 nobody thought to ask.
 
-The repository already has the machinery. `tests/golden/` holds pinned envelopes for
-`response`, `batch-result`, `corpus-report`, `journal` and `liveness-report`, and
-`test_compare_characterize.py` is a worked example of the pattern.
+**Built, on `feat/characterization-suite`.** `tests/test_characterization.py` pins seven
+surfaces: `parse_single`, `parse_batch`, `route`, `compare`, `strategy`, `leaderboard`, `resume`.
+Every row is now judged by which pinned fields it moved.
 
-**Before row 0, extend it**: pin a full envelope for each surface (single parse, batch, compare,
-strategy walk, resumed run, leaderboard) against local backends only, so it runs offline and
-deterministically. Then every row is judged by which pinned fields it moved. A row that moves a
-field nobody predicted has found a real coupling, and the diff says so in one line instead of a
-week of bisecting.
+Two corrections to this record's first draft, left here because both cost time:
 
-One golden file already carries a doomed field: `tests/golden/batch-result/` has one file with
-`cost_usd` or `skip_reason` in it. That is the expected kind of churn, not a problem, but it must
-be **re-pinned deliberately with the new expected value**, never regenerated in bulk. A golden
-file regenerated without reading the diff is a test that asserts whatever the code now does.
+- `test_compare_characterize.py` is **not** a worked example of this pattern. It tests a module
+  that happens to be named `characterize`. `tests/golden/` is schema-evolution fixtures. The
+  suite was built fresh.
+- A naive pin is 2.5 MB of block geometry, and trimming it naively destroys the signal:
+  collapsing every long list turns the fallback chain into a count, and that chain is the single
+  most important thing row 4 moves. The rule that works is **collapse lists of containers, keep
+  lists of scalars whole**, so ids, codes and chain order survive while block trees do not.
+
+Nothing pinned may depend on a real OCR run. `tesseract_ocr_works()` exists because a
+present-but-broken install answers `which` and then fails at the job (BL-170), so a pin generated
+on one machine fails on another for reasons unrelated to anyone's change. `_strategy` therefore
+does not escalate and `_leaderboard` drops tesseract's rows.
+
+One golden file already carries a doomed field: `tests/golden/batch-result/` has one with
+`cost_usd` or `skip_reason` in it. That is expected churn, but it must be **re-pinned
+deliberately with the new expected value**, never regenerated in bulk. A golden file regenerated
+without reading the diff asserts whatever the code now does.
 
 ## 2. Fixtures are recorded vendor responses. Do not edit them.
 
