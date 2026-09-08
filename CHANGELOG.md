@@ -26,6 +26,11 @@ them.
 
 ### Added
 
+- **Website and tutorial ownership.** The OSS pages and guided walkthrough live in
+  `multiversal-ventures/openreading-web`, served at `/oss` and `/oss-tutorial` through Firebase.
+  Core retains its README diagrams and points readers to the hosted tutorial. Tutorial checks
+  run in the web repository against core, so core verification needs no website checkout.
+
 - **`strategy-config` v0.3.** The `policy:` block is a closed, typed object: the five compliance
   keys carrying `request.compliance`'s own descriptions verbatim, `optimize_for` as its enum, and
   the three attestation keys as `boolean` and `array` of `string`. A quoted `"false"` and a bare
@@ -41,8 +46,7 @@ them.
   Three IRS forms join the two bank statements there: `schedule_a_2024.pdf` and `1040_2024.pdf`
   are born-digital and come back as table blocks, and `1040-1988.pdf` is a five-page scan with no
   text layer, which is what makes an escalating strategy demonstrable on a shipped document.
-  `tests/test_docs_truth.py` executes every strategy block in the tutorial, and
-  `tests/test_docs_policy.py` allowlists the file by exact path.
+  The tutorial and its configuration checks now live in `openreading-web`, alongside the website.
 - **`openreading help [TOPIC]`.** The CLI now carries its own manual. `openreading help` prints a
   topic index grouped by what you are trying to do, and `openreading help batch` prints one
   chapter. The chapters are sections of the `openreading.cli` package docstring, located by

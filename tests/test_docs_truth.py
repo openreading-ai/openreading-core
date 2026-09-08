@@ -1,13 +1,12 @@
 """Docs-truth test. Every fenced ```yaml strategy block in the `openreading.strategies` module
-docstrings (the cookbook in `presets.py` above all), the strategies and comparison guides,
-and `tutorial/README.md`,
+docstrings (the cookbook in `presets.py` above all), and the strategies and comparison guides,
 must parse and pass `strategy validate` with NO errors — the cookbook is executable truth, not
 prose, so a docstring edit that breaks the grammar fails `make verify`. Documentation lives in
 code (AGENTS.md); this is what keeps the strategy documentation honest now that it lives next to
 the engine.
 
-Tutorial configurations must also keep their named backends reachable under their own policy.
-A pruned hosted fallback would otherwise pass grammar validation while defeating the walkthrough's escalation example.
+The guided tutorial belongs to openreading-web, which validates its configurations against core.
+This gate never reads another checkout, so a fresh core clone remains independently verifiable.
 
 Blocks come in several shapes: full configs (`version` + `strategies`), a bare `strategies:` map,
 a single node body, a deployment block, or a preset showcase. Each config-like block is wrapped
@@ -47,10 +46,6 @@ _MODULES = (
 _GUIDES = (
     "src/openreading/strategies/README.md",
     "src/openreading/comparison/README.md",
-    # The tutorial builds an `openreading.yaml` step by step, so a reader pastes every block in
-    # it. A block that the grammar rejects would break the walkthrough at the exact point a
-    # newcomer has nothing else to fall back on.
-    "tutorial/README.md",
 )
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -169,7 +164,3 @@ def test_doc_yaml_passes_strategy_validate(name, i, cfg):
     assert not errors, f"{name}#{i} has validate errors: " + "; ".join(
         f"{e.path}: {e.message}" for e in errors
     )
-    if name == "tutorial/README.md":
-        # A valid tree can still prune the fallback the walkthrough promises to run.
-        unreachable = [x for x in issues if "filtered out by the policy" in x.message]
-        assert not unreachable, "; ".join(x.message for x in unreachable)

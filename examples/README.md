@@ -3,7 +3,7 @@
 You can parse these five documents the moment the clone finishes. Your first run needs no key, no
 vendor account, and no documents of your own. A backend is one document parser. Both of the parsers
 that run locally with no key read these files. PyMuPDF reads the text layer. Tesseract rasterizes
-the page and runs OCR over the pixels. [The tutorial](../tutorial/README.md) walks the whole tool over them
+the page and runs OCR over the pixels. [The tutorial](https://openreading.ai/oss-tutorial) walks the whole tool over them
 in seventeen steps, and the root [README](../README.md) gives the short tour. This page says what
 they are and where they came from.
 
@@ -113,7 +113,7 @@ succeeded
 Eight characters across five pages, and every block has `"type": "image"`. The run succeeded,
 because PyMuPDF read the text layer correctly and there is no text layer. That gap between
 `succeeded` and useful is the whole argument for a strategy, and
-[The tutorial](../tutorial/README.md) builds one around this file. Tesseract returns about 19,000
+[The tutorial](https://openreading.ai/oss-tutorial) builds one around this file. Tesseract returns about 19,000
 characters from the same document in roughly twenty seconds.
 
 The entered values are synthetic and deliberately impossible. Both social security numbers begin

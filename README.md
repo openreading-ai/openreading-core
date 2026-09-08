@@ -33,10 +33,10 @@ Whichever backends read your documents, you get one shape that you can read, com
 replay the run.
 
 <!-- diagram:README-1 -->
-<p align="center"><img src="assets/diagrams/README-1.svg" alt="What it does" /></p>
+<p align="center"><a href="assets/diagrams/README-1.svg"><img src="assets/diagrams/README-1.svg" alt="Your documents follow your rules to a chosen backend, then return one response shape for reading, comparison, and replay." /></a></p>
 
 <details>
-<summary>Diagram source (Mermaid)</summary>
+<summary>Logical flow (Mermaid)</summary>
 
 ```mermaid
 %%{init: {"theme":"base","fontFamily":"Arial","deterministicIds":true,"deterministicIDSeed":"openreading","htmlLabels":false,"themeVariables":{"fontFamily":"Arial","fontSize":"17px","lineColor":"#8194ad","textColor":"#183451","primaryTextColor":"#183451","primaryColor":"#edf3fc","primaryBorderColor":"#9db4d0","edgeLabelBackground":"#ffffff","clusterBkg":"#f5f8fc","clusterBorder":"#d7e1ee","titleColor":"#183451","actorBkg":"#edf3fc","actorBorder":"#9db4d0","actorTextColor":"#183451","actorLineColor":"#9db4d0","signalColor":"#527095","signalTextColor":"#183451","labelBoxBkgColor":"#fff4de","labelBoxBorderColor":"#c6953a","labelTextColor":"#70501b","loopTextColor":"#527095","noteBkgColor":"#edf3fc","noteBorderColor":"#9db4d0","noteTextColor":"#183451","sequenceNumberColor":"#ffffff","activationBkgColor":"#e7f3ee","activationBorderColor":"#679780"},"flowchart":{"curve":"monotoneY","nodeSpacing":32,"rankSpacing":48,"padding":18,"useMaxWidth":true},"sequence":{"useMaxWidth":true,"actorMargin":65,"messageMargin":38,"mirrorActors":false}}}%%
@@ -142,7 +142,7 @@ tesseract                      oss_library        no          tesseract binary (
 
 ## Your first parse
 
-> **Want the guided version?** [`tutorial/README.md`](tutorial/README.md) walks the whole tool
+> **Want the guided version?** [The tutorial](https://openreading.ai/oss-tutorial) walks the whole tool
 > in seventeen steps, from this first parse to a policy, a self-escalating strategy, a folder run
 > and the HTTP server. It uses the documents in [`examples/`](examples/README.md) and needs no key.
 > The sections below are the short tour.
@@ -506,7 +506,7 @@ command.
 | You want to know… | Run / open |
 |---|---|
 | **the full documentation, every guide, and how an agent uses it** | [`src/openreading/README.md`](src/openreading/README.md), then `uv run openreading --help` and `uv run openreading <cmd> --help` for every flag |
-| **how to get from a fresh clone to a working strategy, one step at a time** | [`tutorial/README.md`](tutorial/README.md), the guided walkthrough over the shipped documents |
+| **how to get from a fresh clone to a working strategy, one step at a time** | [The tutorial](https://openreading.ai/oss-tutorial), maintained in `openreading-web`, over the shipped documents |
 | what the shipped example documents contain and where they came from | [`examples/README.md`](examples/README.md) |
 | each backend's variables, runtime location, and env-var precedence rules | [`src/openreading/adapters/README.md`](src/openreading/adapters/README.md), then `uv run python -m pydoc openreading.credentials` |
 | the exact JSON shapes (the contract) | [`src/openreading/schemas/README.md`](src/openreading/schemas/README.md), then the `*.json` files beside it |

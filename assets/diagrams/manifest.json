@@ -46,23 +46,5 @@
     "source": "src/openreading/strategies/README.md",
     "title": "How it decides",
     "file": "src-openreading-strategies-2.svg"
-  },
-  {
-    "name": "tutorial-1",
-    "source": "tutorial/README.md",
-    "title": "3. Reading the envelope",
-    "file": "tutorial-1.svg"
-  },
-  {
-    "name": "tutorial-2",
-    "source": "tutorial/README.md",
-    "title": "7. The document that defeats one backend",
-    "file": "tutorial-2.svg"
-  },
-  {
-    "name": "tutorial-3",
-    "source": "tutorial/README.md",
-    "title": "10. Reading the trace with `explain`",
-    "file": "tutorial-3.svg"
   }
 ]

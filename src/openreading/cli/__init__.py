@@ -41,11 +41,11 @@ count always accounts for every file you pointed at.
 From a clone the command is `uv run openreading`; an installed package puts
 `openreading` on your PATH. Read the topics with `openreading help`.
 
-Want the guided version? `tutorial/README.md`, in a clone or the source
-distribution, walks the whole tool in seventeen steps, from this first parse
-to a policy, a self-escalating strategy, a folder run and the HTTP server. It
-uses the documents in `examples/` and needs no key. The chapters below are the
-reference; that file is the tour.
+Want the guided version? https://openreading.ai/oss-tutorial walks the tool
+in seventeen steps, from this first parse to a policy, an escalating strategy,
+a folder run and the HTTP server. The walkthrough lives in `openreading-web`
+and uses the documents in this clone's `examples/` directory without a key.
+The chapters below are the reference; the hosted tutorial is the tour.
 
 help [TOPIC]
 ------------
