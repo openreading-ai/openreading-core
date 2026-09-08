@@ -225,18 +225,15 @@ def test_native_and_platform_are_observationally_equivalent(tmp_path, monkeypatc
     assert {i["transport"] for i in native["items"]} == {"native"}
     assert {i["transport"] for i in platform["items"]} == {"platform"}
 
-    # BL-100: native must not silently drop cost accounting. _FakeNative.report_cost always
+    # BL-100: native must not silently drop usage accounting. _FakeNative.report_cost always
     # returns infra_only("page", 1.0) regardless of transport, so a correctly-metered native item
-    # is indistinguishable from its platform counterpart: same cost_basis, same pages_processed,
-    # no invented cost_usd (infra_only reports no dollar figure — merge_cost_report never invents
-    # one, so the key is dropped by to_schema_dict's exclude_none rather than sent as null).
+    # is indistinguishable from its platform counterpart: the same page count, and no money on
+    # either.
     for env in (native, platform):
         for item in env["items"]:
             usage = item["response"]["usage"]
-            assert usage["cost_basis"] == "infra_only"
             assert usage["pages_processed"] == 1
-            assert "cost_usd" not in usage
-    assert native["summary"]["cost_bases"] == platform["summary"]["cost_bases"] == ["infra_only"]
+            assert "cost_usd" not in usage and "cost_basis" not in usage
     assert native["summary"]["pages_processed"] == platform["summary"]["pages_processed"] == 3
 
 
@@ -262,16 +259,19 @@ def test_native_dispatch_threads_credentials_so_cost_report_warning_is_redacted(
     assert "***" in warnings[0]["message"]
 
 
-def test_native_skips_are_still_honored(tmp_path, monkeypatch):
+def test_native_dispatches_every_file_whatever_its_extension(tmp_path, monkeypatch):
+    """A native batch used to filter by `input_formats` before submitting. It submits everything
+    now: whether the backend can read a document is the backend's answer, and its refusal is what
+    the item reports."""
     d = tmp_path / "c"
     d.mkdir()
     (d / "ok.pdf").write_bytes(build_sample_pdf())
-    (d / "no.docx").write_bytes(b"not a pdf")  # unsupported for fake-native (input_formats=[pdf])
+    (d / "no.docx").write_bytes(b"not a pdf")
     _register(monkeypatch, _FakeNative(native="claimed"))
     env = run_batch([str(d)], backend="fake-native")
     states = {i["source"]["relpath"]: i["state"] for i in env["items"]}
-    assert states == {"no.docx": "skipped", "ok.pdf": "succeeded"}
-    # the succeeded item went native; the skip never reached the adapter
+    assert set(states) == {"no.docx", "ok.pdf"}
+    assert "skipped" not in set(states.values())
     ok = next(i for i in env["items"] if i["state"] == "succeeded")
     assert ok["transport"] == "native"
 

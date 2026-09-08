@@ -39,7 +39,7 @@ typecheck-mypy:
 # sweep alone cannot prevent. The retry fires only on that combine()-time INTERNALERROR signature,
 # never on any other failure. The script's own module docstring carries the full mechanism.
 test:
-	uv run python scripts/run_test_suite.py -m "not live" --cov=openreading --cov-report=term-missing --cov-fail-under=91
+	uv run python scripts/run_test_suite.py -m "not live" --cov=openreading --cov-report=term-missing --cov-fail-under=94
 
 schema-validate:
 	uv run python -m openreading.schemas validate

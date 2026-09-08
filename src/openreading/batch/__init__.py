@@ -1,5 +1,5 @@
 """The batch layer: one invocation over many documents of any supported format
-produces ONE `batch-result.v0.1` JSON, and that JSON is a first-class `compare` subject.
+produces ONE `batch-result.v0.2` JSON, and that JSON is a first-class `compare` subject.
 
 Two modules: intake resolution (`openreading.batch.sources`, invariants M1-M5) and the platform
 runner (`openreading.batch.runner`, M6-M9). `openreading.api.run_batch` composes them and owns
@@ -12,7 +12,7 @@ platform should own: bounded concurrency, per-item failure isolation, honest ski
 cost roll-up, and a comparable artifact at the end. The batch layer composes the existing
 single-document pipeline without touching it. Three load-bearing choices:
 
-1. The single-document contract is untouched. `request.v0.2` / `response.v0.3` do not change; a
+1. The single-document contract is untouched. `request.v0.3` / `response.v0.3` do not change; a
    batch is a separate envelope whose items CONTAIN ordinary `response.v0.3` envelopes. Failure
    avoided: churning the one contract every consumer, test and adapter depends on. (A
    `documents[]` field on the request was rejected for exactly that reason -- it also forces
@@ -26,9 +26,8 @@ single-document pipeline without touching it. Three load-bearing choices:
    one corpus report answering "which backend is better on MY corpus".
 
 Principles shared with the channel contract (`openreading.derive`): deliver-or-warn per item (the
-batch never silently shrinks); compliance is never relaxed by batching (per-item routing runs the
-same compliance-first
-elimination as a single run -- no side door); determinism (same inputs => same envelope modulo
+batch never silently shrinks); the backend list is never widened by batching (per-item routing
+resolves exactly as a single run does -- no side door); determinism (same inputs => same envelope modulo
 backend nondeterminism: item order is input order, directory expansion is sorted, identity
 hashes are content-based); honesty over convenience (native-batch claims are graded, never
 assumed).
@@ -36,7 +35,7 @@ assumed).
 Intake resolution (`sources.resolve_intake`, pure: no network beyond stat/read)
 --------------------------------------------------------------------------------
 Each source becomes a `ResolvedSource` = `types.batch.SourceRef` {path|url, relpath, filename,
-format, mime_type, size_bytes, sha256} + `skip_reason`. `relpath` (relative to the expanded
+format, mime_type, size_bytes, sha256}. `relpath` (relative to the expanded
 directory root) is the stable cross-run pairing key for corpus compare; `sha256` of the file
 bytes is the identity fallback and the per-item idempotency ingredient. URLs get no sha at
 intake (only computed if the item is materialized).
@@ -49,12 +48,12 @@ intake (only computed if the item is materialized).
   >=2 source arguments => batch envelope even if expansion yields one file; a single explicit
   file/URL => the single `response.v0.3` behaviour, byte-for-byte backward compatible. Failure
   avoided: an envelope type that flips depending on how many files happen to be in a folder.
-- M3 honest format filter: `format` is the lowercased extension, matched against the effective
-  format set -- a named backend's `input_formats`, or the union across READY backends for
-  `auto` / a strategy. A descriptor entry like `"pdf (rasterized)"` matches on its first token
-  (DECISIONS D12). Non-matching known formats => `state: "skipped"`,
-  `skip_reason: "unsupported_format"`; unknown extensions => `"unknown_format"`. A `.docx`
-  handed to pymupdf is a skip with a reason, never a crash and never a silent omission.
+- M3 every named source is dispatched: `format` is the lowercased extension and it is recorded,
+  not acted on. Intake used to sort files against a backend's `input_formats` and skip the
+  non-matching ones, which was core deciding what a vendor can read from a table core cannot
+  verify. Being wrong in that direction silently excluded a file the caller asked for, and
+  nothing surfaced it. A `.docx` handed to pymupdf is now attempted, and pymupdf refuses it
+  first-hand as a `failed` item naming the format and what it does read.
 - M4 size guard: expansion beyond `max_items` (default `DEFAULT_MAX_ITEMS` = 200) raises
   `SourceLimitError` early -- BEFORE any bytes are read -- naming the count and the escape hatch
   (`--max-items` / `max_items=`). Protects against pointing the tool at a home directory and
@@ -75,23 +74,25 @@ intake (only computed if the item is materialized).
 
 Execution (`runner.run_batch`, platform fan-out -- the default for every backend)
 ----------------------------------------------------------------------------------
-Each non-skipped item runs the EXISTING single-document path through a `run_one(source,
+Each item runs the existing single-document path through a `run_one(source,
 idempotency_key) -> response.v0.3 dict` seam (production wires it to `api.run`: route ->
 materialize -> submit -> run_to_completion -> normalize -> validate). No new adapter surface,
 so every adapter batches correctly on day one.
 
-- M6 per-item isolation: a terminal error, timeout or compliance refusal records
+- M6 per-item isolation: a terminal error or timeout records
   `state: "failed"` + `error {code, message}` on that item and the batch continues;
   `_run_item` never raises. The stderr progress line is the only place a failed item's message
   is read.
-- M7 per-item compliance and routing: each item is routed exactly as a single run would be,
-  including per-item backend choice under `auto` (a PNG may legitimately route to a different
+- M7 per-item routing: each item is routed exactly as a single run would be,
+  including per-item backend choice when no backend is named (two documents may route to different
   backend than a PDF in the same batch; each inner response carries `backend.id`). No batch-level
-  cache of routing decisions that could widen the compliance-eligible set.
-- M8 honest aggregation: `summary.cost_usd` sums only items that reported a cost (absent if
-  none did); `summary.cost_bases` lists the distinct bases observed, so `estimated` and
-  `metered` never blend into fake precision; `summary` also carries `total / succeeded / failed
-  / skipped`, `duration_ms`, `pages_processed`, and `backends` (a per-item backend tally).
+  cache of routing decisions that could widen the resolved backend set.
+- M8 honest aggregation: `summary` carries `total / succeeded / failed`, `duration_ms`,
+  `pages_processed` (summed over the items that reported one, absent if none did), and
+  `backends` (a per-item backend tally). It carries no money. `cost_usd` and `cost_bases` were
+  removed with the per-vendor price tables behind them: a total
+  summed out of derived guesses is fake precision, and the caller's own invoice is where the
+  real number lives.
 - M9 items are full envelopes: a succeeded item's `response` is a complete, schema-valid
   `response.v0.3` document -- anything compare/evals can already consume.
 - Concurrency: default `jobs=1`, which is serial, deterministic and rate-limit-safe. A default
@@ -108,24 +109,23 @@ so every adapter batches correctly on day one.
   (`RetryableError`, `next_poll_at`).
 - Idempotency: with a caller key `K`, item keys derive as `f"{K}:{sha256[:16]}"`; without `K`
   (or without a sha, e.g. a URL item) none is fabricated. `/v1/batch` never uses the server's
-  idempotency cache: a replayed response still carries the original `usage.cost_usd`, which the
-  summary would sum into a total nobody was billed for (DECISIONS D-v3-3).
+  idempotency cache: a replayed response still carries the original run's `usage` counters,
+  which the summary would sum into a total describing work nobody did (DECISIONS D-v3-3).
 - Progress: one stderr line per completed item -- skipped items included, so `[i/N]` always
   reaches N -- keeping stdout pure JSON.
-- Cost preflight (advisory, stderr, CLI): when more than 10 live items target a directly named
-  `hosted_api` backend, print the count and the descriptor's `usd_per_page_equiv` range before
-  starting. The rate is per PAGE and an item is a document, so the line says so in words and
-  multiplies out the one total that exists before any file is opened -- items x one page x rate --
-  labelled as the single-page floor it is. Intake reads no bytes and never fetches a URL (M5), so
-  real page counts are not knowable here and no truer total can be printed; a line naming the item
-  count beside a per-page rate reads as a per-item price and under-states a real corpus by its
-  average page count. Never an interactive prompt: batches must stay scriptable; the M4 guard is
-  the real spend protection.
+- Scope preflight (advisory, stderr, CLI): when more than 10 live items target a directly named
+  `hosted_api` backend, print how many calls are about to leave this machine, to whom, and on
+  whose key. One call per item is the floor, and a paged document exceeds it. It used to print a
+  dollar range from the descriptor's `usd_per_page_equiv` instead, a rate this package had
+  written down about someone else's rate card and could not verify.
+  Intake reads no bytes and never fetches a URL (M5), so no page count exists at this point
+  either. Never an interactive prompt: batches must stay scriptable; the M4 guard is the real
+  protection.
 - Interplay: `--strategy X` batches fine (each item runs the strategy; native batch never
   applies to strategies). `--extract`, `--pages`, `features` are request-level and apply to
   every item. Materialization stays per item inside the existing pipeline.
 
-The envelope: `batch-result.v0.1.json` (`openreading.types.batch`, `schemas.validate_batch_result`)
+The envelope: `batch-result.v0.2.json` (`openreading.types.batch`, `schemas.validate_batch_result`)
 ---------------------------------------------------------------------------------------------------
 Required in-band `schema_version` const `"0.1"`; filename == `$id` == const == pydantic default;
 `extra="ignore"` forward tolerance; golden fixtures and the non-additive-diff gate from birth.
@@ -136,10 +136,10 @@ succeeded|failed|skipped; item `transport` platform|native. Both new families ar
 `python -m openreading.schemas validate` sweep that `make verify` runs.
 
     status.state; request {backend, strategy, jobs, source_args} (echo for provenance/replay);
-    items[] {source, state, response|null, error {code, message}|null, skip_reason|null,
+    items[] {source, state, response|null, error {code, message}|null,
              transport};
-    summary {total, succeeded, failed, skipped, duration_ms, cost_usd?, cost_bases,
-             pages_processed?, backends}; warnings[] {code, message}
+    summary {total, succeeded, failed, duration_ms, pages_processed?, backends};
+    warnings[] {code, message}
 
 Status rule (`runner.batch_state`): `succeeded` = >=1 succeeded and 0 failed; `partial` = some
 of each; `failed` = 0 succeeded (all failed, all skipped, or empty -- nothing was produced).
@@ -160,9 +160,9 @@ runtime-checkable Protocol, NOT in the required eight:
 most backends have no multi-document call, and a required stub that says "unsupported" teaches
 nothing (the precedent `LivenessProbeAdapter` later copied, DECISIONS D-v7-1).
 
-Dispatch rule (`api._native_adapter`): native iff the backend is directly named (not `auto`, not
+Dispatch rule (`api._native_adapter`): native iff the backend is directly named (not null, not
 a strategy), `descriptor.batch.native` is truthy, the adapter implements the Protocol, >=1 item
-is non-skipped, and the live count is within `batch.max_items`; otherwise platform fan-out.
+exists, and the item count is within `batch.max_items`; otherwise platform fan-out.
 - M10 observational equivalence: both paths build the envelope through the same
   `runner.assemble_result`; the result differs only in timing/cost and `transport` provenance.
   Per-item failures inside a native batch -- vendor-reported or raised by the adapter's own
@@ -177,12 +177,7 @@ is non-skipped, and the live count is within `batch.max_items`; otherwise platfo
   `credentials.DEFAULT_NATIVE_BATCH_DEADLINE_MS` (1h); override via `run_batch(deadline_ms=)`
   or `--deadline SECONDS`. The HTTP surface has no override because `POST /v1/batch` never
   reaches native dispatch -- it always drives the platform pipeline.
-- Compliance on the native path: `policy` is applied per item via `build_request` (the same
-  spelling the platform path's `run()` uses), and the resulting `req.compliance` is enforced
-  with the same `Router.check_eligible` call the named-backend single run uses, before
-  `submit_many` sees a document. Because every item in a batch shares identical policy and
-  overrides, `req.compliance` is identical across `reqs`, so the eligibility check runs ONCE on
-  the first request as a stand-in for the whole batch (`api._run_native`).
+- The native path applies the same shared request options to every item before `submit_many`.
 - Reference implementation: anthropic-claude via the Message Batches API (submit, poll
   `processing_status`, fetch `results_url` JSONL; per-item succeeded/errored maps 1:1 onto M6),
   built against respx fixtures and verified only in the keyed live lane. Grade ladder:
@@ -233,15 +228,15 @@ Surfaces
   single-document run it overrides the generic 120s default for a directly-named backend,
   BL-169; in batch mode it reaches only native dispatch -- `api.run_batch` forwards
   `deadline_ms` to `_run_native` alone, so platform fan-out items keep the single-run default;
-  `auto` / `--strategy` ignore it; a value `<= 0` means fail fast, BL-138),
+  an unnamed backend and `--strategy` ignore it; a value `<= 0` means fail fast, BL-138),
   `--save-dir DIR` writes each succeeded item's inner response to `DIR/<relpath>.json` (falling
   back to `<filename>.json`; mirrors compare's fan-out flag) so per-backend envelopes are
   reusable offline. Stdout is the one envelope; progress/advisories on stderr. Exits: 0 all
   succeeded; 4 partial (some items failed); 1 nothing succeeded; 2 unresolvable source, over
-  `--max-items` or `--max-jobs`; 3 cannot run at all (credentials, policy, `ComplianceRefused`,
+  `--max-items` or `--max-jobs`; 3 cannot run at all (credentials, policy, `ScopeRefused`,
   or a native `submit_many` `RetryableError`/deadline); 6 interrupted with `OPENREADING_LEDGER` set (batch keys on the var, not on an armed run)
   (batch-level resume is not supported, so no run id is named).
-- Python: `openreading.run_batch(sources, backend="auto", *, strategy, jobs=1, max_jobs=32,
+- Python: `openreading.run_batch(sources, backend=None, *, strategy, jobs=1, max_jobs=32,
   max_items=200, deadline_ms=None, env_file, idempotency_key, on_progress, on_preflight,
   **request_overrides) -> batch-result dict`; `run()`'s signature is untouched.
 - Server: `POST /v1/batch` with `{"documents": [<request.document>...], <shared request

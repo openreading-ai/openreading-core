@@ -1,6 +1,6 @@
 """Docling adapter — the first ContainerAdapter. Talks to a self-hosted docling-serve container
 over HTTP; because the container runs in the caller's own infra, data never leaves the environment
-(runs_fully_local=True — a compliance answer by construction). MIT-licensed.
+(it runs on hardware you control, so no document leaves it). MIT-licensed.
 
 The DoclingDocument is a tree: `body.children` are JSON-pointer refs (`#/texts/0`, `#/tables/0`,
 `#/groups/1`) that we walk to linearize reading order. Each item's provenance carries a bbox with
@@ -30,9 +30,7 @@ from openreading.types.cost import CostReport, infra_only
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     ConfigField,
-    Cost,
     LivenessProbe,
     Output,
     OutputChannels,
@@ -136,9 +134,7 @@ def _descriptor() -> AdapterDescriptor:
         # cached on self) — verified against the real R1/R2 conformance kit, not assumed.
         protocol_version=2,
         adapter_impl="container",
-        provisioning=Provisioning(
-            byo_mode=["container"], auth="none", billing_target="caller_infra"
-        ),
+        provisioning=Provisioning(byo_mode=["container"], auth="none"),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(
             ocr="claimed",
@@ -151,14 +147,6 @@ def _descriptor() -> AdapterDescriptor:
             figures_charts="claimed",
             multi_column="verified",
             input_formats=["pdf", "docx", "pptx", "xlsx", "html", "png", "jpg"],
-        ),
-        cost=Cost(native_unit="cpu_second", basis="infra_only", usd_per_page_equiv_low=0.0),
-        compliance=ComplianceProfile(
-            hipaa_baa="na_local",
-            trains_on_customer_data="na_local",
-            runs_fully_local=True,
-            data_region_options=["*"],
-            max_retention_hours=0,
         ),
         runtime=RuntimeProfile(
             offline_capable=True,
@@ -183,8 +171,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="medium",
-            integration_priority="P0",
-            priority_reason="MIT complex-layout parser, no license cap; first container adapter; residency-proof floor.",
         ),
         config_spec=[
             ConfigField(

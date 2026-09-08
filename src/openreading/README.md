@@ -26,7 +26,7 @@ inventing a value. `channel_provenance` lists the channels this run did produce.
 entry names some of those gaps and not others, so read provenance rather than waiting for a warning
 ([The channel contract](derive/README.md#which-signal-to-trust-when-a-channel-is-missing)).
 
-A compliance policy is a short list of rules about which backends may see your documents. The
+A backend policy is the caller's ordered default chain for requests that name no backend. The
 router is the step that picks a backend for each request. It applies that policy before anything
 runs, and no later step, fallback, or setting can bring a dropped backend back.
 
@@ -62,14 +62,12 @@ Each mechanism below holds on every surface, and each links to the guide that de
   test on each result that decides whether to accept it or move on. Every attempt carries
   one category from a closed vocabulary. `explain` renders the trace, and `replay --trace`
   re-executes its decisions. [Strategies](strategies/README.md).
-- **Compliance-first routing, widened only by your policy.** The router picks a backend in three
-  stages. Stage 1 drops backends for policy, and stages 2 and 3 only filter and reorder the
-  survivors. An unverified claim, such as a vendor that lists no regions, counts as no. Your policy
-  is the one thing that sets the eligible set, and exactly three of its keys enlarge it:
-  `allow_unverified_compliance`, `baa_tier_confirmed` and `train_optout_confirmed`. Nothing after
-  the policy enlarges it again. No fallback, named backend, or strategy step readmits a dropped
-  vendor. A decider, the optional LLM call at a strategy's decision points, cannot readmit one
-  either. [Routing and keys](router/README.md).
+- **You name the backends; selection is a lookup.** Three rules, in order: the backend you named,
+  else `policy.backends` in written order, else `pymupdf`. Nothing is inferred, because core holds
+  no fact it cannot verify. The router used to filter on a per-vendor compliance table, gate on a
+  capability table and score on a "quality" number that was this project's own build priority;
+  every input to all three was a claim it could not check, and being wrong routed a document to a
+  backend the operator believed was excluded. [Routing and keys](router/README.md).
 - **Ledger resume.** With `OPENREADING_LEDGER` set, a strategy run journals every step, meaning it
   writes each step to disk as it completes. `resume <run_id>` replays the recorded steps and runs
   the rest. [The run ledger](ledger/README.md).
@@ -86,7 +84,7 @@ Every document follows the path below, whichever backend answers.
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif","fontSize":"14px","lineColor":"#94a3b8","textColor":"#334155","primaryTextColor":"#0f172a","edgeLabelBackground":"#eef2f7","clusterBkg":"#f8fafc","clusterBorder":"#cbd5e1","titleColor":"#334155"},"flowchart":{"curve":"basis","nodeSpacing":36,"rankSpacing":44,"padding":8,"useMaxWidth":true}}}%%
 flowchart TD
-  Q[/"request plus policy"/]:::src --> R1{{"router stage 1<br>compliance filter"}}:::gate
+  Q[/"request plus policy"/]:::src --> R1{{"configured backend chain"}}:::gate
   R1 -- "pass" --> R2["router stages 2 and 3<br>capability, score"]:::work
   R2 --> AD["adapter<br>submit, poll, normalize"]:::work
   AD --> DV["derive<br>text, tables, geometry"]:::work
@@ -132,7 +130,7 @@ The table below tells you which guide answers which need and how long each takes
 | run a public benchmark, then rank backends on your labeled documents | [Evals](evals/README.md) | 10 min |
 | decide whether to approve this for regulated data | [What this software protects, and what it does not](../../SECURITY.md#what-this-software-protects-and-what-it-does-not) | 10 min |
 | look up the exact JSON shapes and enums | [JSON Schemas](schemas/README.md) | look up as needed |
-| look up a backend's variables, license, and compliance posture | [Backend adapters](adapters/README.md) | look up as needed |
+| look up a backend's variables, license, and runtime requirements | [Backend adapters](adapters/README.md) | look up as needed |
 | call it from Python: `run()`, `route()`, `compare()`, `run_batch()`, and one exception type per condition | reference only: `uv run python -m pydoc openreading.api` | look up as needed |
 | look up the pydantic models that mirror the schemas | reference only: `uv run python -m pydoc openreading.types` | look up as needed |
 | look up how `openreading.yaml` is found, and the nine keys its `policy:` block takes | reference only: `uv run python -m pydoc openreading.config` | look up as needed |
@@ -150,21 +148,21 @@ reading them out of order costs nothing.
 | [`README.md`](../../README.md) | The front door | Install, the four walkthroughs (parse, compare, route, strategy), and what this is not. | 529 |
 | [`src/openreading/README.md`](README.md) | Docs home | This page. The map above, plus how an agent drives the engine. | 434 |
 | [`src/openreading/cli/README.md`](cli/README.md) | The command line | One JSON envelope on stdout, everything else on stderr, and an exit code a script can branch on. | 454 |
-| [`src/openreading/router/README.md`](router/README.md) | Routing and keys | Which backends a policy allows, why each was dropped, and how to write the `policy:` block. | 568 |
+| [`src/openreading/router/README.md`](router/README.md) | Routing and keys | How a policy sets the default chain, why entries may be absent, and how to write `policy:`. | 568 |
 | [`src/openreading/strategies/README.md`](strategies/README.md) | Strategies | Cascades, races and gates in `openreading.yaml`, and the trace each run leaves. | 743 |
 | [`src/openreading/batch/README.md`](batch/README.md) | Batch runs | A folder, a glob or several files as one `batch-result` envelope. | 400 |
 | [`src/openreading/comparison/README.md`](comparison/README.md) | Compare | Where two backends disagree on one document, as a verdict plus findings. | 402 |
 | [`src/openreading/evals/README.md`](evals/README.md) | Evals | Public benchmarks, and ranking backends on documents you labeled. | 713 |
-| [`src/openreading/ledger/README.md`](ledger/README.md) | The run ledger | Resume after an interruption, replay offline, and crypto-shred what a run recorded. | 410 |
+| [`src/openreading/ledger/README.md`](ledger/README.md) | The run ledger | Resume after an interruption and replay completed work offline. | 410 |
 | [`src/openreading/server/README.md`](server/README.md) | The HTTP server | `openreading serve`: the same engine behind a local JSON API, with bearer auth. | 509 |
-| [`src/openreading/adapters/README.md`](adapters/README.md) | Backend adapters | The catalog: each backend's formats, variables, price and compliance posture. | 378 |
+| [`src/openreading/adapters/README.md`](adapters/README.md) | Backend adapters | The catalog: each backend's formats, variables, and runtime requirements. | 378 |
 | [`src/openreading/schemas/README.md`](schemas/README.md) | JSON Schemas | The contract every surface speaks, and how a version is cut. | 401 |
 | [`src/openreading/derive/README.md`](derive/README.md) | The channel contract | Why a field is absent rather than wrong, and who computed it. | 280 |
 | [`examples/README.md`](../../examples/README.md) | Example documents | The two synthetic bank statements the guides parse, and where they came from. | 96 |
 
 Three more files sit at the repository root and are not guides. [`SECURITY.md`](../../SECURITY.md)
-states what a compliance policy does and does not guarantee, and is the page to read before
-approving this for regulated data. [`CHANGELOG.md`](../../CHANGELOG.md) carries every breaking
+states the package's security boundaries and is the page to read before approving it for
+sensitive data. [`CHANGELOG.md`](../../CHANGELOG.md) carries every breaking
 change with the reason for it. [`AGENTS.md`](../../AGENTS.md) is the contributor contract, and
 explains why there is no `docs/` directory: documentation lives in the module docstring beside
 the code, and each directory's `README.md` indexes those places rather than restating them.
@@ -218,16 +216,13 @@ real:
 cat > openreading.yaml <<'YAML'
 version: 1
 policy:
-  require_baa: true
-  no_train_on_data: true
 YAML
 uv run openreading route sample.pdf --run
 ```
 ```json
 { "chosen": "pymupdf",
   "fallbacks": ["docling", "azure-document-intelligence", "google-document-ai", "tesseract", "qwen-vl", "anthropic-claude"],
-  "dropped": { "aws-textract": { "stage": 1, "code": "trains_on_data", "reason": "no_train_on_data set but trains_on_customer_data='opt_out'" },
-               "reducto": { "stage": 1, "code": "no_baa", "reason": "require_baa set but hipaa_baa='tier_gated' and 'reducto' is not in baa_tier_confirmed" },
+  "dropped": {},
                "…": "6 more" },
   "terminal_reason": null,
   "result": { "schema_version": "0.3", "status": { "state": "succeeded" }, "backend": { "id": "pymupdf", … } } }
@@ -259,7 +254,7 @@ decide is which surface you call. Python raises a distinct exception type per co
 only surface that separates all of them. HTTP returns a machine-readable `error.category`. The CLI
 gives you an exit code. Exit `3` covers the six conditions in the `3` rows below, and their correct
 actions disagree. [The command line](cli/README.md) lists every cause of exit `3`, not only these
-six. An agent that must tell a compliance refusal from a rate limit cannot do it from the CLI.
+six. An agent that must distinguish configuration refusal from a rate limit cannot use the CLI.
 
 Source: `src/openreading/__init__.py` ("Let your agents decide", the triage playbook),
 `openreading.api` (Exceptions) and `openreading.server` (HTTP status codes). Live truth: `uv run
@@ -274,7 +269,7 @@ table.
 | a rung gated and a later one answered | exit `0`, warning `quality_escalated` / `fallback_used` | same dict | `200` | consume, and log the trail. Unattended, alert on it: a permanent host fault looks like a one-off blip |
 | some channels or pages missing | exit `0`, `status.state` `partial` | same dict | `200` | consume what is present. `warnings[]` names what is missing |
 | this backend has no confidence to give | exit `0`, warning `confidence_unavailable` | same dict | `200` | do not gate on a number that is not there |
-| policy forbids every eligible backend | exit `3` from a `parse` run under a policy. `route` prints the empty plan and exits `4` | `ComplianceRefused` | `403`, `error.category` `compliance_refused` | change the policy or the request. **Never retry**, because nothing about a retry changes the answer |
+| the allow-list permits no registered backend | exit `3` from a `parse` run. `route` prints the empty chain and exits `4` | `ScopeRefused` | `403`, `error.category` `scope_denied` | widen `policy.backends`, or name a backend the list contains. **Never retry**, because nothing about a retry changes the answer |
 | rate limit or deadline exhausted | exit `3` | `RetryableError` | `504`, `error.category` `retryable_exhausted` | retry later with backoff. Same CLI exit code as the row above, opposite action |
 | a key is missing | exit `3` | `MissingCredentialsError` | `424`, `error.backend_code` `missing_credentials`, `missing_env[]` | provision the named vars |
 | a key was found and rejected | exit `3` | `TerminalError` | `424`, `error.backend_code` `auth_rejected` | fix the key. Retrying will not help |
@@ -311,7 +306,6 @@ enforce for you.
 | `attempts[].category` | closed, 13 values | `openreading.strategies.trace.CATEGORIES`, a real `frozenset` |
 | `headline.verdict`, finding codes | closed | `comparison-report.v0.2.json`, with live-truth commands in [Compare](comparison/README.md) |
 | `document.pages[].blocks[].type` | closed, 22 values | `response.v0.3.json` |
-| `usage.cost_basis` | closed, 4 values | `response.v0.3.json` |
 | `orchestration.outcome` | closed in code, `ok` / `degraded` | a comment in `strategies/trace.py`. No schema enumerates it |
 | `decisions[].downgraded` | closed in code, 9 values | `openreading.strategies.decider.DOWNGRADE_REASONS` |
 | `decisions[].point` | **open** | four values ship (`decide`, `gate_band`, `judge`, `route`). A code comment names only the first three |
@@ -362,8 +356,8 @@ as the `judged_lost` category on the losing attempts. An `offline_first` run pri
 A decision record carries `decision_id`, `node_path`, `label`, `point`, `eligible`, `chosen`,
 `decider`, `config_hash`, `strategy` and `downgraded`. **`eligible` is the audit hook.** It is the
 candidate list the engine enumerated, so a second agent can assert `chosen` is in `eligible` and
-prove the choice was in bounds. The engine builds that list, and a decision cannot override
-compliance.
+prove the choice was in bounds. The engine builds that list, and a decision cannot exceed caller
+scope.
 
 The record below comes from step 7 of the [Strategies
 walkthrough](strategies/README.md#7-declare-a-decision-point-run-it-without-an-llm-replay-it). Save

@@ -10,7 +10,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from openreading.types.request import OpenReadingRequest
@@ -25,9 +25,6 @@ class Facts:
     page_count: int | None = None
     size_mb: float | None = None
     filename: str | None = None
-    compliance: dict[str, Any] = field(
-        default_factory=dict
-    )  # effective compliance (defaults filled)
     content_hash: str | None = None
 
     def sample_bucket(self) -> float | None:
@@ -81,24 +78,16 @@ def page_count(data: bytes | None) -> int | None:
         return None
 
 
-def compute_facts(
-    req: OpenReadingRequest, effective_compliance: dict[str, Any] | None = None
-) -> Facts:
-    """Compute every available fact for `req`. `effective_compliance` (the post-union request ∪
-    request ∪ file `policy:` set, from compile) feeds the compliance fact; absent it falls back
-    to the request's own compliance block."""
+def compute_facts(req: OpenReadingRequest) -> Facts:
+    """Compute every available fact for `req`."""
     d = req.document
     data = doc_bytes(req)
-    compliance = effective_compliance
-    if compliance is None:
-        compliance = req.compliance.model_dump() if req.compliance else {}
     return Facts(
         doc_type=(req.routing.doc_type_hint if req.routing else None),
         mime=d.mime_type,
         page_count=page_count(data),
         size_mb=(len(data) / _MB if data else None),
         filename=d.filename,
-        compliance=compliance,
         content_hash=(hashlib.sha256(data).hexdigest() if data else None),
     )
 
@@ -153,13 +142,5 @@ def _eval_fact(key: str, expected: Any, facts: Facts) -> tuple[bool, Any, str]:
     if key == "sample_percent":
         bucket = facts.sample_bucket()
         return result(bucket, bucket is not None and bucket < expected)
-    if key == "compliance":
-        # nested {field: value}; always "available" (the compliance block carries defaults)
-        matched = all(facts.compliance.get(f) == v for f, v in expected.items())
-        return (
-            matched,
-            {f: facts.compliance.get(f) for f in expected},
-            ("match" if matched else "no_match"),
-        )
     # unknown fact key (schema should have rejected it) — never matches
     return False, None, "unavailable"

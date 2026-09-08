@@ -1,6 +1,6 @@
 """Qwen-VL adapter — a self-hosted VLM behind a BYO OpenAI-compatible endpoint (vLLM / Ollama /
 SGLang). Because the endpoint runs in the caller's own infra, data never leaves the environment
-(runs_fully_local=True). Token-stream paradigm: the model GENERATES the output — there are no
+(it runs on your own hardware). Token-stream paradigm: the model GENERATES the output — there are no
 calibrated per-element scores, so block_confidence is X and never fabricated; generation is
 non-deterministic (conformance runs with deterministic=False).
 
@@ -32,9 +32,7 @@ from openreading.types.cost import CostReport, infra_only
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     ConfigField,
-    Cost,
     CredentialField,
     LivenessProbe,
     Output,
@@ -170,9 +168,7 @@ def _descriptor() -> AdapterDescriptor:
         # cached on self) — verified against the real R1/R2 conformance kit, not assumed.
         protocol_version=2,
         adapter_impl="http",
-        provisioning=Provisioning(
-            byo_mode=["weights", "endpoint"], auth="none", billing_target="caller_infra"
-        ),
+        provisioning=Provisioning(byo_mode=["weights", "endpoint"], auth="none"),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(
             ocr="claimed",
@@ -187,15 +183,8 @@ def _descriptor() -> AdapterDescriptor:
             custom_schema_extraction="claimed",
             vlm_based="verified",
             languages=["en", "zh", "and 30+ (Qwen3-VL)"],
+            page_range_selection=True,
             input_formats=["png", "jpg", "pdf (rasterized)"],
-        ),
-        cost=Cost(native_unit="gpu_second", basis="infra_only", usd_per_page_equiv_low=0.0),
-        compliance=ComplianceProfile(
-            hipaa_baa="na_local",
-            trains_on_customer_data="na_local",
-            runs_fully_local=True,
-            data_region_options=["*"],
-            max_retention_hours=0,
         ),
         runtime=RuntimeProfile(
             offline_capable=True,
@@ -236,8 +225,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="high",
-            integration_priority="P1",
-            priority_reason="Local VLM fallback: zero-egress PHI path when specialists are ineligible.",
         ),
         config_spec=[
             ConfigField(

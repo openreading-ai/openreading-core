@@ -22,7 +22,6 @@ from openreading.types.batch import (
     CorpusReport,
     SourceRef,
 )
-from openreading.types.descriptor import AdapterDescriptor, BatchIntake
 
 GOLDEN = Path(__file__).parent / "golden"
 
@@ -39,8 +38,8 @@ def _minimal_response() -> dict:
 # --- batch-result family ----------------------------------------------------------------
 
 
-def test_batch_result_schema_const_is_0_1():
-    assert schemas.batch_result_schema()["properties"]["schema_version"]["const"] == "0.1"
+def test_batch_result_schema_const_is_0_2():
+    assert schemas.batch_result_schema()["properties"]["schema_version"]["const"] == "0.2"
 
 
 def test_batch_result_pydantic_round_trips_to_schema_valid():
@@ -56,21 +55,21 @@ def test_batch_result_pydantic_round_trips_to_schema_valid():
                 transport="platform",
             )
         ],
-        summary=BatchSummary(total=1, succeeded=1, failed=0, skipped=0),
+        summary=BatchSummary(total=1, succeeded=1, failed=0),
     )
     doc = br.to_schema_dict()
-    assert doc["schema_version"] == "0.1"  # producer default stamped
+    assert doc["schema_version"] == "0.2"  # producer default stamped
     schemas.validate_batch_result(doc)
 
 
-def test_batch_result_skipped_and_failed_items_validate():
+def test_batch_result_failed_items_validate():
     br = BatchResult(
         status={"state": "partial"},
         items=[
             BatchItem(
                 source=SourceRef(filename="x.docx", format="docx"),
-                state="skipped",
-                skip_reason="unsupported_format",
+                state="failed",
+                error={"code": "unsupported_format", "message": "backend cannot read docx"},
             ),
             BatchItem(
                 source=SourceRef(filename="y.pdf", format="pdf"),
@@ -78,17 +77,17 @@ def test_batch_result_skipped_and_failed_items_validate():
                 error={"code": "backend_error", "message": "boom"},
             ),
         ],
-        summary=BatchSummary(total=2, succeeded=0, failed=1, skipped=1, cost_bases=["estimated"]),
+        summary=BatchSummary(total=2, succeeded=0, failed=2),
     )
     schemas.validate_batch_result(br.to_schema_dict())
 
 
 def test_batch_result_rejects_bad_state():
     bad = {
-        "schema_version": "0.1",
+        "schema_version": "0.2",
         "status": {"state": "done"},  # not in the closed enum
         "items": [],
-        "summary": {"total": 0, "succeeded": 0, "failed": 0, "skipped": 0},
+        "summary": {"total": 0, "succeeded": 0, "failed": 0},
     }
     with pytest.raises(ValidationError):
         schemas.validate_batch_result(bad)
@@ -122,10 +121,10 @@ def test_batch_result_envelope_is_forward_tolerant():
     # unknown top-level field parses (extra="ignore" on the envelope) and is dropped on re-serialize
     obj = BatchResult.model_validate(
         {
-            "schema_version": "0.1",
+            "schema_version": "0.2",
             "status": {"state": "succeeded"},
             "items": [],
-            "summary": {"total": 0, "succeeded": 0, "failed": 0, "skipped": 0},
+            "summary": {"total": 0, "succeeded": 0, "failed": 0},
             "some_future_field": {"x": 1},
         }
     )
@@ -159,7 +158,7 @@ def test_corpus_report_pydantic_round_trips_to_schema_valid():
 
 def test_corpus_report_rejects_bad_verdict():
     bad = {
-        "schema_version": "0.1",
+        "schema_version": "0.2",
         "subjects": [],
         "documents": [{"source": {"relpath": "a.pdf"}, "verdict": "kinda"}],
         "rollup": {"documents": 1},
@@ -171,67 +170,15 @@ def test_corpus_report_rejects_bad_verdict():
 # --- adapter-descriptor v0.4 (additive batch block) -------------------------------------
 
 
-def test_descriptor_v04_batch_block_still_validates():
-    # This used to also pin DESCRIPTOR_SCHEMA_FILE to v0.4. v0.5 (Pulse — the optional `liveness`
-    # block) is now current, and the "which file is current" pin moved with it to
-    # tests/test_liveness.py::test_descriptor_v05_is_current_and_accepts_liveness_block. What this
-    # test is actually FOR is unchanged and is the thing that must keep holding: a v0.4-shaped
-    # descriptor carrying `batch` stays valid under whatever version is current (additivity, §8).
-    desc = {
-        "id": "x",
-        "type": "hosted_api",
-        "provisioning": {"byo_mode": ["api_key"], "auth": "api_key"},
-        "wait_modes": ["poll"],
-        "capabilities": {"ocr": "verified"},
-        "cost": {"native_unit": "page"},
-        "compliance": {"hipaa_baa": "no"},
-        "runtime": {"offline_capable": False},
-        "batch": {"native": "claimed", "max_items": 100, "notes": "Message Batches"},
-    }
-    schemas.validate_descriptor(desc)
-
-
-def test_descriptor_batch_intake_round_trips():
-    bi = BatchIntake(native="claimed", max_items=100, max_concurrency=8, notes="x")
-    assert bi.native == "claimed"
-    # a descriptor carrying it dumps schema-valid
-    d = AdapterDescriptor.model_validate(
-        {
-            "id": "x",
-            "type": "hosted_api",
-            "protocol_version": 1,
-            "provisioning": {"auth": "api_key"},
-            "wait_modes": ["poll"],
-            "capabilities": {"ocr": "verified"},
-            "cost": {"native_unit": "page"},
-            "compliance": {"hipaa_baa": "no"},
-            "runtime": {"offline_capable": False},
-            "batch": {"native": "verified"},
-        }
-    )
-    schemas.validate_descriptor(d.to_schema_dict())
-
-
-def test_v03_descriptor_still_validates_against_v04():
-    # additive bump: a descriptor with no `batch` block stays valid
-    v03 = {
-        "id": "legacy",
-        "type": "oss_library",
-        "provisioning": {"auth": "none"},
-        "wait_modes": ["inline"],
-        "capabilities": {"ocr": "verified"},
-        "cost": {"native_unit": "page"},
-        "compliance": {"hipaa_baa": "no"},
-        "runtime": {"offline_capable": True},
-    }
-    schemas.validate_descriptor(v03)
-
-
 # --- golden fixtures for the new families ----------------------------------------------
 
 
 def test_golden_batch_result_validates():
-    schemas.validate_batch_result(json.loads((GOLDEN / "batch-result" / "v0.1.json").read_text()))
+    """v0.1 stays on disk frozen, and no longer validates against the current schema: it carries a
+    `skipped` item, which the vocabulary this release removed. v0.2 is the same run recorded after
+    intake started dispatching every source, so the svg is a failed item with the backend's own
+    reason."""
+    schemas.validate_batch_result(json.loads((GOLDEN / "batch-result" / "v0.2.json").read_text()))
 
 
 def test_golden_corpus_report_validates():

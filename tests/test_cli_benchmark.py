@@ -146,7 +146,7 @@ def test_benchmark_run_prepares_then_runs_each_target(
     assert all(call[2]["data_dir"] == prepared_corpus for call in calls)
     assert all(call[2]["jobs"] == 2 for call in calls)
     out = capsys.readouterr().out
-    assert "estimate:" in out and "2 target(s)" in out
+    assert "scope:" in out and "2 target(s)" in out
     assert "completed: backend:pymupdf" in out
     assert "completed: strategy:main" in out
     assert "comparison: " in out and "leaderboard.html" in out
@@ -174,10 +174,10 @@ def test_benchmark_estimate_makes_no_backend_calls(capsys) -> None:
     )
     out = capsys.readouterr().out
     assert "documents: 370" in out
-    # Pages, not documents. Every hosted backend bills per page, and ExtractBench is 370
-    # documents but 4,869 pages, so a document count understates the bill about thirteen times.
-    assert "pages (the billing unit): 4869" in out
-    assert "backend:nuextract: not priced" in out
+    # Pages, not documents. Every hosted backend meters per page, and ExtractBench is 370
+    # documents but 4,869 pages, so a document count understates the work about thirteen times.
+    assert "pages (the metered unit): 4869" in out
+    assert "backend:nuextract: 370 call(s) (hosted, bills your account)" in out
 
 
 def test_benchmark_estimate_refuses_a_cataloged_profile(capsys) -> None:
@@ -361,14 +361,15 @@ def test_an_unknown_doc_name_stops_before_running(
     assert "no benchmark document named" in capsys.readouterr().err
 
 
-def test_an_unpriced_target_refuses_without_yes(
+def test_an_unbounded_target_refuses_without_yes(
     monkeypatch, tmp_path, capsys, prepared_corpus
 ) -> None:
     seen: list = []
     _stub_run(monkeypatch, seen, prepared_corpus)
 
     # pytest gives the process no terminal, which is the CI shape: refuse and name the flag
-    # rather than hang on stdin. A strategy target is unpriced because escalation depth is unknown.
+    # rather than hang on stdin. A strategy target's call count is unbounded here because
+    # escalation depth is unknown, which is the one thing that still stops a small run.
     rc = main(
         [
             "benchmark",
@@ -387,7 +388,7 @@ def test_an_unpriced_target_refuses_without_yes(
     assert seen == []
     err = capsys.readouterr().err
     assert "pass --yes" in err
-    assert "stopped before spending" in err
+    assert "stopped before running" in err
 
 
 def test_run_prints_the_comparison_and_writes_a_manifest(

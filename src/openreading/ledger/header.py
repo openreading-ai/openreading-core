@@ -1,56 +1,13 @@
-"""The run header (internal/design/ledger.md §5.3.1/§6, plan §4.2): a small sidecar written once at a
-run's first arm and checked on resume — `config_hash`, `plan_hash`, `registry_fingerprint`,
-`journal_version`, and the pinned eligible set's descriptor digests. Layout: a JSON file sibling to
-the run's `.jsonl` journal, `{ledger_root}/{run_id}.header.json`.
+"""Persist the run identity required for deterministic strategy resume.
 
-**Which fields hard-refuse a resume, and why not all five.** `config_hash`/`plan_hash` changing
-means the compiled plan itself is no longer the one this journal was recorded against — "openreading
-.yaml changed since ..." (§10's own transcript) — and `journal_version` changing means this worker
-doesn't understand the journal's own record shape (design doc §6: "An unknown journal family
-version refuses; it does not best-effort"). `registry_fingerprint`/`pinned_eligible` are stored and
-carried through to the resumed `InlineExecutor` (its own per-step `_gate`, armed with
-`pinned_eligible=` from THIS header, not a freshly recomputed one) instead — a drift in a PINNED
-backend's own descriptor is refused per-step, live, during the walk (AC-14: "resume is the first
-scenario that can exercise" that gate for real), not folded into one blanket pre-walk refusal that
-would make the gate's own live check unreachable.
+Each run writes one JSON header beside its JSONL journal. The header records the request
+projection, plan hashes, journal version, and pinned adapter descriptor digests. Resume refuses
+when a hard identity field differs, while the executor checks pinned descriptors per step.
 
-**Reconstructing the request `openreading resume <RUN_ID>` needs.** §10 is explicit that resume
-takes "no other flags — every option comes from the ledger," which the plan's own literal five-field
-list doesn't by itself supply: recompiling the strategy (to re-derive `config_hash`/`plan_hash` for
-comparison) needs the same request `compile_strategy` originally saw. This module extends the header
-with two additional, Build-judgment fields for exactly that (internal/design/ledger.md §5.3.1's own
-future-substrate framing already names both, `document: BlobRef, slim_request`, ahead of this
-tranche's need for them): `document` — the original bytes (or, for a URL-sourced document, the URL
-string itself — see below), written through the SAME per-run encrypted `BlobStore` every step
-payload already uses (never a second plaintext copy; absent only when the original document was a
-`file_id` reference, which carries no bytes and no URL to store) — and `slim_request`, a JSON echo
-of the rest of the request with `document.bytes_base64`/`document.url` (both live in the blob
-instead) and `document.password`/`async.webhook_url` stripped, matching the same never-persisted
-guarantee `test_planted_canaries_in_password_and_webhook_url_never_reach_disk` already pins for
-every other ledger artifact. A resumed run whose only remaining (non-terminal) steps need a
-password-protected document or an async webhook cannot re-dispatch them for real from the header
-alone — a disclosed limitation, not a crash.
-
-**`document.url` is a secret-class field too, not merely a reference.** §9.3 names it explicitly,
-verbatim, alongside `document.password`/`async_.webhook_url`: "routinely a presigned URL, forwarded
-verbatim" — unconditionally, not by size. An earlier version of `slim_request_dict` stripped
-`bytes_base64`/`password`/`webhook_url` but not `url`, so a URL-sourced document's presigned URL
-landed verbatim, in plaintext, in this header file, which `retention.py`'s `reap()` never touches
-at all, so nothing ever erases it. It is now routed through the encrypted blob store instead of
-the plaintext `slim_request` echo, exactly like `bytes_base64`, so it earns the same
-shred/erasure guarantee rather than persisting forever.
-
-**Which of the two shapes a `document` blob holds is its own field, not inferred from
-`media_type`.** The first version told bytes and URL apart by comparing
-`BlobRef.media_type` against the `DOCUMENT_URL_MEDIA_TYPE` sentinel — but a bytes document's own
-`media_type` is `req.document.mime_type`, an unvalidated, caller-supplied string nothing rejects, so
-a (deliberately adversarial, or extraordinarily unlucky) caller setting `mime_type` to that exact
-sentinel string made a real document's bytes get read back as a URL on resume — an uncaught
-`UnicodeDecodeError`, or worse, a silent wrong reconstruction, for a value from the very namespace
-this code exists to distrust. `RunHeader.document_is_url` is a dedicated field this module alone
-sets (never derived from caller input), so the read side never has anything of the caller's own to
-collide with. `DOCUMENT_URL_MEDIA_TYPE` still labels the blob's `media_type` for a human reading it
-directly (informational only, no longer load-bearing)."""
+Document bytes live in the content-addressed blob store. Source URLs, document passwords, and
+webhook URLs are omitted because they can carry secrets. A URL-backed run is not resumable unless
+another layer materialized it to bytes before the ledger was armed.
+"""
 
 from __future__ import annotations
 
@@ -62,7 +19,7 @@ from typing import Any
 
 from openreading.adapters.registry import BUILTIN_ADAPTERS, make_adapter
 from openreading.ledger.inline import descriptor_digest
-from openreading.ledger.retention import VALID_RUN_ID
+from openreading.ledger.localfs import VALID_RUN_ID
 from openreading.ledger.sanitizer import Sanitizer
 from openreading.ledger.step import BlobRef
 from openreading.types.request import OpenReadingRequest
@@ -72,14 +29,6 @@ JOURNAL_VERSION = 1
 # The subset of RunHeader fields whose mismatch refuses a resume outright (AC-4) — see the module
 # docstring for why `registry_fingerprint`/`pinned_eligible` are deliberately excluded.
 _HARD_FIELDS = ("config_hash", "plan_hash", "journal_version")
-
-# A human-readable label for a URL-sourced document's header blob. NOT the bytes/URL
-# discriminator: reading `BlobRef.media_type` back to tell the two apart could collide with a
-# caller-supplied `document.mime_type`, an unvalidated string on the bytes side.
-# `RunHeader.document_is_url` is the real discriminator, a field this module alone ever sets.
-# This constant is kept only as the blob's own `media_type` value, for a human inspecting one
-# directly.
-DOCUMENT_URL_MEDIA_TYPE = "application/x-openreading-document-url"
 
 
 class HeaderMismatch(Exception):
@@ -104,9 +53,8 @@ class RunHeader:
     pinned_eligible: dict[str, str] = field(default_factory=dict)
     strategy_name: str = ""
     document: BlobRef | None = None
-    # The bytes-vs-URL discriminator for `document`, set only by `_arm_ledger`'s own write side.
-    # It is never derived from `document.media_type`, which for the bytes case is
-    # `req.document.mime_type`, an unvalidated string a caller controls.
+    # True records why `document` is absent. The plaintext blob store must not retain a URL that
+    # can contain a bearer token, so resume turns this marker into a typed missing-input refusal.
     document_is_url: bool = False
     slim_request: dict[str, Any] = field(default_factory=dict)
 
@@ -143,8 +91,7 @@ class RunHeader:
 
 def header_path(ledger_root: Path, run_id: str) -> Path:
     # `resume <RUN_ID>` (api.resume_run -> read_header) hands this straight from the operator's
-    # own CLI argument -- the same H3 traversal class as retention.reap's stamped run_id, just
-    # arriving from a different caller. Refuse before the join, not after.
+    # own CLI argument. Refuse malformed path segments before joining them to the ledger root.
     if not VALID_RUN_ID.fullmatch(run_id):
         raise ValueError(f"malformed run_id {run_id!r}")
     return ledger_root / f"{run_id}.header.json"
@@ -159,8 +106,7 @@ def write_header(
 
     `sanitizer`, when given: the SAME `Sanitizer` chokepoint every journal/blob write already runs
     through (§9.3). It is a backstop, not the primary defense.
-    Construction-time exclusion (`slim_request_dict`'s own field-popping, and Finding 3's routing of
-    `document.url`/`bytes_base64` through the encrypted blob store instead) is still what keeps a
+    Construction-time exclusion and routing document content through the blob store keep a
     secret-class field out of this JSON in the first place; this catches anything that slips past
     it — a literal resolved credential value that happens to also appear verbatim elsewhere in the
     request body, for instance."""
@@ -195,8 +141,8 @@ def registry_fingerprint() -> str:
 
 def plan_hash(root: dict[str, Any]) -> str:
     """sha256 of the compiled/pruned strategy tree alone (plan §4.2) — `config_hash` is the
-    CONFIG's identity (compliance posture + router config + every participating descriptor folded
-    in too, `prune.py`'s own `_compute_config_hash`); `plan_hash` is the PLAN's: the pruned tree
+    configuration identity, including router config and participating descriptors. `plan_hash`
+    identifies the compiled tree
     that actually got walked."""
     return (
         "sha256:"
@@ -244,17 +190,13 @@ def slim_request(req: OpenReadingRequest) -> OpenReadingRequest:
 
 def slim_request_dict(req: OpenReadingRequest) -> dict[str, Any]:
     """A resume-safe echo of an `OpenReadingRequest` for the header's own `slim_request` field:
-    every field EXCEPT `document.bytes_base64`/`document.url` (both kept out of this JSON sidecar —
-    see the header's own `document: BlobRef`, the same per-run-encrypted blob store every step
-    payload already uses, never a second plaintext copy) and the two fields
+    every field except `document.bytes_base64` and `document.url`. Those values use the header's
+    `document: BlobRef` instead. It also excludes the two fields
     `test_planted_canaries_in_password_and_webhook_url_never_reach_disk` pins as NEVER reaching
     ledger disk in any form: `document.password`, `async.webhook_url`.
 
-    `document.url`: §9.3 names it a secret-class field
-    unconditionally, "routinely a presigned URL, forwarded verbatim" — the same three-field list
-    this module's own `_arm_ledger` caller and `schemas/step.v0.1.json` already quote verbatim
-    elsewhere. Popped here exactly like `bytes_base64`, because it now travels the same way
-    `bytes_base64` does: through the encrypted blob store (`_arm_ledger`), not this plaintext echo.
+    A document URL can contain a presigned credential. It therefore travels through the blob store
+    like document bytes, rather than appearing in the request echo.
 
     Delegates to `slim_request` (Ledger T4b §4.2) for the actual exclusion — this function is now
     just that object's `to_schema_dict()` projection, so the two never drift apart again."""

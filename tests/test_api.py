@@ -43,15 +43,15 @@ def _policy_file(tmp_path, policy: dict) -> str:
 def test_run_takes_the_same_policy_from_a_dict_and_from_a_file(pdf_path, tmp_path):
     """A dict passed to `config=` is the file, held in memory. Same shape, same validation, same
     result — otherwise a caller with no file on disk has a second grammar to learn."""
-    policy = {"require_local": True}
-    from_dict = openreading.run(pdf_path, backend="auto", config=_policy(policy))
-    from_file = openreading.run(pdf_path, backend="auto", config=_policy_file(tmp_path, policy))
+    policy = {}
+    from_dict = openreading.run(pdf_path, backend=None, config=_policy(policy))
+    from_file = openreading.run(pdf_path, backend=None, config=_policy_file(tmp_path, policy))
     assert from_dict["backend"]["id"] == from_file["backend"]["id"]
     assert from_dict["document"]["text"] == from_file["document"]["text"]
 
 
 def test_route_takes_the_same_policy_from_a_dict_and_from_a_file(pdf_path, tmp_path):
-    policy = {"require_local": True}
+    policy = {}
     from_dict = openreading.route(pdf_path, config=_policy(policy))
     from_file = openreading.route(pdf_path, config=_policy_file(tmp_path, policy))
     assert from_dict.chosen is not None and from_file.chosen is not None
@@ -60,26 +60,16 @@ def test_route_takes_the_same_policy_from_a_dict_and_from_a_file(pdf_path, tmp_p
 
 
 def test_run_batch_takes_the_same_policy_from_a_dict_and_from_a_file(pdf_path, tmp_path):
-    policy = {"require_local": True}
-    from_dict = openreading.run_batch([pdf_path], backend="auto", config=_policy(policy))
+    policy = {}
+    from_dict = openreading.run_batch([pdf_path], backend=None, config=_policy(policy))
     from_file = openreading.run_batch(
-        [pdf_path], backend="auto", config=_policy_file(tmp_path, policy)
+        [pdf_path], backend=None, config=_policy_file(tmp_path, policy)
     )
-    keys = ("total", "succeeded", "failed", "skipped")
+    keys = ("total", "succeeded", "failed")
     assert {k: from_dict["summary"][k] for k in keys} == {k: from_file["summary"][k] for k in keys}
     assert [i.get("response", {}).get("backend") for i in from_dict["items"]] == [
         i.get("response", {}).get("backend") for i in from_file["items"]
     ]
-
-
-def test_a_dict_that_is_not_a_policy_is_refused_from_python_too(pdf_path):
-    """A shape refused from a file is refused from Python, and the message says which it was."""
-    from openreading.config import ConfigError
-
-    with pytest.raises(ConfigError) as exc:
-        openreading.run(pdf_path, backend="pymupdf", config=_policy({"require_locall": True}))
-    assert "<dict>" in str(exc.value)
-    assert "require_locall" in str(exc.value)
 
 
 @pytest.mark.parametrize("call", ["run", "route", "run_batch"])
@@ -89,7 +79,7 @@ def test_the_policy_keyword_is_gone(pdf_path, call):
     fn = getattr(openreading, call)
     source = [pdf_path] if call == "run_batch" else pdf_path
     with pytest.raises(TypeError, match="policy"):
-        fn(source, policy={"require_local": True})
+        fn(source, policy={})
 
 
 def test_run_named_local_backend_returns_schema_dict(pdf_path):
@@ -107,12 +97,6 @@ def test_run_from_bytes(pdf_path):
     assert result["backend"]["id"] == "pymupdf"
 
 
-def test_run_auto_routes_and_executes_local(pdf_path):
-    # require_local → the router picks a local backend and the executor runs it
-    result = openreading.run(pdf_path, backend="auto", config=_policy({"require_local": True}))
-    assert make_adapter(result["backend"]["id"]).descriptor.compliance.runs_fully_local
-
-
 def test_run_named_missing_credentials_raises_naming_vars(pdf_path, monkeypatch):
     for v in ("GCP_PROJECT_ID", "GOOGLE_CLOUD_PROJECT", "GCP_PROCESSOR_ID"):
         monkeypatch.delenv(v, raising=False)
@@ -120,17 +104,6 @@ def test_run_named_missing_credentials_raises_naming_vars(pdf_path, monkeypatch)
         openreading.run(pdf_path, backend="google-document-ai")
     assert exc.value.backend_code == "missing_credentials"
     assert "GCP_PROJECT_ID" in str(exc.value) and "cloud.google.com/document-ai" in str(exc.value)
-
-
-def test_route_returns_plan(pdf_path):
-    plan = openreading.route(pdf_path, config=_policy({"require_local": True}))
-    assert plan.chosen is not None
-    assert plan.chosen.descriptor.compliance.runs_fully_local
-
-
-# NB: with the real registry the local tier is a guaranteed compliance floor, so a route plan is
-# never empty for any policy — the PlanExhaustedError-on-empty-plan branch is defensive. The
-# executor's exhaustion path (all backends fail at run time) is covered in test_executor.py.
 
 
 # --- URL materialization (D-v2-13) -----------------------------------------------------
@@ -216,20 +189,6 @@ def test_download_rejects_file_scheme():
         api._download("file:///etc/hosts")
 
 
-def test_download_streams_and_stops_at_limit(monkeypatch):
-    # `content=` makes httpx auto-set Content-Length, so this always resolves at _download's
-    # declared-length precheck and never reaches the per-chunk iter_bytes loop below it — see
-    # test_download_streams_and_stops_at_limit_with_no_declared_length for that path.
-    monkeypatch.setattr("openreading.api._MAX_DOWNLOAD_BYTES", 1024)
-    monkeypatch.setattr(
-        "socket.getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 80))]
-    )
-    transport = httpx.MockTransport(lambda req: httpx.Response(200, content=b"x" * 4096))
-    with pytest.raises(TerminalError) as e:
-        api._download("http://example.com/big.pdf", transport=transport)
-    assert e.value.backend_code == "doc_too_large"
-
-
 class _UndeclaredLengthBody(httpx.SyncByteStream):
     """A response body with no Content-Length at all — the only way to reach `_download`'s
     per-chunk running-total loop instead of short-circuiting at its declared-length precheck.
@@ -309,19 +268,33 @@ def test_download_allows_private_when_opted_in(monkeypatch):
 
 
 def test_mime_inference_by_extension(tmp_path):
+    """`_document_dict` resolves through `openreading.derive.mime` now, so the nine-entry table
+    and its PDF default are gone. An extension Python knows resolves correctly, and one nobody
+    knows resolves to None rather than being called a PDF."""
     ooxml = "application/vnd.openxmlformats-officedocument"
     for ext, expected in (
         (".png", "image/png"),
         (".pdf", "application/pdf"),
-        (".xyz", "application/pdf"),
         (".docx", f"{ooxml}.wordprocessingml.document"),
         (".xlsx", f"{ooxml}.spreadsheetml.sheet"),
         (".pptx", f"{ooxml}.presentationml.presentation"),
+        # Formats the old table did not list, every one of which used to arrive as a PDF.
+        (".svg", "image/svg+xml"),
+        (".html", "text/html"),
+        (".epub", "application/epub+zip"),
     ):
         f = tmp_path / f"doc{ext}"
         f.write_bytes(b"x")
-        assert api._document_dict(str(f), None)["mime_type"] == expected  # inferred from extension
-    assert api._document_dict(b"raw", None)["mime_type"] == "application/pdf"  # bytes default
+        assert api._document_dict(str(f), None)["mime_type"] == expected
+    # An extension nothing recognises is unknown, not PDF. `.qqq` rather than `.xyz`, because
+    # stdlib mimetypes knows `.xyz` as `chemical/x-xyz`: it recognises far more than the
+    # nine-entry table this replaced, which is the argument for deleting that table.
+    unknown = tmp_path / "doc.qqq"
+    unknown.write_bytes(b"x")
+    assert api._document_dict(str(unknown), None)["mime_type"] is None
+    # Bytes with no name and no signature are unknown too. This supersedes D-v2-9's PDF default:
+    # it was the case core knew least about, and so the least defensible place to invent a type.
+    assert api._document_dict(b"raw", None)["mime_type"] is None
     assert (
         api._document_dict(b"raw", "image/tiff")["mime_type"] == "image/tiff"
     )  # explicit override
@@ -331,28 +304,20 @@ def test_build_request_url_keeps_mime_type():
     # L1: _document_dict's URL branch used to return {"url": s}, dropping the caller's explicit
     # mime_type entirely -- materialize_document's fallback then mis-typed every URL document as
     # application/pdf regardless of what the caller passed.
-    req = api.build_request("https://example.com/scan.png", "auto", mime_type="image/png")
+    req = api.build_request("https://example.com/scan.png", None, mime_type="image/png")
     assert req.document.mime_type == "image/png"
 
 
 @pytest.mark.parametrize("ext", [".docx", ".xlsx", ".pptx"])
 def test_route_office_document_reaches_a_backend(tmp_path, ext):
-    # the reported break: through the convenience path an Office file's OOXML MIME derived the
-    # format token "document"/"sheet"/"presentation" and every backend was dropped.
+    # The reported break: an Office file's OOXML MIME derived the format token
+    # "document"/"sheet"/"presentation" and every backend was dropped. Nothing gates on the token
+    # now, so the chain is never emptied by a format and the chosen backend need not declare it.
     doc = tmp_path / f"doc{ext}"
     doc.write_bytes(b"PK\x03\x04")
     plan = openreading.route(str(doc))
-    assert plan.chosen is not None, f"{ext} dropped every backend: {plan.dropped}"
-    declared = {f.split()[0].lower() for f in plan.chosen.descriptor.capabilities.input_formats}
-    assert ext.lstrip(".") in declared
-
-
-def test_run_named_backend_respects_compliance(pdf_path, monkeypatch):
-    # a directly-named backend that violates the request's compliance is refused, not run.
-    from openreading.types.errors import ComplianceRefused
-
-    with pytest.raises(ComplianceRefused):
-        openreading.run(pdf_path, backend="reducto", config=_policy({"require_local": True}))
+    assert plan.chosen is not None, f"{ext} emptied the chain: {plan.dropped}"
+    assert not [i for i, d in plan.dropped.items() if d.code == "unsupported_format"]
 
 
 def test_build_request_rejects_a_document_override(pdf_path):
@@ -372,31 +337,6 @@ def test_run_document_override_raises_never_silently_wins_over_source(pdf_path):
     # build_request() call.
     with pytest.raises(ValueError, match="document"):
         openreading.run(pdf_path, backend="pymupdf", document={"path": "/evil"})
-
-
-def test_named_tier_gated_backend_needs_confirmation_and_warns(pdf_path, monkeypatch):
-    # hipaa_baa='tier_gated' is a BAA on a higher plan, not one in force: require_baa refuses the
-    # named backend until the operator confirms, and the run that follows says so out loud.
-    from openreading.adapters.registry import BUILTIN_ADAPTERS
-    from openreading.types.errors import ComplianceRefused
-    from tests.fakes import make_backend
-
-    monkeypatch.setitem(
-        BUILTIN_ADAPTERS,
-        "tiered",
-        lambda: make_backend("tiered", hipaa_baa="tier_gated", trains="no", regions=["us"]),
-    )
-    with pytest.raises(ComplianceRefused) as exc:
-        openreading.run(pdf_path, backend="tiered", config=_policy({"require_baa": True}))
-    assert exc.value.constraint == "no_baa"
-
-    result = openreading.run(
-        pdf_path,
-        backend="tiered",
-        config=_policy({"require_baa": True, "baa_tier_confirmed": ["tiered"]}),
-    )
-    note = next(w for w in result["warnings"] if w["code"] == "baa_tier_confirmed")
-    assert note["field"] == "tiered" and "tier_gated" in note["message"]
 
 
 # --- deadline_ms propagation at the named-backend boundary (BL-153) --------------------

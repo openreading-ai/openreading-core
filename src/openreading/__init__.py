@@ -43,7 +43,7 @@ readings and no labels, and for the leaderboard when you are choosing a backend 
   fabricated.
 - `parse` runs one document; `parse <dir|glob|>=2 files>` runs a BATCH -> one `batch-result` over
   many documents; `compare` diffs N responses (two batches -> a `corpus-report`); `route` picks a
-  backend under compliance constraints.
+  backend from the caller's configured chain.
 - Geometry is canonical [0,1] top-left / y-down; confidence is [0,1]; a truncated or partial
   result is `status.state="partial"`, never a bare success.
 
@@ -96,14 +96,15 @@ Parse one document. `source` is a path, an http(s) URL, or raw bytes (NOT a requ
 
     import openreading
     resp = openreading.run("doc.pdf", backend="pymupdf")   # -> dict, the response envelope
-    resp = openreading.run("doc.pdf", backend="auto")      # compliance-first router chooses
+    resp = openreading.run("doc.pdf")                      # the policy's chain, else pymupdf
     resp = openreading.run("scan.png", backend="tesseract",
                            pages={"ranges": [{"start": 1, "end": 2}]})
     # CLI: openreading parse doc.pdf --backend pymupdf     (URL sources work; --pages 1 2)
 
 Extract typed fields (schema-driven). A directly-named backend that cannot do it (pymupdf,
 tesseract, docling) RAISES `UnsupportedFeatureError` (CLI exit 3, HTTP 422) rather than silently
-returning a geometry-only result; `auto` never submits an incapable backend (capability filter).
+returning a geometry-only result. A null-backend chain may learn this only from the backend's
+refusal, then continue to its next entry.
 Only an optional-but-unavailable channel is a returned envelope + `warnings[]` entry:
 
     resp = openreading.run("invoice.pdf", backend="reducto",
@@ -113,18 +114,18 @@ Only an optional-but-unavailable channel is a returned envelope + `warnings[]` e
     # CLI: openreading parse invoice.pdf --backend reducto --extract "total, invoice date, vendor"
 
 Batch a folder -> one JSON. Batch is decided by input FORM: a directory / glob / >=2 args is a
-batch, a single file is single-doc. A file the backend cannot take is a `skipped` item with a
-reason, never a crash; a per-item failure never aborts the batch:
+batch, a single file is single-doc. A file the backend cannot take is a `failed` item carrying that
+backend's own reason, never a crash; a per-item failure never aborts the batch:
 
     env = openreading.run_batch(["invoices/"], backend="pymupdf", jobs=4)   # -> batch-result dict
     # CLI: openreading parse invoices/ --backend pymupdf > run.json
     #      openreading parse 'scans/**/*.png' --backend tesseract --jobs 4
-    #      openreading parse invoices/ extra/w2.png --no-strategy      # auto, routed per file
+    #      openreading parse invoices/ extra/w2.png --no-strategy      # routed per file
 
 `jobs` = documents run AT ONCE (pure speed knob; output is identical and input-ordered).
 `max_items` caps expansion (default 200). `--save-dir D` also writes `D/<relpath>.json` per item.
 Write outputs OUTSIDE the batched directory (or under a hidden subdir like `dir/.runs/`), else
-the next batch re-ingests them as `unknown_format` skips.
+the next batch re-ingests them and they fail on the backend's own terms.
 
 Compare backends. Two forms, and only the first is free. Given >=2 already-computed responses
 (dicts or paths) `compare` is PURE: it reads saved envelopes, runs no backend, and costs nothing.
@@ -154,18 +155,17 @@ matched, capped per side). Not counts, not structure:
     openreading parse invoices/ --backend reducto > runB.json
     openreading compare runA.json runB.json --format diffs
 
-Route with compliance (HIPAA / no-train / local-only). A plan, no execution:
+Route through the configured default chain. This returns a plan without execution:
 
     plan = openreading.route("doc.pdf")           # the policy: block of your openreading.yaml
     plan.chosen, plan.fallbacks, plan.dropped     # dropped = {backend_id: DropReason, ...}
-    # CLI: openreading route doc.pdf --run        # plan + WHY each drop, then run
+    # CLI: openreading route doc.pdf --run        # print the plan, then run it
 
-Compliance is a hard filter never relaxed by fallback; an unverified claim fails closed (the
-backend is dropped). So does a CONDITIONAL one: a training opt-out you have not applied
-(`trains_on_customer_data: opt_out`) or a BAA the vendor sells only on a higher plan
-(`hipaa_baa: tier_gated`). Assert those per deployment with `train_optout_confirmed` /
-`baa_tier_confirmed` (lists of backend ids) in the `policy:` block; the run then carries a
-warning naming the confirmation it rests on.
+`policy.backends` is the whole of it: the default backends this deployment tries, in your chosen
+order. `routing.fallback` reorders within it and never adds to it. An EMPTY list permits
+nothing, so a request that names no backend refuses. Naming a backend runs it, list or no list:
+that is an explicit act, and on one machine the operator and the caller are the same person. The
+enforcement boundary, where they are not, is the server's API-key scope.
 
 Strategies (optional `openreading.yaml` orchestration):
 
@@ -194,7 +194,7 @@ local or behind a gateway):
 Responses on `/v1/parse`, `/v1/batch`, `/v1/compare` are schema-validated before they leave the
 process; async `/v1/jobs` responses come from the same round-trip-tested models but are NOT
 re-validated on the way out. The server loads strategy config ONLY from `OPENREADING_CONFIG`,
-never its cwd. HTTP statuses: 400 invalid body · 401 unauthorized · 403 ComplianceRefused /
+never its cwd. HTTP statuses: 400 invalid body · 401 unauthorized · 403 ScopeRefused /
 scope_denied · 404 unknown backend · 413 doc too large · 422 unsupported feature · 424 missing
 credentials · 502 plan exhausted / terminal · 504 deadline. Interactive docs at `/docs`.
 
@@ -225,8 +225,7 @@ Top level: `schema_version`, `status`, `backend`, `document` (required) + option
       },
       "typed_fields": {"total": {"value": "$4,400.00", "type": "string", "confidence": 0.96,
                                  "citations": [..]}},
-      "usage": {"duration_ms": 120, "cost_usd": 0.02, "cost_basis": "estimated",
-                "pages_processed": 2},
+      "usage": {"duration_ms": 120, "pages_processed": 2},
       "warnings": [{"code": "confidence_unavailable", "message": "..",
                     "field": "block_confidence"}]
     }
@@ -238,16 +237,15 @@ prefer `document.text`, else `document.markdown`, else join `pages[].blocks[].te
 `reading_order`. `warnings[].code` is an OPEN set. Switch on the codes you know, tolerate the
 rest.
 
-The request (`request.v0.2`)
+The request (`request.v0.3`)
 ============================
 Required: `document` + `backend`. `document` is EXACTLY ONE of `bytes_base64` | `url` | `path` |
 `file_id` (+ optional `mime_type`, `filename`). Other top-level fields: `outputs` (markdown /
 text / blocks / typed_fields / tables / chunking / include_backend_raw), `extraction_schema`
 (`json_schema`, `instructions`, `citations`), `features` (`ocr`, `ocr_languages`, `layout`,
 `tables`, `forms_key_value`, `handwriting`, ..), `pages` (`ranges`, `max_pages`), `routing`
-(`doc_type_hint`, `optimize_for`, `fallback`), `compliance` (`require_baa`, `no_train_on_data`,
-`data_region`, `require_local`, `max_retention`), `async`, `idempotency_key`. `backend` =
-`{"id": "<slug>|auto|strategy:<name>", "operation"?, "version"?}`. The CLI and Python build it
+(`doc_type_hint`, `fallback`), `async`, `idempotency_key`. `backend` =
+`{"id": "<slug>|null|strategy:<name>", "operation"?, "version"?}`. The CLI and Python build it
 from a source + flags; you construct it by hand only for the server. Extra keyword arguments to
 `run()` / `run_batch()` are these top-level request fields.
 
@@ -294,13 +292,12 @@ read the error, which does name the variable.
 
 Batch & corpus shapes
 =====================
-`batch-result.v0.1`: `{schema_version, status{state: succeeded|partial|failed}, items[],
+`batch-result.v0.2`: `{schema_version, status{state: succeeded|partial|failed}, items[],
 summary, warnings?}`. `items[i]` = `{source{relpath, filename, format, sha256, ..}, state:
 succeeded|failed|skipped, response? (a full response.v0.3), error?{code, message},
-skip_reason? (unsupported_format|unknown_format), transport: platform|native|null. That is null
+transport: platform|native|null. That is null
 on a `skipped` item, which never ran}`. `summary` =
-`{total, succeeded, failed, skipped, duration_ms, cost_usd, cost_bases[], pages_processed,
-backends{id: count}}`. Batch status: `succeeded` (>=1 ok, 0 failed) / `partial` (some of each) /
+`{total, succeeded, failed, duration_ms, pages_processed, backends{id: count}}`. Batch status: `succeeded` (>=1 ok, 0 failed) / `partial` (some of each) /
 `failed` (0 succeeded).
 
 `corpus-report.v0.1`: `{schema_version, subjects[], documents[{source, verdict:
@@ -310,38 +307,34 @@ Rules a caller must not get wrong
 =================================
 - Never fabricate a channel. No confidence / blocks / tables from a backend means absent plus a
   `warnings[]` code saying why. Do not tell the user to expect it.
-- Compliance fails closed, and the policy is the ONLY thing that sets the eligible set. Exactly
-  three policy keys widen it, each an attestation about paperwork the router cannot see:
-  `allow_unverified_compliance` (admits backends that stayed SILENT on a fact, never one that
-  answered no), `baa_tier_confirmed` (named backends whose tier-gated BAA you signed) and
-  `train_optout_confirmed` (named backends whose training opt-out you applied). Nothing after the
-  policy widens the set again: not a fallback, not a named `--backend`, not a strategy rung, not a
-  decider. So never propose a construct that widens it, and treat
-  `allow_unverified_compliance` as the operator's call rather than yours, because it waives
-  verification for every vendor at once while the other two assert a checked fact about named
-  ones. `route` prints the reason each backend was dropped.
+- `policy.backends` sets the chain an unnamed request resolves to, and no fallback reorders its
+  way out of it. A named backend is the caller's own explicit act and runs; the server's API-key
+  scope is the boundary that refuses one. Never propose a construct that lets a request slip past
+  that scope. Core also holds no fact it cannot verify, so never propose that it decide from one: a
+  vendor's terms, its retention, or what it can read are all claims core cannot check, and a
+  constraint core cannot check is one it must not appear to enforce. `route` prints the resolved
+  chain and the reason for any backend the caller's own list excluded.
 - Batch is decided by input FORM, not count. Do not add `--jobs` / `--max-items` to a
   single-file parse (batch-only flags).
 - `--jobs` vs native batch: most hosted APIs are one-document-per-call, so a batch is N
   independent calls and `--jobs` is how many run concurrently. Only a backend whose descriptor
   declares `batch.native` (Anthropic Message Batches) sends the whole list in one request. The
   envelope is identical either way.
-- Cost: a batch of N files on a hosted backend is N billed calls, with no discount unless a native
-  batch path applies. Local backends are free. `usage.cost_usd` totals every backend that ran;
-  `cost_basis` (closed enum) says what the number IS: `billed` (the provider's charge),
-  `estimated` (pricing model, most hosted backends), `infra_only` (local / self-hosted: pymupdf,
-  tesseract, docling, qwen-vl, which have no `cost_usd`), `unknown` (nuextract). Normally
-  filled, not never null: the router fills it from the adapter's cost report when the adapter
-  left it unset, but a `report_cost` that raises degrades to whatever `normalize()` set
-  (`str | null`) plus a `cost_unavailable` warning. Treat a missing `cost_basis` as
-  "unmetered". The engine never invents a number or enforces a budget from one.
+- Usage: a batch of N files on a hosted backend is N calls on your own key, with no discount
+  unless a native batch path applies. `usage` reports what each backend consumed in the unit it
+  meters in: `pages_processed`, `credits`, `input_tokens`, `output_tokens`, `duration_ms`. There
+  are no dollars anywhere in this package. Converting a counter into a price needed a per-vendor
+  rate core kept in its own source and could not verify, so `usage.cost_usd` and `cost_basis` are
+  gone along with the rates. Multiply these counters by the prices on
+  your own invoice, which is the only rate card that carries your tier. A `report_cost` that
+  raises degrades to whatever `normalize()` reported, plus a `cost_unavailable` warning.
 - CLI exit codes: 0 ok · 1 unexpected error / a batch where nothing succeeded · 2 usage error
   (unknown backend/strategy, unresolvable source, over `--max-items`/`--max-jobs`, compare misuse)
   · 3 cannot run (missing credentials naming the env var + signup URL; auth rejected, where the key
   was found but the provider said no, with a `check <VAR>` hint naming the env var and never the
-  provider's response body; unsupported feature, ComplianceRefused, plan exhausted, a named
+  provider's response body; unsupported feature, ScopeRefused, plan exhausted, a named
   backend's RetryableError, which has no next rung) · 4 partial batch (some items failed); `route`
-  with no compliant backend · 5 compare inputs not schema-valid · 6 interrupted while
+  with no backend permitted by policy · 5 compare inputs not schema-valid · 6 interrupted while
   `OPENREADING_LEDGER` was armed (resumable; a single document names its run id, a batch names
   none) · 143 terminated by SIGTERM with no ledger armed, so nothing was resumable. An unarmed
   Ctrl-C is an ordinary KeyboardInterrupt and exits 130.
@@ -349,8 +342,7 @@ Rules a caller must not get wrong
   `compare a.json b.json`, run no backend and cost nothing. The fan-out form,
   `compare doc.pdf --backends x,y,z`, runs every backend named and bills each hosted one. Do not
   call the fan-out form in a loop believing comparison is free.
-- Three strategy laws: no config file => byte-identical legacy behavior; compliance prunes
-  BEFORE execution and nothing can re-admit a backend; deciders choose but never widen.
+- Strategy decisions stay within the candidates enumerated by the compiled plan.
 
 Let your agents decide: the triage playbook
 ===========================================
@@ -380,12 +372,12 @@ prose. Branch on:
   `on_error:` map keys you write in `openreading.yaml`, a config-authoring vocabulary. Do not look
   for them in output. Per surface:
     * Python raises a typed exception, and the type IS the branch: `RetryableError` (retry with
-      backoff), `TerminalError` (do not retry), `UnsupportedFeatureError`, `ComplianceRefused`,
+      backoff), `TerminalError` (do not retry), `UnsupportedFeatureError`, `ScopeRefused`,
       `MissingCredentialsError`, `PlanExhaustedError`, `UnknownStrategyError`,
       `SourceNotFoundError`. This is the only surface that separates every condition, so prefer it
       when an agent must branch. ALL EIGHT import from the top level:
 
-          from openreading import ComplianceRefused, RetryableError, TerminalError
+          from openreading import ScopeRefused, RetryableError, TerminalError
 
       Their home module is `openreading.types.errors`, and importing from there still works. An
       `openreading.yaml` that will not load, a `policy:` block that is not a policy included,
@@ -395,15 +387,15 @@ prose. Branch on:
       `PlanExhaustedError` and `UnknownStrategyError` -- so catch those first or a broad
       `except TerminalError` swallows all three. Handling them as `TerminalError` is not WRONG
       (none is retryable), it just loses which one happened.
-    * HTTP returns `error.category`, machine-readable: `compliance_refused` (403),
+    * HTTP returns `error.category`, machine-readable: `scope_denied` (403),
       `unsupported_feature` (422), `terminal` (424 and 502), `plan_exhausted` (502),
       `retryable_exhausted` (504), `scope_denied` (403), `unauthorized`, `unknown_backend`,
       `unknown_strategy`, `bad_request`, `bad_signature`. On 424 the category is `terminal` and the
       DISCRIMINATOR is `error.backend_code` (`missing_credentials` or `auth_rejected`), with
       `missing_env[]` naming the vars.
     * The CLI gives you the exit code and English on stderr, and exit 3 covers six conditions with
-      opposite correct actions (a compliance refusal you must never retry, and a `RetryableError`
-      you should). It carries no machine-readable discriminator. An agent that must tell them apart
+      opposite correct actions, such as a missing dependency and a `RetryableError`. It carries
+      no machine-readable discriminator. An agent that must tell them apart
       calls Python or HTTP instead of parsing stderr.
     * A single-document response never populates `status.error` at all. A batch item does:
       `items[].error.code`, which is the adapter's `backend_code` when it set one and otherwise the
@@ -412,7 +404,8 @@ prose. Branch on:
   carries the adapter's own failure code (e.g. `TesseractNotFoundError`). Branch on that `code`,
   not the class: `error(provider_error)` is the catch-all, and a missing local binary or an
   unusable install lands there beside a genuine transient blip while failing identically forever.
-- `ComplianceRefused` (HTTP 403 `compliance_refused`): policy forbids every eligible backend;
+- `ScopeRefused` (HTTP 403 `scope_denied`): the declared allow-list permits none of the
+  registered backends;
   fails closed -> change the policy or the ask. NEVER retry: nothing about a retry changes the
   answer. Do not confuse this with `retryable_exhausted` (504), which is rate limiting or a
   deadline and IS worth retrying later. The CLI reports both as exit 3.
@@ -423,10 +416,9 @@ prose. Branch on:
 - corpus verdict `divergent`: backends materially disagree on this document -> route it through
   a `compare:` + `then:` strategy.
 
-Why the output can be trusted blind: never fabricate (absence is signal); compliance fails
-closed before anything runs; honest accounting (`usage.cost_usd` per attempt and in total, each
-labeled by `cost_basis`; the `orchestration` trace records machine-readably why every backend
-ran or did not).
+Why the output can be trusted blind: never fabricate (absence is signal); core holds no fact it
+cannot verify, so what reaches you was measured or came off the wire; the `orchestration` trace
+records machine-readably why every backend ran or did not.
 
 ONE trace vocabulary is closed, and it is not the whole trace. Every attempt's `category` comes
 from `openreading.strategies.trace.CATEGORIES`, a real 13-member frozenset you can import and
@@ -460,8 +452,8 @@ Strategies in brief
 ===================
 A strategy is a named recipe in `openreading.yaml`: which backends run, in what order or
 together, and when to move on. Start with the Plain dialect. That is six structure keys (`try`
-/ `race` / `compare` / `escalate_when` / `then` / `max_time`), four criteria (`looks_bad` /
-`low_confidence` / `missing` / `disagree`), and `auto`. Built-in presets work with no file:
+/ `race` / `compare` / `escalate_when` / `then` / `max_time`) and four criteria (`looks_bad` /
+`low_confidence` / `missing` / `disagree`). Built-in presets work with no file:
 `cost_saver`, `max_accuracy`, `fast`, `offline_first`. The loop: write -> `strategy validate`
 (badges plain/advanced, flags what cannot work) -> `parse --strategy` -> `explain out.json` ->
 `strategy show <name> --longhand` (the full-grammar tree Plain compiled to). Grammar and run
@@ -469,8 +461,8 @@ semantics: `openreading.strategies`, with the Plain dialect in `openreading.stra
 
 Decisions DURING a run, the LLM decider: three decision points (gate-band review, `decide:`
 nodes, `pick: best` judging) where an LLM chooses inside hard rails. The engine enumerates the
-candidates (the tool schema's action enum IS the candidate list), compliance is invisible and
-un-overridable, and every failure mode downgrades to the deterministic engine default (an LLM
+candidates, and the tool schema's action enum is that candidate list. Every failure mode
+downgrades to the deterministic engine default, so an LLM
 outage can never fail a parse).
 
 `decisions[]` records only LLM-ELIGIBLE decision points, so it is EMPTY for a plain `pick: best`
@@ -521,22 +513,11 @@ switch and its reason; time and cost with honest unknowns) is spread across `war
 strategy `orchestration`, the batch summary and an armed ledger, with no common carrier
 (design record: `design/run-stats-analytics.md`).
 
-Under review, and unlike the gaps above these propose REMOVING behaviour this package ships
-today, so read the record before relying on either feature: the compliance filter and the
-per-vendor compliance table leave core entirely, because core cannot verify a claim about a
-vendor and must not appear to enforce one (design records: `design/compliance-removal.md`,
-`product/specs/compliance-removal.product-spec.md`); the stage-2 format gate goes the same way,
-and the several extension-to-MIME tables collapse into one resolver that answers "unknown"
-instead of guessing PDF (design record: `design/format-agnostic-intake.md`); the ledger stops
-holding any policy about the caller's own disk, so retention, the reaper and encryption at rest
-all leave, because a directory on your own machine is yours to keep or delete (design record:
-`design/ledger-policy-removal.md`); `optimize_for`, the stage-3 scorer, the capability gate and
-`auto` itself go with them, so choosing a backend becomes a lookup rather than an inference, the
-one the caller wrote (design records: `design/explicit-backends.md`,
-`design/unverifiable-claims-sweep.md`). Vendor pricing goes the same way, so `usage` keeps the
-counters a backend reported and stops converting them into dollars core cannot verify (design
-record: `design/cost-removal.md`). `design/README.md` states the test all six apply, the order
-they land in, and what each one deletes.
+Recently removed, and worth knowing if you read older material about this package: the compliance
+filter and its per-vendor table, the capability gate, the stage-3 scorer, `optimize_for`, and
+`auto` in every dialect. Ledger retention, encryption at rest, and every dollar figure also left.
+Each let an unverifiable fact decide what core did. `CHANGELOG.md` under Unreleased records the
+removals. The replacement law is in this file: core holds no fact it cannot verify.
 
 Extending it (agent-executable)
 ===============================
@@ -564,7 +545,7 @@ Where deeper docs live
 - `openreading.evals`: the scorer, the runner, and `leaderboard`: the verb that answers which
   backend is CORRECT on documents you labeled, where `compare` only says where two disagree.
 - `openreading.batch`: intake resolution + platform runner.
-- `openreading.router` (`compliance`): the three stages, the compliance filter, the drop reasons.
+- `openreading.router`: the configured chain, request fallback order, and execution plan.
 - `openreading.strategies` (`loader`, `decider`): grammar, execution, the decider.
 - `openreading.credentials`: key resolution order, `.env` handling, security posture.
 - `openreading.ledger`: the journal / resume plane.
@@ -584,11 +565,10 @@ from openreading.comparison import compare
 # The triage above tells an agent to branch on the exception TYPE, because Python is the only
 # surface that separates every failure condition. That advice is only executable if the type can
 # be imported, and every one of these classes used to live two packages down, so the import an
-# agent actually writes -- `from openreading import ComplianceRefused` -- raised ImportError on the
+# agent actually writes -- `from openreading import ScopeRefused` -- raised ImportError on the
 # very surface the briefing recommends. They are re-exported here and their home is unchanged:
 # `openreading.types.errors` is the home of every one of them.
 from openreading.types.errors import (
-    ComplianceRefused,
     MissingCredentialsError,
     PlanExhaustedError,
     RetryableError,
@@ -609,7 +589,6 @@ __all__ = [
     "run_batch",
     "__version__",
     "SCHEMA_VERSION",
-    "ComplianceRefused",
     "MissingCredentialsError",
     "PlanExhaustedError",
     "RetryableError",

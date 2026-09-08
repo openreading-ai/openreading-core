@@ -109,12 +109,6 @@ def test_evaluate_when_pages_under():
     assert not evaluate_when({"pages_under": 1}, facts).matched
 
 
-def test_evaluate_when_compliance_nested():
-    facts = compute_facts(_req(compliance={"require_local": True}, pdf=True))
-    assert evaluate_when({"compliance": {"require_local": True}}, facts).matched
-    assert not evaluate_when({"compliance": {"require_baa": True}}, facts).matched  # default False
-
-
 def test_evaluate_when_size():
     facts = compute_facts(_req(size_bytes=3 * 1024 * 1024))  # 3 MB
     assert evaluate_when({"size_over_mb": 2}, facts).matched
@@ -164,7 +158,7 @@ def test_evaluate_when_unknown_fact_key_is_unavailable():
 def _reg():
     return scripted_registry(
         ScriptedBackend("pymupdf", local=True, text=CLEAN),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN),
+        ScriptedBackend("reducto", text=CLEAN),
     )
 
 
@@ -202,23 +196,6 @@ def test_route_all_rules_traced():
     rules = res.orchestration["decisions"][0]["rules"]
     assert len(rules) == 2  # both rules recorded even though rule 0 matched
     assert rules[0]["matched"] and not rules[1]["matched"]
-
-
-def test_route_compliance_fact():
-    reg = scripted_registry(ScriptedBackend("pymupdf", local=True, text=CLEAN))
-    cfg = {
-        "version": 1,
-        "strategies": {
-            "s": {
-                "route": {
-                    "rules": [{"when": {"compliance": {"require_local": True}}, "use": "pymupdf"}],
-                    "default": "pymupdf",
-                }
-            }
-        },
-    }
-    res = _run(cfg, "s", reg, _req(compliance={"require_local": True}, pdf=True))
-    assert res.orchestration["decisions"][0]["chosen"] == 0
 
 
 def test_route_nested_into_cascade():

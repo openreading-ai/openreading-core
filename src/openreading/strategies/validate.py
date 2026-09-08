@@ -21,8 +21,6 @@ from typing import Any
 
 from openreading import schemas
 from openreading.adapters.registry import BUILTIN_ADAPTERS, make_adapter
-from openreading.router import compliance as comp
-from openreading.router.compliance import RouterConfig
 from openreading.strategies.model import RawNode, StrategyConfig
 from openreading.strategies.normalize import (
     DEFAULT_BUNDLE,
@@ -32,15 +30,6 @@ from openreading.strategies.normalize import (
 )
 from openreading.strategies.plain import ADVANCED_TO_PLAIN, PlainInfo
 from openreading.types.enums import ChannelGrade
-from openreading.types.request import Compliance
-
-_COMPLIANCE_KEYS = (
-    "require_baa",
-    "no_train_on_data",
-    "data_region",
-    "require_local",
-    "max_retention",
-)
 
 _SECRET_KEY_RE = re.compile(
     r"(?i)(api[_-]?key|secret|token|password|passwd|access[_-]?key|credential|private[_-]?key)"
@@ -123,23 +112,9 @@ class _Ctx:
         self.current_dialect: str | None = None
         self.decider_configured = config.decider is not None and config.decider.llm is not None
         self.issues: list[ValidationIssue] = []
-        # compliance context for the steps-unreachable check (built once).
-        self._compliance: Compliance | None = None
-        self._router_config: RouterConfig | None = None
-        if policy and any(k in policy for k in _COMPLIANCE_KEYS):
-            self._compliance = Compliance(**{k: policy[k] for k in _COMPLIANCE_KEYS if k in policy})
-            self._router_config = RouterConfig(
-                allow_unverified_compliance=bool(policy.get("allow_unverified_compliance", False)),
-                train_optout_confirmed=frozenset(policy.get("train_optout_confirmed", [])),
-                baa_tier_confirmed=frozenset(policy.get("baa_tier_confirmed", [])),
-            )
-
-    def policy_drop(self, desc) -> str | None:
-        """Return a drop reason if the effective policy would filter this backend out, else None."""
-        if self._compliance is None or self._router_config is None:
-            return None
-        dr = comp.evaluate(self._compliance, desc, self._router_config)
-        return dr.code if dr is not None else None
+        # The steps-unreachable check used to build a compliance context here and ask the router
+        # which backends survived stage 1. There is no stage 1 and no filter, so a step is
+        # unreachable only in ways the author can already see in their own file.
 
     def err(self, path: str, message: str) -> None:
         self.issues.append(ValidationIssue("error", path, message))
@@ -154,8 +129,7 @@ def validate_config(
     raw: dict[str, Any] | None = None,
     plain_info: dict[str, PlainInfo] | None = None,
 ) -> list[ValidationIssue]:
-    """Return every world-consistency issue (errors + warnings) for `config`. The compliance
-    context is the file's own `policy:` block, which is the only place a policy is written; `raw`
+    """Return every world-consistency issue (errors + warnings) for `config`. `raw`
     is the pre-model dict, scanned for secret-pattern keys the schema's open sub-trees (`policy`,
     `with.*`) don't lock down.
     `plain_info` (from the loader) tags each strategy's dialect so §8 issues on a Plain body are
@@ -166,14 +140,12 @@ def validate_config(
     except NormalizeError as e:
         return [ValidationIssue("error", "strategies", str(e))]
 
-    # The effective policy is validated here, not just at run time, because this command exists to
-    # find a broken config BEFORE a run does — and because `_Ctx` builds its own Compliance +
-    # RouterConfig out of this same raw dict for the steps-unreachable check. An unvalidated block
-    # makes that advice wrong in the direction that reads as reassurance: a typo'd key produces no
-    # unreachable-step warning at all, and a quoted `allow_unverified_compliance: "false"` coerces
-    # truthy and reports a `trains_on_customer_data: unverified` backend as reachable. When the
-    # policy is refused the context is dropped rather than built from a dict we do not trust, so
-    # the rest of the file is still checked and this error is the only thing said about the policy.
+    # The policy is validated here, not just at run time, because this command exists to find a
+    # broken config BEFORE a run does. The failure it catches reads as reassurance: `backend:` for
+    # `backends:` is refused as an unknown key here, where an unvalidated block would drop it in
+    # silence and run with no restriction at all. When the policy is refused the context is
+    # dropped rather than built from a dict we do not trust, so the rest of the file is still
+    # checked and this error is the only thing said about the policy.
     checked_policy, policy_issue = _checked_policy(config)
     ctx = _Ctx(config, library, checked_policy, plain_info)
     if policy_issue is not None:
@@ -335,9 +307,9 @@ def _use_targets(node: RawNode) -> list[str]:
 
 
 def _dispatchable(node: Any, library: dict[str, RawNode], seen: frozenset[str]) -> set[str]:
-    """Concrete backend ids a node's subtree can dispatch (`auto` excluded; use refs resolved)."""
+    """Concrete backend ids a node's subtree can dispatch (use refs resolved)."""
     if isinstance(node, str):
-        if node == "auto" or node.startswith("strategy:"):
+        if node.startswith("strategy:"):
             name = node[len("strategy:") :] if node.startswith("strategy:") else None
             return _dispatchable_ref(name, library, seen) if name else set()
         return {node}
@@ -347,7 +319,7 @@ def _dispatchable(node: Any, library: dict[str, RawNode], seen: frozenset[str]) 
         return set()
     if "backend" in node:
         b = node["backend"]
-        return set() if b == "auto" else {b}
+        return {b}
     if "use" in node:
         return _dispatchable_ref(node["use"], library, seen)
     out: set[str] = set()
@@ -429,13 +401,11 @@ def _min_opt(a: Any, b: Any) -> Any:
 
 def _check_leaf(node: dict[str, Any], path: str, ctx: _Ctx, eff_deadline_ms: Any) -> None:
     slug = node["backend"]
-    if slug == "auto":
-        return
     desc = _descriptor(slug)
     if desc is None:
         ctx.err(
             f"{path}.backend",
-            f"unknown backend {slug!r}; known: {', '.join(sorted(BUILTIN_ADAPTERS))} (or 'auto')",
+            f"unknown backend {slug!r}; known: {', '.join(sorted(BUILTIN_ADAPTERS))}",
         )
         return
     # leaf timeout larger than the effective deadline (clamped)
@@ -445,14 +415,6 @@ def _check_leaf(node: dict[str, Any], path: str, ctx: _Ctx, eff_deadline_ms: Any
             f"{path}.timeout",
             f"per-attempt timeout {node['timeout']} exceeds the effective deadline and will be "
             "clamped",
-        )
-    # steps unreachable under the file's own `policy:` block
-    drop = ctx.policy_drop(desc)
-    if drop is not None:
-        ctx.warn(
-            f"{path}.backend",
-            f"{slug!r} is filtered out by the policy ({drop}). This step can never run in that "
-            "compliance context. Remove it or relax the policy",
         )
     # step-position gate bindability + `missing:` on a backend that cannot produce typed fields
     for gate_key in ("escalate_if", "review_if"):
@@ -618,7 +580,7 @@ def _check_cascade(node: dict[str, Any], path: str, ctx: _Ctx, child_kw: dict) -
         # re-parses the WHOLE doc, not just the failing pages.
         if paged and i > 0 and isinstance(step, dict) and isinstance(step.get("backend"), str):
             desc = _descriptor(step["backend"])
-            if desc is not None and not getattr(desc.capabilities, "page_range_selection", False):
+            if desc is not None and not desc.capabilities.page_range_selection:
                 ctx.warn(
                     spath,
                     f"granularity: page but backend {step['backend']!r} lacks native page-range "

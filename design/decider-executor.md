@@ -1,10 +1,16 @@
 > **Migrated from the private company repo on 2026-09-05, verbatim.** This record describes work
 > `openreading-core` has not shipped. AGENTS.md keeps an unbuilt design record here, next to the
-> code it proposes to change, so it is reviewed in the open. It was written before the monorepo
-> split and predates protocol v2, adapter-descriptor v0.7 and the current `.env.example` posture,
-> so verify every fact against this repository's code before implementing from it. Delete this
-> file in the pull request that finishes the work, moving its durable facts into the module
-> docstrings.
+> code it proposes to change, so it is reviewed in the open. Delete this file in the pull request
+> that finishes the work, moving its durable facts into the module docstrings.
+>
+> **Superseded in part by the removal set, 2026-09-07. Re-scope before implementing.** That set
+> deleted the router this record was written against: the three stages are one lookup now (the
+> backend the caller named, else `policy.backends` in written order, else `pymupdf`), and with
+> them went the compliance filter, the capability gate, stage-3 scoring, `optimize_for`, `auto`,
+> and every cost figure. Any passage here that routes on a vendor claim, scores candidates, or
+> spells `backend: auto` describes machinery that no longer exists. The governing rule is now
+> `openreading.router.router`: core holds no fact it cannot verify. Check `CHANGELOG.md` under
+> Unreleased and the module docstrings before taking any line of this as current.
 
 # The decider executor — Design ("Decider", target v0.9)
 

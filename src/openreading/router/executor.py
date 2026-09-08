@@ -3,8 +3,7 @@ demonstrable. `execute_plan` walks a RoutePlan chosen→fallbacks and returns th
 NormalizedResponse.
 
 Invariants:
-- It consumes ONLY the RoutePlan. It can never widen eligibility — the router already enforced
-  compliance (never-relaxed, fail-closed), so every backend here is already eligible.
+- It consumes only the `RoutePlan`, so the executor cannot invent another backend.
 - A plan carrying a caller allow-list (`RoutePlan.backend_allowlist`, set by `restrict_to`) has
   already had the chain pruned to it. Every chain member is re-checked against it here anyway,
   before the run context that resolves the vendor credential is built, and an out-of-scope member
@@ -14,10 +13,9 @@ Invariants:
   a network preflight — the first real proof of a key is the submit call).
 - Terminal / Retryable-exhausted / UnsupportedFeature fall to the next backend. (RetryableError
   reaching here means the driver already exhausted same-backend backoff.)
-- The successful response is metered: `report_cost()` fills the `usage` fields the adapter left
-  unset (`cost_usd` above all). A meter that raises degrades to a warning, never a failed run.
-- The successful response records the attempt trail in warnings[] (`fallback_used`), plus any
-  operator confirmation the responding backend's compliance eligibility rests on.
+- The successful response is metered: `report_cost()` fills the `usage` counters the adapter left
+  unset. A meter that raises degrades to a warning, never a failed run.
+- The successful response records the attempt trail in `warnings[]` (`fallback_used`).
 - Chain exhausted → PlanExhaustedError carrying the full trail.
 - Idempotency cache (bounded LRU + TTL) is consulted before submit and populated after success; a
   cache hit adds an `idempotent_replay` warning. Keyed by CONTENT, never by secrets and never by a
@@ -41,12 +39,10 @@ from openreading.ledger.header import slim_request
 from openreading.readiness import attach_auth_hint, missing_required
 from openreading.router.cache import content_key, document_identity
 from openreading.router.clock import Clock, RealClock
-from openreading.router.compliance import BAA_TIER_CONFIRMED_WARNING
 from openreading.router.cost import apply_cost_report
 from openreading.router.driver import run_to_completion
 from openreading.router.router import RoutePlan
 from openreading.types.errors import (
-    ComplianceRefused,
     PlanExhaustedError,
     RetryableError,
     ScopeRefused,
@@ -63,14 +59,14 @@ _CACHE_TTL_MS = 15 * 60 * 1000
 # isinstance, not `type(e).__name__`: a private subtype raised internally by a lower layer for its
 # own dispatch purposes (e.g. driver.py's `_DriveSliceExpired(RetryableError)`, BL-88) must still
 # report as its taxonomy base here, never leak its own concrete class name into this trail.
-_TAXONOMY = (TerminalError, RetryableError, UnsupportedFeatureError, ComplianceRefused)
+_TAXONOMY = (TerminalError, RetryableError, UnsupportedFeatureError, ScopeRefused)
 
 
 @dataclass
 class Attempt:
     backend: str
     # "skipped" | "terminal" (a crash outside the taxonomy) | "TerminalError" |
-    # "RetryableError" | "UnsupportedFeatureError" | "ComplianceRefused"
+    # "RetryableError" | "UnsupportedFeatureError" | "ScopeRefused"
     category: str
     code: str
     detail: str = ""
@@ -134,12 +130,6 @@ def _record_trail(resp: NormalizedResponse, trail: list[Attempt], chosen: str) -
         )
 
 
-def _record_confirmations(resp: NormalizedResponse, plan: RoutePlan, chosen: str) -> None:
-    note = plan.baa_tier_notes.get(chosen)
-    if note is not None:
-        resp.add_warning(BAA_TIER_CONFIRMED_WARNING, note, chosen)
-
-
 def execute_plan(
     plan: RoutePlan,
     req: OpenReadingRequest,
@@ -193,7 +183,6 @@ def execute_plan(
                 resp.add_warning(
                     "idempotent_replay", f"replayed cached result for {desc.id}", desc.id
                 )
-                _record_confirmations(resp, plan, desc.id)
                 _record_trail(resp, trail, desc.id)
                 return resp
 
@@ -239,7 +228,6 @@ def execute_plan(
             # request's confirmations/trail — the cached entry must stay the adapter's
             # canonical answer, or every later hit replays this caller's transient history.
             cache.put(key, resp.model_copy(deep=True), clock.now_ms())
-        _record_confirmations(resp, plan, desc.id)
         _record_trail(resp, trail, desc.id)
         return resp
 

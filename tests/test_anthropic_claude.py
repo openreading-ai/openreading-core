@@ -349,13 +349,15 @@ def test_model_override_via_backend_version():
     assert adapter._client.last_call["model"] == "claude-sonnet-5"
 
 
-def test_cost_from_token_usage():
+def test_report_cost_forwards_the_token_counts_anthropic_returned():
+    """2400 input + 180 output, summed and left in tokens.
+
+    This used to multiply them by a per-model `_MODEL_PRICE` table and assert the dollars."""
     adapter = AnthropicClaudeAdapter(client=FakeClaudeClient())
     job = adapter.submit(_req(), RunContext())
     cost = adapter.report_cost(job)
-    # opus-4-8: 2400 in @ $5/M + 180 out @ $25/M
-    assert cost.cost_usd == pytest.approx(2400 / 1e6 * 5.0 + 180 / 1e6 * 25.0)
-    assert cost.billing_target == "caller_account"
+    assert cost.native_unit == "token"
+    assert cost.native_quantity == 2580
 
 
 def test_rate_limit_maps_to_retryable():
@@ -396,12 +398,3 @@ def test_live_liveness_probe():  # pragma: no cover
     report = check_liveness(AnthropicClaudeAdapter())
     assert report.measured is True
     assert report.status is LivenessStatus.LIVE, report.detail
-
-
-def test_every_declared_input_format_has_a_media_type():
-    """A format the descriptor claims but the media-type table omits would be sent as a PDF, which
-    the API accepts and reads as garbage rather than refusing."""
-    from openreading.adapters.anthropic_claude.adapter import _MEDIA_TYPES
-
-    formats = AnthropicClaudeAdapter().descriptor.capabilities.input_formats
-    assert set(_MEDIA_TYPES) == set(formats)

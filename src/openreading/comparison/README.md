@@ -96,9 +96,9 @@ uv run openreading compare pymupdf.json tesseract.json --format table
 ```text
 COMPARE — 2 subjects (pairwise)
 
-SUBJECT             TYPE             PAGES BLOCKS  CHARS FIELDS      COST    TIME
-pymupdf             oss_library          2      9    336      0         -       -
-tesseract           oss_library          2      9    336      0         -       -
+SUBJECT             TYPE             PAGES BLOCKS  CHARS FIELDS    TIME
+pymupdf             oss_library          2      9    336      0       -
+tesseract           oss_library          2      9    336      0       -
 
 CONTENT: MIXED  (text:agree  table_cells:diverge)
 
@@ -368,7 +368,6 @@ dimension, and `facts` covers the scoreboard numbers.
 | `table_shape_mismatch` | tables | table counts or grid shapes differ |
 | `confidence_gap` | blocks | matched blocks, confidences 0.2 or more apart, on two backends' own scales ([why that is not a ranking](../derive/README.md#a-confidence-is-comparable-inside-one-backend-not-across-two)) |
 | `page_count_mismatch` | pages | subjects disagree on page count |
-| `cost_outlier` | facts | one subject cost at least 3 times the others' mean |
 | `empty_output` | facts | a subject produced no text, blocks, or fields |
 
 ## Reference

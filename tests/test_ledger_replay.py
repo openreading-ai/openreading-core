@@ -3,7 +3,7 @@ criterion, a test per ship item (§6): zero-network replay (race-free + `on_win:
 mismatch refusal (AC-4), `journal_seq` race/partial-`require` ordering (§7.4), a composite-vs-leaf
 tie not crashing (§4.0 F11), `pinned_eligible` actually armed on resume with a live compliance-gate
 refusal that fails the run rather than failing over (AC-14), missing-credentials journaled and
-terminal on resume including "credentials became available" (AC-15), shred-then-resume-reports-
+terminal on resume including "credentials became available" (AC-15),
 expired (AC-10), the AC-12 child-process-kill test scoped to `open_ocr`/`aws_textract`, and a
 `KeyboardInterrupt`-during-`cmd_parse` test for exit code 6.
 
@@ -24,24 +24,23 @@ import threading
 import time
 import uuid
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
 
 from openreading import api
 from openreading.api import _arm_ledger
 from openreading.credentials import EnvCredentialBroker
-from openreading.ledger.header import HeaderMismatch
+from openreading.ledger.header import HeaderMismatch, read_header
 from openreading.ledger.inline import InlineExecutor
 from openreading.ledger.jsonl import JsonlJournal
-from openreading.ledger.localfs import LocalFsBlobStore, LocalFsKeyStore
+from openreading.ledger.localfs import LocalFsBlobStore
 from openreading.ledger.step import StepRef, StepRequest, StepResult
 from openreading.router.clock import RealClock
 from openreading.router.router import RouterConfig
 from openreading.strategies import StrategyConfig, compile_strategy, run_strategy
 from openreading.strategies.engine import _step_id, _step_request
 from openreading.testing.sample_pdf import build_sample_pdf
-from openreading.types.errors import ComplianceRefused, PlanExhaustedError, TerminalError
+from openreading.types.errors import PlanExhaustedError, ScopeRefused, TerminalError
 from openreading.types.request import OpenReadingRequest
 from tests.fakes import ScriptedBackend, scripted_registry
 
@@ -193,8 +192,7 @@ def test_resume_replays_a_cancelled_step_with_zero_network_calls(tmp_path):
     exercise `exec()` in isolation rather than through a full engine walk."""
     ledger_root = tmp_path / "ledger"
     journal = JsonlJournal(ledger_root / "run1.jsonl")
-    keys = LocalFsKeyStore(ledger_root / "keys")
-    blobs = LocalFsBlobStore(ledger_root / "blobs", keys)
+    blobs = LocalFsBlobStore(ledger_root / "blobs")
     ex = InlineExecutor(journal=journal, blobs=blobs, registry=None, clock=RealClock())
     req = StepRequest(
         step_id="s1",
@@ -231,6 +229,36 @@ def test_resume_replays_a_cancelled_step_with_zero_network_calls(tmp_path):
     assert result.status == "cancelled"
     assert result.replayed is True
     assert result.journal_seq == recs[-1].journal_seq
+
+
+def test_resume_replays_a_successful_none_payload(tmp_path):
+    """Removing the ZDR storage branch makes `None` an ordinary recorded payload again."""
+    ledger_root = tmp_path / "ledger"
+    journal = JsonlJournal(ledger_root / "run1.jsonl")
+    blobs = LocalFsBlobStore(ledger_root / "blobs")
+    req = StepRequest(
+        step_id="s1",
+        run_id="run1",
+        kind="submit",
+        step_path="root",
+        step_seq=0,
+        attempt=1,
+        backend_id="fake",
+    )
+    first = InlineExecutor(journal=journal, blobs=blobs, registry=None, clock=RealClock())
+    assert asyncio.run(first.exec(req, run=lambda: None)).payload is None
+
+    replay = InlineExecutor(
+        journal=JsonlJournal(ledger_root / "run1.jsonl"),
+        blobs=blobs,
+        registry=None,
+        clock=RealClock(),
+    )
+    result = asyncio.run(
+        replay.exec(req, run=lambda: (_ for _ in ()).throw(AssertionError("must not dispatch")))
+    )
+    assert result.payload is None
+    assert result.replayed is True
 
 
 def test_a_replayed_cancelled_cascade_rung_keeps_its_own_attempt_category(tmp_path, monkeypatch):
@@ -520,41 +548,6 @@ def test_cmd_resume_prints_the_refusal_shape_and_returns_exit_3(tmp_path, monkey
 # ---- the REAL api.resume_run/cmd_resume path, end-to-end (Finding 10b) --------------------------
 
 
-def test_api_resume_run_reconstructs_the_request_from_a_header_on_disk_and_replays_successfully(
-    tmp_path, monkeypatch
-):
-    """Finding 5/10(b) (Phase C round-1): every OTHER replay test in this file drives
-    `_arm_ledger`/`run_strategy` directly via `_resume` above, reusing the SAME in-memory `req`
-    object the test itself built — never exercising `api.resume_run`/`_request_from_header`'s own
-    disk-read reconstruction for a SUCCESSFUL resume (the only two existing `api.resume_run` call
-    sites, above, both exercise the REFUSAL path). This calls the real `api.resume_run` — no
-    injected registry, no in-memory shortcut — against a header actually read from disk, and proves
-    the reconstructed request replays to the identical result.
-
-    No `policy={"require_local": True}` workaround needed (Phase C round-2 Finding 8 / a reviewer
-    Finding 6, now fixed): against the REAL, whole-registry `eligible` set (`prune.py`'s own
-    `plan.eligible_ids`, computed over every registered backend, not just the named strategy step —
-    see `slim_request_dict`'s own docstring), `reducto`'s real descriptor (the only built-in with a
-    genuine `zdr_flag`, and `max_retention_hours=0`) is ALSO eligible for a plain PDF — but it is
-    never named by this strategy nor dispatched, so it no longer has any effect on this run's ZDR
-    gating or retention ceiling. This is exactly the ordinary, real-registry shape both reviewers'
-    Finding 8/6 repros used, run through the real production registry (not a test fixture)."""
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("OPENREADING_LEDGER", str(tmp_path / "ledger"))
-    pdf_path = tmp_path / "doc.pdf"
-    pdf_path.write_bytes(build_sample_pdf())
-    (tmp_path / "openreading.yaml").write_text(
-        "version: 1\nstrategies:\n  s:\n    steps:\n      - backend: pymupdf\n"
-    )
-    armed: list[str] = []
-    original = api.run(str(pdf_path), strategy="s", on_run_armed=armed.append)
-    run_id = armed[0]
-
-    resumed = api.resume_run(run_id)
-    assert resumed["status"]["state"] == "succeeded"
-    assert resumed["document"] == original["document"]
-
-
 def test_an_unusable_ledger_root_fails_with_a_named_config_error_not_a_bare_oserror(
     tmp_path, monkeypatch, capsys
 ):
@@ -585,6 +578,31 @@ def test_an_unusable_ledger_root_fails_with_a_named_config_error_not_a_bare_oser
     assert "OPENREADING_LEDGER" in cap.err  # names the knob, not just an errno and a path
     assert str(not_a_dir) in cap.err
     assert "Traceback" not in cap.err
+
+
+def test_cmd_resume_reports_a_modified_input_blob_as_replay_refusal(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    ledger_root = tmp_path / "ledger"
+    monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
+    pdf_path = tmp_path / "doc.pdf"
+    pdf_path.write_bytes(build_sample_pdf())
+    (tmp_path / "openreading.yaml").write_text(
+        "version: 1\nstrategies:\n  s:\n    steps:\n      - backend: pymupdf\n"
+    )
+    armed: list[str] = []
+    api.run(str(pdf_path), strategy="s", on_run_armed=armed.append)
+    capsys.readouterr()
+    header = read_header(ledger_root, armed[0])
+    assert header is not None and header.document is not None
+    digest = header.document.digest.split(":", 1)[1]
+    (ledger_root / "blobs" / armed[0] / f"{digest}.bin").write_bytes(b"modified")
+
+    from openreading.cli.app import main
+
+    assert main(["resume", armed[0]]) == 3
+    cap = capsys.readouterr()
+    assert cap.out == ""
+    assert "recorded input payload is unavailable" in cap.err
 
 
 def test_cmd_resume_keeps_backend_chatter_off_stdout(tmp_path, monkeypatch, capsys):
@@ -623,38 +641,6 @@ def test_cmd_resume_keeps_backend_chatter_off_stdout(tmp_path, monkeypatch, caps
     assert "pymupdf_layout" in cap.err  # the advisory went somewhere, and that somewhere is stderr
 
 
-def test_cmd_resume_reports_payload_expired_when_the_original_documents_blob_was_shredded(
-    tmp_path, monkeypatch, capsys
-):
-    """Finding 10(b): `cmd_resume`'s own `except PayloadExpired` clause exists specifically for
-    `_request_from_header`'s un-wrapped `blobs.get(header.document)` call (`api.py`'s own comment:
-    "left to propagate uncaught... the whole-run analog of AC-10's per-step signal") — but no test
-    ever constructed a bytes_base64-sourced run, shredded ITS OWN key (not a step's), and called
-    `api.resume_run`/`cmd_resume` before `run_strategy` is ever reached. This is that test."""
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("OPENREADING_LEDGER", str(tmp_path / "ledger"))
-    ledger_root = tmp_path / "ledger"
-    pdf_path = tmp_path / "doc.pdf"
-    pdf_path.write_bytes(build_sample_pdf())
-    (tmp_path / "openreading.yaml").write_text(
-        "version: 1\nstrategies:\n  s:\n    steps:\n      - backend: pymupdf\n"
-    )
-    armed: list[str] = []
-    api.run(str(pdf_path), strategy="s", on_run_armed=armed.append)
-    run_id = armed[0]
-
-    keys = LocalFsKeyStore(ledger_root / "keys")
-    keys.destroy(run_id)  # shreds the ORIGINAL document's own blob key, not a step payload's
-
-    from openreading.cli.app import build_parser
-
-    args = build_parser().parse_args(["resume", run_id])
-    rc = args.func(args)
-    assert rc == 3
-    err = capsys.readouterr().err
-    assert "[resume]" in err and "key destroyed" in err
-
-
 # ---- pinned_eligible armed on resume + a live compliance-gate refusal (AC-14) --------------------
 
 
@@ -685,10 +671,10 @@ def test_pinned_eligible_is_armed_on_resume_and_the_gate_refuses_a_changed_descr
     assert fresh is not None
 
     # A "live" registry whose "x" descriptor has genuinely changed since the original run pinned
-    # it (a different cost profile) — config_hash/plan_hash are held fixed here (matching the
-    # header) so this test isolates the gate mechanism itself, per F6's own narrow finding, rather
-    # than the header-comparison path AC-4's own test already covers.
-    v2_reg = scripted_registry(ScriptedBackend("x", local=True, text="hi", cost_low=99.0))
+    # it (a capability the v1 descriptor did not declare) — config_hash/plan_hash are held fixed
+    # here (matching the header) so this test isolates the gate mechanism itself, per F6's own
+    # narrow finding, rather than the header-comparison path AC-4's own test already covers.
+    v2_reg = scripted_registry(ScriptedBackend("x", local=True, text="hi", page_ranges=True))
     resumed_executor = _arm_ledger(
         run_id,
         req,
@@ -713,12 +699,63 @@ def test_pinned_eligible_is_armed_on_resume_and_the_gate_refuses_a_changed_descr
         attempt=1,
         backend_id="x",
     )
-    with pytest.raises(ComplianceRefused):
+    with pytest.raises(ScopeRefused):
         asyncio.run(
             resumed_executor.exec(
                 step_req, run=lambda: (_ for _ in ()).throw(AssertionError("must not dispatch"))
             )
         )
+
+
+@pytest.mark.parametrize(
+    ("leaf", "scope", "expected"),
+    [
+        ("pymupdf", None, "pymupdf"),
+        ("tesseract", frozenset({"tesseract"}), "tesseract"),
+    ],
+)
+def test_resume_preserves_the_strategy_backend_under_scope(
+    tmp_path, monkeypatch, leaf, scope, expected
+):
+    """Resume dispatches the backend the first run did, scoped token or not.
+
+    The second case was an `auto` leaf until `auto` was removed. What it was really guarding is
+    that the API-key scope on the ORIGINAL run is what resume honours, so it now names the backend
+    the scope permits and asserts the same thing.
+    """
+    ledger_root = tmp_path / "ledger"
+    monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "openreading.yaml").write_text(
+        "version: 1\n"
+        "policy:\n"
+        "  backends: [pymupdf, tesseract]\n"
+        "strategies:\n"
+        "  s:\n"
+        "    steps:\n"
+        f"      - backend: {leaf}\n"
+    )
+    pdf = tmp_path / "sample.pdf"
+    pdf.write_bytes(build_sample_pdf())
+    req = OpenReadingRequest.model_validate(
+        {"document": {"path": str(pdf)}, "backend": {"id": "strategy:s"}}
+    )
+    cfg = StrategyConfig.model_validate(
+        {
+            "version": 1,
+            "policy": {"backends": ["pymupdf", "tesseract"]},
+            "strategies": {"s": {"steps": [{"backend": leaf}]}},
+        }
+    )
+    armed: list[str] = []
+
+    first = api.run_request(
+        req, strategy_config=cfg, backend_allowlist=scope, on_run_armed=armed.append
+    )
+    resumed = api.resume_run(armed[0])
+
+    assert first["backend"]["id"] == expected
+    assert resumed["backend"]["id"] == expected
 
 
 # ---- missing-credentials journaled and terminal on resume (AC-15) -------------------------------
@@ -812,205 +849,10 @@ def test_resume_replays_both_records_of_a_two_rung_cascade_whose_early_rung_was_
 # ---- shred-then-resume-reports-expired (AC-10) ---------------------------------------------------
 
 
-def test_shred_then_resume_reports_payload_expired(tmp_path, monkeypatch):
-    """T1's own shred mechanism destroys the run's key; the journal record survives (§9.4). A
-    resumed step whose recorded payload was spilled to the (now-unreadable) blob store must report
-    `payload_expired` BY NAME — rather than either succeed with stale-looking data or crash the
-    walk outright. `InlineExecutor._resolve_replay_payload` converts the raw `PayloadExpired` into
-    a `TerminalError(backend_code="payload_expired")`, so the walk degrades through the SAME
-    already-handled taxonomy a live permanent failure takes (never an uncaught crash) while still
-    naming the real reason in the resulting `PlanExhaustedError`'s own trail."""
-    monkeypatch.setenv("OPENREADING_LEDGER", str(tmp_path / "ledger"))
-    ledger_root = tmp_path / "ledger"
-    reg = scripted_registry(ScriptedBackend("solo", local=True, text="hello"))
-    cfg = _cfg([{"backend": "solo"}])
-    req = _req()
-
-    run_id, _compiled, _result = _run_once(ledger_root, reg, cfg, req)
-
-    keys = LocalFsKeyStore(ledger_root / "keys")
-    keys.destroy(run_id)  # T1's own shred mechanism — the journal record survives, content doesn't
-
-    raising_reg = scripted_registry(
-        ScriptedBackend("solo", local=True, error=AssertionError("must not dispatch"))
-    )
-    with pytest.raises(PlanExhaustedError) as exc_info:
-        _resume(ledger_root, run_id, raising_reg, cfg, req)
-    assert any("payload_expired" in a.get("detail", "") for a in exc_info.value.trail)
-
-
 # ---- ZDR + replay no longer crashes (Finding 2) --------------------------------------------------
 
 
-def test_resume_reports_a_typed_error_for_a_zdr_flagged_backends_replayed_ok_step(
-    tmp_path, monkeypatch
-):
-    """Finding 2 (Phase C round-1, two reviewers independently): a ZDR-flagged backend's live "ok"
-    dispatch never calls `blobs.put` (§9.4 — zero retained content), so the journaled record's own
-    `payload` is `None` by design. Before this fix, replaying that record reached
-    `engine._response_payload` unchanged and crashed with an uncaught `pydantic.ValidationError`
-    trying `NormalizedResponse.model_validate(None)` — 100% of the time, for any resume that
-    touched a ZDR backend. This proves the fix: the resumed walk degrades to a clean, named
-    `TerminalError(backend_code="zdr_payload_not_retained")` through the SAME `PlanExhaustedError`
-    taxonomy AC-10's own `payload_expired` case already uses, and never crashes."""
-    monkeypatch.setenv("OPENREADING_LEDGER", str(tmp_path / "ledger"))
-    ledger_root = tmp_path / "ledger"
-
-    def _zdr_backend(**kwargs: Any) -> ScriptedBackend:
-        # `local=False` (hosted): §9.4's retention math only applies ZDR to the HOSTED path
-        # (`InlineExecutor._is_zdr_backend` skips `runs_fully_local` descriptors before ever
-        # consulting `zdr_flag`, mirroring `compute_retention_ceiling_hours`'s own guard — a fully
-        # local backend already retains nothing at any vendor by construction) — a `local=True`
-        # backend's own step payload can never be suppressed this way, regardless of `zdr_flag`.
-        # Both the original and the resumed registry build this THE SAME way — an inconsistent
-        # descriptor between them would (correctly) refuse via `config_hash`, AC-4's own territory,
-        # not what this test exists to prove.
-        b = ScriptedBackend("zdr-backend", local=False, **kwargs)
-        b.descriptor = b.descriptor.model_copy(
-            update={
-                "compliance": b.descriptor.compliance.model_copy(
-                    update={"zdr_flag": "vendor-attested"}
-                )
-            }
-        )
-        return b
-
-    reg = scripted_registry(_zdr_backend(text="zdr succeeded"))
-    cfg = _cfg([{"backend": "zdr-backend"}])
-    req = _req()
-
-    run_id, _compiled, result = _run_once(ledger_root, reg, cfg, req)
-    assert result.response.document.text == "zdr succeeded"
-
-    journal_file = ledger_root / f"{run_id}.jsonl"
-    parsed = [json.loads(line) for line in journal_file.read_text().splitlines() if line.strip()]
-    ok_records = [p for p in parsed if p["status"] == "ok"]
-    assert ok_records and ok_records[0].get("payload") is None, "ZDR must retain zero content"
-
-    # Non-regression (Phase C round-2, item 2's own safety property): a REAL dispatch to this
-    # ZDR-flagged backend must still be reflected in the run's own retention stamp — the fix that
-    # stops an eligible-but-undispatched backend from tainting the stamp (below) must not also stop
-    # a genuinely-dispatched one from doing so.
-    from openreading.ledger.retention import stamp_path
-
-    stamp = json.loads(stamp_path(ledger_root, run_id).read_text())
-    assert stamp["zdr"], "a backend that actually dispatched IS ZDR-flagged — the stamp must say so"
-
-    raising_reg = scripted_registry(_zdr_backend(error=AssertionError("must not dispatch")))
-    with pytest.raises(PlanExhaustedError) as exc_info:
-        _resume(ledger_root, run_id, raising_reg, cfg, req)
-    assert any("zdr_payload_not_retained" in a.get("detail", "") for a in exc_info.value.trail)
-
-
 # ---- ZDR/retention scoped to the run's ACTUAL PATH, not the whole eligible set (Finding 8/6) -----
-
-
-def test_resume_retains_and_replays_a_local_only_run_even_when_an_undispatched_zdr_backend_is_eligible(
-    tmp_path, monkeypatch
-):
-    """Phase C round-2 (Findings 8 and 6) — the exact repro shape both reviewers
-    used against the REAL production registry (`reducto`, `zdr_flag` + `max_retention_hours=0`,
-    eligible for essentially any plain PDF whether or not it's ever named or credentialed),
-    reproduced here against a small fake registry so it runs offline. A strategy naming ONLY a
-    local, non-ZDR backend, against a registry that ALSO contains an eligible-but-UNDISPATCHED
-    hosted ZDR/zero-retention backend.
-
-    Before this fix, `_arm_ledger` computed `zdr`/the retention ceiling from
-    `compute_retention_ceiling_hours(descriptors, ...)` over `compiled.eligible` — the registry-WIDE
-    compliance/capability survivor list, which includes BOTH backends here even though the strategy
-    names only `local-solo` — so the local step's own successful payload was never written to blob
-    storage (whole-run `zdr=True`) and the ceiling collapsed to ~0 hours (`min()` included the
-    undispatched backend's own zero). Both effects made this ordinary, already-successful run's
-    resume fail unconditionally, for a document that never touched ZDR content at all."""
-    monkeypatch.setenv("OPENREADING_LEDGER", str(tmp_path / "ledger"))
-    ledger_root = tmp_path / "ledger"
-
-    def _zdr_zero_retention_backend(**kwargs: Any) -> ScriptedBackend:
-        b = ScriptedBackend("undispatched-zdr", local=False, **kwargs)
-        b.descriptor = b.descriptor.model_copy(
-            update={
-                "compliance": b.descriptor.compliance.model_copy(
-                    update={"zdr_flag": "vendor-attested", "max_retention_hours": 0}
-                )
-            }
-        )
-        return b
-
-    local_backend = ScriptedBackend("local-solo", local=True, text="local succeeded")
-    reg = scripted_registry(local_backend, _zdr_zero_retention_backend())
-    cfg = _cfg([{"backend": "local-solo"}])  # the strategy names ONLY the local backend
-    req = _req()
-
-    before_ms = int(RealClock().now_wall_ms())  # the base the stamp uses (see ledger.retention)
-    run_id, compiled, result = _run_once(ledger_root, reg, cfg, req)
-    assert result.response.document.text == "local succeeded"
-    # both backends really are eligible — the shape both reviews' repros used, not a narrower one.
-    assert set(compiled.eligible) == {"local-solo", "undispatched-zdr"}
-
-    journal_file = ledger_root / f"{run_id}.jsonl"
-    parsed = [json.loads(line) for line in journal_file.read_text().splitlines() if line.strip()]
-    ok_records = [p for p in parsed if p["status"] == "ok"]
-    assert ok_records and ok_records[0].get("payload") is not None, (
-        "the DISPATCHED local backend's own content must be retained — an eligible-but-undispatched "
-        "ZDR backend elsewhere in the registry must have zero effect on it"
-    )
-
-    from openreading.ledger.retention import stamp_path
-
-    stamp = json.loads(stamp_path(ledger_root, run_id).read_text())
-    assert not stamp["zdr"], "an eligible-but-undispatched ZDR backend must not flag the whole run"
-    generous_floor_ms = 3600_000  # well under the 24h default — proves the ceiling wasn't collapsed
-    assert stamp["expires_epoch_ms"] - before_ms > generous_floor_ms
-
-    raising_reg = scripted_registry(
-        ScriptedBackend("local-solo", local=True, error=AssertionError("must not dispatch")),
-        _zdr_zero_retention_backend(error=AssertionError("must not dispatch")),
-    )
-    resumed = _resume(ledger_root, run_id, raising_reg, cfg, req)
-    assert resumed.response.document.text == "local succeeded"
-
-
-def test_a_dispatched_hosted_backends_own_retention_limit_tightens_the_runs_ceiling(
-    tmp_path, monkeypatch
-):
-    """Non-regression on the compliance guarantee item 2's fix must not weaken (Phase C round-2):
-    when a step genuinely DOES dispatch to a hosted backend with a strict retention limit, the run's
-    overall ceiling must still collapse to respect it. `_arm_ledger`'s new arm-time stamp (the
-    operator default alone) is only the un-narrowed STARTING point; `InlineExecutor.exec`'s live
-    "ok" branch tightens it right back down, via `retention.tighten_retention`, the moment that
-    backend actually dispatches. The companion test above proves the opposite direction: a backend
-    that stays merely eligible must never do this."""
-    monkeypatch.setenv("OPENREADING_LEDGER", str(tmp_path / "ledger"))
-    ledger_root = tmp_path / "ledger"
-
-    def _short_retention_backend(**kwargs: Any) -> ScriptedBackend:
-        b = ScriptedBackend("short-hosted", local=False, **kwargs)
-        b.descriptor = b.descriptor.model_copy(
-            update={
-                "compliance": b.descriptor.compliance.model_copy(update={"max_retention_hours": 1})
-            }
-        )
-        return b
-
-    reg = scripted_registry(_short_retention_backend(text="short-lived"))
-    cfg = _cfg([{"backend": "short-hosted"}])
-    req = _req()
-
-    before_ms = int(RealClock().now_wall_ms())  # the base the stamp uses (see ledger.retention)
-    run_id, _compiled, result = _run_once(ledger_root, reg, cfg, req)
-    assert result.response.document.text == "short-lived"
-
-    from openreading.ledger.retention import stamp_path
-
-    stamp = json.loads(stamp_path(ledger_root, run_id).read_text())
-    # tightened from the (much longer) operator default down to ~1h — this backend's own declared
-    # limit, not the un-narrowed arm-time default (`DEFAULT_RETENTION_HOURS` == 24).
-    assert stamp["expires_epoch_ms"] - before_ms <= 2 * 3600_000
-    # ...and tightened on the SAME clock base it was stamped with. `tighten_retention` takes a
-    # `min`, so a monotonic `now` here would beat the wall-clock stamp outright and collapse the
-    # ceiling into 1970 — a hosted dispatch shredding its own run. The upper bound above cannot
-    # see that (a far-too-small stamp satisfies it), so assert the floor too.
-    assert stamp["expires_epoch_ms"] > before_ms
 
 
 # ---- AC-12, scoped to open_ocr/aws_textract (§4.6) -----------------------------------------------
@@ -1177,3 +1019,47 @@ def test_keyboard_interrupt_during_cmd_parse_prints_resumable_message_and_exits_
     err = capsys.readouterr().err
     assert "interrupted" in err and "resumable" in err
     assert "openreading resume" in err
+
+
+def test_a_url_sourced_run_records_no_url_and_refuses_resume(tmp_path, monkeypatch, capsys):
+    """A `document.url` is routinely a presigned URL, which is a live credential.
+
+    It used to be written to the blob store, which was justified while that store was encrypted.
+    Removing the cipher removed the justification, so the URL is not persisted at all now: the
+    header records `document_is_url` and nothing else, and a resume of that run refuses rather
+    than replaying against an input it does not have.
+
+    Guards both halves. A regression that starts persisting it again puts a bearer token in a
+    plaintext file on disk, and one that drops the marker turns an honest refusal into a crash.
+    """
+    monkeypatch.chdir(tmp_path)
+    ledger_root = tmp_path / "ledger"
+    monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
+    # `reducto` declares accepts_url, so the URL is NOT materialized and reaches the header as a
+    # URL. It then fails on its missing key, which is after the ledger arms — which is the state
+    # this test is about.
+    (tmp_path / "openreading.yaml").write_text(
+        "version: 1\nstrategies:\n  s:\n    steps:\n      - backend: reducto\n"
+    )
+    for var in ("REDUCTO_API_KEY", "OPENREADING_REDUCTO_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    secret = "https://bucket.example/doc.pdf?X-Amz-Signature=deadbeefcafe"
+    armed: list[str] = []
+    with pytest.raises(Exception):  # noqa: B017 — it fails on the key; the header is the subject
+        api.run(secret, strategy="s", on_run_armed=armed.append)
+    capsys.readouterr()
+
+    assert armed, "the run armed a ledger before the fetch failed"
+    header = read_header(ledger_root, armed[0])
+    assert header is not None
+    assert header.document is None and header.document_is_url is True
+
+    # The secret must appear nowhere under the ledger root, in any file.
+    for path in ledger_root.rglob("*"):
+        if path.is_file():
+            assert "X-Amz-Signature" not in path.read_text(encoding="utf-8", errors="ignore")
+
+    from openreading.cli.app import main
+
+    assert main(["resume", armed[0]]) == 3
+    assert "payload" in capsys.readouterr().err.lower()

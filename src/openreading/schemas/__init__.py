@@ -43,20 +43,20 @@ Validate anything programmatically with ``validate_request`` / ``validate_respon
 on the way in and responses on the way out; the CLI validates before printing. Inspect any
 backend's descriptor with ``make_adapter(id).descriptor.to_schema_dict()``.
 
-Request (``request.v0.2.json``)
+Request (``request.v0.3.json``)
 -------------------------------
 Required: ``document`` and ``backend``; ``additionalProperties: false`` at the top level AND at
 every nested object node — ``document``, ``backend``, ``backend.runtime``, ``outputs``,
 ``outputs.chunking``, ``extraction_schema``, ``features``, ``pages``, ``pages.ranges[]``,
-``routing``, ``compliance``, ``async`` (unknown keys are rejected — D7: deployment knobs such as
-``allow_unverified_compliance`` therefore live on ``RouterConfig``, never on the wire). The one
+``routing``, ``async`` (unknown keys are rejected — D7: a deployment knob such as the backend
+allow-list therefore lives on ``RouterConfig``, never on the wire). The one
 deliberate exception is ``extraction_schema.json_schema``'s VALUE, an arbitrary caller-supplied
 JSON Schema the wire contract does not shape. Nested strictness is v0.2 (M12): v0.1 closed the
 top level only, so a misspelled nested field such as ``document.mim_type`` passed schema
 validation and failed only later, at the pydantic layer (``openreading.types.request``, already
 ``extra="forbid"`` throughout) — the vendored schema stopped being the source of truth exactly
-where nesting began. Optional blocks: ``schema_version`` (const ``"0.2"``), ``outputs``,
-``features``, ``pages``, ``extraction_schema``, ``routing``, ``compliance``, ``async``,
+where nesting began. Optional blocks: ``schema_version`` (const ``"0.3"``), ``outputs``,
+``features``, ``pages``, ``extraction_schema``, ``routing``, ``async``,
 ``idempotency_key``.
 
 - ``document``: exactly ONE of ``bytes_base64`` (the router may spool/upload where a backend needs
@@ -66,7 +66,7 @@ where nesting began. Optional blocks: ``schema_version`` (const ``"0.2"``), ``ou
   downloaded to bytes first for the rest), ``path`` (local backends only), ``file_id`` (a
   previously uploaded file, e.g. a reused Chunkr task). Plus ``mime_type`` (inferred from the
   extension by CLI/Python, default ``application/pdf``), ``filename``, ``password``.
-- ``backend``: ``id`` (registry slug, or ``"auto"`` for the compliance-first router), ``type``
+- ``backend``: ``id`` (registry slug, or ``null`` to resolve the chain from the policy), ``type``
   (``hosted_api`` | ``oss_library`` | ``framework_loader`` | ``self_hosted_model``,
   informational), ``operation`` (Textract ``DetectDocumentText``/``AnalyzeDocument``/
   ``AnalyzeExpense``/``AnalyzeID``/``AnalyzeLending``, Azure model ids, reducto/chunkr
@@ -95,19 +95,10 @@ where nesting began. Optional blocks: ``schema_version`` (const ``"0.2"``), ``ou
   rather than silently returning geometry-only (D13).
 - ``pages``: ``ranges`` of 1-based inclusive ``{start, end?}``, ``max_pages``; applied natively
   where supported, else by the normalizer.
-- ``routing`` (for ``backend.id = "auto"``): ``doc_type_hint`` (bank_statement, paystub, w2,
+- ``routing`` (for ``backend.id = null``): ``doc_type_hint`` (bank_statement, paystub, w2,
   1003_loan_app, 1040_tax, invoice, id_document, medical_form, clinical_pdf, generic),
-  ``optimize_for`` (accuracy | cost | latency | offline — stage-3 weights), ``fallback`` (ordered
-  ids, honored WITHIN the eligible set only — routing never re-admits a compliance-dropped
-  backend).
-- ``compliance`` (the stage-1 filter; hard constraints, never traded off; unverified vendor
-  claims fail closed): ``require_baa`` (BAA path, or fully-local where PHI never leaves),
-  ``no_train_on_data`` (unconfirmed opt-outs and unverified no-train claims excluded too),
-  ``data_region`` (e.g. ``"us"``, ``"eu"``; enforced against the descriptor's
-  ``data_region_options``), ``require_local``, ``max_retention`` (``"zero"``, ``"48h"``). These
-  also bind
-  a directly named backend: a non-compliant request is refused (``ComplianceRefused`` / HTTP
-  403), never silently run.
+  ``fallback`` (ordered ids, honored WITHIN the resolved set only — routing reorders a
+  restriction and never widens one).
 - ``async``: ``mode`` auto (default; router picks per backend and document) | sync | async;
   ``webhook_url`` (always caller-supplied; without it async polls).
 - ``idempotency_key``: when omitted, defaults to a deterministic key over the document content,
@@ -168,11 +159,12 @@ backend cannot produce is ABSENT with a ``warnings[]`` entry — never fabricate
 - ``chunks[]``: ``id``, ``text``/``markdown``, ``block_ids`` (each chunk traces to spine blocks),
   ``page_span``, optional ``embedding``.
 - ``usage``: ``pages_processed``, native ``credits``, ``input_tokens``/``output_tokens``,
-  ``cost_usd`` with ``cost_basis`` (billed/estimated/infra_only/unknown), ``duration_ms``. The
-  adapter meters (``report_cost()`` projects its own counters through its pricing model) and the
-  router accounts: after ``normalize()`` it fills only the ``usage`` fields the adapter left
-  unset — an adapter-reported ``cost_usd`` is never overwritten, and a local backend gets
-  ``infra_only`` with a null price rather than an invented one.
+  ``duration_ms``. Counters only, in the unit each backend meters in. The adapter meters
+  (``report_cost()`` projects the counters out of ``job.raw``) and the router accounts: after
+  ``normalize()`` it fills only the ``usage`` fields the adapter left unset, and never reshapes
+  one unit into another. ``cost_usd`` and ``cost_basis`` were removed with the per-vendor price
+  tables that filled them. A derived price sat on ``usage`` beside
+  counters that were measured, and nothing downstream could tell the two apart.
 - ``job``: the async handle (``id``, timestamps, ``poll_url``, provider console URL).
 - ``warnings[]``: ``{code, message, field}`` for anything requested but unavailable, degraded or
   noteworthy. The code set is OPEN, so a consumer tolerates a code it has never seen. Every code
@@ -197,9 +189,7 @@ backend cannot produce is ABSENT with a ``warnings[]`` entry — never fabricate
     Those last three are separate codes because escalating is right for a gate and wrong for
     an exhausted budget. An agent triage playbook branches on them to separate "escalate"
     from "consume".
-  - the deployment or the vendor said so: ``baa_tier_confirmed`` (``require_baa`` satisfied
-    only by the deployment's tier-gated confirmation), ``backend_warning`` (the vendor's own
-    warning text, passed through).
+  - the vendor said so: ``backend_warning`` (the vendor's own warning text, passed through).
 
   ``unsupported_feature`` is NOT a warning code. It is an ``on_error`` map key, an exception
   category and an HTTP ``error.category``, each documented elsewhere in this file. Grouping the
@@ -242,12 +232,12 @@ be restated here lives with the rest, in ``openreading.derive``. The invariants 
 guarantees at the Canon milestone, the ``0.5.0`` row of the manifest below. ``0.5.0`` there is a
 milestone label rather than a package version. The shipped package version is ``0.3.0``.
 
-Adapter descriptor (``adapter-descriptor.v0.7.json``)
+Adapter descriptor (``adapter-descriptor.v0.8.json``)
 -----------------------------------------------------
 A static, machine-readable declaration per adapter — the reason the router NEVER branches on
-backend type: eligibility, ranking, credential resolution and the readiness UI read descriptor
-fields only. Required: ``id``, ``type``, ``provisioning``, ``wait_modes``, ``capabilities``,
-``cost``, ``compliance``, ``runtime``. No ``additionalProperties: false`` (so each additive bump
+backend type: credential resolution, execution, and the readiness UI read descriptor fields.
+Required: ``id``, ``type``, ``provisioning``, ``wait_modes``, ``capabilities``, and ``runtime``.
+No ``additionalProperties: false`` (so each additive bump
 keeps every older descriptor valid) and no in-band version — filename + ``$id`` only.
 
 - Identity: ``id``, ``type``, ``adapter_impl`` (http | in_process | subprocess | container),
@@ -255,37 +245,23 @@ keeps every older descriptor valid) and no in-band version — filename + ``$id`
   webhook).
 - ``provisioning``: ``byo_mode`` (api_key, cloud_credential, pip, container, weights, endpoint —
   a coarse hint; the per-key truth is ``credentials_spec``), ``auth`` (none/api_key/sigv4/
-  oauth2/entra/gcp_adc), ``billing_target`` (caller_account/caller_infra; the ``openreading``
-  enum value exists but is never emitted — pure pass-through, no resale, kit-enforced).
+  oauth2/entra/gcp_adc).
 - ``capabilities``: each of ``ocr``, ``handwriting``, ``printed_tables``, ``complex_tables``,
   ``forms_key_value``, ``layout``, ``reading_order``, ``multi_column``, ``figures_charts``,
   ``signatures``, ``classification``, ``splitting``, ``custom_schema_extraction``,
   ``vlm_based``, ``human_in_the_loop`` is ``"verified"`` (first-party live run or benchmark),
   ``"claimed"`` (vendor docs only) or ``false``; plus ``languages``, ``input_formats``,
-  ``max_pages_per_request``, ``max_file_size``. Read by the router's stage-2 filter.
+  ``max_pages_per_request``, ``max_file_size``. Descriptive, not a gate: the router runs no
+  capability filter, and a backend that cannot read a document refuses first-hand.
 - ``output``: ``paradigms`` (the six raw shapes above); ``channels`` grades each response
   channel — ``markdown``, ``text``, ``blocks``, ``block_bbox``, ``block_confidence``,
   ``typed_fields``, ``table_cells`` — as N (native), D (derivable) or X (impossible); the
   conformance kit enforces C4/C5/C6 against these grades; optional ``block_granularity``
   (word | line | paragraph | section | element) so consumers and compare can reason about
   packaging differences instead of discovering them empirically.
-- ``cost``: ``native_unit`` (page/credit/token/doc/gpu_second/cpu_second/subscription),
-  ``usd_per_page_equiv_low``/``_high``, ``basis``, ``lossiness`` of the page-equivalence
-  conversion. Feeds stage-3 cost scoring and ``usage.cost_usd``.
-- ``compliance`` — facts, not marketing; the stage-1 filter treats anything unverified as
-  ineligible unless the deployment explicitly allows it: ``hipaa_baa`` (``yes`` | ``tier_gated``
-  — BAA only on a higher plan, eligible under ``require_baa`` only once the operator confirms
-  ``baa_tier_confirmed`` (D7a: otherwise a PHI caller could be routed to a vendor with nothing
-  signed) | ``no`` | ``na_local``), ``trains_on_customer_data`` (``yes`` | ``no`` | ``opt_out``
-  — eligible only when the operator confirms the opt-out | ``na_local`` | ``unverified`` — fails
-  closed under ``no_train_on_data`` unless ``allow_unverified_compliance``),
-  ``data_region_options`` (``["*"]`` for local), ``data_retention``/``max_retention_hours``
-  (unknown retention fails closed under ``max_retention``), ``runs_fully_local`` (the BAA-free
-  PHI path), ``soc2``, ``gdpr``, ``pci``, ``train_opt_out_precondition``, ``zdr_flag``,
-  ``phi_path_constraints``.
 - ``runtime``: ``offline_capable``, ``license`` (copyleft flagged here), ``system_deps``,
-  ``version_pin``, hardware/serving profile, ``sandbox``. ``router``: ``normalization_difficulty``,
-  ``integration_priority`` P0-P2, ``priority_reason``. ``sources``: primary-source URLs with
+  ``version_pin``, hardware/serving profile, ``sandbox``. ``router`` carries only
+  ``normalization_difficulty``. ``sources``: primary-source URLs with
   access dates backing every claim above.
 - BYO-credential declaration (v0.2): ``credentials_spec[]`` (``{key, required, secret, env:
   [names in precedence order], description, example}``), ``config_spec[]`` (non-secret config:
@@ -295,8 +271,8 @@ keeps every older descriptor valid) and no in-band version — filename + ``$id`
   ambient-chain backends like
   Textract). The broker, ``openreading backends``, ``/v1/backends`` and missing-credential errors
   are all generated from these — no per-backend logic anywhere else. The kit requires them of
-  every backend with ``auth != none`` OR an endpoint/container ``byo_mode`` (NOT keyed on
-  ``runs_fully_local``: docling/qwen-vl are compliance-local yet still need an endpoint URL).
+  every backend with ``auth != none`` OR an endpoint/container ``byo_mode``: docling and qwen-vl
+  run on your own hardware and still need an endpoint URL.
 - ``batch`` (v0.4): ``native`` (verified | claimed | false), ``max_items``, ``max_concurrency``,
   ``notes``. Absent means platform batching (the runner fans out single-document runs).
 - ``liveness`` (v0.5): ``probe`` (none | local | endpoint | vendor), ``method``, ``timeout_s``,
@@ -389,10 +365,7 @@ Versioning rules
 - Stability ladder: fields annotate ``x-stability: experimental | stable`` (draft 2020-12
   tolerates unknown keywords). ``experimental_fields()`` generates the registry; the compat
   meta-test in ``tests/test_schema_evolution.py`` asserts registry == annotations and excludes
-  experimental fields from backward guarantees. Designed, not shipped: the spec also asks
-  compliance code to consult the registry so ONLY stable fields drive compliance decisions;
-  ``openreading.router.compliance`` never reads ``experimental_fields()`` or ``x-stability`` —
-  it reads descriptor ``compliance`` facts only (none of which are experimental today).
+  experimental fields from backward guarantees.
 - Deprecation: JSON Schema ``deprecated: true`` + pydantic ``deprecated=``; using a deprecated
   feature appends a ``warnings[]`` entry; never deprecate before the replacement is shipped and
   stable; deprecated for at least one MINOR before removal; removal only at MAJOR.
@@ -503,7 +476,7 @@ from typing import Any
 # v0.2 (Security review, M12): additionalProperties:false now closes every nested object node,
 # not only the top level, matching the pydantic mirrors' extra="forbid" — additive+Changed over
 # v0.1 (§6/§8; see "Schema version history" above for the full rationale).
-REQUEST_SCHEMA_FILE = "request.v0.2.json"
+REQUEST_SCHEMA_FILE = "request.v0.3.json"
 # v0.3 (Canon): named channel invariants (C1-C11 in $defs descriptions), confidence bounds [0,1]
 # on TableCell/Page/doc_type/Citation, + document.confidence / channel_provenance / schema_url,
 # and the const-fix for the v0.1/0.2 version-identity drift. Additive+Changed over v0.2 (§6/§8).
@@ -517,18 +490,17 @@ RESPONSE_SCHEMA_FILE = "response.v0.3.json"
 # v0.7 (Ledger T4a, AC-8) adds the optional `protocol_version` integer (optional here so this
 # schema stays additive over v0.6; the pydantic AdapterDescriptor model requires it with no
 # default — see that field's own comment for why the two layers deliberately diverge).
-DESCRIPTOR_SCHEMA_FILE = "adapter-descriptor.v0.7.json"
+DESCRIPTOR_SCHEMA_FILE = "adapter-descriptor.v0.8.json"
 # v0.3 (Strategies): the optional openreading.yaml orchestration grammar.
 # v0.2 (Plain, v0.7): the simple dialect's body grammar (plain_try/race/compare_body) + the
 # disagreement_over gate predicate — additive over v0.1 (config `version` const stays 1). Cut as
 # a new file because v0.1 is byte-frozen (schema-evolution §8); v0.1 remains the frozen artifact.
-# v0.3 (One file): `policy` becomes a CLOSED, typed object — the nine keys, the five compliance
-# ones carrying `request.compliance`'s own descriptions verbatim. It was `additionalProperties:
+# v0.3 (One file): `policy` becomes a closed, typed object. It was `additionalProperties:
 # true` while a hand-written JSON policy file was the primary spelling and the block its superset.
 # With the file the only spelling, a typo and a quoted boolean are refused here rather than by a
 # validator standing in for the schema. No file that was valid and meaningful becomes invalid: a
 # key outside this set was already refused, one rung later. The config `version` const stays 1.
-STRATEGY_CONFIG_SCHEMA_FILE = "strategy-config.v0.3.json"
+STRATEGY_CONFIG_SCHEMA_FILE = "strategy-config.v0.4.json"
 # v0.4 (Compare): the read-only cross-backend comparison report (the openreading.comparison
 # docstring).
 # v0.5 (Canon): the `structure` finding code + content-first `headline`; finding-
@@ -536,7 +508,7 @@ STRATEGY_CONFIG_SCHEMA_FILE = "strategy-config.v0.3.json"
 COMPARISON_REPORT_SCHEMA_FILE = "comparison-report.v0.2.json"
 # v0.6 (Manifest): the batch-run envelope + the corpus (batch-vs-batch) comparison report — two new
 # families composing the single-document contract (internal/design/batch-intake.md §5/§8).
-BATCH_RESULT_SCHEMA_FILE = "batch-result.v0.1.json"
+BATCH_RESULT_SCHEMA_FILE = "batch-result.v0.2.json"
 CORPUS_REPORT_SCHEMA_FILE = "corpus-report.v0.1.json"
 # BL-160 (Leaderboard): N registered backends ranked on ONE evals.dataset case.json corpus, via the
 # unchanged evals.runner.run_case path — a new family, not an edit to any existing schema.
@@ -621,9 +593,7 @@ def experimental_fields(schema: dict[str, Any] | None = None) -> set[str]:
     Walks a schema (default: the current response schema) and returns the set of field paths
     annotated ``x-stability: experimental``. The compat meta-tests exclude these from backward
     guarantees, and a meta-test asserts this generated set equals the schema annotations, so
-    the two can never silently drift. Designed, not shipped: the spec also has compliance code
-    consult this registry so ONLY stable fields drive compliance decisions;
-    ``openreading.router.compliance`` does not call it.
+    the two can never silently drift.
     """
     schema = response_schema() if schema is None else schema
     found: set[str] = set()

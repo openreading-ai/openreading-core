@@ -18,8 +18,6 @@ from openreading.types import (
     BlockType,
     Capabilities,
     ChannelGrade,
-    ComplianceProfile,
-    Cost,
     Document,
     LeaderboardBackend,
     LeaderboardCase,
@@ -27,7 +25,6 @@ from openreading.types import (
     NativeOrigin,
     NativeUnit,
     NormalizedResponse,
-    OpenReadingRequest,
     Output,
     OutputChannels,
     OutputParadigm,
@@ -103,7 +100,7 @@ def test_full_response_roundtrips_through_json_schema():
             ],
         ),
         typed_fields={"total": TypedField(value=42.0, type="currency", confidence=0.97)},
-        usage=Usage(pages_processed=1, cost_usd=0.07, cost_basis="estimated"),
+        usage=Usage(pages_processed=1),
     )
     resp.add_warning("confidence_partial", "some blocks lack confidence", field="blocks")
     schemas.validate_response(resp.to_schema_dict())
@@ -120,21 +117,6 @@ def test_typed_fields_only_response_is_valid():
     schemas.validate_response(resp.to_schema_dict())
 
 
-def test_request_roundtrips_including_async_alias():
-    req = OpenReadingRequest.model_validate(
-        {
-            "document": {"bytes_base64": "JVBERi0=", "mime_type": "application/pdf"},
-            "backend": {"id": "aws-textract", "type": "hosted_api", "operation": "AnalyzeLending"},
-            "outputs": {"typed_fields": True, "blocks": True},
-            "compliance": {"require_baa": True, "no_train_on_data": True},
-            "async": {"mode": "async", "webhook_url": "https://example.test/hook"},
-        }
-    )
-    dumped = req.to_schema_dict()
-    assert "async" in dumped and dumped["async"]["mode"] == "async"
-    schemas.validate_request(dumped)
-
-
 def test_page_range_end_before_start_rejected():
     # M3: cross-field numeric comparison is inexpressible in the vendored JSON Schema draft, so
     # this is enforced only in pydantic — see PageRange._end_not_before_start.
@@ -148,7 +130,7 @@ def test_descriptor_roundtrips_through_json_schema():
         type=BackendType.OSS_LIBRARY,
         protocol_version=1,
         adapter_impl="in_process",
-        provisioning=Provisioning(byo_mode=["pip"], auth="none", billing_target="caller_infra"),
+        provisioning=Provisioning(byo_mode=["pip"], auth="none"),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(
             ocr=False,
@@ -168,10 +150,6 @@ def test_descriptor_roundtrips_through_json_schema():
                 table_cells=ChannelGrade.NATIVE,
             ),
         ),
-        cost=Cost(native_unit="cpu_second", basis="infra_only"),
-        compliance=ComplianceProfile(
-            hipaa_baa="na_local", trains_on_customer_data="na_local", runs_fully_local=True
-        ),
         runtime=RuntimeProfile(offline_capable=True, license="AGPL-3.0", sandbox="in_process"),
     )
     dumped = desc.to_schema_dict()
@@ -180,8 +158,11 @@ def test_descriptor_roundtrips_through_json_schema():
 
     from jsonschema.validators import validator_for
 
+    # The CURRENT schema, not v0.1. A v0.8 descriptor carries no `compliance` block, which every
+    # frozen schema from v0.1 to v0.7 required, so descriptor validation is deliberately no longer
+    # backward-compatible across that boundary.
     schema = json.loads(
-        (Path(schemas.__file__).parent / "adapter-descriptor.v0.1.json").read_text()
+        (Path(schemas.__file__).parent / schemas.DESCRIPTOR_SCHEMA_FILE).read_text()
     )
     validator_for(schema)(schema).validate(dumped)
     # channel grades serialize to N/D/X
@@ -206,7 +187,6 @@ def test_leaderboard_report_roundtrips_through_json_schema():
                 n_cases=2,
                 n_scored=2,
                 errors=0,
-                cost_per_doc=0.0,
                 non_deterministic=False,
                 dimensions={"text_contains": 0.95, "table_cell_accuracy": 0.87},
             ),
@@ -217,7 +197,6 @@ def test_leaderboard_report_roundtrips_through_json_schema():
                 n_cases=2,
                 n_scored=1,
                 errors=1,
-                cost_per_doc=1.25,
                 non_deterministic=True,
                 dimensions={"text_contains": 0.40},
             ),

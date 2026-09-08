@@ -3,8 +3,8 @@
 A strategy says which backends run, in what order or together, and when to move on. Plain lets
 you write that in eleven words you can hold in your head. It is a dialect, not a second engine:
 the loader (`openreading.strategies.loader.parse_config_raw`) calls `desugar_config` after the
-JSON-Schema gate (`schemas/strategy-config.v0.2.json`) and before `StrategyConfig.model_validate`,
-so the engine, traces, replay, keep-best, compliance pruning, and `strategy validate` see only
+JSON-Schema gate (`schemas/strategy-config.v0.4.json`) and before `StrategyConfig.model_validate`,
+so the engine, traces, replay, keep-best, caller-scope pruning, and `strategy validate` see only
 the canonical five-node longhand the engine already runs. `openreading strategy show <name>` prints
 a user strategy's body AS WRITTEN — a Plain body prints Plain, a preset prints its vendored
 longhand (`openreading.cli.app._strategy_body_as_written` re-reads the source file, because the
@@ -36,8 +36,9 @@ The whole language
     disagree           the compared backends produced materially different output
                        (`compare` only; `true` = 0.3)
 
-1 reserved word: `auto` — "openreading's best remaining pick", the router's stage-3 choice among
-eligible, not-yet-attempted backends — usable as a `try` rung or a `then:` target.
+0 reserved words. Every rung names a backend or another strategy, so a Plain file says what it
+runs by reading it. (`auto` once meant "openreading's best remaining pick"; it is refused now, and
+`_resolve_item` below says so in the words a reader needs.)
 
 That is the entire surface. No signal catalog, no thresholds with units, no wrappers or
 combinators, no `on_error`, no `route:`/`when:` (per-doc-type behavior in Plain is separate named
@@ -54,10 +55,9 @@ A strategy body is Plain iff it is one of:
 3. a map whose keys are a subset of {try, race, compare, escalate_when, then, max_time}, with
    these value shapes (closed):
 
-* `try`: a list of items, or a single item. An item is a backend id, `auto`, or the name of
-  another strategy or preset in scope.
-* `race` / `compare`: a list of 2 or more items. `auto` is not an item here: two concurrent
-  stage-3 picks have no defined distinctness — name the backends you race.
+* `try`: a list of items, or a single item. An item is a backend id, or the name of another
+  strategy or preset in scope.
+* `race` / `compare`: a list of 2 or more items, same item shapes.
 * `escalate_when`: the scalar `looks_bad` (the only legal scalar), or a non-empty flat map with
   keys among {looks_bad, low_confidence, missing, disagree}:
   - `looks_bad: true` — all members at defaults; or a member map (below). Member maps OVERLAY
@@ -66,7 +66,7 @@ A strategy body is Plain iff it is one of:
   - `low_confidence: true | <0..1>` (`true` = 0.6).
   - `missing: [<field-name>, ...]` — a non-empty list of bare strings.
   - `disagree: true | <0..1>` (`true` = 0.3). Legal only in a `compare:` body.
-* `then`: exactly one item (backend id, `auto`, or strategy name). It must not repeat an item of
+* `then`: exactly one item (backend id or strategy name). It must not repeat an item of
   the `compare:` list — the escape hatch must be a different backend; a repeat would replay the
   loser's cached result and be a guaranteed no-op.
 * `max_time`: a unit-suffixed duration string (`"90s"`, `"2m"`). A bare number is a schema
@@ -252,7 +252,6 @@ Desugaring (normative equivalences)
     disagree: true / F                     disagreement_over: 0.3 / F
     looks_bad + low_confidence: true       the `default` bundle, member-for-member, scan-aware
     <strategy or preset name>              {use: <name>}
-    auto                                   {backend: auto}
 
 Emitted trees are canonical (normalize fixed points): list items are `{backend: …}` maps, no
 `escalate_if: off`, and the gate is a flat OR map unless the scan member forces a one-level
@@ -293,8 +292,8 @@ another strategy runs that strategy's own rules; the outer `escalate_when` does 
 and `strategy validate` says so — loud, never silent. The final rung is never gated: keep-best,
 `on_quality_exhausted: best_effort`, and honest `warnings[]` are the inherited defaults.
 
-`race` — first *successful* response wins; losers cancelled; loser cost still lands in
-`usage.cost_usd`. `escalate_when` beside `race` is a load error, but a generic one: the shape is
+`race` — first *successful* response wins; losers cancelled; a cancelled loser's call still
+reached the vendor, and the trace records it. `escalate_when` beside `race` is a load error, but a generic one: the shape is
 rejected by `additionalProperties: false` on the schema's `plain_race_body` and surfaced by the
 loader as the located schema error ("invalid config at 'strategies/<name>': {...} is not valid
 under any of the given schemas"). The schema's `description` ("a race keeps the first success;
@@ -345,11 +344,10 @@ key lookup in the response's `typed_fields` map — the developer's own names fr
 portable across rungs. Missing = key absent OR value null/empty-string. Top-level names only; the
 advanced alias form (`{name, aliases}`) and dotted paths are out of Plain.
 
-Names — a list or `then:` item that is not a registered backend id and not `auto` resolves as a
-strategy or preset name → `{use: <name>}`. A name matching both a backend id and a strategy is an
-error at the reference site (rename instruction). Duplicate concrete ids in one list are an error;
-`auto` is exempt in `try` — it never re-picks an attempted backend, so `try: [auto, auto]` is the
-legitimate second-opinion shape.
+Names — a list or `then:` item that is not a registered backend id resolves as a strategy or
+preset name → `{use: <name>}`. A name matching both a backend id and a strategy is an error at the
+reference site (rename instruction). Duplicate ids in one list are an error, in every key: a rung
+that repeats an earlier one replays a result already in hand.
 
 The boundary
 ============
@@ -405,7 +403,7 @@ bare number.
 Desugar-time (this module, `ConfigError`, Plain vocabulary, Elm doctrine — locate, explain,
 suggest the fix; name resolution is the loader's one dependency on the adapter registry):
 unknown name (with nearest-name suggestion) · name matching both a backend id and a strategy ·
-duplicate concrete id in one list · `auto` inside `race`/`compare` · `disagree` outside a
+duplicate id in one list · a rung naming `auto` · `disagree` outside a
 `compare` body · `escalate_when` on a single-item `try` · `then:` repeating a `compare:` item.
 
 `strategy validate` (world-consistency, `openreading.strategies.validate`): unbindable gate — an
@@ -468,13 +466,12 @@ scanned-PDF fixture produces (the attempt line's timing is illustrative):
 Guardrails you get for free
 ===========================
 
-* Honest costs. `usage.cost_usd` totals every backend that ran, winners and losers alike — the
-  amount each one reported, labeled by `cost_basis` (`billed` | `estimated` | `infra_only` |
-  `unknown`, the `response.v0.3.json` enum, folded by priority `billed > estimated >
-  infra_only > unknown`; a real cost with no basis coalesces to `unknown`); the engine never
-  invents a number.
-* Compliance is untouchable. The file's `policy:` block prunes ineligible backends before
-  anything runs; no strategy can re-admit one.
+* Every attempt on the record. `orchestration.attempts[]` names every backend that ran, winners
+  and losers alike, so you can count the calls a run made. It carries no price: the totals it used
+  to publish as `usage.cost_usd` were built from per-vendor rates core could not verify. `usage`
+  reports what a backend consumed in its own unit.
+* Every backend is visible in the Plain body. Server API-key scope can prune that written list,
+  while `policy.backends` only supplies defaults outside Plain.
 * Never silent. If everything gates, you get the best result kept so far with honest
   `warnings[]`, never a fabricated answer.
 
@@ -494,22 +491,22 @@ Design decisions, and the failure each avoids
 * Every Plain construct desugars to existing longhand — one engine, one validator, one trace,
   one replay path. The only engine changes Plain brought were the step gate on parallel steps
   and the `disagreement_over` signal, both available to advanced files too.
-* The grammar lives in `strategy-config.v0.2.json`, a new file rather than an edit of v0.1. A
+* The grammar lives in `strategy-config.v0.4.json`. A
   released schema is byte-frozen, so it is changed by cutting a new version. The change is
   additive, the config `version` const stays 1, and v0.2 validates every v0.1 config.
 * Presets stay vendored in longhand; they carry `intent:`, which Plain cannot spell. The docs
   pair each with its Plain near-equivalent (`openreading.strategies.presets`).
-* No dollar ceiling. Prices change too often for a plan-time estimate to be honest, so the
-  engine reports the real billed cost and never enforces a spending wall. `budget:` carries
+* No dollar ceiling, and no dollars at all. Prices change too often for anything core writes down
+  to stay true, so the engine quotes none and enforces no spending wall. `budget:` carries
   `max_duration` and `max_attempts`, and `validate` refuses any file that declares
   `max_attempts`, because no engine code reads it. `budget_exhausted` therefore always means
   the time deadline.
 * No pre-parse scan router: the cheap first rung *is* the free scan detector. No auto-tiering by
-  descriptor cost: ordering stays explicit.
+  descriptor price: ordering stays explicit, in the order you wrote.
 
 Non-goals: no route/decide/judge/review/on_error/granularity/extends/with/shadow/hedge in Plain
 (all advanced, unchanged); no renaming of advanced constructs; no dotted-path or alias forms in
-`missing:`; no changes to invocation, discovery, precedence, compliance, or budget laws.
+`missing:`; no changes to invocation, discovery, precedence, caller scope, or budget laws.
 """
 
 from __future__ import annotations
@@ -662,9 +659,7 @@ def _desugar_try(
     provenance: dict[str, dict[str, str]] = {}
     warnings: list[tuple[str, str]] = []
     for idx, item in enumerate(items):
-        node = _resolve_item(
-            name, item, strategy_names, known_names, allow_auto=True, at=f"try[{idx}]"
-        )
+        node = _resolve_item(name, item, strategy_names, known_names, at=f"try[{idx}]")
         is_last = idx == len(items) - 1
         if gate is not None and not is_last:
             if "use" in node:  # a strategy reference runs its own rules; the outer gate can't apply
@@ -691,7 +686,7 @@ def _desugar_race(
     items = body["race"]
     _check_no_dup(name, "race", items)
     branches = [
-        _resolve_item(name, it, strategy_names, known_names, allow_auto=False, at=f"race[{i}]")
+        _resolve_item(name, it, strategy_names, known_names, at=f"race[{i}]")
         for i, it in enumerate(items)
     ]
     out: dict[str, Any] = {"parallel": branches, "pick": "fastest", "on_win": "cancel"}
@@ -705,7 +700,7 @@ def _desugar_compare(
     items = body["compare"]
     _check_no_dup(name, "compare", items)
     branches = [
-        _resolve_item(name, it, strategy_names, known_names, allow_auto=False, at=f"compare[{i}]")
+        _resolve_item(name, it, strategy_names, known_names, at=f"compare[{i}]")
         for i, it in enumerate(items)
     ]
 
@@ -727,7 +722,7 @@ def _desugar_compare(
     gate, predicates = _compile_gate(escalate_when)
 
     parallel_step = {"parallel": branches, "pick": "best", "require": "all", "escalate_if": gate}
-    then_node = _resolve_item(name, then, strategy_names, known_names, allow_auto=True, at="then")
+    then_node = _resolve_item(name, then, strategy_names, known_names, at="then")
     out = {"steps": [parallel_step, then_node]}
     _attach_budget(out, body)
     return out, {"steps[0]": predicates}, []
@@ -742,16 +737,18 @@ def _resolve_item(
     strategy_names: set[str],
     known_names: set[str],
     *,
-    allow_auto: bool,
     at: str,
 ) -> dict:
     if item == "auto":
-        if not allow_auto:
-            raise ConfigError(
-                f"strategies.{name}.{at}: 'auto' cannot race or be compared, because two "
-                f"concurrent router picks have no defined order. Name the backends explicitly"
-            )
-        return {"backend": "auto"}
+        # `auto` asked the engine to pick from vendor claims it could not verify, and it is gone.
+        # A Plain rung names a backend or a strategy; the deployment's own preference order lives
+        # in `policy.backends`, which is where a caller states it once for every run. Kept as its
+        # own branch rather than falling through to "unknown name" because a reader who wrote
+        # `auto` needs to be told what replaces it, not that it does not exist.
+        raise ConfigError(
+            f"strategies.{name}.{at}: 'auto' is no longer a rung. Name a backend, or set the "
+            f"deployment's order once in policy.backends"
+        )
 
     is_backend = item in BUILTIN_ADAPTERS
     is_strategy = item in strategy_names or item in PRESET_NAMES
@@ -773,8 +770,6 @@ def _resolve_item(
 def _check_no_dup(name: str, key: str, items: list) -> None:
     seen: set[str] = set()
     for item in items:
-        if item == "auto":
-            continue  # auto never re-picks an attempted backend — try: [auto, auto] is legal
         if item in seen:
             raise ConfigError(
                 f"strategies.{name}.{key}: {item!r} appears twice, and each rung must be distinct"

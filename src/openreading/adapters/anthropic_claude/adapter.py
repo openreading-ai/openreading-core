@@ -24,21 +24,18 @@ Only PDF document blocks enable citations, because image blocks do not accept th
 from __future__ import annotations
 
 import base64
-from pathlib import PurePath
 from typing import Any, Protocol
 
 from openreading.adapters.base import BackendAdapter
 from openreading.derive import md_to_blocks, md_to_text, pdf_page_count
 from openreading.router.cost import apply_cost_report
 from openreading.types.blocks import Citation, TypedField
-from openreading.types.cost import CostBasis, CostReport
+from openreading.types.cost import CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     BatchIntake,
     Capabilities,
-    ComplianceProfile,
     ConfigField,
-    Cost,
     CredentialField,
     LivenessProbe,
     Output,
@@ -75,22 +72,6 @@ N = ChannelGrade.NATIVE
 D = ChannelGrade.DERIVABLE
 
 _DEFAULT_MODEL = "claude-opus-4-8"
-# One media type per format the descriptor's `input_formats` claims, keyed by that format's name.
-# A format the descriptor claims and this table omits falls back to PDF, which the API accepts and
-# reads as garbage instead of refusing, so `test_every_declared_input_format_has_a_media_type`
-# holds the two lists in step. Add a format to both, or to neither.
-_MEDIA_TYPES = {"pdf": "application/pdf", "png": "image/png", "jpg": "image/jpeg"}
-# File suffixes that name a format under a different spelling than `input_formats` uses.
-_FORMAT_ALIASES = {"jpeg": "jpg"}
-# $/1M tokens (input, output) for cost derivation, from Anthropic's published pricing page
-# (accessed 2026-06-24).
-_MODEL_PRICE: dict[str, tuple[float, float]] = {
-    "claude-opus-4-8": (5.0, 25.0),
-    "claude-opus-4-7": (5.0, 25.0),
-    "claude-sonnet-5": (3.0, 15.0),
-    "claude-haiku-4-5": (1.0, 5.0),
-    "claude-fable-5": (10.0, 50.0),
-}
 _RETRYABLE_EXC = {
     "RateLimitError",
     "InternalServerError",
@@ -169,9 +150,7 @@ def _descriptor() -> AdapterDescriptor:
         protocol_version=2,
         adapter_impl="http",
         operations=["parse", "extract"],
-        provisioning=Provisioning(
-            byo_mode=["api_key"], auth="api_key", billing_target="caller_account"
-        ),
+        provisioning=Provisioning(byo_mode=["api_key"], auth="api_key"),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(
             ocr="claimed",
@@ -186,24 +165,6 @@ def _descriptor() -> AdapterDescriptor:
             languages=["en", "and many"],
             input_formats=["pdf", "png", "jpg"],
             max_pages_per_request="100 (<1M ctx) / 600 (1M ctx)",
-        ),
-        cost=Cost(
-            native_unit="token",
-            basis="estimated",
-            usd_per_page_equiv_low=0.01,
-            usd_per_page_equiv_high=0.08,
-            lossiness="page-def",
-        ),
-        compliance=ComplianceProfile(
-            hipaa_baa="yes",
-            soc2="verified",
-            gdpr="verified",
-            trains_on_customer_data="no",
-            data_region_options=["us", "global"],
-            data_retention="no training; retention per enterprise terms",
-            max_retention_hours=0,
-            phi_path_constraints=["messages_api_inline_pdf_only"],
-            runs_fully_local=False,
         ),
         runtime=RuntimeProfile(
             offline_capable=False, license="proprietary", version_pin="messages-2023-06-01"
@@ -230,8 +191,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="medium",
-            integration_priority="P1",
-            priority_reason="Self-serve-BAA hosted PHI path for custom-schema extraction on hard docs.",
         ),
         credentials_spec=[
             CredentialField(
@@ -428,9 +387,16 @@ class AnthropicClaudeAdapter(BackendAdapter):
         model = req.backend.version or (ctx.runtime or {}).get("model") or _DEFAULT_MODEL
         mode = "extract" if req.extraction_schema else "parse"
         document = req.document
-        suffix = PurePath(document.filename or document.path or "").suffix.lower().lstrip(".")
-        fmt = _FORMAT_ALIASES.get(suffix, suffix)
-        media_type = document.mime_type or _MEDIA_TYPES.get(fmt, _MEDIA_TYPES["pdf"])
+        # `openreading.derive.mime` resolved this before the request was built, so there is no
+        # table here and no PDF default. An unidentified input is refused below rather than
+        # relabelled: sending unknown bytes as a PDF is how an image became a document block.
+        media_type = document.mime_type
+        if not media_type:
+            raise TerminalError(
+                "Claude needs a media type and core could not identify this document; "
+                "pass document.mime_type explicitly",
+                backend_code="unsupported_input",
+            )
         is_image = media_type.startswith("image/")
         cite = mode == "parse" and not is_image
 
@@ -567,10 +533,10 @@ class AnthropicClaudeAdapter(BackendAdapter):
         """Map the batch JSONL results (keyed by custom_id) back to per-request results, reusing the
         single-document normalize() for each succeeded message and a BatchItemError for the rest.
 
-        Cost (BL-100) is metered per item, right here, not by the caller: the batch-level `job`
+        Usage (BL-100) is metered per item, right here, not by the caller: the batch-level `job`
         this method receives has no top-level `usage` key (its `raw.payload` is `{"results": [...]}`
-        ), so a single report_cost(job) call over the whole batch would silently price every item at
-        cost_usd=0.0 — worse than leaving usage absent. Each succeeded item's own synthetic `synth`
+        ), so a single report_cost(job) call over the whole batch would report zero tokens for
+        every item — worse than leaving usage absent. Each succeeded item's own synthetic `synth`
         job, built below from that item's own result message, carries the real per-item `usage`
         block report_cost() needs, so apply_cost_report runs against THAT — mirroring
         run_request's `apply_cost_report(adapter, job, adapter.normalize(job, ctx, slim_req))`
@@ -871,15 +837,14 @@ class AnthropicClaudeAdapter(BackendAdapter):
         return len(pages) or None
 
     def report_cost(self, job: Job) -> CostReport:
+        """The token counts Anthropic returned, unconverted.
+
+        This used to multiply them by a `_MODEL_PRICE` table whose own comment dated it
+        `accessed 2026-06-24`, and put the product on the response as `cost_usd`.
+        """
         raw = job.raw.payload if job.raw else {}
-        model = raw.get("model") or _DEFAULT_MODEL
         u = raw.get("usage", {})
-        pin, pout = _MODEL_PRICE.get(model, _MODEL_PRICE[_DEFAULT_MODEL])
-        cost = (u.get("input_tokens", 0) / 1e6) * pin + (u.get("output_tokens", 0) / 1e6) * pout
         return CostReport(
             native_unit="token",
             native_quantity=float(u.get("input_tokens", 0) + u.get("output_tokens", 0)),
-            cost_usd=cost,
-            basis=CostBasis.ESTIMATED,
-            billing_target="caller_account",
         )

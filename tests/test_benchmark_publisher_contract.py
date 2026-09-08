@@ -55,7 +55,7 @@ def test_extract_target_builds_a_valid_openreading_request(monkeypatch) -> None:
 
     def capture(source, **kwargs):
         # The real builder, so the shape of every kwarg is checked rather than recorded.
-        captured["request"] = api.build_request(source, kwargs.pop("backend", "auto"), **kwargs)
+        captured["request"] = api.build_request(source, kwargs.pop("backend", None), **kwargs)
         return {"status": {"state": "succeeded"}, "document": {}}
 
     monkeypatch.setattr("openreading.api.run", capture)
@@ -82,7 +82,7 @@ def test_parse_target_leaves_the_backend_sub_operation_unset(monkeypatch) -> Non
     captured: dict[str, object] = {}
 
     def capture(source, **kwargs):
-        captured["request"] = api.build_request(source, kwargs.pop("backend", "auto"), **kwargs)
+        captured["request"] = api.build_request(source, kwargs.pop("backend", None), **kwargs)
         return {"status": {"state": "succeeded"}, "document": {}}
 
     monkeypatch.setattr("openreading.api.run", capture)
@@ -385,7 +385,7 @@ def test_parse_target_asks_for_the_table_shape_the_scorer_reads(monkeypatch) -> 
     captured: dict[str, object] = {}
 
     def capture(source, **kwargs):
-        captured["request"] = api.build_request(source, kwargs.pop("backend", "auto"), **kwargs)
+        captured["request"] = api.build_request(source, kwargs.pop("backend", None), **kwargs)
         return {"status": {"state": "succeeded"}, "document": {}}
 
     monkeypatch.setattr("openreading.api.run", capture)

@@ -3,16 +3,16 @@
 <sub>[Docs home](../README.md) · [← JSON Schemas](../schemas/README.md)</sub>
 
 > **In one sentence.** These tables are what every backend declares about itself: its formats, its
-> variables, its price and its compliance posture.
+> variables and the ceilings it puts on one request.
 
-You want to know which backend can read your file, what key it needs, and whether your policy
-allows it. This page answers all three from the descriptor each backend ships. A backend is one
+You want to know which backend can read your file, what key it needs, and what it can put in a
+response. This page answers all three from the descriptor each backend ships. A backend is one
 parser, such as the local `pymupdf` library or a hosted API. An adapter is the package that wraps
 one backend. Its descriptor is the static record in which the backend declares the formats it
-reads, the environment variables it needs and its compliance posture.
+reads, the environment variables it needs and where it runs.
 
-The five tables under [Catalog](#catalog) cover what each backend reads, needs, promises, charges,
-and can put in a response. You need the package installed with `uv sync --all-extras --dev`, and a
+The five tables under [Catalog](#catalog) cover what each backend reads, needs, where it runs,
+its limits, and what it can put in a response. You need the package installed with `uv sync --all-extras --dev`, and a
 key for any hosted backend you want to call. Local backends such as `pymupdf` and `tesseract` need
 no key.
 
@@ -67,7 +67,7 @@ offline suite is what the CI badge covers. Real vendor calls run only in a manua
 with `uv run openreading backends --check <id>`, which probes the vendor.
 
 Every adapter passes a conformance kit before it ships, which checks bbox geometry, channel
-honesty, cost shape and determinism. Channel honesty means a channel graded `N`, `D` or `X` in
+honesty, usage shape and determinism. Channel honesty means a channel graded `N`, `D` or `X` in
 [the fifth table](#what-each-backend-can-put-in-a-response) behaves that way.
 
 ## Catalog
@@ -78,7 +78,7 @@ from a value of zero. A required env var has `required: true` in the backend's d
 nothing is set.
 
 Source: `src/openreading/adapters/registry.py` (the `BUILTIN_ADAPTERS` mapping) and each
-`make_adapter(id).descriptor` (`credentials_spec`, `config_spec`, `compliance`, `runtime.license`,
+`make_adapter(id).descriptor` (`credentials_spec`, `config_spec`, `type`, `runtime.license`,
 `signup_url`). The install extra is the `pyproject.toml` extra of the same name. The one exception
 is `aws-textract`, whose extra is named `textract`. `scripts/check_extras_parity.py` holds it in
 `EXTRA_NAME_EXCEPTIONS`. Live truth: `uv run
@@ -146,90 +146,78 @@ Two rows read `none` under required env and still fail without a key. `anthropic
 those fields optional. Run either with nothing set and the command exits 3 with a message naming
 the variable.
 
-### What each backend promises about your data
+### Where each backend runs, its license, and where to sign up
 
-The third table gives each backend's compliance posture, license and signup page. A backend's
-compliance posture is the set of claims its descriptor makes about data handling. A BAA (Business
-Associate Agreement) is the contract a vendor signs under HIPAA before it may handle protected
-health information. The `hipaa_baa` column records whether the vendor offers one, never whether
-you signed one. A `require_baa` policy therefore admits a backend on the vendor's published offer,
-which is necessary and not sufficient. Confirm your own executed agreement out of band before you
-send regulated data to a row reading `yes` or `tier_gated`. The license column quotes each
-descriptor's `runtime.license` string as written. In the signup column, none means the backend
-runs locally and has nothing to sign up for.
+The third table gives facts about the code and the account, which are things this repository can
+check. `type` says where the work happens: `oss_library` in this process, `self_hosted_model` on
+hardware you run, `hosted_api` on someone else's. The license column quotes each descriptor's
+`runtime.license` string as written. In the signup column, none means the backend runs on your own
+machine and has nothing to sign up for.
 
-| id | `hipaa_baa` | `trains_on_customer_data` | `runs_fully_local` | license | signup |
-|---|---|---|---|---|---|
-| `anthropic-claude` | yes | no | false | proprietary | https://console.anthropic.com |
-| `aws-textract` | yes | opt_out | false | proprietary | https://aws.amazon.com/textract/ |
-| `azure-document-intelligence` | yes | no | false | proprietary | https://azure.microsoft.com/products/ai-services/ai-document-intelligence |
-| `chunkr` | tier_gated | opt_out | false | proprietary (AGPL-3.0 self-host available) | https://chunkr.ai |
-| `docling` | na_local | na_local | true | MIT | none |
-| `google-document-ai` | yes | no | false | proprietary | https://cloud.google.com/document-ai |
-| `google-gemini` | no | unverified | false | proprietary | https://aistudio.google.com/apikey |
-| `mistral-ocr` | no | unverified | false | proprietary | https://console.mistral.ai/api-keys |
-| `nuextract` | no | unverified | false | proprietary (open-weight NuExtract 2.0 [MIT 2B/8B] is self-hostable via vLLM, but its wire protocol differs and would need a separate adapter) | https://nuextract.ai |
-| `open-ocr` | no | unverified | false | proprietary | https://open-ocr.com |
-| `pulse` | tier_gated | unverified | false | proprietary | https://www.runpulse.com |
-| `pymupdf` | na_local | na_local | true | AGPL-3.0 | none |
-| `qwen-vl` | na_local | na_local | true | Apache-2.0 (Qwen3-VL; Qwen2.5-VL per-size) | none |
-| `reducto` | tier_gated | no | false | proprietary | https://platform.reducto.ai |
-| `tesseract` | na_local | na_local | true | Apache-2.0 | none |
+| id | `type` | license | signup |
+|---|---|---|---|
+| `anthropic-claude` | hosted_api | proprietary | https://console.anthropic.com |
+| `aws-textract` | hosted_api | proprietary | https://aws.amazon.com/textract/ |
+| `azure-document-intelligence` | hosted_api | proprietary | https://azure.microsoft.com/products/ai-services/ai-document-intelligence |
+| `chunkr` | hosted_api | proprietary (AGPL-3.0 self-host available) | https://chunkr.ai |
+| `docling` | oss_library | MIT | none |
+| `google-document-ai` | hosted_api | proprietary | https://cloud.google.com/document-ai |
+| `google-gemini` | hosted_api | proprietary | https://aistudio.google.com/apikey |
+| `mistral-ocr` | hosted_api | proprietary | https://console.mistral.ai/api-keys |
+| `nuextract` | hosted_api | proprietary (open-weight NuExtract 2.0 [MIT 2B/8B] self-hostable via vLLM — different wire protocol, separate adapter) | https://nuextract.ai |
+| `open-ocr` | hosted_api | proprietary | https://open-ocr.com |
+| `pulse` | hosted_api | proprietary | https://www.runpulse.com |
+| `pymupdf` | oss_library | AGPL-3.0 | none |
+| `qwen-vl` | self_hosted_model | Apache-2.0 (Qwen3-VL; Qwen2.5-VL per-size) | none |
+| `reducto` | hosted_api | proprietary | https://platform.reducto.ai |
+| `tesseract` | oss_library | Apache-2.0 | none |
 
-### Where those compliance claims come from
+Source: `AdapterDescriptor.type`, `RuntimeProfile.license` and `signup_url` in
+`src/openreading/types/descriptor.py`. Live truth: `uv run python -c "from
+openreading.adapters.registry import make_adapter, BUILTIN_ADAPTERS; [print(i,
+make_adapter(i).descriptor.to_schema_dict()['runtime'].get('license')) for i in BUILTIN_ADAPTERS]"`.
 
-The compliance cells in the third table are vendor claims, and each descriptor records the pages a
-maintainer read. Each descriptor carries a `sources` list whose entries are `{url, accessed,
-supports}`. `accessed` is the day a maintainer read the page, and `supports` names what that page
-established. Sources are recorded per descriptor, not per compliance field, so a cell can have
-no source that speaks to it. Six `hipaa_baa` cells cite no source for that claim today. Two of them
-read `tier_gated` (`chunkr` and `pulse`) and four read `no` (`google-gemini`, `mistral-ocr`,
-`nuextract` and `open-ocr`). Filter a backend's sources to see what they say about a BAA and when
-they were read.
+### What each descriptor no longer claims about your data
+
+There used to be a fourth table here, and a `compliance` block on every descriptor behind it:
+twelve fields per backend, 180 claims in all, saying whether each vendor signs a business associate
+agreement, trains on customer data, which regions it offers, and how long it retains a document.
+The router filtered on them.
+
+Every one was a claim about a company this project does not control, published on a page that
+changes without notice, with nothing here able to detect drift and no way for you to tell a fact
+verified last week from one copied at import time. Being wrong did not fail loudly: it routed a
+document to a backend the operator believed was excluded, and the run succeeded. So the block is
+gone, and so is the filter. **Core holds no fact it cannot verify, and a constraint core cannot
+check is one it must not appear to enforce.**
+
+What replaces it is your own conclusion, written down: `policy.backends` is the list of backends
+this deployment permits, in the order you want them tried, and core honours it exactly. Read each
+vendor's own terms, confirm your own executed agreements out of band, and put the survivors in that
+list. [Routing and keys](../router/README.md) has the mechanics.
+
+A descriptor still carries `sources`, a list of `{url, accessed, supports}` entries naming the
+pages a maintainer read. That is documentation with a date on it rather than a routing input, which
+is the only honest form for a fact about someone else:
 
 ```bash
 uv run python -c "
 from openreading.adapters.registry import make_adapter
 for s in make_adapter('azure-document-intelligence').descriptor.to_schema_dict()['sources']:
     print(s['accessed'], s['url'], s['supports'])
-" | grep -iE "baa|hipaa"
+"
 ```
 
-```text
-2026-07-21 https://learn.microsoft.com/azure/ai-services/document-intelligence/ AnalyzeResult shape, LRO, pricing, HIPAA BAA
-```
+### The ceilings on one request
 
-Change the id for any other backend, and keep the filter so the output stays on the BAA claim.
-Some descriptors carry further citations that this filter hides, and every source URL among them is
-public. A `supports` line may open with a review id such as `BL-166`, which
-[`AGENTS.md`](../../../AGENTS.md) explains. Vendor terms move after the date in that column, and
-nothing here re-reads them on a schedule. The table is where your own verification starts rather
-than where it ends. A cell that no longer matches its source is a reportable defect under
-[`SECURITY.md`](../../../SECURITY.md), which names a lying descriptor field as a compliance-filter
-bypass.
-
-Descriptors record four more compliance facts that no policy key gates: `soc2`, `gdpr`, `pci` and
-`phi_path_constraints`. A fifth field, `data_retention`, is read by nothing either. It restates in
-prose what the enforced `max_retention_hours` holds as a number, so it is not one of the four. Print
-them with `make_adapter(id).descriptor.to_schema_dict()['compliance']` and use them for your own
-reporting, not for routing. The router guide lists that gap under
-[Not built yet](../router/README.md#not-built-yet).
-
-### What each backend charges, and the ceilings on one request
-
-Price is the widest difference between these backends, so settle it before you tune anything else.
-The fourth table gives each backend's published rate and the limits it puts on one request. A
-page-equivalent is the common unit this project uses to compare vendors that bill in different
-things. A vendor that charges per credit or per token declares what its rate works out to for a
-single page. That declaration is a range, and `usd_per_page_equiv_low` and
-`usd_per_page_equiv_high` are its two ends. Both numbers are per page and never per document, so a
-twelve-page document costs twelve times the rate in this table.
-
-The `basis` column says how far to trust that pair. `billed` means the response carries the charge
-the vendor made. `estimated` means the adapter projects the rate from a published price
-list. `infra_only` means the backend runs on hardware you already pay for, so the response omits
-`cost_usd` rather than inventing a number. `unknown` means the vendor publishes no rate at all, and
-the adapter declines to guess one.
+The fourth table gives the limits each backend puts on one request. It used to open with a price:
+each descriptor carried `usd_per_page_equiv_low`/`_high` and a `basis`, and this table printed
+them for all fifteen backends. Those numbers were a rate card this project had read off vendor
+pages and typed into Python, unverifiable from here and silently wrong the day a vendor repriced.
+They are gone, along with `usage.cost_usd`, the `cost/doc` leaderboard column and the spending
+preflight built on them. Price a run from your own provider invoice,
+which carries your tier and your negotiated rate. What core reports is what a backend consumed:
+`usage.pages_processed`, `credits`, `input_tokens`, `output_tokens`.
 
 The three limit columns say how much work one request may carry. Max pages per request is the page
 count the vendor accepts, quoted from the descriptor as free text. Nothing in the router or the
@@ -239,42 +227,36 @@ in
 [walkthrough step 2](../batch/README.md#2-a-single-file-a-glob-several-files---jobs-the-size-guard-a-strategy).
 Native batch max items is how many documents the vendor's own bulk endpoint accepts in one job.
 
-| id | low $/page-equiv | high $/page-equiv | `basis` | max pages per request | batch concurrency cap | native batch max items |
-|---|---|---|---|---|---|---|
-| `anthropic-claude` | 0.01 | 0.08 | estimated | 100 (<1M ctx) / 600 (1M ctx) | none | 100000 |
-| `aws-textract` | 0.0015 | 0.07 | estimated | 1 sync / 3000 async | none | none |
-| `azure-document-intelligence` | 0.0006 | 0.03 | estimated | 2000 | none | none |
-| `chunkr` | 0.008 | 0.03 | estimated | 2000 (soft) | none | none |
-| `docling` | 0.0 | none | infra_only | none | none | none |
-| `google-document-ai` | 0.0006 | 0.03 | estimated | 15 sync / 500 batch | none | none |
-| `google-gemini` | none | none | unknown | 1000 | none | none |
-| `mistral-ocr` | 0.004 | 0.005 | estimated | none | none | none |
-| `nuextract` | none | none | unknown | none | none | none |
-| `open-ocr` | 0.0005 | none | billed | engine-dependent: 200 (tesseract) / 5-20 (vision LLMs) | none | none |
-| `pulse` | 0.015 | 0.02 | estimated | none | none | none |
-| `pymupdf` | 0.0 | none | infra_only | unbounded | none | none |
-| `qwen-vl` | 0.0 | none | infra_only | none | none | none |
-| `reducto` | 0.015 | 0.06 | billed | unbounded (async) | none | none |
-| `tesseract` | 0.0 | none | infra_only | none | 4 | none |
+| id | max pages per request | batch concurrency cap | native batch max items |
+|---|---|---|---|
+| `anthropic-claude` | 100 (<1M ctx) / 600 (1M ctx) | none | 100000 |
+| `aws-textract` | 1 sync / 3000 async | none | none |
+| `azure-document-intelligence` | 2000 | none | none |
+| `chunkr` | 2000 (soft) | none | none |
+| `docling` | none | none | none |
+| `google-document-ai` | 15 sync / 500 batch | none | none |
+| `google-gemini` | 1000 | none | none |
+| `mistral-ocr` | none | none | none |
+| `nuextract` | none | none | none |
+| `open-ocr` | engine-dependent: 200 (tesseract) / 5-20 (vision LLMs) | none | none |
+| `pulse` | none | none | none |
+| `pymupdf` | unbounded | none | none |
+| `qwen-vl` | none | none | none |
+| `reducto` | unbounded (async) | none | none |
+| `tesseract` | none | 4 | none |
 
-Source: `Cost`, `Capabilities.max_pages_per_request` and `BatchSupport` in
+Source: `Capabilities.max_pages_per_request` and `BatchSupport` in
 `src/openreading/types/descriptor.py`, read through `make_adapter(id).descriptor`. Live truth: `uv
 run python -c "from openreading.adapters.registry import make_adapter, BUILTIN_ADAPTERS; [print(i,
-make_adapter(i).descriptor.to_schema_dict()['cost']) for i in BUILTIN_ADAPTERS]"`, with
-`.get('batch')` and `['capabilities'].get('max_pages_per_request')` for the other columns, because
-`to_schema_dict()` drops a field the descriptor leaves unset. If the table and that output
-disagree, the output is right and the table needs fixing.
+make_adapter(i).descriptor.to_schema_dict()['capabilities'].get('max_pages_per_request')) for i in
+BUILTIN_ADAPTERS]"`, with `.get('batch')` for the other two columns, because `to_schema_dict()`
+drops a field the descriptor leaves unset. If the table and that output disagree, the output is
+right and the table needs fixing.
 
-A corpus turns that spread into a decision. Two hundred thousand documents averaging twelve pages
-is 2.4 million page-equivalents. That corpus bills $1,200 at `open-ocr`'s low end and $24,000 at
-`anthropic-claude`'s. Comparing published floors, the factor is 20. At `anthropic-claude`'s high
-end the same corpus bills $192,000, so the full published spread is a factor of 160. Every figure
-here is a published rate rather than a quote you negotiated. Treat the low and high columns as a
-range, not as a price. Every cost estimate elsewhere in this project is built from these two
-columns. The `cost/doc` figure that `openreading leaderboard` prints is one of them, and it
-multiplies the low end alone by an assumed page count. A corpus that size runs in shards rather
-than one invocation. A single run holds every response in memory and has no resume of its own.
-[Sizing a large run](../batch/README.md#sizing-a-large-run) gives the ceiling and the shard size.
+A corpus of two hundred thousand documents averaging twelve pages is 2.4 million pages of work,
+and no run of that size belongs in one invocation. A single run holds every response in memory and
+has no resume of its own. [Sizing a large run](../batch/README.md#sizing-a-large-run) gives the
+ceiling and the shard size.
 
 ### What each backend can put in a response
 
@@ -315,25 +297,6 @@ openreading.adapters.registry import make_adapter, BUILTIN_ADAPTERS; [print(i,
 make_adapter(i).descriptor.to_schema_dict()['output']['channels']) for i in BUILTIN_ADAPTERS]"`. If
 the table and that output disagree, the output is right and the table needs fixing.
 
-## Reading the compliance columns
-
-These rules decide whether your policy admits a backend. A policy is the `policy:` block of your
-`openreading.yaml`, a short list of compliance requirements the router enforces before it picks a
-backend. The rules were checked with `printf 'version: 1\npolicy:\n  require_baa: true\n
-no_train_on_data: true\n' > openreading.yaml` and `uv run openreading route sample.pdf`.
-
-- `hipaa_baa: tier_gated` is dropped under `require_baa` unless the id is in `baa_tier_confirmed`
-  (drop code `no_baa`). `no` is always dropped.
-- `trains_on_customer_data: opt_out` is dropped under `no_train_on_data` unless the id is in
-  `train_optout_confirmed` (drop code `trains_on_data`).
-- `unverified` is dropped unless your policy sets `allow_unverified_compliance`. The default is to
-  drop, so a vendor that said nothing is treated as a no rather than assumed safe.
-- `na_local` backends pass every column.
-- Your policy sets the eligible set, and three of its keys widen it deliberately. Nothing after the
-  policy widens it again, so no request, strategy, fallback or resume can readmit a dropped
-  backend. The three keys are the ones in the bullets above. The router guide's
-  [How it decides](../router/README.md#how-it-decides) tabulates every drop code alongside them.
-
 ## Override form
 
 Set `OPENREADING_<SLUG>_<KEY>` and it wins over the vendor's own variable name. `<SLUG>` is the id
@@ -343,8 +306,8 @@ example, `OPENREADING_REDUCTO_API_KEY` beats `REDUCTO_API_KEY`. Source: `credent
 
 ## Not built yet
 
-- Nothing reads `capabilities.max_pages_per_request`. A document over the vendor's ceiling fails at
-  the vendor rather than at the router's stage 2. Reproduce it with
+- Nothing reads `capabilities.max_pages_per_request`. A document over the vendor's ceiling fails
+  at the vendor rather than before the call. Reproduce it with
   `grep -rn max_pages_per_request src/openreading/router src/openreading/batch`, which prints
   nothing.
 - `framework_loader` is one of the four backend types the schemas allow, and no adapter declares
@@ -358,8 +321,8 @@ This section is the bookkeeping a backend owes this page, and it is not the work
 Once the adapter itself works, register it in `BUILTIN_ADAPTERS`. Add one row to each of the five
 tables here from its descriptor. Add a block to `.env.example`. Add the extra to `pyproject.toml`.
 `scripts/check_extras_parity.py` fails until the extra exists. It also fails until a slug that
-differs from its extra name is in `EXTRA_NAME_EXCEPTIONS`. A changed compliance value, format, env
-var, rate, limit or channel grade is one cell here. When a "Not built yet" line stops being true,
+differs from its extra name is in `EXTRA_NAME_EXCEPTIONS`. A changed format, env var, license,
+limit or channel grade is one cell here. When a "Not built yet" line stops being true,
 delete it. The full table of what to update for each kind of change is under *Where a change gets
 documented* in [`AGENTS.md`](../../../AGENTS.md).
 
@@ -368,9 +331,8 @@ documented* in [`AGENTS.md`](../../../AGENTS.md).
 - [Docs home](../README.md)
 - [`.env.example`](../../../.env.example) lists every var with its signup URL.
 - `uv run python -m pydoc openreading.credentials` prints the precedence and the `.env` rules.
-- [Routing and keys](../router/README.md#how-it-decides) tabulates every drop code with the policy
-  key that triggers it. `uv run python -m pydoc openreading.router.compliance` prints the stage-1
-  gate itself, meaning the constraints it reads and the attestations it honours.
+- [Routing and keys](../router/README.md#how-it-decides) states the three selection rules.
+  `uv run python -m pydoc openreading.router.router` prints them and the law behind them.
 - `uv run python -m pydoc openreading.adapters` prints the runbook for adding a backend, and
   [`scripts/new_adapter.py`](../../../scripts/new_adapter.py) scaffolds it.
 - [JSON Schemas](../schemas/README.md) describes the response every backend returns.

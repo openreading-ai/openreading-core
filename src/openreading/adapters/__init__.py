@@ -33,8 +33,8 @@ one of the seven shapes the picker table below groups the templates into
 (`hosted_api`, `hosted_sync_async`, `hosted_webhook`, `hosted_aggregator`,
 `self_hosted_endpoint`, `cloud_sdk`, `in_process`; e.g. `--template chunkr --type hosted_api`);
 a template/type pair outside that set is declined, never improvised -- fall back to the manual
-walkthrough starting at §1. Every honesty-graded field the generator writes (capabilities,
-channels, cost basis, compliance) takes its SAFEST value regardless of the template's own
+walkthrough starting at §1. Every honesty-graded capability and channel field takes its safest
+value regardless of the template's own
 researched descriptor, because a scaffold has verified nothing; every remaining gap carries a
 grep-able scaffold marker (the literal is `MARKER` in `tests/test_scaffold_sentinel.py`, not
 repeated here on purpose: that test scans this whole package and fails `make verify` on any line
@@ -65,8 +65,8 @@ Template picker -- copy the closest shape for your target API:
     hosted API, webhook with signature verification (svix)  reducto/
     hosted API, temp-project flow, token usage, PARTIAL on  nuextract/
       validation error
-    hosted aggregator, INLINE+POLL+WEBHOOK, actual-USD      open_ocr/
-      billing
+    hosted aggregator, INLINE+POLL+WEBHOOK, reports a real   open_ocr/
+      debit in its own payload (never on `usage`)
     hosted API with a native multi-document batch endpoint  anthropic_claude/ (§3 Native batch)
     self-hosted model behind an OpenAI-compatible endpoint  qwen_vl/
     self-hosted container speaking HTTP                     docling/
@@ -90,10 +90,9 @@ Pin down ALL ten; when a fact is unknown, §3 says how to encode "unknown" hones
  5. Input intake: URL? base64 bytes? multipart upload? (drives `accepts_url` + `_input` mapping).
  6. Output channels actually produced: markdown / text / blocks / bbox / per-block confidence /
     typed fields / table cells -- this drives the N/D/X grading.
- 7. Pricing + usage counters the response reports (tokens, pages, credits, actual USD).
- 8. Compliance posture: BAA? SOC2? explicit no-train statement? retention? A claim that cannot
-    be verified from a primary source -> encode fail-closed (§3).
- 9. Limits: max pages, max file size, rate limits, retry semantics.
+ 7. Usage counters the response reports (tokens, pages, credits). Counters only: core carries
+    no prices at all, so nothing here reads a rate card.
+ 8. Limits: max pages, max file size, rate limits, retry semantics.
 10. Source URLs + access date -- required in `descriptor.sources`.
 
 2. Complete file checklist
@@ -122,9 +121,8 @@ Files to EDIT -- each guarded by a test that fails if you forget it:
     openreading.credentials         one line in the module docstring's "Per-backend reference"
                                     (a hand-written list; the generator prints a HAND reminder
                                     and does not edit it). Guard: reviewer eyes.
-    src/openreading/adapters/README.md  one row in each of the five Catalog tables (input
-                                    formats, install extra and env, compliance, cost and
-                                    limits, response channels), every value copied from the
+    src/openreading/adapters/README.md  one row in each Catalog table (install extra and env,
+                                    request limits, response channels), every value copied from the
                                     descriptor, plus the pasted `openreading backends` table
                                     re-run. Guard: reviewer eyes.
     tests/test_descriptor_specs.py  `EXPECTED_CRED_KEYS["<slug>"]`,
@@ -140,8 +138,8 @@ Files to EDIT -- each guarded by a test that fails if you forget it:
 Module docstring (mandatory, dense) -- the design record; a future agent must be able to
 re-derive every descriptor value from it. Record: what the backend is + which ops; the exact
 flow (endpoints, poll target, status vocabulary); channel posture (what is emitted, what is X
-and why); pricing/usage mapping; credential/env conventions; deliberate non-choices ("the API's
-X mode is NOT used because ..."); compliance fail-closed notes; and
+and why); usage mapping; credential/env conventions; deliberate non-choices ("the API's
+X mode is NOT used because ..."); and
 `Sources: <urls> (accessed YYYY-MM-DD)`.
 
 Client: a `Protocol` + a real httpx class.
@@ -178,12 +176,9 @@ Client: a `Protocol` + a real httpx class.
   `table_cells` only when `outputs.tables == "cells"`). Conformance enforces both directions and
   reads `field` as the primary signal -- the channel name spelled as whole words in code/message
   is only a fallback, so `field` is what you set.
-- Cost: `basis="billed"` only if the response carries the actual charge; `"estimated"` with
-  `usd_per_page_equiv_low/high` when projecting from a public price; `"unknown"` (and
-  `cost_usd=None` in `report_cost`) when pricing is not public -- NEVER invent a rate.
-- Compliance fails closed: no primary-source no-train statement ->
-  `trains_on_customer_data="unverified"`; unverified certs -> `False`; BAA only if documented.
-  The router drops fail-closed backends under strict policies -- that is the point.
+- Usage: `report_cost` returns the counter the vendor reported, in the vendor's own unit. There
+  is no price to declare and no `cost` block on a descriptor. Both left with the per-vendor rate
+  tables core could not verify.
 - `credentials_spec` / `config_spec`: every key your code reads from `ctx.credentials.values` /
   `ctx.runtime`, with `env=[...]` in precedence order (service-native var first, vendor-SDK
   aliases after). Secrets stay `secret=True`; endpoints/regions/engine-ids are ConfigFields
@@ -192,12 +187,28 @@ Client: a `Protocol` + a real httpx class.
   a boto3 profile) may declare an empty `credentials_spec`. The env broker handles the
   `OPENREADING_<SLUG>_<KEY>` override form automatically -- do not hand-roll env reading.
   DECISIONS D-v2-6.1a: the kit demands a spec whenever the backend is PROVISIONED (`auth != none`
-  or an endpoint/container `byo_mode`), not on `runs_fully_local` -- docling/qwen-vl are
-  compliance-local yet still need an endpoint URL; the compliance flag and "needs env config"
-  are orthogonal. D-v2-6.1b: IAM keypairs and ADC are `byo_mode="cloud_credential"`, not
+  or an endpoint/container `byo_mode`) -- docling and qwen-vl run on your own hardware and still
+  need an endpoint URL, so "runs locally" and "needs env config" are orthogonal. D-v2-6.1b: IAM keypairs and ADC are `byo_mode="cloud_credential"`, not
   `api_key`; `byo_mode` is a coarse hint, `credentials_spec` is the per-key truth.
 - `signup_url` (mandatory for `hosted_api`), `accepts_url` (True only for native URL intake),
   `live_gate_env` (the vars gating the live test), `sources` (with access dates).
+- **A vendor claim is documentation, and core never branches on one.** `capabilities.*`,
+  `runtime.*`, `input_formats`, `max_pages_per_request`, `languages`, `idempotency_supported`,
+  `cancel_supported` and `router.normalization_difficulty` describe a company this project does
+  not control. `tests/test_descriptor_is_documentation.py` asserts each is read at zero sites, so
+  a change that starts branching on one fails `make verify` and has to argue for it. Fill them in
+  HONESTLY anyway: a person choosing a backend reads them, and a wrong entry misinforms that
+  person even though it cannot mis-route a document. See `openreading.types.descriptor` for which
+  fields ARE load-bearing and why those are safe to be.
+- **Keeping a claim current.** Every one carries its evidence in `sources`: `{url, accessed,
+  supports}`, the page a maintainer read, the day they read it, and what it established. Refresh a
+  backend by re-reading the pages its `sources` names, updating the cells the pages moved, and
+  setting `accessed` to today in the same commit -- never bump the date without re-reading, which
+  turns a citation into a claim about a claim. Print one backend's citations with
+  `uv run python -c "from openreading.adapters.registry import make_adapter; [print(s) for s in
+  make_adapter('reducto').descriptor.to_schema_dict()['sources']]"`. The `accessed` date is the
+  whole mechanism: it lets a reader judge staleness themselves rather than trusting the cell, and
+  it is why a stale descriptor is a documentation defect here and not a correctness one.
 - `protocol_version`: required, no default, and `2` is the ONLY value a new built-in may declare.
   Every `BUILTIN_ADAPTERS` entry is checked unconditionally
   (`tests/test_protocol_version_guard.py`, no hardcoded allow-list), so an adapter registered at
@@ -303,9 +314,9 @@ The 8 methods -- patterns
   `ResponseState.PARTIAL` with `status.error`, not a raise.
 - `report_cost(job)`: thin projection of `job.raw` usage counters. The router calls it right
   after `normalize()` and merges the result into `response.usage` (filling only what normalize
-  left unset), so this is what a caller sees as `usage.cost_usd` -- it must not raise, and it
-  must not invent a rate. `billing_target` is `"caller_account"` (BYO key) or `"caller_infra"`
-  (local/self-hosted); `"openreading"` is forbidden and conformance rejects it. Native-batch
+  left unset), so this is what a caller sees as `usage` -- it must not raise, and it must
+  report only what the vendor said. A rate applied to a counter is a number core cannot verify
+  and does not carry. Native-batch
   exception: the router-calls-it-right-after-normalize story is the single-item path only -- a
   `normalize_many` may need to call `openreading.router.cost.apply_cost_report` directly per
   item, since the batch-level `job` it receives has no top-level `usage` to project from.
@@ -411,7 +422,7 @@ Hard rules, all enforceable in review:
 - Never accept an `OpenReadingRequest`. The signature has no document parameter on purpose, so a
   probe can never become a data path; and no `router`/`strategies`/`comparison`/`evals`/`batch`
   module imports `openreading.liveness` (pinned by a test), so a pulse can never widen the
-  compliance-eligible set (D-v7-6).
+  resolved backend set (D-v7-6).
 - Tests: offline against an injected fake client, live against the real thing. A probe test in
   the offline suite that opens a socket is a defect -- `make verify` must stay network-free.
   Copy `tests/test_liveness.py`'s adapter-probe tests for the offline half, and add one
@@ -539,7 +550,7 @@ does:
 - Copy from `anthropic_claude/` (Message Batches API -- `submit_many`/`poll`/`normalize_many`),
   the one adapter implementing this today and this shape's row in the §0 picker.
 - Dispatch rule (`openreading.api._native_adapter`; full contract in the `openreading.batch`
-  module docstring): native iff the backend is directly named (not `auto`, not a strategy),
+  module docstring): native iff the backend is directly named (not unnamed, not a strategy),
   `descriptor.batch.native` is truthy, the adapter implements the Protocol, and the live item
   count is within `batch.max_items`; otherwise platform fan-out. Native dispatch defaults its
   deadline to `DEFAULT_NATIVE_BATCH_DEADLINE_MS` (1h), not the 120s single-document default.
@@ -582,7 +593,7 @@ captures the first time someone runs `make verify-live` with the key set and
 - One `@pytest.mark.live` test using `tests/live_helpers.py` (`skip_unless_creds(slug)` +
   `run_live(...)`) -- skips cleanly without the key.
 
-`tests/test_<pkg>_faults.py` (branch coverage -- the 91% coverage floor is a gate). Cover every
+`tests/test_<pkg>_faults.py` (branch coverage -- the 94% coverage floor is a gate). Cover every
 branch the happy path skips. The standard set:
 - input variants: each accepted intake + each rejected one
   (`backend_code == "unsupported_input"`)
@@ -610,7 +621,7 @@ mocking libraries, no respx; plain classes implementing the Protocol.
 ------------------------------
     uv run pytest tests/test_<pkg>.py tests/test_<pkg>_faults.py -p no:cov
     uv run pytest tests/test_descriptor_specs.py tests/test_server.py -p no:cov
-    make verify            # ruff (check + format!), pyright, full suite w/ 91% coverage floor,
+    make verify            # ruff (check + format!), pyright, full suite w/ 94% coverage floor,
                            # schema-validate, CLI smoke, strategy smoke
     uv run python -m openreading.cli backends   # slug listed with the right MISSING env hint
 
@@ -619,19 +630,18 @@ coverage dip (add fault tests, never lower the floor), a descriptor schema viola
 
 6. Definition of done
 ---------------------
-- [ ] `make verify` green (includes the conformance call and the 91% coverage floor)
+- [ ] `make verify` green (includes the conformance call and the 94% coverage floor)
 - [ ] `protocol_version=2` declared, and `adapter_factory=` (R1/R2/R3) actually run green --
       not assumed from the shape of the code
 - [ ] every file in the §2 checklist created/edited
 - [ ] descriptor values traceable to the module docstring's primary sources (with dates)
-- [ ] compliance encoded fail-closed for anything unverified
 - [ ] no fabricated channel anywhere; X-channels warn when requested
 - [ ] live test skips cleanly without the key; runs against the real API with it
 - [ ] liveness: either a real probe (free, non-billing, declared + tested offline and live) or
       NO `liveness` block at all -- never a billed call, and never a guessed endpoint URL
 - [ ] `src/openreading/adapters/README.md` catalog rows added and the pasted `backends` table
       re-run
-- [ ] commit message records flow, channel posture, cost basis, and deliberate non-choices
+- [ ] commit message records flow, channel posture, and deliberate non-choices
 
 Known-honest caveat to state in the PR/commit: the `_Httpx*` real-network client is excluded
 from offline coverage by design; the first `make verify-live` run with real keys validates it

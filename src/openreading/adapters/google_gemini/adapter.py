@@ -22,10 +22,9 @@ booleans, arrays, or nested objects.
 
 Pricing is deliberately ``unknown``: usage preserves the API's reported input/output token counts,
 but this integration does not freeze a model-price table whose identifiers and rates can change.
-No dollar value is invented. Compliance also fails closed. Google documents materially different
-data-use posture between free and paid service tiers, while the adapter cannot observe the tier;
-``trains_on_customer_data`` is therefore ``unverified`` and unsupported public compliance claims
-remain false. This implementation claims neither vendor cancellation nor idempotency, native
+No dollar value is invented. Google documents materially different data-use terms between free
+and paid service tiers, while the adapter cannot observe the tier. The caller decides whether the
+configured account is suitable. This implementation claims neither vendor cancellation nor idempotency, native
 batching, liveness probing, geometry, or confidence. Capability grades remain ``claimed`` until a
 maintainer runs the keyed live test; no live account was available while this module was authored.
 
@@ -54,9 +53,7 @@ from openreading.types.cost import CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     ConfigField,
-    Cost,
     CredentialField,
     Output,
     OutputChannels,
@@ -68,7 +65,6 @@ from openreading.types.descriptor import (
 from openreading.types.enums import (
     BackendType,
     ChannelGrade,
-    CostBasis,
     JobState,
     OutputParadigm,
     ResponseState,
@@ -166,9 +162,7 @@ def _descriptor() -> AdapterDescriptor:
         protocol_version=2,
         adapter_impl="http",
         operations=["parse", "extract"],
-        provisioning=Provisioning(
-            byo_mode=["api_key"], auth="api_key", billing_target="caller_account"
-        ),
+        provisioning=Provisioning(byo_mode=["api_key"], auth="api_key"),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(
             ocr="claimed",
@@ -183,14 +177,6 @@ def _descriptor() -> AdapterDescriptor:
             input_formats=["pdf"],
             max_pages_per_request=1000,
             max_file_size="50 MB",
-        ),
-        cost=Cost(native_unit="token", basis="unknown", lossiness="page-def"),
-        compliance=ComplianceProfile(
-            hipaa_baa="no",
-            soc2=False,
-            gdpr=False,
-            trains_on_customer_data="unverified",
-            runs_fully_local=False,
         ),
         runtime=RuntimeProfile(
             offline_capable=False,
@@ -213,8 +199,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="medium",
-            integration_priority="P1",
-            priority_reason="General document understanding and schema-constrained extraction.",
         ),
         credentials_spec=[
             CredentialField(
@@ -305,7 +289,15 @@ class GoogleGeminiAdapter(BackendAdapter):
     def _document_input(self, req: OpenReadingRequest) -> tuple[dict[str, Any], int | None]:
         """The Interactions document part plus the PDF page count (None when unknowable)."""
         document = req.document
-        mime_type = document.mime_type or "application/pdf"
+        # No PDF default: `openreading.derive.mime` already answered, and if it answered None
+        # then core does not know what these bytes are and must not tell Gemini they are a PDF.
+        mime_type = document.mime_type
+        if not mime_type:
+            raise TerminalError(
+                "Gemini needs a media type and core could not identify this document; "
+                "pass document.mime_type explicitly",
+                backend_code="unsupported_input",
+            )
         # The Interactions `document` part understands PDF natively and accepts text types as
         # plain text; an image or Office file posted as a document part is a vendor 400 that
         # would surface as an opaque `http_400`, so refuse it here in the adapter's own taxonomy.
@@ -636,10 +628,4 @@ class GoogleGeminiAdapter(BackendAdapter):
             (self._token_count(usage, "total_input_tokens") or 0)
             + (self._token_count(usage, "total_output_tokens") or 0)
         )
-        return CostReport(
-            native_unit="token",
-            native_quantity=quantity,
-            cost_usd=None,
-            basis=CostBasis.UNKNOWN,
-            billing_target="caller_account",
-        )
+        return CostReport(native_unit="token", native_quantity=quantity)

@@ -7,13 +7,9 @@ markdown description for pictures). Extract returns three parallel trees: result
 citations, and metrics (per-leaf confidence rating) — flattened into typed_fields here.
 
 BYO API key (Authorization header; CHUNKR_API_KEY). Also self-hostable (AGPL, Docker) with the
-identical API — point CHUNKR_BASE_URL at your container. Credit-based pricing. The descriptor
-estimates $0.008 to $0.03 per page-equivalent, and `report_cost` projects $0.01 per page until a
-live run refines it.
-Compliance: BAA is enterprise-tier (hipaa_baa=tier_gated, so a require_baa policy drops Chunkr
-unless the operator confirms it via `baa_tier_confirmed`); the no-train guarantee is scoped to
-Scale-tier+ so it is modelled as opt_out (drops under a no-train policy unless the operator
-confirms it). Sources: https://docs.chunkr.ai/api-references/tasks/{create-parse,create-extract}-task
+identical API — point CHUNKR_BASE_URL at your container. Chunkr meters credits, and `report_cost`
+forwards the page count its `output_usage` reported. Sources:
+https://docs.chunkr.ai/api-references/tasks/{create-parse,create-extract}-task
 and .../features/parse/outputs (accessed 2026-07-21).
 """
 
@@ -32,13 +28,11 @@ from openreading.derive import (
     table_to_text,
 )
 from openreading.types.blocks import Block, Chunk, Citation, Table, TypedField
-from openreading.types.cost import CostBasis, CostReport
+from openreading.types.cost import CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     ConfigField,
-    Cost,
     CredentialField,
     Output,
     OutputChannels,
@@ -203,9 +197,7 @@ def _descriptor() -> AdapterDescriptor:
         protocol_version=2,
         adapter_impl="http",
         operations=["parse", "extract"],
-        provisioning=Provisioning(
-            byo_mode=["api_key", "container"], auth="api_key", billing_target="caller_account"
-        ),
+        provisioning=Provisioning(byo_mode=["api_key", "container"], auth="api_key"),
         wait_modes=[WaitMode.POLL, WaitMode.WEBHOOK],
         capabilities=Capabilities(
             ocr="verified",
@@ -219,23 +211,6 @@ def _descriptor() -> AdapterDescriptor:
             vlm_based="verified",
             input_formats=["pdf", "docx", "pptx", "xlsx", "png", "jpg", "tiff", "webp", "html"],
             max_pages_per_request="2000 (soft)",
-        ),
-        cost=Cost(
-            native_unit="credit",
-            basis="estimated",
-            usd_per_page_equiv_low=0.008,
-            usd_per_page_equiv_high=0.03,
-            lossiness="credit",
-        ),
-        compliance=ComplianceProfile(
-            hipaa_baa="tier_gated",  # BAA is an Enterprise-tier feature
-            soc2="claimed",  # SOC 2 Type I & II audits in progress (cert-complete UNVERIFIED)
-            gdpr=False,  # DPA offered at Enterprise; no explicit statement (UNVERIFIED → not claimed)
-            trains_on_customer_data="opt_out",  # no-train guaranteed Scale-tier+ only → confirm to use
-            train_opt_out_precondition="scale_tier_or_above_no_train_guarantee",
-            data_region_options=["us"],
-            data_retention="per-task expires_in → permanent delete; TLS + AES-256 at rest",
-            runs_fully_local=False,
         ),
         runtime=RuntimeProfile(
             offline_capable=False,
@@ -257,9 +232,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="medium",
-            integration_priority="P0",
-            priority_reason="One adapter covers a hosted RAG-grade backend AND the offline/compliance "
-            "tier (identical API self-hosted, AGPL).",
         ),
         credentials_spec=[
             CredentialField(key="api_key", required=True, env=["CHUNKR_API_KEY"], example="ch_..."),
@@ -654,13 +626,7 @@ class ChunkrAdapter(BackendAdapter):
     def report_cost(self, job: Job) -> CostReport:
         usage = (job.raw.payload or {}).get("output_usage", {}) if job.raw else {}
         pages = usage.get("page_count", 1) or 1
-        return CostReport(
-            native_unit="credit",
-            native_quantity=float(pages),
-            cost_usd=0.01 * float(pages),
-            basis=CostBasis.ESTIMATED,
-            billing_target="caller_account",
-        )
+        return CostReport(native_unit="credit", native_quantity=float(pages))
 
     def _map_error(self, e: Exception):
         if isinstance(e, (TerminalError, RetryableError)):

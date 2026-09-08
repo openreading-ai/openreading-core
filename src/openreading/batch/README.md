@@ -12,8 +12,9 @@ it in a shell loop means two hundred output files, a crash halfway that stops ev
 summary at the end. A backend is one parser, such as the local `pymupdf` library or a hosted API.
 `openreading parse corpus/ --backend pymupdf > batch.json` runs the whole folder in one invocation
 and prints one JSON document. Each document runs the ordinary single-document pipeline on its own,
-so one failure never stops the rest. A file the backend cannot read is skipped with a reason such as
-`unsupported_format`. The result is one envelope, meaning one JSON document with a fixed shape, and
+so one failure never stops the rest. Every source is dispatched: a file the backend cannot read
+comes back as a FAILED item carrying that backend's own reason, such as `unsupported_format`,
+rather than being filtered out before it was ever offered. The result is one envelope, meaning one JSON document with a fixed shape, and
 this one is called `batch-result`. It carries a complete `response` per succeeded item, a summary
 with counts, and warnings. Run the same folder with a second backend and `compare` the two
 envelopes to see, document by document, where the two backends disagree. Deciding which one is
@@ -25,12 +26,11 @@ backends.
 
 The batch layer wraps the single-document path and never changes what that path does. Intake is the
 first step, and it expands your sources into one sorted list of files. Each item then runs exactly
-as `parse one.pdf` would, with its own routing and its own compliance check.
+as `parse one.pdf` would, with its own routing and error isolation.
 
-A policy is a short list of rules about which backends may see a document, written once in the
-`policy:` block of your `openreading.yaml`. The per-item compliance check enforces it on every
-item. The command above ran with no filter because that directory holds no such file; write one
-and the same command gates the whole corpus, whether it names a backend or runs a strategy. From
+A policy is the default backend chain, written once in the `policy.backends` block of your
+`openreading.yaml`. Each null-backend item resolves that list independently. A batch that names a
+backend runs that backend directly, while a named strategy follows its own explicit nodes. From
 Python, `openreading.run_batch(paths, config="openreading.yaml")` reads the same file, and
 `config={"version": 1, "policy": {…}}` passes the same shape inline. [Routing and
 keys](../router/README.md#recipes) runs both.
@@ -78,10 +78,9 @@ mkdir -p corpus && cp sample.pdf corpus/a.pdf && cp sample.pdf corpus/b.pdf && e
 uv run openreading parse corpus/ --backend pymupdf --save-dir out > batch.json
 ```
 ```text
-[1/3] c.txt skipped unsupported_format
-…
-[2/3] a.pdf succeeded
-[3/3] b.pdf succeeded
+[1/3] a.pdf succeeded
+[2/3] b.pdf succeeded
+[3/3] c.txt failed unsupported_format: pymupdf cannot read c.txt. It reads pdf, xps, epub, mobi, cbz, svg, and this file is not one of them.
 ```
 
 **You should see** one progress line per file on stderr, exit 0, and pure JSON in `batch.json`.
@@ -95,18 +94,18 @@ each item completes. An interrupted run therefore writes none of them, however m
 succeeded, so `--save-dir` is a convenience and not a crash-safety mechanism. [Sizing a large
 run](#sizing-a-large-run) has the shard recipe that does protect a long run.
 
-`batch.json` is a `batch-result.v0.1`. Here it is with the two inner responses cut out:
+`batch.json` is a `batch-result.v0.2`. Here it is with the two inner responses cut out:
 
 ```json
-{ "schema_version": "0.1", "status": { "state": "succeeded" },
+{ "schema_version": "0.2", "status": { "state": "partial" },
   "request": { "backend": "pymupdf", "jobs": 1, "source_args": ["corpus/"] },
   "items": [
     { "source": { "filename": "a.pdf", "format": "pdf", "path": "corpus/a.pdf", "relpath": "a.pdf", "size_bytes": 8688, "sha256": "…" },
       "state": "succeeded", "response": { "schema_version": "0.3", "…": "…" }, "transport": "platform" },
     { "source": { "relpath": "b.pdf", "…": "…" }, "state": "succeeded", "response": "…", "transport": "platform" },
-    { "source": { "filename": "c.txt", "format": "txt", "path": "corpus/c.txt", "relpath": "c.txt", "size_bytes": 3 }, "state": "skipped", "skip_reason": "unsupported_format" } ],
-  "summary": { "total": 3, "succeeded": 2, "failed": 0, "skipped": 1, "duration_ms": 67.0, "cost_bases": ["infra_only"], "pages_processed": 4, "backends": { "pymupdf": 2 } },
-  "warnings": [ { "code": "items_skipped", "message": "1 file(s) skipped: 1 unsupported_format" } ] }
+    { "source": { "filename": "c.txt", "format": "txt", "path": "corpus/c.txt", "relpath": "c.txt", "size_bytes": 1, "sha256": "…" },
+      "state": "failed", "error": { "code": "unsupported_format", "message": "pymupdf cannot read c.txt. It reads pdf, xps, epub, mobi, cbz, svg, and this file is not one of them." } } ],
+  "summary": { "total": 3, "succeeded": 2, "failed": 1, "duration_ms": 49.0, "pages_processed": 4, "backends": { "pymupdf": 2 } } }
 ```
 
 The envelope holds one item per file, in argument order. A directory's files come sorted by
@@ -159,16 +158,15 @@ uv run openreading parse corpus/ --backend tesseract --jobs 8 | jq -c .request
 ```
 ```text
 [preflight] --jobs 8 requested; tesseract caps platform concurrency at 4 (descriptor.batch.max_concurrency), so this run uses 4
-[1/3] c.txt skipped unsupported_format
 …
 {"backend":"tesseract","jobs":4,"source_args":["corpus/"]}
 ```
 
 **You should see** the notice on stderr and `jobs: 4` in the envelope. That field always echoes the
-value the run used, never the one you asked for. Every backend's ceiling is in the [cost and limits
-table](../adapters/README.md#what-each-backend-charges-and-the-ceilings-on-one-request), and the
+value the run used, never the one you asked for. Every backend's ceiling is in the [limits
+table](../adapters/README.md#the-ceilings-on-one-request), and the
 useful ceiling sits far below the `--max-jobs` limit of 32. The notice stays silent under the
-router's own choice (`--no-strategy` on the command line, `backend="auto"` in Python) and under
+router's own choice (`--no-strategy` on the command line, `backend=None` in Python) and under
 `--strategy`. Both resolve a backend per item, so no single ceiling is knowable up front.
 
 `--max-items` (default 200) refuses before any file is read. It guards against a mistyped path and
@@ -226,18 +224,19 @@ Flatten one row per item from `items[]`, and run three assertions on every load 
 queries the result.
 
 ```bash
-jq -e '.schema_version == "0.1"' batch.json > /dev/null || echo "schema bumped, re-check the loader"
+jq -e '.schema_version == "0.2"' batch.json > /dev/null || echo "schema bumped, re-check the loader"
 jq -r '[.items[] | select(.state != "succeeded") | .source.relpath] | @csv' batch.json
-jq -r '.summary.cost_bases' batch.json
+jq -r '.summary.pages_processed' batch.json
 ```
 
 Assert `schema_version` first, because a bump is the one signal that the shape may have moved
-under you. Triage every item whose `state` is not `succeeded` next. A failed item carries an
-`error` instead of a response, and a skipped item carries a `skip_reason`. Read
-`summary.cost_bases` last, and refuse to sum `cost_usd` as spend unless every basis in it is
-`billed`. An `estimated` basis is a rate card applied to a page count rather than money anyone was
-charged. [JSON Schemas](../schemas/README.md#what-a-response-guarantees) defines all four values in
-its `usage.cost_basis` row. Three columns are absent rather than null when they have no value:
+under you. Triage every item whose `state` is not `succeeded` next: a failed item carries an
+`error` instead of a response. Read `summary.pages_processed` last, which sums the page counts
+the backends themselves reported and is absent when none did. There is no money in the envelope
+to load. `cost_usd` and `cost_bases` were removed along with the per-vendor price tables that
+filled them ([JSON Schemas](../schemas/README.md#what-a-response-guarantees)), so a spend column
+comes from your provider invoice joined on your own run ids. Three columns are absent rather than
+null when they have no value:
 `warnings`, per-block `confidence`, and `typed_fields`. Read them with a default and make the
 column nullable.
 
@@ -276,10 +275,9 @@ symlinks inside a directory are skipped.
 With a hosted key, `--backend anthropic-claude` over a directory sends one vendor batch job, and
 each item reports `"transport": "native"`. `--deadline SECONDS` overrides its one-hour wait.
 
-**Read the cost preflight before a hosted run.** More than 10 live items on a directly named hosted
-backend print a `[preflight]` estimate on stderr first, and never a prompt. The rate it quotes is
-per page and not per item. A corpus of twelve-page documents therefore costs twelve times the total
-the second line shows.
+**Read the scope preflight before a hosted run.** More than 10 live items on a directly named
+hosted backend print a `[preflight]` line on stderr first, and never a prompt. It names how many
+calls are about to leave your machine, to which backend, on whose key.
 
 `c16/` is any folder of sixteen documents.
 
@@ -287,20 +285,18 @@ the second line shows.
 uv run openreading parse c16/ --backend reducto > /dev/null
 ```
 ```text
-[preflight] 16 items → hosted backend reducto: ~$0.015-$0.06 per page-equiv, not per item
-[preflight] 16 items would cost ~$0.24-$0.96 if every item is one page; multiply by your average page count (pages are not counted before the run)
+[preflight] 16 items on hosted backend reducto: 16 call(s) on your own key, one per item and more if a document is paged
 …
 ```
 
-**You should see** two lines, the second of which multiplies the rate by the item count and labels
-the result a single-page floor. Intake opens no files, so no page count exists yet and the run
-cannot do that multiplication for you. The threshold is 10 live items, counting neither skipped
-files nor a directly named single file. The preflight stays silent under `--no-strategy` and under
-`--strategy`, which is the shape a production backfill usually takes. Price those runs yourself
-from the [cost and limits
-table](../adapters/README.md#what-each-backend-charges-and-the-ceilings-on-one-request). With no
-`REDUCTO_API_KEY` set, every item fails on missing credentials and the batch exits 1, after the
-preflight has printed.
+**You should see** one line naming the call count as a floor. It quotes no price. The rates it
+used to print came from `descriptor.cost`, a rate card this package had written down about
+someone else and could not verify, and they are gone with the rest of core's money. Intake opens
+no files either, so no page count exists yet. The threshold is 10 live items, counting neither a
+failed item nor a directly named single file. The preflight stays silent under `--no-strategy`
+and under `--strategy`, which is the shape a production backfill usually takes. Price any run
+from your provider's own invoice. With no `REDUCTO_API_KEY` set, every item fails on missing
+credentials and the batch exits 1, after the preflight has printed.
 
 ### Sizing a large run
 
@@ -346,7 +342,7 @@ shards.
 ## How it decides
 
 These rules are why a batch never surprises you with a different envelope shape, a crash, or a
-widened compliance set. Each rule names the failure it avoids. The full set is M1–M10 in the
+widened backend set. Each rule names the failure it avoids. The full set is M1–M10 in the
 package docstring.
 
 Source: `src/openreading/batch/__init__.py` (the M1–M10 invariants). Live truth: `uv run python -m
@@ -359,12 +355,12 @@ pydoc openreading.batch`. If this table and that text disagree, the text is righ
 | `M3` unsupported format is a skip with a reason | A file the chosen backend cannot read crashing the run, or vanishing silently | `batch.sources.resolve_intake` |
 | `M4` item and jobs ceilings refuse before reading | A home directory, an accidental hosted spend, or a corpus whose responses exhaust memory | `batch.sources`, `batch.runner.bound_jobs` |
 | `M6` per-item isolation | One bad file taking the corpus down | `batch.runner` |
-| `M7` per-item routing and compliance, no batch-level cache | A cached decision widening the compliant set | `batch.runner`, `openreading.api` |
+| `M7` per-item routing, no batch-level cache | A cached decision widening the caller's list | `batch.runner`, `openreading.api` |
 
 The batch status has three values. `succeeded` means at least one item succeeded and none failed
-(exit 0). `partial` means some of each (exit 4). `failed` means nothing succeeded (exit 1). Skips
-alone never fail a batch that produced something. An all-skipped or empty batch is `failed`, with
-an `items_skipped` or `empty_batch` warning saying why. Silence is never mistaken for a hang.
+(exit 0). `partial` means some of each (exit 4). `failed` means nothing succeeded (exit 1). An
+empty batch is `failed`, with an `empty_batch` warning saying why. Silence is never mistaken for
+a hang.
 
 ## Reference
 
@@ -372,7 +368,7 @@ an `items_skipped` or `empty_batch` warning saying why. Silence is never mistake
   surfaces, and exits.
 - `uv run python -m pydoc openreading.comparison.corpus` covers pairing precedence and verdicts.
 - `uv run openreading parse --help` lists every batch flag.
-- `src/openreading/schemas/batch-result.v0.1.json` and `corpus-report.v0.1.json` are described in
+- `src/openreading/schemas/batch-result.v0.2.json` and `corpus-report.v0.1.json` are described in
   [JSON Schemas](../schemas/README.md). `scripts/batch_demo.sh corpus/` runs `pymupdf` and
   `tesseract` over a folder you name, writes both envelopes under `<folder>/.runs/`, and compares
   them.

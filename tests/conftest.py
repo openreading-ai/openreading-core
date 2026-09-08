@@ -31,7 +31,7 @@ The bar for every commit. No credentials, no network. Sub-targets:
                     spawn, while the module form works on any venv. `make typecheck-mypy` runs
                     mypy unconditionally, outside `verify`, because the `||` fallback never runs
                     mypy on the green path — mypy drift stayed invisible for months that way.
-  test              full pytest suite at the 91% coverage floor (`--cov-fail-under=91`):
+  test              full pytest suite at the 94% coverage floor (`--cov-fail-under=94`):
                     coverage below the floor fails the build like a red test. Ratchet up, never
                     down. Test counts are never quoted anywhere, because they change with every
                     commit that adds a test. Read the live count with
@@ -75,7 +75,7 @@ summary line after an explicit `-q` is this, not a hang or a crash; do not pass 
 you need the summary. Neither the Makefile's `test:` target nor the wrapper adds one.
 
 `make test` runs through `scripts/run_test_suite.py`, not bare pytest. It passes the real argv
-(`-m "not live" --cov=openreading --cov-report=term-missing --cov-fail-under=91`) straight
+(`-m "not live" --cov=openreading --cov-report=term-missing --cov-fail-under=94`) straight
 through, streaming output live, and adds two things. Before the run it deletes any stale
 `.coverage` / `.coverage.*` file, because pytest-cov calls `Coverage.combine()` unconditionally at
 the end of every `--cov` run and a leftover data file from a differently-configured run (branch vs
@@ -190,7 +190,7 @@ red build, not a silent hole):
       them
   [ ] `tests/test_conformance.py` + `tests/test_descriptor_specs.py` pass — the descriptor is
       honest and the 8 methods conform
-  [ ] `make verify` green, including the 91% coverage floor
+  [ ] `make verify` green, including the 94% coverage floor
   [ ] `openreading backends` shows it, with the correct MISSING vars when unkeyed
   [ ] AT LEAST ONCE: a live run with real keys + `OPENREADING_RECORD_FIXTURES=1`, driven through
       BOTH the CLI and the server

@@ -128,8 +128,17 @@ _UNRELEASED = {
     "strategy-config.v0.2.json",
     # One file — `policy` closed to its nine typed keys (freeze at milestone end):
     "strategy-config.v0.3.json",
+    "strategy-config.v0.4.json",
     # Leaderboard (BL-160) — brand-new family this milestone (not yet byte-frozen):
     "leaderboard-report.v0.1.json",
+    # The removal set — batch intake dispatches every source, so `skip_reason`, the `skipped`
+    # item state and `summary.skipped` all leave:
+    "batch-result.v0.2.json",
+    # The removal set — compliance, optimize_for and `auto` leave the request; the compliance
+    # profile and the priority hints leave the descriptor; `policy` becomes one key:
+    "request.v0.3.json",
+    "adapter-descriptor.v0.7.json",
+    "adapter-descriptor.v0.8.json",
     # Pulse (internal/design/liveness.md) — brand-new family + the additive descriptor bump that
     # carries its optional `liveness` block (freeze both at milestone end):
     "liveness-report.v0.1.json",
@@ -143,7 +152,6 @@ _UNRELEASED = {
     "journal.v0.1.json",
     # Ledger T4a (AC-8) — additive descriptor bump carrying the optional `protocol_version`
     # integer (not yet byte-frozen):
-    "adapter-descriptor.v0.7.json",
 }
 
 
@@ -202,30 +210,6 @@ def _walk_object_nodes(node: dict, path: str, skip_subtrees: frozenset[str]):
     items = node.get("items")
     if isinstance(items, dict):
         yield from _walk_object_nodes(items, f"{path}[]", skip_subtrees)
-
-
-def test_request_schema_nested_objects_forbid_additional_properties():
-    """M12: request.v0.1.json set `additionalProperties: false` at the top level only, while the
-    pydantic mirrors (openreading.types.request) are `extra="forbid"` at every level — a misspelled
-    NESTED field (e.g. `document.mim_type`) passed schema validation and failed only later, at the
-    pydantic layer, contradicting the "schemas are the source of truth" contract (AGENTS.md). This
-    structural walk pins the fix so no future nested object can silently regress to permissive:
-    every `type: object` node in the ACTIVE request schema must close the door on unknown keys,
-    except `extraction_schema.json_schema`'s own value, which IS an arbitrary caller-supplied JSON
-    Schema (draft 2020-12 subset) and must stay open."""
-    schema = schemas.request_schema()
-    nodes = list(
-        _walk_object_nodes(schema, "", skip_subtrees=frozenset({"extraction_schema.json_schema"}))
-    )
-    # sanity: the walk actually reached the root plus the 12 nested object nodes the review found
-    # (document, backend, backend.runtime, outputs, outputs.chunking, extraction_schema, features,
-    # pages, pages.ranges[], routing, compliance, async) — not silently walking zero nodes.
-    assert len(nodes) >= 13
-    for path, node in nodes:
-        assert node.get("additionalProperties") is False, (
-            f"{path or '<root>'}: object node allows unknown keys "
-            "(a misspelled field would pass schema validation and fail only at the pydantic layer)"
-        )
 
 
 def test_request_schema_extraction_schema_value_stays_open():

@@ -12,7 +12,6 @@ import pytest
 from openreading import schemas
 from openreading.batch.runner import (
     JobsLimitError,
-    assemble_result,
     batch_state,
     bound_jobs,
     item_idempotency_key,
@@ -30,9 +29,8 @@ def _src(name, fmt="pdf", sha="0123456789abcdef0000", skip=None, url=None):
             path=None if url else f"/x/{name}",
             url=url,
             relpath=None if url else name,
-            sha256=None if (skip or url) else sha,
+            sha256=None if url else sha,
         ),
-        skip_reason=skip,
     )
 
 
@@ -66,7 +64,7 @@ def test_batch_state_truth_table():
     assert batch_state(2, 0) == "succeeded"
     assert batch_state(1, 1) == "partial"
     assert batch_state(0, 1) == "failed"  # all failed
-    assert batch_state(0, 0) == "failed"  # all skipped / empty → nothing produced
+    assert batch_state(0, 0) == "failed"  # empty → nothing produced
 
 
 # --- M6 per-item isolation --------------------------------------------------------------
@@ -99,11 +97,13 @@ def test_failure_error_code_prefers_backend_code():
     assert res.items[0].state == "failed" and res.items[0].error.code == "doc_too_large"
 
 
-# --- skips (M3 warning surfaced here) ---------------------------------------------------
+# --- every source is dispatched ---------------------------------------------------------
 
 
-def test_skipped_items_are_not_run_and_produce_a_warning():
-    srcs = [_src("a.pdf"), _src("x.docx", fmt="docx", skip="unsupported_format")]
+def test_every_source_runs_whatever_its_extension():
+    """Intake no longer pre-judges a document by extension, so a format a backend cannot read is
+    that backend's own refusal on a failed item rather than a skip that never left the house."""
+    srcs = [_src("a.pdf"), _src("x.docx", fmt="docx")]
     calls = []
 
     def run_one(src, idem):
@@ -111,89 +111,22 @@ def test_skipped_items_are_not_run_and_produce_a_warning():
         return _ok()
 
     res = run_batch(srcs, run_one=run_one)
-    assert calls == ["a.pdf"]  # the skipped file is never executed
-    assert res.items[1].state == "skipped" and res.items[1].skip_reason == "unsupported_format"
-    assert res.summary.skipped == 1
-    assert any(w.code == "items_skipped" for w in (res.warnings or []))
+    assert calls == ["a.pdf", "x.docx"]
+    assert [i.state for i in res.items] == ["succeeded", "succeeded"]
+    assert not (res.warnings or [])
 
 
-def test_all_skipped_is_a_failed_batch():
-    srcs = [_src("x.docx", fmt="docx", skip="unsupported_format")]
-    res = run_batch(srcs, run_one=lambda s, i: _ok())
-    assert res.status.state == "failed" and res.summary.succeeded == 0
-
-
-# --- BL-147: empty batch + skip progress -------------------------------------------------
-
-
-def test_assemble_result_on_no_items_attaches_empty_batch_warning():
-    # A source list that resolved to zero documents (empty/hidden-only dir, zero-match expansion,
-    # an empty `documents: []` request body) must never finish with no warnings key at all — the
-    # only prior signal was `summary.total == 0`, indistinguishable from a hang or a crash.
-    res = assemble_result([])
-    assert res.warnings is not None
-    assert [w.code for w in res.warnings] == ["empty_batch"]
-    assert res.warnings[0].message == "no source resolved to a document to process"
-    assert res.status.state == "failed"  # unchanged: 0 succeeded ⇒ failed (no exit-code change)
-
-
-def test_run_batch_with_no_sources_produces_empty_batch_warning():
-    res = run_batch([], run_one=lambda s, i: _ok())
-    assert res.summary.total == 0
-    assert res.warnings is not None and res.warnings[0].code == "empty_batch"
-
-
-def test_non_empty_batch_never_gets_the_empty_batch_warning():
-    # a batch with >=1 item (even an all-skipped one) keeps the existing items_skipped shape —
-    # empty_batch is reserved for the zero-items case, the two never coexist.
-    srcs = [_src("x.docx", fmt="docx", skip="unsupported_format")]
-    res = run_batch(srcs, run_one=lambda s, i: _ok())
-    codes = [w.code for w in (res.warnings or [])]
-    assert "empty_batch" not in codes and "items_skipped" in codes
-
-
-def test_on_progress_reaches_total_and_renders_skip_reason_for_a_mixed_batch():
-    # Tier 2/1: a skip-classified source used to be written into items[idx] without ever calling
-    # _emit, so on_progress (and the [N/total] counter it drives) silently stalled short of total
-    # whenever any item was skipped. A healthy batch with one skip among successes must now still
-    # invoke on_progress exactly `total` times, and the skip's own event must carry its skip_reason.
-    srcs = [_src("a.pdf"), _src("x.docx", fmt="docx", skip="unsupported_format"), _src("b.pdf")]
+def test_on_progress_reaches_total_for_a_mixed_batch():
+    """`on_progress` fires once per source, and every source is now a source that ran."""
+    srcs = [_src("a.pdf"), _src("x.docx", fmt="docx")]
     events = []
     res = run_batch(
-        srcs,
-        run_one=lambda s, i: _ok(),
-        on_progress=lambda done, total, item: events.append((done, total, item)),
+        srcs, run_one=lambda s, i: _ok(), on_progress=lambda d, t, i: events.append((d, t, i))
     )
-    assert len(events) == len(srcs) == 3  # every source reached on_progress, not just the two run
-    assert {e[0] for e in events} == {1, 2, 3} and all(e[1] == 3 for e in events)
-    skip_events = [item for _, _, item in events if item.state == "skipped"]
-    assert len(skip_events) == 1 and skip_events[0].skip_reason == "unsupported_format"
-    assert res.summary.total == 3  # sanity: the fix doesn't change aggregation, only progress
+    assert len(events) == len(srcs) == res.summary.total
 
 
 # --- M8 honest aggregation --------------------------------------------------------------
-
-
-def test_aggregation_sums_cost_tallies_backends_and_bases():
-    srcs = [_src("a.pdf"), _src("b.pdf"), _src("c.pdf")]
-    resp = {
-        "a.pdf": _ok("reducto", cost=0.10, basis="estimated", pages=2),
-        "b.pdf": _ok("reducto", cost=0.20, basis="metered", pages=3),
-        "c.pdf": _ok("pymupdf"),  # no cost reported
-    }
-    res = run_batch(srcs, run_one=lambda s, i: resp[s.ref.filename])
-    assert res.summary.cost_usd == pytest.approx(0.30)  # only items that reported a cost
-    assert set(res.summary.cost_bases) == {
-        "estimated",
-        "metered",
-    }  # distinct bases, no fake precision
-    assert res.summary.backends == {"reducto": 2, "pymupdf": 1}
-    assert res.summary.pages_processed == 5
-
-
-def test_no_cost_reported_leaves_cost_usd_absent():
-    res = run_batch([_src("a.pdf")], run_one=lambda s, i: _ok("pymupdf"))
-    assert res.summary.cost_usd is None
 
 
 # --- concurrency preserves input order (M1) ---------------------------------------------

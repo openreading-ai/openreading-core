@@ -7,7 +7,6 @@ message locates (file + node path), explains, and suggests a fix.
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
 
 from openreading.cli.app import main
 from openreading.strategies import StrategyConfig, validate_config
@@ -116,17 +115,6 @@ def test_decide_candidates_colliding_on_one_label():
         },
     }
     assert _has(_errors(cfg), "strategies.x", "both resolve to the candidate label 'parallel'")
-
-
-def test_a_secret_in_the_policy_block_is_refused_outright():
-    """`policy:` was an open subtree, so a secret hiding there could only be WARNED about by the
-    secret scan. v0.3 closed the block, so `api_key` is now simply not a policy key and the
-    config will not build at all. Refusing beats warning: nothing downstream can read it."""
-    with pytest.raises(ValidationError) as exc:
-        StrategyConfig.model_validate(
-            {"version": 1, "policy": {"api_key": "sk-xxx"}, "strategies": {"x": ["pymupdf"]}}
-        )
-    assert "api_key" in str(exc.value)
 
 
 def test_with_allowlist_secret_also_caught():
@@ -346,16 +334,6 @@ def test_judged_over_three_candidates_warns():
     assert _has(_warnings(cfg), "strategies.x", ">3 candidates")
 
 
-def test_policy_unreachable_step_warns():
-    cfg = {
-        "version": 1,
-        "policy": {"require_local": True},
-        "strategies": {"x": ["pymupdf", "reducto"]},
-    }
-    w = _warnings(cfg)
-    assert _has(w, "steps[1].backend", "filtered out by the policy")
-
-
 def test_clean_config_no_issues():
     cfg = {
         "version": 1,
@@ -403,29 +381,6 @@ def test_cli_validate_schema_error_located(_clean_cwd, capsys):
     rc = main(["strategy", "validate", "--config", str(f)])
     assert rc == 3
     assert str(f) in capsys.readouterr().err
-
-
-def test_cli_validate_with_a_policy_block(_clean_cwd, capsys):
-    f = _clean_cwd / "openreading.yaml"
-    f.write_text(
-        "version: 1\npolicy: {require_local: true}\nstrategies:\n  x: [pymupdf, reducto]\n"
-    )
-    rc = main(["strategy", "validate", "--config", str(f)])
-    # warnings don't fail the exit code
-    assert rc == 0
-    assert "filtered out by the policy" in capsys.readouterr().out
-
-
-def test_cli_validate_a_policy_block_that_is_not_a_policy_exits_3(_clean_cwd, capsys):
-    """The block is the only spelling of a policy, so a key that is not one is an error here and
-    not an advisory. One tagged stderr line, exit 3; main() returning at all pins "no traceback"."""
-    f = _clean_cwd / "openreading.yaml"
-    f.write_text("version: 1\npolicy: {require_locall: true}\nstrategies:\n  x: [pymupdf]\n")
-    rc = main(["strategy", "validate", "--config", str(f)])
-    assert rc == 3
-    err = capsys.readouterr().err
-    assert "require_locall" in err
-    assert "Traceback" not in err
 
 
 # ---- P3: Plain-dialect validation (§8 strategy-validate rows, harness §15 T4/T6) --------------
@@ -696,16 +651,3 @@ def test_cli_validate_refuses_unenforced_guardrails_and_never_affirms_them(_clea
     assert "not enforced" in cap.err
     # the summary must never narrate an unenforced ceiling as a real one
     assert "at most 1 attempt" not in cap.out
-
-
-def test_cli_validate_with_no_config_anywhere_exits_3_not_0(_clean_cwd, capsys):
-    """A CI job whose whole purpose is `openreading strategy validate` must not pass when there is
-    nothing to validate. Reported as exiting 0 (a false green) and re-measured at 3 in every
-    invocation form: auto-discovery, and an explicit `--config` naming a missing file. This pins
-    that, since the finding would have been real if it were true."""
-    for argv in (
-        ["strategy", "validate"],
-        ["strategy", "validate", "--config", str(_clean_cwd / "nope.yaml")],
-    ):
-        assert main(argv) == 3, argv
-        assert capsys.readouterr().out == ""  # and never an "OK" on stdout

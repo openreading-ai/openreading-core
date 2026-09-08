@@ -27,9 +27,7 @@ from openreading.types.cost import CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     ConfigField,
-    Cost,
     CredentialField,
     Output,
     OutputChannels,
@@ -42,7 +40,6 @@ from openreading.types.enums import (
     BackendType,
     BlockType,
     ChannelGrade,
-    CostBasis,
     JobState,
     NativeOrigin,
     NativeUnit,
@@ -83,13 +80,6 @@ _OPERATIONS = {
     "AnalyzeExpense": {"features": [], "price": 0.01},
     "AnalyzeID": {"features": [], "price": 0.025},
     "AnalyzeLending": {"features": [], "price": 0.07},
-}
-_OP_PRICE: dict[str, float] = {
-    "DetectDocumentText": 0.0015,
-    "AnalyzeDocument": 0.065,
-    "AnalyzeExpense": 0.01,
-    "AnalyzeID": 0.025,
-    "AnalyzeLending": 0.07,
 }
 _ASYNC_OPS = {"AnalyzeDocument", "DetectDocumentText", "AnalyzeLending"}
 
@@ -196,9 +186,7 @@ def _descriptor() -> AdapterDescriptor:
         protocol_version=2,
         adapter_impl="http",
         operations=list(_OPERATIONS),
-        provisioning=Provisioning(
-            byo_mode=["cloud_credential"], auth="sigv4", billing_target="caller_account"
-        ),
+        provisioning=Provisioning(byo_mode=["cloud_credential"], auth="sigv4"),
         wait_modes=[WaitMode.INLINE, WaitMode.POLL],
         capabilities=Capabilities(
             ocr="verified",
@@ -215,32 +203,6 @@ def _descriptor() -> AdapterDescriptor:
             languages=["en", "fr", "de", "it", "pt", "es"],
             input_formats=["pdf", "png", "jpg", "tiff"],
             max_pages_per_request="1 sync / 3000 async",
-        ),
-        cost=Cost(
-            native_unit="page",
-            basis="estimated",
-            usd_per_page_equiv_low=0.0015,
-            usd_per_page_equiv_high=0.07,
-            lossiness="none",
-        ),
-        compliance=ComplianceProfile(
-            hipaa_baa="yes",
-            soc2="verified",
-            gdpr="verified",
-            pci="verified",
-            trains_on_customer_data="opt_out",
-            train_opt_out_precondition="aws_org_ai_services_optout_policy_applied",
-            data_region_options=[
-                "us-east-1",
-                "us-west-2",
-                "eu-west-1",
-                "eu-central-1",
-                "ap-southeast-2",
-                "us-gov-west-1",
-            ],
-            data_retention="processed in-memory; not stored after processing (UNVERIFIED beyond 'encrypted')",
-            max_retention_hours=None,  # UNVERIFIED -> retention constraints fail closed
-            runs_fully_local=False,
         ),
         runtime=RuntimeProfile(
             offline_capable=False, license="proprietary", version_pin="boto3>=1.34"
@@ -260,8 +222,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="high",
-            integration_priority="P0",
-            priority_reason="Lending wedge (AnalyzeLending mortgage classes); first async block-graph adapter.",
         ),
         credentials_spec=[
             CredentialField(
@@ -950,15 +910,12 @@ class AWSTextractAdapter(BackendAdapter):
         return resp
 
     def report_cost(self, job: Job) -> CostReport:
-        op = (job.raw.object_class if job.raw else None) or "AnalyzeDocument"
+        """The page count Textract returned in `DocumentMetadata`.
+
+        This used to multiply it by a per-operation `_OP_PRICE` table. Textract prices differ by
+        operation, region and volume tier, none of which this call knows.
+        """
         pages = 1
         if job.raw and isinstance(job.raw.payload, dict):
             pages = (job.raw.payload.get("DocumentMetadata") or {}).get("Pages", 1) or 1
-        price = _OP_PRICE.get(op, 0.0)
-        return CostReport(
-            native_unit="page",
-            native_quantity=float(pages),
-            cost_usd=price * pages,
-            basis=CostBasis.ESTIMATED,
-            billing_target="caller_account",
-        )
+        return CostReport(native_unit="page", native_quantity=float(pages))

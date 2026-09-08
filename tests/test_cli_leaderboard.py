@@ -4,8 +4,8 @@ tests/test_cli_replay_calibrate.py's shape for `calibrate`: arg handling, backen
 
 AC-6's four taxonomy-member tests inject the exception at the seam `cmd_leaderboard` actually
 calls (`openreading.evals.leaderboard.run_leaderboard`), the SAME documented technique
-tests/test_cli.py already uses for `cmd_compare`'s fan-out ComplianceRefused and
-tests/test_cli_replay_calibrate.py / tests/test_cli.py use for `cmd_calibrate`'s ComplianceRefused
+tests/test_cli.py already uses for `cmd_compare`'s fan-out ScopeRefused and
+tests/test_cli_replay_calibrate.py / tests/test_cli.py use for `cmd_calibrate`'s ScopeRefused
 — because, like those, a per-case backend fault never actually escapes evals.runner.run_case (it
 is always turned into a scored CaseResult, per AC-1/AC-2), so there is no organic trigger; this
 proves the CLI's OWN coded-exit mapping is correct and stays correct, independent of whether
@@ -20,8 +20,8 @@ import pytest
 from openreading.cli import main
 from openreading.testing.sample_pdf import build_sample_pdf
 from openreading.types.errors import (
-    ComplianceRefused,
     RetryableError,
+    ScopeRefused,
     TerminalError,
     UnsupportedFeatureError,
 )
@@ -86,28 +86,8 @@ def test_leaderboard_cli_missing_dataset_exits_3(capsys, tmp_path):
     assert "Traceback" not in err
 
 
-def test_leaderboard_cli_malformed_policy_block_exits_3_without_a_traceback(capsys, tmp_path):
-    bad_config = tmp_path / "openreading.yaml"
-    bad_config.write_text("version: 1\npolicy: {require_locall: true}\n")
-    rc = main(
-        [
-            "leaderboard",
-            SAMPLE,
-            "--backends",
-            "pymupdf,tesseract",
-            "--config",
-            str(bad_config),
-        ]
-    )
-    assert rc == 3
-    err = capsys.readouterr().err
-    assert "[leaderboard]" in err
-    assert "require_locall" in err
-    assert "Traceback" not in err
-
-
 # ---- AC-6: the CLI leaderboard command exits through the same coded, per-taxonomy-member exits --
-# ---- (RetryableError / TerminalError / UnsupportedFeatureError / ComplianceRefused) that ---------
+# ---- (RetryableError / TerminalError / UnsupportedFeatureError / ScopeRefused) that ---------
 # ---- calibrate and compare already use — never a bare exit-1 crash. ------------------------------
 
 
@@ -124,9 +104,9 @@ def _raise(exc: Exception):
         RetryableError("simulated rate-limit exhaustion"),
         TerminalError("simulated can't-run-at-all failure"),
         UnsupportedFeatureError("simulated unsupported feature", feature="ocr"),
-        ComplianceRefused("nothing is compliant here", constraint="no_compliant_backend"),
+        ScopeRefused("no backend this token may reach", constraint="no_backend_in_scope"),
     ],
-    ids=["retryable", "terminal", "unsupported_feature", "compliance_refused"],
+    ids=["retryable", "terminal", "unsupported_feature", "scope_refused"],
 )
 def test_leaderboard_cli_taxonomy_member_exits_3_clean(exc, capsys, monkeypatch):
     import openreading.evals.leaderboard as leaderboard_mod
@@ -176,7 +156,6 @@ def _backend(bid, rank, mean, n_cases, n_scored, errors=0, nd=False, dims=None):
         "n_cases": n_cases,
         "n_scored": n_scored,
         "errors": errors,
-        "cost_per_doc": 0.0,
         "non_deterministic": nd,
         "dimensions": dims or {},
     }

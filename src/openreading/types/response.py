@@ -85,8 +85,6 @@ class Usage(BaseModel):
     credits: float | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
-    cost_usd: float | None = None
-    cost_basis: str | None = None
     duration_ms: int | None = None
 
 

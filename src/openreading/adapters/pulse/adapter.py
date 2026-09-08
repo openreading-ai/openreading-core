@@ -5,12 +5,7 @@ shapes the adapter must handle: (a) inline JSON, and (b) for large docs (>5MB / 
 resolves it before normalizing. Sync (`async: false`) → INLINE; async → POLL.
 
 BYO API key (`x-api-key`; PULSE_API_KEY). Pulse exposes NO per-element confidence → block
-confidence is channel X and never fabricated (a warning says so). Compliance: SOC 2 Type II,
-HIPAA BAA on Pro only (`hipaa_baa="tier_gated"`: a require_baa request drops Pulse unless the
-deployment lists it in `baa_tier_confirmed`), GDPR — and the no-train posture is UNVERIFIED, so
-`trains_on_customer_data="unverified"`: a no-train request drops Pulse unless the deployment sets
-`allow_unverified_compliance` (internal/research/openreading/routing_and_compliance.md §3/§4 —
-fail closed). Sources:
+confidence is channel X and never fabricated (a warning says so). Sources:
 https://docs.runpulse.com/api-reference/endpoint/extract, runpulse.com/security (accessed 2026-07-21).
 """
 
@@ -30,12 +25,10 @@ from openreading.derive import (
     table_to_text,
 )
 from openreading.types.blocks import Block, Citation, Table, TypedField
-from openreading.types.cost import CostBasis, CostReport
+from openreading.types.cost import CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
-    Cost,
     CredentialField,
     Output,
     OutputChannels,
@@ -177,9 +170,7 @@ def _descriptor() -> AdapterDescriptor:
         protocol_version=2,
         adapter_impl="http",
         operations=["extract"],
-        provisioning=Provisioning(
-            byo_mode=["api_key"], auth="api_key", billing_target="caller_account"
-        ),
+        provisioning=Provisioning(byo_mode=["api_key"], auth="api_key"),
         wait_modes=[WaitMode.INLINE, WaitMode.POLL],
         capabilities=Capabilities(
             ocr="verified",
@@ -193,22 +184,6 @@ def _descriptor() -> AdapterDescriptor:
             custom_schema_extraction="claimed",
             vlm_based="claimed",
             input_formats=["pdf", "docx", "pptx", "xlsx", "png", "jpg"],
-        ),
-        cost=Cost(
-            native_unit="credit",
-            basis="estimated",
-            usd_per_page_equiv_low=0.015,
-            usd_per_page_equiv_high=0.02,
-            lossiness="credit",
-        ),
-        compliance=ComplianceProfile(
-            hipaa_baa="tier_gated",  # BAA on Pro plan
-            soc2="verified",
-            gdpr="verified",
-            trains_on_customer_data="unverified",  # no explicit no-train statement → fail closed
-            data_region_options=["us", "eu"],
-            data_retention="result URLs expire 1h; zero-data-retention on Enterprise",
-            runs_fully_local=False,
         ),
         runtime=RuntimeProfile(offline_capable=False, license="proprietary", version_pin="api"),
         output=Output(
@@ -226,9 +201,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="medium",
-            integration_priority="P1",
-            priority_reason="Clean dev-first API with markdown+bbox+schema; compliance fits the "
-            "lending/health wedge, but no-train is UNVERIFIED (fails closed).",
         ),
         credentials_spec=[
             CredentialField(key="api_key", required=True, env=["PULSE_API_KEY"], example="pk_..."),
@@ -728,9 +700,6 @@ class PulseAdapter(BackendAdapter):
         return CostReport(
             native_unit="credit",
             native_quantity=float(credits) if credits is not None else float(pages),
-            cost_usd=float(credits) * 0.015 if credits is not None else 0.015 * pages,
-            basis=CostBasis.ESTIMATED,
-            billing_target="caller_account",
         )
 
     def _map_error(self, e: Exception):

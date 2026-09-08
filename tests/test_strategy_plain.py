@@ -82,7 +82,7 @@ def test_desugar_is_a_strict_noop_on_normalize_expansion_inputs():
 def test_config_without_plain_bodies_roundtrips_unchanged():
     cfg = {
         "version": 1,
-        "policy": {"no_train_on_data": True},
+        "policy": {},
         "strategies": {"a": "reducto", "b": ["pymupdf", "reducto"], "c": {"steps": ["pymupdf"]}},
     }
     out, info = desugar_config(cfg)
@@ -112,7 +112,6 @@ PLAIN_GOLDENS = [
     # try -> cascade
     ({"try": "reducto"}, {"steps": [{"backend": "reducto"}]}),
     ({"try": ["pymupdf", "reducto"]}, {"steps": [{"backend": "pymupdf"}, {"backend": "reducto"}]}),
-    ({"try": ["pymupdf", "auto"]}, {"steps": [{"backend": "pymupdf"}, {"backend": "auto"}]}),
     # try + escalate_when (scalar looks_bad -> any_of; gate on non-final only)
     (
         {"try": ["pymupdf", "reducto"], "escalate_when": "looks_bad"},
@@ -284,7 +283,7 @@ PLAIN_GOLDENS = [
     ),
     # 3-way compare
     (
-        {"compare": ["docling", "aws-textract", "reducto"], "then": "auto"},
+        {"compare": ["docling", "aws-textract", "reducto"], "then": "tesseract"},
         {
             "steps": [
                 {
@@ -297,7 +296,7 @@ PLAIN_GOLDENS = [
                     "require": "all",
                     "escalate_if": _COMPARE_DEFAULT_GATE,
                 },
-                {"backend": "auto"},
+                {"backend": "tesseract"},
             ]
         },
     ),
@@ -370,9 +369,9 @@ def _generated_plain_bodies():
         for crit in criteria:
             yield {"try": items, "escalate_when": crit, **wall}
         yield {"race": items, **wall}
-        yield {"compare": items, "then": "auto", **wall}
+        yield {"compare": items, "then": "tesseract", **wall}
         for crit in criteria + [{"disagree": True}, {"disagree": 0.5, "looks_bad": True}]:
-            yield {"compare": items, "then": "auto", "escalate_when": crit, **wall}
+            yield {"compare": items, "then": "tesseract", "escalate_when": crit, **wall}
 
 
 def _path_exists(tree, path):
@@ -410,8 +409,8 @@ def test_generated_plain_invariants(body):
 PLAIN_DESUGAR_ERRORS = [
     ({"try": ["pymupdf", "nonesuch-backend"]}, None, "not a known backend or strategy"),
     ({"try": ["pymupdf", "reducto", "reducto"]}, None, "appears twice"),
-    ({"race": ["pymupdf", "auto"]}, None, "cannot race"),
-    ({"compare": ["docling", "auto"], "then": "reducto"}, None, "cannot race or be compared"),
+    ({"race": ["pymupdf", None]}, None, "cannot race"),
+    ({"compare": ["docling", None], "then": "reducto"}, None, "cannot race or be compared"),
     (
         {"try": ["pymupdf", "reducto"], "escalate_when": {"disagree": True}},
         None,
@@ -422,14 +421,6 @@ PLAIN_DESUGAR_ERRORS = [
     # backend/strategy name collision at a reference site
     ({"try": ["pymupdf"]}, {"pymupdf": "reducto"}, "both a backend id and a strategy name"),
 ]
-
-
-@pytest.mark.parametrize("body,extra,message", PLAIN_DESUGAR_ERRORS)
-def test_plain_desugar_time_errors(body, extra, message):
-    cfg = _wrap(body, extra)
-    schemas.validate_strategy_config(cfg)  # the input is schema-valid: this is a DESUGAR error
-    with pytest.raises(ConfigError, match=message):
-        desugar_config(cfg)
 
 
 def test_close_name_suggestion():
@@ -453,7 +444,7 @@ def test_is_plain_dialect_predicate():
 
 
 def test_desugar_config_without_strategies_is_a_noop():
-    cfg = {"version": 1, "policy": {"no_train_on_data": True}}
+    cfg = {"version": 1, "policy": {}}
     out, info = desugar_config(cfg)
     assert out is cfg and info == {}
 
@@ -499,11 +490,11 @@ from openreading.strategies import normalize_strategy  # noqa: E402
 
 PRESET_PAIRINGS = {
     "cost_saver": {
-        "try": ["pymupdf", "docling", "auto"],
+        "try": ["pymupdf", "docling", "aws-textract"],
         "escalate_when": {"looks_bad": True, "low_confidence": True},
     },
     "max_accuracy": {
-        "try": ["auto", "auto"],
+        "try": ["aws-textract", "azure-document-intelligence"],
         "escalate_when": {"looks_bad": True, "low_confidence": True},
     },
     "fast": {"race": ["pymupdf", "tesseract"]},

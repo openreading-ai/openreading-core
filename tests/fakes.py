@@ -1,8 +1,8 @@
 """Shared test fakes: minimal backend adapters plus the factories that build their descriptors.
 
 Reach for `InlineFake`, `PollFake`, `WebhookFake` or `NeverFinishesFake` to exercise one wait mode
-through the driver. Reach for `make_backend` when a router or compliance test needs a descriptor
-with particular compliance, capability, cost or priority values. Strategy-engine tests use
+through the driver. Reach for `make_backend` when a router test needs a descriptor with
+particular capability or cost values. Strategy-engine tests use
 `ScriptedBackend`, `PollFaultBackend` and `scripted_registry`. Compare tests use `make_envelope`.
 
 Tests import this module as `tests.fakes`, which works because pyproject sets `pythonpath = ["."]`
@@ -18,8 +18,6 @@ from openreading.types import (
     BackendInfo,
     BackendType,
     Capabilities,
-    ComplianceProfile,
-    Cost,
     CostReport,
     Document,
     Health,
@@ -29,7 +27,6 @@ from openreading.types import (
     Provisioning,
     RawResult,
     ResponseState,
-    RouterHints,
     RuntimeProfile,
     Status,
     WaitMode,
@@ -38,7 +35,7 @@ from openreading.types import (
 from openreading.types.descriptor import CredentialField
 from openreading.types.errors import RetryableError, TerminalError
 from openreading.types.request import OpenReadingRequest
-from openreading.types.response import Page, Usage
+from openreading.types.response import Page
 from openreading.types.runtime import RunContext
 
 
@@ -54,8 +51,6 @@ def make_envelope(
     pages: list[Any] | None = None,
     warnings: list[str] | None = None,
     duration_ms: float | None = None,
-    cost_usd: float | None = None,
-    cost_basis: str | None = None,
     pages_processed: int | None = None,
     validate: bool = True,
 ) -> dict[str, Any]:
@@ -102,8 +97,6 @@ def make_envelope(
         k: v
         for k, v in (
             ("duration_ms", duration_ms),
-            ("cost_usd", cost_usd),
-            ("cost_basis", cost_basis),
             ("pages_processed", pages_processed),
         )
         if v is not None
@@ -126,17 +119,15 @@ def make_descriptor(backend_id: str, wait_modes: list[WaitMode]) -> AdapterDescr
         id=backend_id,
         type=BackendType.HOSTED_API,
         protocol_version=1,
-        provisioning=Provisioning(auth="api_key", billing_target="caller_account"),
+        provisioning=Provisioning(auth="api_key"),
         wait_modes=wait_modes,
         capabilities=Capabilities(ocr="claimed"),
-        cost=Cost(native_unit="page", basis="estimated"),
-        compliance=ComplianceProfile(hipaa_baa="no"),
         runtime=RuntimeProfile(offline_capable=False),
     )
 
 
 class ConfigurableBackend(BackendAdapter):
-    """An INLINE adapter whose descriptor (compliance/capabilities/cost/priority) is fully
+    """An INLINE adapter whose descriptor (capabilities/cost) is fully
     parameterized — used to reproduce the `internal/design/routing_and_compliance.md` worked
     examples."""
 
@@ -167,35 +158,20 @@ def make_backend(
     *,
     btype: BackendType = BackendType.HOSTED_API,
     local: bool = False,
-    hipaa_baa: str = "no",
-    trains: str = "no",
-    regions: list[str] | None = None,
-    max_retention_hours: int | None = None,
-    soc2: bool = False,
-    gdpr: bool = False,
     handwriting: bool = False,
     forms: bool = False,
     tables: bool = False,
     custom_schema: bool = False,
     input_formats: list[str] | None = None,
-    priority: str = "P1",
-    cost_low: float | None = None,
-    cost_high: float | None = None,
     page_ranges: bool = False,
     webhook: bool = False,
 ) -> ConfigurableBackend:
-    """A ConfigurableBackend whose descriptor carries the given compliance, capability and cost."""
-    compliance_extra: dict = {}
-    if max_retention_hours is not None:
-        compliance_extra["max_retention_hours"] = max_retention_hours
+    """A ConfigurableBackend whose descriptor carries the given capability values."""
     desc = AdapterDescriptor(
         id=backend_id,
         type=btype,
         protocol_version=1,
-        provisioning=Provisioning(
-            auth="none" if local else "api_key",
-            billing_target="caller_infra" if local else "caller_account",
-        ),
+        provisioning=Provisioning(auth="none" if local else "api_key"),
         wait_modes=[WaitMode.WEBHOOK, WaitMode.INLINE] if webhook else [WaitMode.INLINE],
         capabilities=Capabilities(
             ocr="verified",
@@ -207,23 +183,7 @@ def make_backend(
             # extra-allowed capability (granularity:page, §2.7); dict-spread keeps pyright quiet
             **{"page_range_selection": page_ranges},
         ),
-        cost=Cost(
-            native_unit="cpu_second" if local else "page",
-            basis="infra_only" if local else "estimated",
-            usd_per_page_equiv_low=cost_low,
-            usd_per_page_equiv_high=cost_high,
-        ),
-        compliance=ComplianceProfile(
-            hipaa_baa=hipaa_baa,
-            soc2=soc2,
-            gdpr=gdpr,
-            trains_on_customer_data=trains,
-            data_region_options=regions or (["*"] if local else []),
-            runs_fully_local=local,
-            **compliance_extra,
-        ),
         runtime=RuntimeProfile(offline_capable=local),
-        router=RouterHints(integration_priority=priority),
     )
     return ConfigurableBackend(desc)
 
@@ -314,10 +274,8 @@ class PollFaultBackend(_NormalizeMixin, BackendAdapter):
     the strategy-engine fakes (`make_backend`), so it can stand in for a hosted branch in a
     `parallel` node."""
 
-    def __init__(
-        self, backend_id: str, *, cost_low: float | None = 0.01, cancel_sleep_s: float = 0.0
-    ) -> None:
-        self.descriptor = make_backend(backend_id, cost_low=cost_low).descriptor.model_copy(
+    def __init__(self, backend_id: str, *, cancel_sleep_s: float = 0.0) -> None:
+        self.descriptor = make_backend(backend_id).descriptor.model_copy(
             update={"wait_modes": [WaitMode.POLL]}
         )
         self.submitted: list[Job] = []
@@ -397,15 +355,11 @@ class ScriptedBackend(BackendAdapter):
         backend_id: str,
         *,
         local: bool = False,
-        cost_low: float | None = None,
-        trains: str = "no",
-        hipaa_baa: str = "no",
         error: Exception | None = None,
         normalize_error: Exception | None = None,
         text: str = "The quick brown fox jumps over the lazy dog, and it does so every day.",
         confidence: float | None = None,
         typed_fields: dict | None = None,
-        cost_usd: float | None = None,
         pages: list | None = None,
         required_env: list[str] | None = None,
         latency_ms: int = 0,
@@ -416,9 +370,6 @@ class ScriptedBackend(BackendAdapter):
         self.descriptor = make_backend(
             backend_id,
             local=local,
-            cost_low=cost_low,
-            trains=trains,
-            hipaa_baa=hipaa_baa,
             page_ranges=page_ranges,
             webhook=webhook,
         ).descriptor
@@ -442,7 +393,6 @@ class ScriptedBackend(BackendAdapter):
         self._text = text
         self._confidence = confidence
         self._typed_fields = typed_fields
-        self._cost_usd = cost_usd
         self._pages = pages
         self._report_cost_error = report_cost_error
         self.contexts: list[RunContext] = []
@@ -472,20 +422,16 @@ class ScriptedBackend(BackendAdapter):
         if pages is not None and req.pages and req.pages.ranges:
             wanted = {n for r in req.pages.ranges for n in range(r.start, (r.end or r.start) + 1)}
             pages = [p for p in pages if p.page_number in wanted]
-        usage = Usage(cost_usd=self._cost_usd) if self._cost_usd is not None else None
         return NormalizedResponse(
             status=Status(state=ResponseState.SUCCEEDED),
             backend=BackendInfo(id=self.descriptor.id, type=self.descriptor.type),
             document=Document(text=self._text, pages=pages),
             typed_fields=self._typed_fields,
-            usage=usage,
         )
 
     def report_cost(self, job: Job) -> CostReport:
-        # BL-134: an adapter whose meter raises AFTER normalize() already set usage.cost_usd
-        # (router/cost.py's own "an adapter meters a channel itself" pattern) — apply_cost_report's
-        # own except clause degrades gracefully but never runs merge_cost_report, so cost_basis
-        # stays unset. Lets a test reproduce a real, positive cost with no resolved basis.
+        # An adapter whose meter raises: apply_cost_report's own except clause degrades to
+        # whatever normalize() reported, plus a `cost_unavailable` warning.
         if self._report_cost_error is not None:
             raise self._report_cost_error
         return infra_only("page", 1.0)

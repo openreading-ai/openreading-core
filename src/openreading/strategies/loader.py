@@ -14,7 +14,7 @@ longhand, so everything downstream sees one tree. Errors locate by node path
 marks, and a mark-preserving loader was judged not worth it (D-v3-8).
 
 `LoadedConfig` carries provenance: `path` (`None` for a dict passed to `config.load`),
-`source_hash` (sha256 of the file TEXT — distinct from the compliance-aware normalized-tree
+`source_hash` (sha256 of the file text, distinct from the normalized-tree
 `config_hash` the engine stamps on `orchestration.config_hash`), the schema-valid `raw` dict
 (validate scans it for secrets), and `plain_info` (per-strategy Plain classification for
 `explain`).
@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from openreading.config import ConfigError, LoadedFile, load, parse
-from openreading.strategies.model import RawNode, StrategyConfig
+from openreading.strategies.model import RawNode, StrategyConfig, _auto_node_path
 
 STRATEGY_PREFIX = "strategy:"
 
@@ -98,7 +98,34 @@ def _desugar_and_build(raw: dict, *, source: str) -> tuple[StrategyConfig, dict,
     except ConfigError as exc:  # a desugar-time §8 violation; already located
         raise ConfigError(f"{source}: {exc}") from exc
 
+    _refuse_auto(raw, source)
     return StrategyConfig.model_validate(raw), raw, plain_info
+
+
+def _refuse_auto(raw: dict, source: str) -> None:
+    """Refuse `backend: auto` anywhere in the canonical tree.
+
+    `auto` used to mean "the best backend still untried", resolved at dispatch against the
+    router's ordered candidates. Nothing here could say what "best" was: the ranking read a
+    per-vendor claim table this package could not verify, and when that table went, the word kept
+    a promise the code no longer made. A rung that names no backend also cannot be read off the
+    page, so a strategy file stopped saying what it would run.
+
+    Enforced after desugar so one check covers every dialect. Plain refuses its own `auto` earlier
+    and more specifically (`openreading.strategies.plain`), because a Plain author is reading a
+    different page; longhand, the shorthand string form and a parallel branch all land here.
+    """
+
+    def refuse(path: str) -> None:
+        raise ConfigError(
+            f"{source}: {path}: 'auto' is not a backend. Name the backend this rung runs, or set "
+            "the deployment's order once in policy.backends and let an unnamed request resolve "
+            "through it."
+        )
+
+    for name, body in (raw.get("strategies") or {}).items():
+        if path := _auto_node_path(body, f"strategies.{name}"):
+            refuse(path)
 
 
 def parse_config(text: str, *, source: str = "<string>") -> StrategyConfig:
@@ -135,9 +162,13 @@ def build_config(loaded: LoadedFile | None) -> LoadedConfig | None:
     )
 
 
-def strip_strategy_prefix(backend_id: str) -> str | None:
+def strip_strategy_prefix(backend_id: str | None) -> str | None:
     """Return the strategy name if `backend_id` is a `strategy:<name>` reference, else None.
-    `strategy:none` is the reserved escape hatch and returns the literal 'none'."""
+    `strategy:none` is the reserved escape hatch and returns the literal 'none'.
+
+    `None` in means the caller named no backend, which is not a strategy reference either."""
+    if backend_id is None:
+        return None
     if backend_id.startswith(STRATEGY_PREFIX):
         return backend_id[len(STRATEGY_PREFIX) :]
     return None

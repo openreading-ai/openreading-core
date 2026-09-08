@@ -1,10 +1,16 @@
 > **Migrated from the private company repo on 2026-09-05, verbatim.** This record describes work
 > `openreading-core` has not shipped. AGENTS.md keeps an unbuilt design record here, next to the
-> code it proposes to change, so it is reviewed in the open. It was written before the monorepo
-> split and predates protocol v2, adapter-descriptor v0.7 and the current `.env.example` posture,
-> so verify every fact against this repository's code before implementing from it. Delete this
-> file in the pull request that finishes the work, moving its durable facts into the module
-> docstrings.
+> code it proposes to change, so it is reviewed in the open. Delete this file in the pull request
+> that finishes the work, moving its durable facts into the module docstrings.
+>
+> **Superseded in part by the removal set, 2026-09-07. Re-scope before implementing.** That set
+> deleted the router this record was written against: the three stages are one lookup now (the
+> backend the caller named, else `policy.backends` in written order, else `pymupdf`), and with
+> them went the compliance filter, the capability gate, stage-3 scoring, `optimize_for`, `auto`,
+> and every cost figure. Any passage here that routes on a vendor claim, scores candidates, or
+> spells `backend: auto` describes machinery that no longer exists. The governing rule is now
+> `openreading.router.router`: core holds no fact it cannot verify. Check `CHANGELOG.md` under
+> Unreleased and the module docstrings before taking any line of this as current.
 
 # Agentic readiness — Design ("Agentic", target v0.8)
 
@@ -14,8 +20,8 @@ executes the §12 work breakdown in order against the §13 test harness.
 (file:line-cited ground truth); three independent full design candidates (rails-first,
 contract-first, agent-seat-first); a three-lens judge panel (optionality & safety, repo-fit &
 executability, agent value & vocabulary) whose scores, grafts, and fatal-flaw list this
-synthesis obeys; the shipped `docs/user-guide.md` §6 triage table; the v0.7 cost-removal
-milestone (the engine reports cost, never estimates or enforces it).
+synthesis obeys; a legacy private user-guide triage table; and the superseded v0.7 cost
+milestone.
 **Revision 2** (2026-08-02, maintainer review): (a) the decider executor is **extracted to its
 own milestone** — v0.9 "Decider", [`decider-executor.md`](decider-executor.md) — quarantining
 the one real-spend path and restoring the repo's one-feature-per-version release grammar; §7

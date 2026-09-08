@@ -222,8 +222,6 @@ def _describe_when(when: dict[str, Any]) -> str:
             parts.append(f"documents over {value} pages")
         elif key == "mime":
             parts.append(f"{value} files")
-        elif key == "compliance":
-            parts.append("compliance-constrained documents")
         else:
             parts.append(f"documents matching {key}")
     return " and ".join(parts) if parts else "any document"
@@ -234,12 +232,12 @@ def _describe_when(when: dict[str, Any]) -> str:
 
 def _name(node: Any) -> str:
     if isinstance(node, str):
-        return "the best available backend" if node == "auto" else node
+        return node
     if not isinstance(node, dict):
         return "a sub-strategy"
     if "backend" in node:
         b = node["backend"]
-        return "the best available backend" if b == "auto" else str(b)
+        return str(b)
     if "use" in node:
         return f"the {node['use']} strategy"
     if "parallel" in node:
@@ -262,19 +260,9 @@ def _ordered(names: list[str]) -> str:
 
 
 def _rung_names(steps: list[Any]) -> list[str]:
-    """Name each cascade rung; a second/later `auto` rung reads as "the next best available
-    backend" (it picks among what the earlier autos didn't try) rather than repeating."""
-    names: list[str] = []
-    autos = 0
-    for step in steps:
-        if isinstance(step, dict) and step.get("backend") == "auto":
-            autos += 1
-            names.append(
-                "the best available backend" if autos == 1 else "the next best available backend"
-            )
-        else:
-            names.append(_name(step))
-    return names
+    """Name each cascade rung. Every rung names a backend or a strategy, so this never has to
+    describe a rung whose target is only known at dispatch."""
+    return [_name(step) for step in steps]
 
 
 def _budget_sentence(tree: dict[str, Any]) -> str:

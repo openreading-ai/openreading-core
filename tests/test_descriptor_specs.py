@@ -172,21 +172,6 @@ def test_honesty_restoring_channel_grades_v03():
     assert qwen.text is ChannelGrade.DERIVABLE
 
 
-def test_v01_descriptor_still_validates_against_v02_schema():
-    # a descriptor with none of the v0.2 fields must remain valid (additive bump).
-    v01 = {
-        "id": "legacy",
-        "type": "hosted_api",
-        "provisioning": {"byo_mode": ["api_key"], "auth": "api_key"},
-        "wait_modes": ["inline"],
-        "capabilities": {"ocr": "verified"},
-        "cost": {"native_unit": "page"},
-        "compliance": {"hipaa_baa": "no"},
-        "runtime": {"offline_capable": False},
-    }
-    schemas.validate_descriptor(v01)
-
-
 def test_descriptor_sources_cite_nothing_from_the_company_repo():
     """A descriptor's `sources[]` is public: it reaches users verbatim through
     `descriptor.to_schema_dict()` and `GET /v1/backends`. AGENTS.md sanctions an `internal/<path>`

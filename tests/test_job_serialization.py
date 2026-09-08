@@ -13,8 +13,8 @@ import pytest
 from openreading.types.enums import JobState, WaitMode
 from openreading.types.errors import (
     AdapterError,
-    ComplianceRefused,
     RetryableError,
+    ScopeRefused,
     TerminalError,
     UnsupportedFeatureError,
 )
@@ -67,9 +67,9 @@ def test_succeeded_job_round_trips():
         RetryableError("slow down", backend_code="429", retry_after=2.5),
         TerminalError("nope", backend_code="bad_request"),
         UnsupportedFeatureError("no tables here", backend_code="unsupported", feature="tables"),
-        ComplianceRefused("no BAA", backend_code="hipaa", constraint="hipaa_baa"),
+        ScopeRefused("no BAA", backend_code="hipaa", constraint="hipaa_baa"),
     ],
-    ids=["RetryableError", "TerminalError", "UnsupportedFeatureError", "ComplianceRefused"],
+    ids=["RetryableError", "TerminalError", "UnsupportedFeatureError", "ScopeRefused"],
 )
 def test_failed_job_round_trips_for_every_taxonomy_class(error: AdapterError):
     job = Job(id="j1", backend_id="b1", wait_mode=WaitMode.POLL, state=JobState.FAILED, error=error)
@@ -108,11 +108,11 @@ def test_failed_job_preserves_each_error_classes_own_extra_field():
     assert isinstance(back.error, UnsupportedFeatureError)
     assert back.error.feature == "signatures"
 
-    refused = ComplianceRefused("no BAA", constraint="hipaa_baa")
+    refused = ScopeRefused("no BAA", constraint="hipaa_baa")
     back = _roundtrip(
         Job(id="j1", backend_id="b1", wait_mode=WaitMode.POLL, state=JobState.FAILED, error=refused)
     )
-    assert isinstance(back.error, ComplianceRefused)
+    assert isinstance(back.error, ScopeRefused)
     assert back.error.constraint == "hipaa_baa"
 
 
@@ -145,4 +145,3 @@ def test_job_with_cost_hint_round_trips():
     back = _roundtrip(job)
     assert back.cost_hint is not None
     assert back.cost_hint.native_quantity == 3.0
-    assert back.cost_hint.billing_target == "caller_infra"

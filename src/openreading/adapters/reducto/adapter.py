@@ -3,10 +3,9 @@ docs push you off polling (CODE 2000 excessive-polling), so async prefers webhoo
 the degrade path. Parse returns chunks[] of typed blocks (Text/Table/Title/Signature/...) with
 normalized bbox; /extract returns typed_fields with per-field citations.
 
-BYO API key (Bearer). HIPAA/ZDR are tier-gated (Growth+), so hipaa_baa=tier_gated — a require_baa
-request drops Reducto unless the deployment lists it in `baa_tier_confirmed` (fail closed).
-Credit-based cost (~1 credit/page, ~$0.015). resolve_webhook verifies the Svix signature and is
-idempotent by job id (duplicate deliveries are no-ops).
+BYO API key (Bearer). Reducto meters credits, roughly one per page, and `report_cost` forwards
+the count it reported. resolve_webhook verifies the Svix signature and is idempotent by job id
+(duplicate deliveries are no-ops).
 """
 
 from __future__ import annotations
@@ -29,12 +28,10 @@ from openreading.derive import (
     table_to_text,
 )
 from openreading.types.blocks import Block, Chunk, Citation, TypedField
-from openreading.types.cost import CostBasis, CostReport
+from openreading.types.cost import CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
-    Cost,
     CredentialField,
     Output,
     OutputChannels,
@@ -252,9 +249,7 @@ def _descriptor() -> AdapterDescriptor:
         protocol_version=2,
         adapter_impl="http",
         operations=["parse", "extract", "split", "classify", "edit", "pipeline"],
-        provisioning=Provisioning(
-            byo_mode=["api_key"], auth="api_key", billing_target="caller_account"
-        ),
+        provisioning=Provisioning(byo_mode=["api_key"], auth="api_key"),
         wait_modes=[WaitMode.INLINE, WaitMode.WEBHOOK, WaitMode.POLL],
         capabilities=Capabilities(
             ocr="verified",
@@ -270,23 +265,6 @@ def _descriptor() -> AdapterDescriptor:
             vlm_based="claimed",
             input_formats=["pdf", "png", "jpg", "docx", "xlsx", "pptx"],
             max_pages_per_request="unbounded (async)",
-        ),
-        cost=Cost(
-            native_unit="credit",
-            basis="billed",
-            usd_per_page_equiv_low=0.015,
-            usd_per_page_equiv_high=0.06,
-            lossiness="credit",
-        ),
-        compliance=ComplianceProfile(
-            hipaa_baa="tier_gated",
-            soc2="verified",
-            gdpr="verified",
-            trains_on_customer_data="no",
-            data_region_options=["us", "eu"],
-            max_retention_hours=0,
-            zdr_flag="zdr_tier_gated",
-            runs_fully_local=False,
         ),
         runtime=RuntimeProfile(
             offline_capable=False, license="proprietary", version_pin="reducto-api"
@@ -306,8 +284,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="medium",
-            integration_priority="P0",
-            priority_reason="Accuracy ceiling for the hard residual; first webhook adapter.",
         ),
         credentials_spec=[
             CredentialField(
@@ -337,7 +313,7 @@ def _descriptor() -> AdapterDescriptor:
             Source(
                 url="https://docs.reducto.ai/",
                 accessed="2026-07-21",
-                supports="parse chunks/blocks shape, webhooks, credit pricing, tier-gated BAA",
+                supports="parse chunks/blocks shape, webhooks, credit metering",
             ),
             # BL-166's finding is deliberately uncited here. Its only write-up is in the company
             # repo, and `sources[]` ships to every caller through `GET /v1/backends`, where a
@@ -754,12 +730,8 @@ class ReductoAdapter(BackendAdapter):
     def report_cost(self, job: Job) -> CostReport:
         usage = (job.raw.payload or {}).get("usage", {}) if job.raw else {}
         credits = usage.get("credits", 0.0)
-        pages = usage.get("num_pages", 1) or 1
         return CostReport(
             native_unit="credit",
             native_quantity=float(credits),
-            cost_usd=float(credits) * 0.015 if credits else 0.015 * pages,
-            basis=CostBasis.BILLED,
-            billing_target="caller_account",
             breakdown=usage.get("page_billing_breakdown"),
         )

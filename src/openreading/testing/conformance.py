@@ -430,17 +430,18 @@ def _check_credential_spec(desc: AdapterDescriptor, rec: Recorder) -> None:
 
 def _check_cost(adapter: Any, job: Job, rec: Recorder, case: str) -> None:
     """`report_cost` feeds `response.usage` at the router's choke points, so the kit holds it to
-    two rules. It must not raise on a job the driver just finished: production degrades to an
+    one rule: it must not raise on a job the driver just finished. Production degrades to an
     unmetered response rather than failing, which is a silent hole in the caller's accounting.
-    And `billing_target` must stay pass-through — `openreading` (resale) is never valid, whatever
-    the report is built from."""
+
+    The kit used to also reject a `billing_target` of `openreading`, the resale value. There is no
+    `billing_target` any more, and no `cost_usd` for one to describe.
+    The quantity a `report_cost` returns is whatever the vendor reported, so there is nothing left
+    here for the kit to hold to a value.
+    """
     try:
-        cost = adapter.report_cost(job)
+        adapter.report_cost(job)
     except Exception as exc:  # noqa: BLE001
         rec("cost", case, f"report_cost raised on a succeeded job: {type(exc).__name__}: {exc}")
-        return
-    if cost.billing_target not in ("caller_account", "caller_infra"):
-        rec("cost", case, f"billing_target={cost.billing_target!r} (pure pass-through only)")
 
 
 def _check_identity(

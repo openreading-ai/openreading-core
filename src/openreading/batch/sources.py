@@ -1,6 +1,6 @@
 """Intake resolution (Manifest v0.6, invariants M1–M5). Resolve CLI/API source arguments —
 files, directories, globs, http(s) URLs — into an ordered list of `ResolvedSource` records, each a
-`types.batch.SourceRef` plus an honest per-file `skip_reason`. Pure: no network beyond stat/read.
+`types.batch.SourceRef`. Pure: no network beyond stat/read.
 
 - M1 deterministic expansion: arg order preserved; a directory expands recursively, files sorted
   by relative path (bytewise); hidden (dot-prefixed) files/dirs skipped; symlinks not followed.
@@ -25,47 +25,10 @@ import itertools
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 from urllib.parse import urlparse
 
 from openreading.types.batch import SourceRef
 from openreading.types.errors import SourceNotFoundError
-
-SkipReason = Literal["unsupported_format", "unknown_format"]
-
-# The document extensions the fleet knows about (union of every adapter's input_formats + common
-# aliases). Used only to tell an UNSUPPORTED-but-known format (a real doc a backend can't take)
-# from an UNKNOWN one (not a document at all) — M3's two honest skip reasons.
-_KNOWN_DOC_FORMATS = frozenset(
-    {
-        "pdf",
-        "docx",
-        "doc",
-        "pptx",
-        "ppt",
-        "xlsx",
-        "xls",
-        "odt",
-        "txt",
-        "html",
-        "htm",
-        "rtf",
-        "md",
-        "png",
-        "jpg",
-        "jpeg",
-        "tif",
-        "tiff",
-        "bmp",
-        "gif",
-        "webp",
-        "svg",
-        "epub",
-        "mobi",
-        "xps",
-        "cbz",
-    }
-)
 
 _GLOB_CHARS = set("*?[")
 
@@ -90,7 +53,6 @@ class SourceLimitError(Exception):
 @dataclass
 class ResolvedSource:
     ref: SourceRef
-    skip_reason: SkipReason | None = None
 
 
 def is_url(s: str) -> bool:
@@ -181,7 +143,7 @@ def _expand_arg(arg: str) -> list[_RawRef]:
             # the identical note at the other SourceNotFoundError raise site below.
             # BL-143: `errno.ENOENT`, not `None` — see the identical note at the other raise site.
             raise SourceNotFoundError(errno.ENOENT, "glob matched no files", arg)
-        # `relpath` is the cross-run pairing key (batch-result.v0.1.json) and the `--save-dir`
+        # `relpath` is the cross-run pairing key (batch-result.v0.2.json) and the `--save-dir`
         # layout, so it has to stay unique per document. Measuring it from the pattern's fixed
         # root keeps the directories the wildcard walked; a bare basename would collapse
         # `x/invoice.pdf` and `y/invoice.pdf` into one record and one saved file.
@@ -245,22 +207,19 @@ def _streaming_sha256(p: Path) -> str:
     return h.hexdigest()
 
 
-def _skip_reason(fmt: str, supported: set[str] | None) -> SkipReason | None:
-    if supported is None:
-        return None
-    if fmt in supported:
-        return None
-    return "unsupported_format" if fmt in _KNOWN_DOC_FORMATS else "unknown_format"
-
-
 def resolve_intake(
     source_args: list[str],
     *,
     supported_formats: set[str] | None = None,
     max_items: int = DEFAULT_MAX_ITEMS,
 ) -> list[ResolvedSource]:
-    """Resolve `source_args` into ordered `ResolvedSource` records (M1–M5). `supported_formats` (a
-    set of normalized format tokens, e.g. {'pdf','png'}) drives the M3 filter; None disables it.
+    """Resolve `source_args` into ordered `ResolvedSource` records (M1-M5).
+
+    Every file the caller named is dispatched. Intake does not pre-judge a document by its
+    extension: a backend that cannot read one refuses first-hand, and the per-item isolation
+    reports that refusal as a failed item. `supported_formats` is accepted and ignored, kept so
+    callers need not change; it is removed once they stop passing it.
+
     Raises SourceLimitError past `max_items` and SourceNotFoundError for a missing arg."""
     raws: list[_RawRef] = []
     for arg in source_args:
@@ -277,15 +236,12 @@ def resolve_intake(
         if url is not None:
             fmt = format_of(url)
             ref = SourceRef(filename=filename, format=fmt, url=url)
-            out.append(ResolvedSource(ref=ref, skip_reason=_skip_reason(fmt, supported_formats)))
+            out.append(ResolvedSource(ref=ref))
             continue
         assert path is not None
         p = Path(path)
         fmt = format_of(filename)
-        skip = _skip_reason(fmt, supported_formats)
-        sha256 = None
-        if skip is None:  # only hash files we will actually process
-            sha256 = _streaming_sha256(p)
+        sha256 = _streaming_sha256(p)
         ref = SourceRef(
             filename=filename,
             format=fmt,
@@ -294,5 +250,5 @@ def resolve_intake(
             size_bytes=p.stat().st_size,
             sha256=sha256,
         )
-        out.append(ResolvedSource(ref=ref, skip_reason=skip))
+        out.append(ResolvedSource(ref=ref))
     return out

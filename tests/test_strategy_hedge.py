@@ -73,8 +73,8 @@ def test_leaf_dispatch_threads_remaining_budget_into_run_context(limit, expected
 def test_hedge_fires_when_primary_slow():
     # primary latency 60ms > hedge start_after 20ms → hedge fires (done at 25ms) and wins
     reg = scripted_registry(
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN, latency_ms=60),
-        ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN, latency_ms=5),
+        ScriptedBackend("reducto", text=CLEAN, latency_ms=60),
+        ScriptedBackend("aws-textract", text=CLEAN, latency_ms=5),
     )
     res = _run(
         {
@@ -94,10 +94,8 @@ def test_hedge_fires_when_primary_slow():
 
 def test_hedge_cancelled_when_primary_wins_fast():
     # primary latency 5ms, hedge start_after 100ms → primary wins before the hedge ever launches
-    hedge = ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN)
-    reg = scripted_registry(
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN, latency_ms=5), hedge
-    )
+    hedge = ScriptedBackend("aws-textract", text=CLEAN)
+    reg = scripted_registry(ScriptedBackend("reducto", text=CLEAN, latency_ms=5), hedge)
     res = _run(
         {
             "version": 1,
@@ -119,7 +117,7 @@ def test_hedge_cancelled_when_primary_wins_fast():
 def test_start_after_past_deadline_is_pruned():
     reg = scripted_registry(
         ScriptedBackend("pymupdf", local=True, text=CLEAN),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN),
+        ScriptedBackend("reducto", text=CLEAN),
     )
     # a 5s hedge under a 1s node deadline can never launch
     cfg = {
@@ -142,7 +140,7 @@ def test_start_after_past_deadline_is_pruned():
 def test_shadow_runs_but_never_wins():
     reg = scripted_registry(
         ScriptedBackend("pymupdf", local=True, text=CLEAN),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN, cost_usd=0.05),
+        ScriptedBackend("reducto", text=CLEAN),
     )
     res = _run(
         {
@@ -165,7 +163,7 @@ def test_shadow_faster_still_never_wins():
     # even if the shadow would be fastest, it is excluded from the race
     reg = scripted_registry(
         ScriptedBackend("pymupdf", local=True, text=CLEAN, latency_ms=30),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN, latency_ms=1),
+        ScriptedBackend("reducto", text=CLEAN, latency_ms=1),
     )
     res = _run(
         {
@@ -186,38 +184,13 @@ def test_shadow_faster_still_never_wins():
 # ---- on_win: drain ----------------------------------------------------------------------------
 
 
-def test_drain_bills_the_loser():
-    reg = scripted_registry(
-        ScriptedBackend("pymupdf", local=True, text=CLEAN, latency_ms=5),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN, cost_usd=0.05, latency_ms=20),
-    )
-    res = _run(
-        {
-            "version": 1,
-            "strategies": {
-                "s": {
-                    "parallel": ["pymupdf", "reducto"],
-                    "pick": "fastest",
-                    "on_win": "drain",
-                    "budget": {"max_cost_usd": 1.0},
-                }
-            },
-        },
-        reg,
-    )
-    assert res.response.backend.id == "pymupdf"
-    # the drained loser finished → its cost is billed into the total (T9)
-    assert res.response.usage.cost_usd == pytest.approx(0.05)
-    assert ("reducto", "raced_lost") in _cats(res)
-
-
 # ---- require ----------------------------------------------------------------------------------
 
 
 def test_require_one_returns_on_first_success():
     reg = scripted_registry(
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN, latency_ms=5),
-        ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN, latency_ms=200),
+        ScriptedBackend("reducto", text=CLEAN, latency_ms=5),
+        ScriptedBackend("aws-textract", text=CLEAN, latency_ms=200),
     )
     res = _run(
         {
@@ -242,8 +215,8 @@ def test_require_one_returns_on_first_success():
 def test_determinism_with_hedge():
     def once():
         reg = scripted_registry(
-            ScriptedBackend("reducto", cost_low=0.01, text=CLEAN, latency_ms=60),
-            ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN, latency_ms=5),
+            ScriptedBackend("reducto", text=CLEAN, latency_ms=60),
+            ScriptedBackend("aws-textract", text=CLEAN, latency_ms=5),
         )
         res = _run(
             {
@@ -272,7 +245,7 @@ def test_drain_over_deadline_records_loser_without_cost():
     # fabricated cost — it was never awaited to completion (Law 6, cost estimation removed).
     reg = scripted_registry(
         ScriptedBackend("pymupdf", local=True, text=CLEAN, latency_ms=1),
-        ScriptedBackend("reducto", cost_low=0.02, text=CLEAN, latency_ms=500),
+        ScriptedBackend("reducto", text=CLEAN, latency_ms=500),
     )
     res = _run(
         {
@@ -302,7 +275,7 @@ def test_webhook_loser_is_marked_acknowledge_and_drop():
     # a cancelled loser whose backend delivers via WEBHOOK is recorded so a late callback is dropped
     reg = scripted_registry(
         ScriptedBackend("pymupdf", local=True, text=CLEAN, latency_ms=1),
-        ScriptedBackend("reducto", cost_low=0.02, text=CLEAN, latency_ms=500, webhook=True),
+        ScriptedBackend("reducto", text=CLEAN, latency_ms=500, webhook=True),
     )
     res = _run(
         {
@@ -329,7 +302,7 @@ def test_shadow_over_deadline_is_still_recorded_without_cost():
     # always recorded), but WITHOUT a fabricated cost (Law 6) — never silently dropped from the trace.
     reg = scripted_registry(
         ScriptedBackend("pymupdf", local=True, text=CLEAN, latency_ms=1),
-        ScriptedBackend("reducto", cost_low=0.02, text=CLEAN, latency_ms=500),
+        ScriptedBackend("reducto", text=CLEAN, latency_ms=500),
     )
     res = _run(
         {

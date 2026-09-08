@@ -16,10 +16,6 @@ def _md_row(cells: Sequence[str]) -> str:
     return "| " + " | ".join(_esc_pipe(c) for c in cells) + " |"
 
 
-def _fmt_cost(c: Any) -> str:
-    return f"${c:.4f}" if isinstance(c, int | float) else "-"
-
-
 def _fmt_ms(m: Any) -> str:
     return f"{int(m)}ms" if isinstance(m, int | float) else "-"
 
@@ -31,14 +27,16 @@ def render_table(report: dict[str, Any], *, show_agreements: bool = False) -> st
     lines.append("")
 
     # scoreboard
-    hdr = f"{'SUBJECT':<20}{'TYPE':<16}{'PAGES':>6}{'BLOCKS':>7}{'CHARS':>7}{'FIELDS':>7}{'COST':>10}{'TIME':>8}"
+    hdr = (
+        f"{'SUBJECT':<20}{'TYPE':<16}{'PAGES':>6}{'BLOCKS':>7}{'CHARS':>7}{'FIELDS':>7}{'TIME':>8}"
+    )
     lines.append(hdr)
     for s in subs:
         f = s["facts"]
         lines.append(
             f"{s['label']:<20}{str(s['backend'].get('type') or '-'):<16}"
             f"{f['pages']:>6}{f['blocks']:>7}{f['chars']:>7}{f['fields']:>7}"
-            f"{_fmt_cost(f['cost_usd']):>10}{_fmt_ms(f['duration_ms']):>8}"
+            f"{_fmt_ms(f['duration_ms']):>8}"
         )
 
     # content-first headline (§9 tranche 2): equivalence on the guaranteed channels
@@ -99,8 +97,8 @@ def render_markdown(report: dict[str, Any], *, show_agreements: bool = False) ->
     subs = report["subjects"]
     out: list[str] = [f"# Comparison — {len(subs)} subjects ({report['mode']})", ""]
     out += [
-        _md_row(["subject", "type", "pages", "blocks", "chars", "fields", "cost", "time"]),
-        "|---|---|--:|--:|--:|--:|--:|--:|",
+        _md_row(["subject", "type", "pages", "blocks", "chars", "fields", "time"]),
+        "|---|---|--:|--:|--:|--:|--:|",
     ]
     for s in subs:
         f = s["facts"]
@@ -113,7 +111,6 @@ def render_markdown(report: dict[str, Any], *, show_agreements: bool = False) ->
                     str(f["blocks"]),
                     str(f["chars"]),
                     str(f["fields"]),
-                    _fmt_cost(f["cost_usd"]),
                     _fmt_ms(f["duration_ms"]),
                 ]
             )

@@ -17,7 +17,7 @@ Start here: write one file
 --------------------------
 
 Most people never need the full grammar. Plain is eleven words covering the five things people
-actually want, which are running backends in parallel, cascading on failure, cost tiers,
+actually want, which are running backends in parallel, cascading on failure, quality gates,
 escalating on simple criteria, and compare-and-route. Write `./openreading.yaml` and describe
 the run the way you would say it out loud:
 
@@ -36,7 +36,7 @@ garbled characters, or too many empty pages. Invoke that strategy three equivale
     { "document": { "path": "loan.pdf" }, "backend": { "id": "strategy:cheap_first" } }  # wire
     openreading.run("loan.pdf", strategy="cheap_first")                         # Python
 
-If `pymupdf`'s result passes the gate, that is your answer and it cost nothing. If the gate
+If `pymupdf`'s result passes the gate, that is your answer. If the gate
 fires, that result is retained as best-so-far and `reducto` runs. If every rung gates, you get
 the best retained result with honest `warnings[]`. If every rung fails outright and nothing
 was retained, you get `PlanExhaustedError` with the full attempt trail, never silence and
@@ -55,18 +55,13 @@ Two invariants this package exists to keep
 path and the response is byte-identical to a run without this package. The package is not even
 imported on that path: `openreading.api` inlines the `strategy:` prefix check, reads the file
 through `openreading.config` (which imports nothing from here), and builds the STRATEGY half of
-it lazily, ONLY for `auto` / `strategy:` requests. A named-backend run importing nothing from
+it lazily, only for null-backend or `strategy:` requests. A named-backend run importing nothing from
 `openreading.strategies` is proven in a subprocess test. The reason: an operator who never wrote
 a YAML must be able to upgrade without any behavior change.
 
-**Compliance is never widened.** The 3-stage router's compliance/capability filter prunes the
-tree BEFORE execution (`openreading.strategies.prune`); constraints from the request
-and the file's `policy:` block union most-restrictive-wins; `compliance` is not a catchable
-`on_error` class (naming it is a load-time error); every decision point (gate band, `decide`,
-judge) enumerates its candidates first and any decider — engine or LLM — selects from that list.
-`intent:` prose guides choices under the ceiling and can never move it. The reason: a strategy
-file is authored far from the compliance posture it runs under, and no rule, prose, or model
-output may re-admit a backend the posture dropped.
+**Backend selection stays explicit.** Every leaf runs the backend it names, so a file says what
+it dispatches. `policy.backends` supplies the chain an unnamed request walks, not a rung's target.
+Every decision point enumerates its candidates before the engine or an LLM selects one.
 
 Discovery (first hit wins; sources are never merged)
 ----------------------------------------------------
@@ -84,7 +79,7 @@ cannot load is an error, never a silent fall-through.
 Invocation: `backend.id: "strategy:<name>"` (a documented reserved prefix of the free-string
 `backend.id`, no wire-schema change — D-v3-2), CLI `--strategy <name>` / `--no-strategy`,
 Python `openreading.run(..., strategy="<name>")`; `strategy:none` forces the legacy path even
-when `defaults.strategy` opts `auto` traffic in. Precedence: request wire fields → CLI flags →
+when `defaults.strategy` opts unnamed traffic in. Precedence: request wire fields → CLI flags →
 config `defaults:` → built-ins. `limits:` binds every strategy-engaged run and never a
 direct-named request.
 
@@ -108,18 +103,17 @@ The map — what each module documents
   collisions) and the warning set, located by node path (D-v3-8). Run by `strategy validate`
   only. The run path loads the schema and compiles the tree, and it never calls
   `validate_config` (`model` §9).
-- `prune` — the compile pipeline: route once, normalize, prune compliance-dropped leaves,
-  union the file `policy:` into the effective compliance (D-v3-12); `CompiledPlan`.
+- `prune` — the compile pipeline: normalize trees, apply caller scope, and build `CompiledPlan`.
 - `facts` — pre-parse route facts (`doc_type`, `mime`, page/size probes, `filename_matches`,
-  `compliance`, `sample_percent`); an uncomputable fact means "rule doesn't match", never error.
+  `sample_percent`); an unavailable fact does not match.
 - `signals` — the reference-free quality probe (Tier-1 engine-computed, Tier-2 envelope-reported)
   and `evaluate_gate` (gate maps OR; `any_of`/`all_of`; the missing-signal law).
 - `engine` — what running a tree means: the Outcome algebra, cascade/parallel/route/decide
-  evaluation order, keep-best, hedge/shadow/drain, `pick: merge`, page granularity, honest cost
-  accounting (every billed rung, loser, shadow, judge, and decider call), the concurrency
+  evaluation order, keep-best, hedge/shadow/drain, `pick: merge`, page granularity, the attempt
+  trail (every rung, loser, shadow, judge and decider call is recorded), the concurrency
   contract, `classify_error`, `run_strategy`.
 - `decider` — the LLM decision layer: two-key enablement (file `decider:` block AND the
-  `OPENREADING_LLM_DECIDER` env; no request field can enable it), the per-request compliance gate
+  `OPENREADING_LLM_DECIDER` env; no request field can enable it), API-key scope
   on the decider/judge backend, engine defaults for every decision point, the downgrade
   taxonomy (`decider_downgraded`), deterministic decision ids, replay.
   No LLM is called today. No shipped surface constructs a `DeciderPort`, so an enabled decider
@@ -143,7 +137,7 @@ The tour: one line to full tree
 Each stage is real, minimal, and valid on its own. Start at the top; stop wherever your problem
 stops.
 
-1. One-liner preset. Opt `backend.id: "auto"` traffic into a built-in strategy:
+1. One-liner preset. Opt traffic that names no backend into a built-in strategy:
 
 ```yaml
 version: 1
@@ -151,7 +145,7 @@ defaults:
   strategy: cost_saver
 ```
 
-Applies only when the request says `auto` and names no strategy; `strategy:none` on any request
+Applies only when the request names no backend and no strategy; `strategy:none` on any request
 forces the legacy path.
 
 2. Named cascade, default gates. The same file in the advanced dialect, with the built-in gate
@@ -227,8 +221,7 @@ A strategy is a node; a node is one of five map forms, discriminated by exactly 
 reference form `use: <name>`). The grammar is closed and deliberately sub-Turing — no loops, no
 variables, no expression language.
 
-- leaf (`backend:`) — Run one backend (or `auto` = router's pick among still-eligible,
-  not-yet-attempted).
+- leaf (`backend:`) — Run the one backend it names.
 - cascade (`steps:`) — Serial escalation: run in order; gates decide accept vs escalate; errors
   advance per `on_error`.
 - parallel (`parallel:`) — Fan-out: run children concurrently; `pick:` selects the result (race /
@@ -247,10 +240,9 @@ FAQ
 ---
 
 - **Is the config file required?** No. No file ⇒ no change.
-- **What happens to my existing `routing.fallback`?** Without a strategy engaged, it behaves as
-  always: listed ids move to the front of the eligible chain and the remaining eligible backends
-  still follow (formally it desugars to `{steps: [your ids, then the rest of the eligible set in
-  score order], escalate_if: off}`). If a strategy IS engaged, the strategy wins and the list is
+- **What happens to my existing `routing.fallback`?** Without a strategy engaged, listed ids move
+  to the front of the declared default chain and the remaining ids keep their written order. If a
+  strategy IS engaged, the strategy wins and the list is
   ignored with a `strategy_overrides_fallback` warning.
 - **Does an LLM have to be involved?** No. Every construct has mandatory engine semantics —
   `review_default` for gray bands, `otherwise:` for decide nodes, a deterministic composite score
@@ -258,16 +250,17 @@ FAQ
   point resolves to its engine default and the trace says `decider_downgraded: unavailable`.
   When the wire adapter lands it will be opt-in by two keys, and every decider failure will
   still fall back to the engine default.
-- **Can a strategy weaken compliance?** Never — see the second invariant above.
+- **Can a strategy name a backend outside `policy.backends`?** Yes. A named leaf is explicit.
 - **How do I debug why a fallback fired — or didn't?** The trace records everything: every
   attempt with its category, and for gate events each predicate's observed value vs. threshold,
   fired or not (`orchestration.attempts[]`, decision records). `openreading explain` walks a run's
   decisions; engine runs replay exactly, and LLM-mode runs replay via `openreading replay
   --trace`.
-- **What does it cost?** What you let it: `budget:` on any node and the operator-level `limits:`
-  ceiling bound spend before dispatch, and `usage.cost_usd` on the response honestly totals ALL
-  attempts — winners, losers, shadows, judges, deciders — with the per-attempt breakdown in the
-  trace.
+- **What does it use?** What you let it: `budget:` on any node and the operator-level `limits:`
+  ceiling bound the time a walk gets before dispatch, and `orchestration.attempts[]` names ALL of
+  them — winners, losers, shadows, judges, deciders — so you can count the calls a run made. No
+  price: core carries no rates, so join those counts to your own
+  provider invoice.
 - **Can I keep using plain fallback lists?** Yes — a bare list is a valid strategy body and means
   exactly the legacy chain. Add `escalate_if: default` the day you want quality-based
   escalation; nothing else changes.

@@ -109,13 +109,14 @@ envelope the CLI prints. `ready` means the backend is configured, not that it wa
 the file inline instead of by `path`, put it in `document.bytes_base64`. Check:
 `jq .schema_version server-pymupdf.json` is `"0.3"`.
 
-### 2. Let the cache replay an `auto` run
+### 2. Let the cache replay a routed run
 
-The same `auto` request sent twice shows the result cache answering the second call.
+The same request sent twice, with no backend named, shows the result cache answering the second
+call.
 
 ```bash
 for i in 1 2; do curl -s -X POST localhost:8787/v1/parse -H 'content-type: application/json' \
-  -d '{"document": {"path": "'"$PWD"'/sample.pdf"}, "backend": {"id": "auto"}, "compliance": {"require_local": true}}' \
+  -d '{"document": {"path": "'"$PWD"'/sample.pdf"}, "backend": {"id": null}}' \
   | jq -c '{backend: .backend.id, warnings: [.warnings[].code]}'; done
 ```
 
@@ -124,7 +125,7 @@ for i in 1 2; do curl -s -X POST localhost:8787/v1/parse -H 'content-type: appli
 {"backend":"pymupdf","warnings":["confidence_unavailable","idempotent_replay"]}
 ```
 
-**You should see** `idempotent_replay` on the second call. `auto` runs are cached for 15 minutes,
+**You should see** `idempotent_replay` on the second call. Routed runs are cached for 15 minutes,
 keyed on content plus options, and the cache dies with the process. `POST /v1/route` with the same
 body returns the routing plan without running a backend. `"id": "strategy:offline_first"` runs a
 preset with no config file. A strategy is a named plan over one or more backends, and a preset is
@@ -152,7 +153,7 @@ curl -s localhost:8787/v1/jobs/$(jq -r .job_id job.json) | jq -c '{job_id, state
 ```json
 {"schema_version":"0.2","subjects":["pymupdf","tesseract"],"findings":4}
 HTTP 200
-{"state":"partial","summary":{"total":2,"succeeded":1,"failed":1,"skipped":0,"duration_ms":19.0,"cost_bases":["infra_only"],"pages_processed":2,"backends":{"pymupdf":1}},"items":[{"relpath":"0","state":"succeeded","code":null},{"relpath":"1","state":"failed","code":"FileDataError"}]}
+{"state":"partial","summary":{"total":2,"succeeded":1,"failed":1,"duration_ms":19.0,"pages_processed":2,"backends":{"pymupdf":1}},"items":[{"relpath":"0","state":"succeeded","code":null},{"relpath":"1","state":"failed","code":"FileDataError"}]}
 {"job_id":"omjob_86129928b4744727b9f5a2001ddb265c","state":"succeeded","response_state":"succeeded","error":null}
 ```
 
@@ -193,9 +194,9 @@ right, so fix the table.
 |---|---|---|---|
 | `200` | none | success. Also `GET /v1/jobs/{id}` of a failed job, and every liveness probe result | any step above |
 | `204` | none | `DELETE /v1/jobs/{id}` removed the record, whatever its state, with an empty body | `curl -X DELETE localhost:8787/v1/jobs/$(jq -r .job_id job.json)` |
-| `400` | `bad_request`, `unknown_strategy` | body not JSON, fails the request schema, unknown `strategy:<name>`, bad `jobs` or `timeout_s`, `/v1/jobs` with `auto` | `"backend": {"id": "strategy:nope"}` |
+| `400` | `bad_request`, `unknown_strategy` | body not JSON, fails the request schema, unknown `strategy:<name>`, bad `jobs` or `timeout_s`, `/v1/jobs` with no backend named | `"backend": {"id": "strategy:nope"}` |
 | `401` | `unauthorized`, `bad_signature` | auth on and no valid bearer, on every endpoint but the two named below. Or a webhook signature is invalid or its secret is unset. Or a `chunkr` / `open-ocr` event arrives without its per-job callback token | `POST /v1/webhooks/reducto` with any body and no `REDUCTO_WEBHOOK_SECRET` |
-| `403` | `compliance_refused`, `scope_denied` | the policy leaves nothing to run, or the body's `data_region` names a different region than the file's (`backend_code: "region_conflict"`). Or the token is not scoped to the backend it named, or scope empties that request's router chain or strategy walk | `"backend": {"id": "reducto"}, "compliance": {"require_baa": true}` |
+| `403` | `scope_denied` | an unnamed request has an empty default chain, or token scope excludes every backend the request or strategy can reach | `policy: { backends: [] }`, or a token scoped to a backend the request did not name |
 | `404` | `unknown_backend`, `unknown_job` | the id names nothing | `"backend": {"id": "nope"}`, or `GET /v1/jobs/j_nope` |
 | `413` | `terminal` (`doc_too_large`) | document over the backend's size limit, OR the request body itself over the transport cap `OPENREADING_MAX_BODY_BYTES` (`_BodyLimitMiddleware`) | the doc-size case needs a hosted key, so the shape is shown and not run. The transport cap needs no key, but a 150 MB default body is impractical to demo here |
 | `422` | `unsupported_feature` | the named backend cannot produce what you asked for | `"backend": {"id": "pymupdf"}, "extraction_schema": {"instructions": "totals"}` |
@@ -340,38 +341,38 @@ sample through `/v1/parse` and `/v1/batch`, asserts schema-valid responses, and 
   on the resolved path, so a symlink pointing outside that directory cannot escape it. The file is
   read at the gate, so no backend re-opens a path that could have been swapped meanwhile.
   `openreading.server.app._gate_document_path` enforces it.
-- Tokens, keys and compliance attestations come from the environment only, never a body or a flag.
-  A compliance attestation is a declaration by the operator, meaning whoever starts the process. It
-  states that a backend meets a requirement such as a signed business associate agreement (BAA).
+- Tokens and backend credentials come from the environment only, never a body or a flag.
   Nothing lands in `ps` or shell history, and no caller can attest on the operator's behalf.
-- A scope only narrows what compliance and routing already allow. A directly named backend is
-  checked at the door, before any adapter is built. An out-of-scope name therefore never resolves a
-  vendor credential.
-- An `auto` request runs on the router's fallback chain pruned to the token's backends. That chain
+- A scope only narrows what the deployment's own `policy.backends` already resolves to. A directly
+  named backend is checked at the door, before any adapter is built. An out-of-scope name therefore
+  never resolves a vendor credential. This is the one boundary a request cannot argue with: naming
+  a backend on the command line runs it, naming one through a scoped token does not.
+- A request naming no backend runs on the resolved chain pruned to the token's backends. That chain
   is the backend the router picks plus every backend it would fall back to. An out-of-scope member
   is removed before the run rather than reached. A token scoped to `pymupdf` and `tesseract` is
-  refused `docling` by name. Its `auto` request on a file neither can parse fails with a trail
+  refused `docling` by name. Its unnamed request on a file neither can parse fails with a trail
   naming those two backends alone.
-- An `auto` request whose top pick alone is out of scope is rerouted, not refused. The check reads
+- A request whose top pick alone is out of scope is rerouted, not refused. The check reads
   the whole fallback chain rather than the first pick alone. A caller is therefore never refused
   over a choice it never made, and no fallback goes unchecked. A token scoped to `tesseract` is
-  still refused `pymupdf` by name, and the same token's `auto` request answers 200 on `tesseract`.
+  still refused `pymupdf` by name, and the same token's unnamed request answers 200 on `tesseract`.
 - A `strategy:<name>` request is checked too, from inside the walk, because a walk chooses its own
-  backends and cannot be judged at the door. Every out-of-scope rung is pruned before it runs, and
-  an `auto` rung resolves only against what is left. A token scoped to `pymupdf` that names
+  backends and cannot be judged at the door. Every out-of-scope rung is pruned before it runs. A
+  token scoped to `pymupdf` that names
   `strategy:offline_first` therefore runs `pymupdf` alone. The response's `orchestration.dropped`
   lists `docling` and `tesseract` with code `scope_denied` at stage 0.
 - Pruning a walk or a chain down to nothing is a refusal, never a 502 and never a silent run on
   nothing. A token scoped to `reducto` that names `strategy:offline_first` answers 403. Its message
   is `this API key is not scoped to reach any backend strategy 'offline_first' can run (denied:
-  docling, pymupdf, tesseract)`. The same token sending `auto` under `require_local` answers 403
-  with `this API key is not scoped to reach backend 'pymupdf'`. That message names the backend the
-  router would have used rather than the ones the token allows.
-- Only a strategy records what the scope removed. A pruned `auto` chain leaves no
+  docling, pymupdf, tesseract)`. The same token sending an unnamed request under a deployment
+  whose list starts with `pymupdf` answers 403 with `this API key is not scoped to reach backend
+  'pymupdf'`. That message names the backend the router would have used rather than the ones the
+  token allows.
+- Only a strategy records what the scope removed. A pruned chain leaves no
   `orchestration.dropped` block on the envelope. You see what survived, in `backend.id` on success
   or in a 502 `trail`, but never a list of what was pruned.
 - `/v1/parse`, `/v1/batch` and `/v1/compare` responses are schema-validated before they leave the
-  process. The server owns the only result cache, so a replayed item never hides a billed call.
+  process. The server owns the only result cache, so a replayed item never hides a real call.
 
 ## Operations
 
@@ -451,10 +452,12 @@ survives the process.
 There is no metrics or tracing surface here, and the "Not built yet" list says so. Three things are
 worth collecting instead. The stdout access log gives request counts and status codes. `uv run
 openreading backends --check <slug>` measures whether a backend answers and belongs on a schedule
-as a vendor-degradation canary ([Routing and keys](../router/README.md)). Each envelope from a
-hosted backend carries `usage.cost_usd`, the only per-request spend figure this process produces. A
-local backend reports `usage.cost_basis: "infra_only"` and no `cost_usd` at all. A consumer that
-totals spend therefore treats a missing key as zero rather than as an error.
+as a vendor-degradation canary ([Routing and keys](../router/README.md)). Each envelope carries
+`usage`, which reports what the backend consumed in the unit it meters in: `pages_processed`,
+`credits`, `input_tokens`/`output_tokens`, `duration_ms`. There is no spend figure. A dollar total
+needed a per-vendor rate this package could not verify, so `cost_usd` and `cost_basis` are gone.
+Join these counters to your provider invoice instead. A counter a backend did not report is absent
+rather than zero, so read every field with a default.
 
 ### Load and time budgets
 
@@ -502,7 +505,7 @@ your own proxy in front before more than one client can reach the port.
 
 - [Docs home](../README.md)
 - [The command line](../cli/README.md) has the same surfaces as verbs and exit codes.
-- [Routing and keys](../router/README.md) explains the compliance stages behind `auto` and 403.
+- [Routing and keys](../router/README.md) explains the three selection rules and the 403.
 - [The run ledger](../ledger/README.md) covers resume, which the server does not offer.
 - [Backend adapters](../adapters/README.md) lists which backend needs which variable.
 

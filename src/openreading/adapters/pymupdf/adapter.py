@@ -1,5 +1,5 @@
 """PyMuPDF (fitz) adapter — the first InProcessAdapter. Born-digital PDF text/tables/layout,
-executed in-process with zero data egress (the local compliance floor).
+executed in-process with zero data egress.
 
 License: PyMuPDF is AGPL-3.0. It is isolated in the `pymupdf` optional extra, imported lazily
 INSIDE this module (never by core), and flagged in the descriptor so the router can surface it.
@@ -33,8 +33,6 @@ from openreading.types.cost import CostReport, infra_only
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
-    Cost,
     LivenessProbe,
     Output,
     OutputChannels,
@@ -89,7 +87,7 @@ def _descriptor() -> AdapterDescriptor:
         # cached on self) — verified against the real R1/R2 conformance kit, not assumed.
         protocol_version=2,
         adapter_impl="in_process",
-        provisioning=Provisioning(byo_mode=["pip"], auth="none", billing_target="caller_infra"),
+        provisioning=Provisioning(byo_mode=["pip"], auth="none"),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(
             ocr=False,  # born-digital only; no OCR
@@ -99,16 +97,9 @@ def _descriptor() -> AdapterDescriptor:
             reading_order="verified",
             multi_column="claimed",
             figures_charts="verified",
+            page_range_selection=True,
             input_formats=["pdf", "xps", "epub", "mobi", "cbz", "svg"],
             max_pages_per_request="unbounded",
-        ),
-        cost=Cost(native_unit="cpu_second", basis="infra_only", usd_per_page_equiv_low=0.0),
-        compliance=ComplianceProfile(
-            hipaa_baa="na_local",
-            trains_on_customer_data="na_local",
-            runs_fully_local=True,
-            data_region_options=["*"],
-            max_retention_hours=0,
         ),
         runtime=RuntimeProfile(
             offline_capable=True,
@@ -131,8 +122,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="medium",
-            integration_priority="P0",
-            priority_reason="Local zero-cost floor for born-digital loan files; first in-process adapter.",
         ),
         # v0.5 (Pulse): a `local` probe — the backend is a library in this process, so liveness is
         # a real measurement (does it import and report a version?) rather than an inference, and
@@ -237,8 +226,8 @@ class PyMuPDFAdapter(BackendAdapter):
         """Refuse a file this backend does not read, by name, before PyMuPDF is asked to open it.
 
         A .txt, a .docx and a truncated PDF all come back from PyMuPDF as `Failed to open stream`,
-        which names neither the problem nor the fix. The folder path already answers honestly, with
-        `skip_reason: unsupported_format`, so the single-document path answers the same way. The
+        which names neither the problem nor the fix. This raises `unsupported_format` naming the
+        formats this backend reads, and a batch reports that as the item's own failure reason. The
         format list is read from the descriptor rather than restated here, so the message cannot
         drift from the catalog. A supported extension whose bytes are corrupt still falls through
         to the generic PyMuPDF error below, because the extension is all this check can see.

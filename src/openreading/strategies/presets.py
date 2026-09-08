@@ -30,15 +30,14 @@ Contract:
   dropped, and Plain's `looks_bad` scan member is result-aware (`openreading.strategies.plain`)
   where the bundle's `scanned_pages_detected` is a bare input-side fact. Hence "≈", not "=".
 
-    cost_saver    ≈ try: [pymupdf, docling, auto]
+    cost_saver    ≈ try: [pymupdf, docling, aws-textract]
                     escalate_when: {looks_bad: true, low_confidence: true}
-    max_accuracy  ≈ try: [auto, auto]            + the same escalate_when
+    max_accuracy  ≈ try: [aws-textract, azure-document-intelligence] + the same escalate_when
     offline_first ≈ try: [pymupdf, tesseract, docling] + the same escalate_when
     fast          ≈ race: [pymupdf, tesseract]
 
-`offline_first` orders local backends only, but *enforcement* of "never leave the machine" is
-`policy: { require_local: true }` — compliance lives outside the tree and a strategy can never
-widen it.
+`offline_first` names only local backends, so every branch stays on the machine. API-key scope can
+further narrow the tree at a server boundary.
 
 Cookbook
 ========
@@ -52,7 +51,7 @@ strategy with `backend.id: "strategy:<name>"`, CLI `--strategy <name>`, or
 `openreading.run(..., strategy="<name>")`. Where a shorter Plain spelling exists
 (`openreading.strategies.plain`) it follows the longhand; it desugars to that longhand.
 Execution laws cited here live in `openreading.strategies.engine`; the grammar in
-`schemas/strategy-config.v0.2.json` and `openreading.strategies.normalize`.
+`schemas/strategy-config.v0.4.json` and `openreading.strategies.normalize`.
 
 1. The headline: free local first, paid rung only when quality demands it
 --------------------------------------------------------------------------
@@ -80,7 +79,7 @@ strategies:
 ```
 
 What happens: normalization copies the `default` bundle onto the pymupdf step (the final step
-stays ungated). On a digital PDF pymupdf passes and is accepted — reducto never runs, cost $0.
+stays ungated). On a digital PDF pymupdf passes and is accepted — reducto never runs at all.
 On a scan `scanned_pages_detected` fires: the pymupdf result is retained as `Deficient` (attempt
 category `quality_escalated`), reducto runs and is accepted, and the response carries a
 `quality_escalated` warning. The bundle's `confidence_below: 0.6` is skipped on pymupdf.
@@ -129,9 +128,9 @@ credential-bound client only because validation forbids two branches naming the 
 `pick: best` waits for all non-shadow branches (default `require: all`), then the engine's
 composite score
 compares candidates. With no gates on this node the score basis is the default-bundle Tier-1
-predicates evaluated over each candidate (comparison is never 0/0); remaining ties break by
-cheaper backend, then first-listed. The loser records `judged_lost` and its cost still lands in
-`usage.cost_usd` — honest money.
+predicates evaluated over each candidate (comparison is never 0/0); remaining ties break by the
+first-listed candidate. The loser records `judged_lost`, because its call reached the vendor
+whether or not it won.
 
 The judged variant — a `judge:` block on the same node makes the comparison LLM-judged:
 
@@ -143,7 +142,7 @@ The judged variant — a `judge:` block on the same node makes the comparison LL
       excerpt_chars: 4000
 ```
 
-The judge is itself a backend: it must pass the request's stage-1 compliance filter, its call is
+The judge is itself a backend: it must be inside the caller's own backend list, its call is
 recorded as a `judge_call` attempt with its billed cost, and comparison is pairwise in both
 orderings. Like every decision point it requires the operator's `OPENREADING_LLM_DECIDER` env
 gate (`openreading.strategies.decider`); an ungated, unavailable, or ineligible judge downgrades
@@ -259,13 +258,13 @@ launch adds no warning), and a reducto *failure* before 45s does NOT shortcut th
 delay — the hedge sleeps the full `start_after` on the shared clock (parallel law 2 in
 `openreading.strategies.engine`); only the node resolving first cancels a still-parked hedge. A
 hedge whose delay would land past the node deadline is `deadline_pruned`. If both run and
-reducto wins, the billed textract attempt stays billed (`raced_lost`, cost summed into
-`usage.cost_usd`) and the response never blocks on the loser's cancellation.
+reducto wins, the textract attempt is still recorded (`raced_lost`) because its call reached
+AWS, and the response never blocks on the loser's cancellation.
 
-7. Budget-capped best-effort cascade ending in `auto`
------------------------------------------------------
+7. Budget-capped best-effort cascade
+------------------------------------
 
-A hard time wall, an escalation ladder, and "let the router pick something untried" last.
+A hard time wall and an escalation ladder, with the strongest backend last.
 
 ```yaml
 strategies:
@@ -276,7 +275,7 @@ strategies:
     steps:
       - pymupdf
       - docling
-      - auto                             # router's stage-3 pick among eligible − attempted
+      - aws-textract                     # a named rung: every rung names what it runs
 ```
 
 Plain spelling (`max_time` is the wall; `best_effort` keep-best is the inherited default):
@@ -284,14 +283,13 @@ Plain spelling (`max_time` is the wall; `best_effort` keep-best is the inherited
 ```yaml
 strategies:
   best_effort:
-    try: [pymupdf, docling, auto]
+    try: [pymupdf, docling, aws-textract]
     escalate_when: looks_bad
     max_time: "2m"
 ```
 
-What happens: the cascade-level gate is copied onto pymupdf and docling; the final `auto` rung
-stays ungated and takes the router's stage-3 best among backends not yet attempted in this walk
-(none left → `Err(exhausted)`, reason `no_untried_backend`). On exhaustion — the ladder ran out
+What happens: the cascade-level gate is copied onto pymupdf and docling; the final rung stays
+ungated, because there is nothing left to escalate to. On exhaustion — the ladder ran out
 or the `max_duration` deadline ended the walk — keep-best returns the best retained `Deficient`
 result — ties keep the EARLIEST-retained rung, the comparison being strict-greater (engine Law
 4; the cookbook's highest-rung-index tiebreak is not implemented) — carrying
@@ -301,50 +299,37 @@ backend answers the second and is exactly wrong for the first. `budget_exhausted
 error class: nothing retained and the deadline ended the walk → `Err(budget_exhausted)`; nothing
 retained otherwise → `Err(exhausted)`; both raise `PlanExhaustedError`.
 
-8. Compliance-constrained cascade with a guaranteed local floor
----------------------------------------------------------------
+8. Explicit sensitive-document cascade
+--------------------------------------
 
-PHI: only BAA-covered or fully-local backends may see the document, and nothing may train on
-it. Compliance lives in `policy:`, outside the tree.
+Core cannot verify vendor agreements or data-use terms. Name only backends your organization has
+approved, and use API-key scope when a caller must be prevented from reaching the others.
 
 ```yaml
 version: 1
-
-policy:
-  require_baa: true
-  no_train_on_data: true
 
 strategies:
   phi_pipeline:
     steps:
-      - pymupdf                      # local: PHI never leaves; always eligible under require_baa
+      - pymupdf                      # local: the document never leaves this machine
       - aws-textract                 # hosted rung with a BAA path
-      - reducto                      # pruned in deployments where its claims aren't verified
+      - reducto                      # include only after your own vendor review
       - docling                      # local floor
     escalate_if: default
 ```
 
-Plain spelling — `policy:` is shared with Plain, so only the cascade changes:
+Plain spelling:
 
 ```yaml
 version: 1
-policy:
-  require_baa: true
-  no_train_on_data: true
 strategies:
   phi_pipeline:
     try: [pymupdf, aws-textract, reducto, docling]
     escalate_when: looks_bad
 ```
 
-What happens: the file's `policy:` unions into every request's compliance block
-(most-restrictive-wins, DECISIONS D-v3-12), and the 3-stage router prunes the tree *before*
-execution. Fully-local rungs are always eligible under `require_baa`. A hosted rung whose
-BAA/no-train posture is not verified is dropped up front: the cascade simply has one fewer rung,
-recorded in `orchestration.dropped[]` with the router's `DropReason`; nothing can re-admit it,
-and naming compliance in `on_error` is a load-time error. `strategy validate` warns statically
-about steps unreachable under the file's own `policy:`. If *every* rung were pruned: terminal
-`no_compliant_backend` — never a silent downgrade.
+What happens: each named rung runs in the written order when earlier quality gates fire. The
+strategy makes no vendor claim. Server API-key scope prunes any rung that token cannot reach.
 
 9. Audit sampling: shadow a premium backend on 5% of traffic
 ------------------------------------------------------------
@@ -374,7 +359,7 @@ strategies:
 What happens: `sample_percent` buckets by sha256 of the document bytes — deterministic per input,
 so the same document always lands in the same bucket and replays agree with the idempotency
 cache. The shadow branch is excluded from `pick` and always drained (category `shadow`); its
-full response and cost land in the trace and `usage.cost_usd`. Shadow-vs-winner comparison over
+full response lands in the trace. Shadow-vs-winner comparison over
 time is the calibration feed for tuning gate thresholds.
 
 10. Gray-band review plus an explicit decision point
@@ -440,21 +425,20 @@ rung (`validate` warns).
 12. The maximal composition — everything at once
 ------------------------------------------------
 
-One file exercising the whole grammar: an operator ceiling, a compliance-fact route, a cascade
-nesting a hedged judged parallel, an `auto` leaf, an error map, shadow sampling, a deployment
-default.
+One file exercising the whole grammar: an operator ceiling, a fact route, a cascade
+nesting a hedged judged parallel, an error map, shadow sampling, a deployment default.
 
 ```yaml
 version: 1
 
 policy:
-  no_train_on_data: true             # unions into every request; most-restrictive-wins
+  backends: [pymupdf, tesseract, aws-textract]
 
 limits:                              # operator ceiling on every strategy-engaged run;
   max_duration_per_doc: 10m          #   binds strategies, not direct-named requests
 
 defaults:
-  strategy: front_door               # backend.id "auto" traffic runs front_door
+  strategy: front_door               # traffic naming no backend runs front_door
 
 strategies:
   base_cascade:
@@ -477,10 +461,10 @@ strategies:
                                                        #   hedge needs pick: fastest — spec §2.3)
         pick: best
         judge:                                         # presence makes the comparison LLM-judged
-          backend: anthropic-claude                    # must pass the request's compliance filter
+          backend: anthropic-claude                    # explicit judge backend
           intent: Prefer complete tables with arithmetically consistent totals.
         on_win: cancel                                 # losers cancelled; billed cost still recorded
-      - auto                                           # router's pick among eligible − attempted
+      - aws-textract                                   # a named rung
 
   tables_heavy:                                        # a second cascade written out in full:
     budget: { max_duration: 6m }                       #   `extends:` is designed, not a file key
@@ -500,8 +484,6 @@ strategies:
   front_door:
     route:                                             # facts computed once, pre-parse
       rules:
-        - when: { compliance: { require_local: true } }  # compliance facts are routable (nested)
-          use: strategy:local_only
         - when: { doc_type: [invoice, bank_statement] }
           use: strategy:tables_heavy
         - when: { sample_percent: 2 }                  # deterministic content-hash bucket
@@ -509,16 +491,12 @@ strategies:
       default: strategy:base_cascade                   # mandatory floor
 ```
 
-What happens: an `auto` request routes through `front_door`. A `require_local` request takes
-`local_only` — and the compliance filter has *already* pruned every hosted leaf, so even a
-routing mistake could not reach one. An invoice takes `tables_heavy`, a second cascade with a
+What happens: a request with no named backend routes through `front_door`. An invoice takes
+`tables_heavy`, a second cascade with a
 bigger duration budget. Inside `base_cascade`: pymupdf, then the hedged judged duel inside the
 cascade's 4m budget inside the operator's 10m ceiling (children clamp, never extend; `limits:`
-binds strategy-engaged runs only, never a direct-named request), then an `auto` rung that can
-only pick a backend the walk has not touched — the attempted set spans rungs, branches, shadows,
-and losers. The `compliance` route fact is a nested `{field: value}`
-map, keys ANDed, never a dotted key (DECISIONS D-v3-11). Every decision, gate evaluation, prune,
-and dollar lands in one trace.
+binds strategy-engaged runs only, never a direct-named request), then aws-textract. The attempted
+set spans rungs, branches, shadows,
 
 Reading the trace
 =================
@@ -526,7 +504,7 @@ Reading the trace
 Every strategy-engaged response carries an `orchestration` block (`openreading.strategies.trace`):
 `strategy`, the attempt trail `attempts[]` — one record per backend run with `node`, `category`
 (`succeeded`, `quality_escalated`, `raced_lost`, `judged_lost`, `shadow`, `judge_call`, …),
-`duration_ms`, `cost_usd`, and `gates[]` where each evaluated predicate carries `threshold`,
+`duration_ms`, and `gates[]` where each evaluated predicate carries `threshold`,
 `observed`, `fired`, and `skipped: signal_unavailable` when it could not bind — and
 `decisions[]`: one record per decision point (gate bands, decide nodes, judges) plus one
 `point: "route"` record per route node evaluated, carrying every rule's `matched` flag and fact
@@ -558,13 +536,16 @@ from openreading.strategies.model import RawNode
 
 PRESETS: dict[str, RawNode] = {
     "cost_saver": {
-        "intent": "Local parse first; escalate to the router's best remaining pick only on bad quality.",
-        "steps": ["pymupdf", "docling", "auto"],
+        # The third rung used to be `auto`, which asked the router to rank vendor claims this
+        # package could not verify. Every rung names a backend now, so a reader can see what a
+        # preset will actually run, and `auto` is refused at load in every dialect.
+        "intent": "Local parse first; escalate to a hosted backend only on bad quality.",
+        "steps": ["pymupdf", "docling", "aws-textract"],
         "escalate_if": "default",
     },
     "max_accuracy": {
-        "intent": "Best eligible backend; second opinion from the next-best when quality gates fire.",
-        "steps": ["auto", "auto"],
+        "intent": "A hosted backend first; second opinion from another when quality gates fire.",
+        "steps": ["aws-textract", "azure-document-intelligence"],
         "escalate_if": "default",
     },
     "fast": {
@@ -574,7 +555,7 @@ PRESETS: dict[str, RawNode] = {
         "on_win": "cancel",
     },
     "offline_first": {
-        "intent": "Never leave the machine. Enforcement belongs to policy: { require_local: true }.",
+        "intent": "Local parsers only. Every rung is explicitly named.",
         "steps": ["pymupdf", "tesseract", "docling"],
         "escalate_if": "default",
     },

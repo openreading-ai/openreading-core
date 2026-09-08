@@ -20,7 +20,7 @@ far. A gate is one test on one result, for example whether the text is near-empt
 threshold. The response is the envelope, the one JSON document every backend returns. The engine
 writes an `orchestration` block, the trace, onto that envelope. The trace records every attempt and
 every gate with its observed value and threshold. It also records every backend dropped by
-compliance and every decision point an LLM was allowed to take. A decision point is a place in the
+backend selection and every decision point an LLM was allowed to take. A decision point is a place in the
 strategy where an LLM may choose, and step 7 builds one. You need `sample.pdf` from the root
 README, and the walkthrough needs no key.
 
@@ -32,7 +32,7 @@ flowchart TD
   Y[/"openreading.yaml"/]:::src --> S{{"schema gate"}}:::gate
   S --> P["Plain desugar"]:::work
   P --> N["normalize"]:::work
-  N --> C{{"compliance prune"}}:::gate
+  N --> C{{"apply caller scope"}}:::gate
   C --> E["engine walk"]:::work
   E --> T(["orchestration trace"]):::hero
   T --> X["explain"]:::out
@@ -59,17 +59,16 @@ Hold the four facts below in mind, and every command on this page follows from t
    openreading's own probe about this backend's output. Is it garbled, near-empty, or a text-layer
    read of a scanned page? A gate that fires keeps the result as best-so-far and moves to the next
    rung. A rung is one step of a cascade, so the next rung is the next backend in order.
-3. Compliance prunes the tree before anything runs. The request's constraints and the file's
-   own `policy:` block are combined, and the most restrictive wins. A dropped backend lands in
-   `orchestration.dropped[]`. Nothing in the file can bring it back.
+3. Every node runs the backend it names. Nothing in a strategy file infers a backend, so what a
+   run will dispatch is what you can read in the file.
 4. Every run leaves the same trace, whoever decided. The engine, a replayed trace, or an enabled LLM
    decider walk the same rails and write the same records. That is why `explain` narrates any run
    and `replay` reproduces one.
 
 Plain is the short form you write, and it has six keys: `try`, `race`, `compare`, `then`,
 `escalate_when`, `max_time`. `escalate_when` takes one or more of four judgment words: `looks_bad`,
-`low_confidence`, `missing: [field]`, and `disagree`. `auto` is the one reserved word, and it stands
-for the router's best remaining pick. `uv run openreading strategy --help` prints the whole
+`low_confidence`, `missing: [field]`, and `disagree`. There are no reserved words: every rung
+names a backend or another strategy. `uv run openreading strategy --help` prints the whole
 language, and each key is shown in use below.
 
 ## Walkthrough
@@ -101,7 +100,7 @@ strategies:                         # the library of named strategies
     race: [pymupdf, tesseract]      # run at once, first success wins
   both:
     compare: [pymupdf, tesseract]   # run at once, keep the one that passes more quality checks
-    then: auto                      # if the winner cannot be trusted, the router's best remaining pick
+    then: aws-textract              # where compare sends the document when it cannot trust the winner
   fields:
     try: [pymupdf, tesseract]
     escalate_when:
@@ -143,8 +142,8 @@ WARNING …/openreading.yaml:strategies.fields.steps[0].escalate_if: missing: 'p
   …
   both: dialect: plain
       compare: [pymupdf, tesseract]
-      then: auto
-    → Runs pymupdf and tesseract at once and keeps the better result; if they disagree or the winner looks bad, sends the document to the best available backend.
+      then: aws-textract
+    → Runs pymupdf and tesseract at once and keeps the better result; if they disagree or the winner looks bad, sends the document to aws-textract.
   …
   what the words mean:
     looks bad       openreading's quality probe flags the result: garbled text, over 20% near-empty pages,
@@ -210,12 +209,11 @@ uv run openreading strategy show cost_saver
 ```
 ```yaml
 cost_saver:
-  intent: Local parse first; escalate to the router's best remaining pick only on
-    bad quality.
+  intent: Local parse first; escalate to a hosted backend only on bad quality.
   steps:
   - pymupdf
   - docling
-  - auto
+  - aws-textract
   escalate_if: default
 ```
 
@@ -225,9 +223,9 @@ output is right. Fix the table.
 
 | Preset | Plain near-equivalent | Differs from Plain in |
 |---|---|---|
-| `cost_saver` | `try: [pymupdf, docling, auto]` + `escalate_when: {looks_bad: true, low_confidence: true}` | `intent:`, and a bare `scanned_pages_detected` instead of the scan pair |
-| `max_accuracy` | `try: [auto, auto]` + the same `escalate_when` | same |
-| `offline_first` | `try: [pymupdf, tesseract, docling]` + the same `escalate_when` | same, and enforcement is `policy: {require_local: true}`, not the preset |
+| `cost_saver` | `try: [pymupdf, docling, aws-textract]` + `escalate_when: {looks_bad: true, low_confidence: true}` | `intent:`, and a bare `scanned_pages_detected` instead of the scan pair |
+| `max_accuracy` | `try:` naming the two backends you trust most + the same `escalate_when` | same |
+| `offline_first` | `try: [pymupdf, tesseract, docling]` + the same `escalate_when` | same, and what keeps a run local is `policy: {backends: [pymupdf, tesseract, docling]}`, not the preset |
 | `fast` | `race: [pymupdf, tesseract]` | `intent:` only |
 
 ### 3. Run a strategy and read the explanation
@@ -282,7 +280,7 @@ CONTENT: MIXED  (text:agree  table_cells:diverge)
   [ warn] table_shape_mismatch  {pymupdf, tesseract}  — table counts differ: {'pymupdf': 1, 'tesseract': 0}
 ```
 
-**You should see** a `disagree` row of `0.0` and the `then: auto` rung never reached. The two texts
+**You should see** a `disagree` row of `0.0` and the `then:` rung never reached. The two texts
 share every word, so nothing disagrees. The findings below the trace are the subject of
 [Compare](../comparison/README.md).
 
@@ -332,16 +330,15 @@ is missing. The gate fires, and the document climbs to `tesseract`. `jq -c '[.wa
 fields.json` prints `["quality_escalated"]`. An escalation is a warning on the envelope, never an
 error.
 
-### 6. Prune a rung with a policy inside the file
+### 6. Set the default backend chain
 
-A policy inside the file removes a backend from the tree before anything runs. Compliance is the
-set of rules about which backends may see a document, such as requiring a fully local one. Save
-this as `local.yaml`. The `policy:` block is compliance, and it sits outside the strategy tree.
+The `policy:` block supplies the ordered chain an unnamed request walks. A strategy leaf names
+its own backend and runs it, list or no list. Save this as `local.yaml`:
 
 ```yaml
 version: 1
 policy:
-  require_local: true               # only fully-local backends may see the document
+  backends: [pymupdf, tesseract]
 strategies:
   onprem:
     try: [pymupdf, reducto, tesseract]
@@ -349,32 +346,40 @@ strategies:
 ```
 
 ```bash
-uv run openreading strategy validate --config local.yaml
+uv run openreading route sample.pdf --config local.yaml
 uv run openreading strategy plan sample.pdf --config local.yaml --strategy onprem
 ```
-```text
-WARNING local.yaml:strategies.onprem.steps[1].backend: 'reducto' is filtered out by the policy (not_local). This step can never run in that compliance context. Remove it or relax the policy
-…
+```json
+{ "chosen": "pymupdf", "fallbacks": ["tesseract"], "dropped": {}, "terminal_reason": null }
 ```
 ```json
 { "strategy": "onprem", "config_hash": "sha256:…",
-  "eligible": ["pymupdf", "docling", "tesseract", "qwen-vl"],
-  "dropped": [ { "backend": "reducto", "stage": 1, "code": "not_local", "detail": "require_local set but backend is not fully local" } ],
-  "tree": { "steps": [ { "backend": "pymupdf", "escalate_if": { "any_of": [ "…" ] } }, { "backend": "tesseract" } ] } }
+  "eligible": ["pymupdf", "tesseract"],
+  "dropped": [],
+  "tree": { "steps": [ { "backend": "pymupdf", "escalate_if": { "any_of": [ "…" ] } },
+                       { "backend": "reducto" }, { "backend": "tesseract" } ] } }
 ```
 
-**You should see** a two-rung tree where you wrote three. `plan` prints the pruned tree for this
-document and policy, with no execution. Run it with `parse sample.pdf --config local.yaml --strategy
-onprem > onprem.json`. `explain onprem.json` ends with the line `dropped reducto (stage 1:
-not_local)`, and `jq -c '.orchestration.dropped' onprem.json` prints the same record. Every verb
-reads the same block from the same file, so `strategy plan`, `replay`, `calibrate` and a plain
-`parse` all prune against one policy.
+**You should see** your two-name list as the chain in `route`, and all three rungs still standing
+in the plan. That is the distinction worth learning here, and it is not a bug.
+
+`policy.backends` is the chain a request that names NO backend resolves to. `routing.fallback`
+reorders within it and never adds to it. But naming a backend, whether with `--backend reducto` or
+as a rung inside your own strategy, is an explicit act by the author of that file, and it runs. On
+one machine the operator and the caller are the same person, and refusing what they just wrote
+helps nobody. What stops the reducto rung here is that no `REDUCTO_API_KEY` is set, which the
+attempt reports as `skipped (missing_credentials)` before anything leaves the machine.
 
 > [!IMPORTANT]
-> Nothing in the file can re-admit a dropped backend. A later rung, `then:`, `auto`, and an
-> `intent:` line all leave the drop in place. A BAA is the signed agreement that lets a vendor
-> handle protected health data. Drop codes and how to attest one are in
-> [Routing and keys](../router/README.md).
+> The enforcement boundary, for the case where the operator and the caller are two different
+> people, is the server's API-key scope. `OPENREADING_API_KEY_SCOPES` refuses a backend outside a
+> token's scope with `scope_denied` before any credential is resolved, whatever the request named,
+> and prunes a strategy's rungs to what that token may reach. [The HTTP
+> server](../server/README.md) has the walkthrough.
+>
+> This file used to prune a rung against a compliance policy instead: `require_local: true`
+> dropped `reducto` with `not_local`, from a per-vendor table core kept in its own source. Core
+> holds no fact it cannot verify, and it could verify none of that.
 
 ### 7. Declare a decision point, run it without an LLM, replay it
 
@@ -458,7 +463,7 @@ uv run openreading calibrate ../src/openreading/evals/sample --strategy main --t
 ```json
 { "strategy": "main", "n_docs": 1, "n_scored": 1,
   "rung1_backend": "pymupdf", "rung2_backend": "tesseract",
-  "target_escalation": 0.15, "max_cost_per_doc": null,
+  "target_escalation": 0.15,
   "sweeps": [], "recommended": {} }
 ```
 
@@ -489,14 +494,15 @@ uv run openreading calibrate ../src/openreading/evals/sample --strategy sweepabl
   | jq -c '{n_docs, n_scored, points: (.sweeps[0].points[0:4]), n_points: (.sweeps[0].points|length), recommended}'
 ```
 ```json
-{"n_docs":1,"n_scored":1,"points":[{"threshold":0.0,"escalation_rate":0.0,"cost_per_doc":0.0,"scorer_agreement":1.0},{"threshold":100.0,"escalation_rate":0.0,"cost_per_doc":0.0,"scorer_agreement":1.0},{"threshold":200.0,"escalation_rate":0.0,"cost_per_doc":0.0,"scorer_agreement":1.0},{"threshold":300.0,"escalation_rate":1.0,"cost_per_doc":0.0,"scorer_agreement":0.0}],"n_points":31,"recommended":{"escalate_if":{"chars_per_page_below":0.0}}}
+{"n_docs":1,"n_scored":1,"points":[{"threshold":0.0,"escalation_rate":0.0,"scorer_agreement":1.0},{"threshold":100.0,"escalation_rate":0.0,"scorer_agreement":1.0},{"threshold":200.0,"escalation_rate":0.0,"scorer_agreement":1.0},{"threshold":300.0,"escalation_rate":1.0,"scorer_agreement":0.0}],"n_points":31,"recommended":{"escalate_if":{"chars_per_page_below":0.0}}}
 ```
 
 **You should see** 31 operating points where there were none, from the same single document. A
 point is one candidate threshold with what it would have done to this sample. `escalation_rate` is
-the share of documents that would have climbed to rung 2. `cost_per_doc` prices that share at the
-per-page rates each backend's descriptor declares. `scorer_agreement` is how often the gate agreed
-with the labels.
+the share of documents that would have climbed to rung 2, which is the figure you multiply by
+your own rung-2 rate. A point used to carry a `cost_per_doc` doing that multiplication for you,
+from a rate this package had written down about a vendor; it is gone.
+`scorer_agreement` is how often the gate agreed with the labels.
 
 Two terms decide that last number and neither has a flag. `quality_bar` is the eval score below
 which a document counts as one that should have escalated, and it is fixed at 0.8 in
@@ -539,9 +545,9 @@ the leaderboard on.
 
 ## Recipes
 
-**Opt `auto` traffic into a preset.** Put `defaults: {strategy: offline_first}` above `strategies:`.
-A request with `backend.id: "auto"`, or `openreading.run("sample.pdf", backend="auto",
-config="defaults.yaml")`, then runs `offline_first`. `backend.id: "strategy:none"` or
+**Apply a preset when no backend is named.** Put `defaults: {strategy: offline_first}` above
+`strategies:`. A request with `backend.id: null`, or `openreading.run("sample.pdf",
+backend=None, config="defaults.yaml")`, then runs `offline_first`. `backend.id: "strategy:none"` or
 `--no-strategy` forces the plain router. The CLI needs exactly one of `--backend`, `--strategy`,
 `--no-strategy`. Use it to change a fleet's default without touching callers.
 
@@ -565,16 +571,17 @@ catches it.
 
 **Climb to a hosted rung only on bad quality** (needs `REDUCTO_API_KEY`, a hosted key, so the shape
 is shown and not run). Write `try: [pymupdf, reducto]` with `escalate_when: looks_bad`. On a
-born-digital PDF the trace ends at `pymupdf`, cost `$0`. On a scan the `cheap_first` example in the
-`openreading.strategies.presets` docstring shows `pymupdf quality_escalated`, then `reducto
-succeeded` with its billed cost in `usage.cost_usd`. To have an LLM judge a `compare` instead of the
+born-digital PDF the trace ends at `pymupdf` and no hosted call leaves your machine. On a scan the
+`cheap_first` example in the `openreading.strategies.presets` docstring shows `pymupdf
+quality_escalated`, then `reducto succeeded`, with the credits Reducto reported in
+`usage.credits`. To have an LLM judge a `compare` instead of the
 engine's score, add `judge: {backend: anthropic-claude, intent: "Prefer complete line-item
 tables."}` beside `pick: best` in the longhand. Without `OPENREADING_LLM_DECIDER=1` the record says
 `downgraded=env_disabled`.
 
 > [!WARNING]
-> Every hosted rung that runs is billed to your key, losers, shadows, and judges included.
-> `usage.cost_usd` sums all of them.
+> Every hosted rung that runs is a call on your key, losers, shadows, and judges included. The
+> trace names each one, and core quotes no price for any of them.
 
 **Audit one agent's run from another.** A second agent can check a strategy run without trusting
 the first. The trace carries everything the check needs. `config_hash` pins the config that ran.
@@ -619,15 +626,14 @@ shape, with an integer `chosen` and no `eligible`.
 
 ## How it decides
 
-These rules keep a strategy from widening compliance, hiding a failure, or spending money it did
-not record. Each rule names the failure it avoids and where it is enforced.
+These rules keep a strategy within its explicit plan, expose failures, and record each attempt.
+Each rule names the failure it avoids and where it is enforced.
 
 - Without a config file, nothing changes. The strategy package is not even imported, so an upgrade
   cannot alter a request that named its backend. The rule lives in `openreading.strategies`
   ("Two invariants"), and a subprocess test proves it.
-- Compliance is outside the tree. Pruning happens in `openreading.strategies.prune` before the walk,
-  and naming `compliance` in `on_error` is a load error. A file authored far from its deployment
-  cannot leak a document to a backend the policy dropped.
+- Every leaf runs the backend it names, and no leaf resolves one at dispatch. `policy.backends`
+  is the chain an unnamed request walks, never a rung's target.
 - Deciders choose, and they never widen the set. Candidates are enumerated after pruning, and the
   decider's tool schema is that list as an enum (`openreading.strategies.decider` §3). An out-of-set
   choice is impossible, not merely discouraged.
@@ -649,13 +655,13 @@ not record. Each rule names the failure it avoids and where it is enforced.
   `OPENREADING_LLM_DECIDER` set, and no request field can enable it
   (`openreading.strategies.decider` §1). A caller cannot talk a service into consulting an LLM its
   operator did not deploy.
-- The cost is honest, and honest is not the same as billed. `usage.cost_usd` totals every attempt
-  that ran, including winners, losers, shadows, and judges, and the engine adds no estimate of its
-  own (`openreading.strategies.plain`, "Guardrails"). What an attempt reported can still be a
-  projection. Seven of the fifteen backends declare `basis: estimated`, meaning a published rate
-  applied to a page count rather than money anyone charged. `usage.cost_basis` folds those bases by
-  the priority `billed > estimated > infra_only`. Read that field before you sum a run as spend
-  ([Backend adapters](../adapters/README.md#what-each-backend-charges-and-the-ceilings-on-one-request)).
+- Every attempt is on the record, and none of them carries a price. The trace names every
+  backend that ran, winners, losers, shadows and judges alike, so a reader can count the calls a
+  run made (`openreading.strategies.plain`, "Guardrails"). It used to also total them as
+  `usage.cost_usd`, folding a `cost_basis` across rungs. Most of what that summed was a published
+  rate this package had typed into its own source and applied to a page count, indistinguishable
+  once totalled from money someone was actually charged. Both are gone: count the attempts here,
+  and price them from your provider invoice.
 
 Every threshold this page prints has a written derivation, and they all live in one document. `uv
 run python -m pydoc openreading.strategies.signals` is that catalog. It gives each signal's formula,
@@ -706,7 +712,7 @@ The category column in `explain` is the closed vocabulary `CATEGORIES` in
 - Also under `openreading.strategies` are `presets` (the cookbook) and `engine` (Outcomes and
   laws, including the score behind `pick: best`). The other two are `decider` (decision points,
   downgrades) and `calibrate` (the sweep report and `quality_bar`).
-- The schema is `src/openreading/schemas/strategy-config.v0.2.json`. The trace rides on
+- The schema is `src/openreading/schemas/strategy-config.v0.4.json`. The trace rides on
   `response.v0.3.json`.
 - `uv run openreading strategy --help`, `explain --help`, `replay --help`, and `calibrate --help`
   document the flags. The exit codes are in `uv run python -m pydoc openreading.cli`, section
@@ -733,8 +739,7 @@ The category column in `explain` is the closed vocabulary `CATEGORIES` in
 ## See also
 
 - [Docs home](../README.md)
-- [Routing and keys](../router/README.md): drop codes, the `policy:` block, attesting a BAA,
-  bringing a key.
+- [Routing and keys](../router/README.md): the `policy.backends` default chain and credentials.
 - [Compare](../comparison/README.md): the verdicts behind `compare --from`.
 - [Evals](../evals/README.md): building the dataset `calibrate` needs.
 - [The run ledger](../ledger/README.md): resuming and replaying whole runs.

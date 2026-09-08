@@ -256,6 +256,22 @@ tells a win from a tie.
 
 ### Removed
 
+**`auto` leaves every strategy dialect.** It survived the removal set in longhand, where a leaf
+`{backend: auto}` still loaded and `engine._resolve_backend` resolved it at dispatch to the first
+candidate the walk had not tried. That is the same inference the removal set deleted everywhere
+else: `auto` meant "the best remaining backend", and the ranking that made "best" mean anything
+was the compliance filter, the capability gate and the cost scorer, all of which are gone. It also
+meant a strategy file could not be read: a rung naming no backend does not say what it will run.
+`loader._refuse_auto` now refuses it in every dialect at load, naming the replacement, and Plain's
+own earlier refusal stays because a Plain author is reading a different page. What replaces it:
+name the backend the rung runs, or write the deployment's preferred order once in
+`policy.backends` and leave the request unnamed. Two consequences worth knowing. `CompiledPlan.
+dispatchable` is now exactly the ids the tree names, where it used to widen to the whole candidate
+chain whenever any leaf said `auto` — so the `Sanitizer` and `pinned_eligible` are armed for what
+can actually run and nothing more. And the `exhausted` error class no longer has a leaf-level
+cause: only a composite that ran out of children raises it. `POST /v1/jobs` and
+`openreading strategy --help` stop naming `auto` as a value a caller can send.
+
 **`--policy PATH`, the `policy=` keyword, and three server environment variables.** The flag is
 gone from `route`, `strategy validate`, `strategy plan`, `replay`, `calibrate`, `benchmark run`
 and `leaderboard`; passing it is an argparse error and exit 2. `policy=` is gone from
@@ -456,6 +472,189 @@ and `tests/test_schema_evolution.py` pins every released file byte for byte.
 - **`compare <missing.pdf> --backends a,b` is usage, not an errno.** `parse` refused a mistyped
   filename at exit 2 with a sentence; fan-out returned a raw `SourceNotFoundError: [Errno 2]` at
   exit 1.
+- **The caller names the backends, and nothing else decides.** The compliance filter, the
+  stage-3 scorer, the capability gate and `auto` are all removed, and `policy.backends` replaces
+  them in the same release so no caller is left without a way to bound the backend set. Selection
+  is a lookup: the backend you named, else `policy.backends` in written order, else `pymupdf`,
+  which needs no key and no config. An empty list permits nothing and refuses with `scope_denied`.
+  Every source of an allow-list intersects and none widens.
+- **`compliance` leaves the request and the descriptor.** 180 vendor claims across 15 adapters:
+  whether each signs a BAA, trains on customer data, which regions it offers, how long it retains
+  a document. Nothing in this package could observe any of it, so a stale entry did not fail
+  loudly, it routed a document to a backend the operator believed was excluded and the run
+  succeeded. Gone with it: the nine stage-1 drop codes, `ComplianceRefused`, the 403
+  `compliance_refused`, `BAA_TIER_CONFIRMED_WARNING`, and the three attestation keys.
+- **`optimize_for` is removed.** Four documented values feeding one formula. Its "quality" term
+  ranked by `integration_priority`, this project's own P0/P1/P2 build label, and `latency` read no
+  latency figure because no descriptor carried one: measured, `latency` and `accuracy` returned
+  byte-identical chains. `integration_priority` and `priority_reason` leave the descriptor too.
+- **The capability gate is removed.** `_truthy_cap` passed `claimed` and `verified` identically,
+  so a vendor's documentation gated dispatch exactly as a test we ran did. The `False` side was
+  worse: asking for signature detection dropped thirteen backends, Azure among them, which ships
+  it. A backend that cannot do a thing refuses first-hand now.
+- **`auto` is deleted.** It asked the engine to infer from data it could not verify. Requests that
+  named it now name no backend, which resolves through the three rules above. **A request with no
+  list gets a chain of ONE.** Previously `auto` fanned out to all fifteen backends; to get a
+  fallback chain, list the backends you want.
+- **Three schemas bump**: `request` v0.3 (no `compliance`, no `optimize_for`, `backend.id`
+  nullable), `adapter-descriptor` v0.8 (no `compliance`, no priority hints), `strategy-config`
+  v0.4 (`policy` is one key; `when` drops the `compliance` fact). A v0.8 descriptor is **not** a
+  valid v0.1-v0.7 descriptor, because those required a `compliance` block.
+- **The ledger keeps no policy about your disk.** Retention, the reaper, the expiry stamp,
+  `OPENREADING_LEDGER_RETENTION_HOURS`, `OPENREADING_RETENTION_SWEEP_S` and the server's sweep
+  loop are all removed, and so is encryption at rest. Retention was a destructor whose only job
+  was deleting the caller's data on a timer, defaulting to a number its own source marked
+  `# placeholder`, with a ceiling derived from `min(max_retention_hours)` across vendor
+  descriptors: an unverifiable claim about somebody else's servers decided when files on your
+  machine were destroyed. Encryption kept `keys/<run_id>.key` in the same directory tree as the
+  ciphertext it protected, so it bought one narrow scenario at the cost of a native dependency on
+  every install. **`cryptography` is no longer a dependency.** Erasure is `rm`, on whatever
+  schedule your own policy sets.
+- **`OPENREADING_LEDGER` says what it copies.** Arming it means "copy every document I process,
+  and every full response, into this directory, in the clear". The response blob is written
+  whatever `include_backend_raw` / `typed_fields` / `image` the request asked for, so the ledger
+  can hold data a caller excluded from their own response. That disclosure is now in the
+  `openreading.ledger` docstring, where the variable is documented.
+- **A run journaled by an older build cannot be read by this one.** Its blobs are encrypted and
+  nothing here decrypts them. The content is reproducible by re-running, and the ledger is
+  arming-gated and pre-release, so no decryptor ships.
+- **The router no longer decides what a backend can read.** The stage-2 format gate dropped a
+  backend when the request's MIME type fell outside its descriptor's `input_formats`. Measured
+  before removal: `.docx` dropped nine backends and `.svg` dropped none, because an unknown
+  extension became `application/pdf` before the router saw it, so the gate was a projection of
+  core's own table rather than knowledge of any vendor. Being wrong in the `False` direction
+  silently excluded a backend that could have done the job. A backend that cannot read a document
+  refuses first-hand now, and the fallback chain already handles that. `input_formats` stays on
+  the descriptor as documentation; nothing branches on it.
+- **A batch dispatches every source the caller named.** Intake used to sort files against a
+  26-extension table and skip the ones it judged unsupported. `skip_reason`, the `skipped` item
+  state and `summary.skipped` are gone with it (**`batch-result` v0.2**), and a file the backend
+  cannot read is a `failed` item carrying that backend's own reason. Hidden files are still
+  excluded, which is a rule about visibility rather than format. Two consequences worth knowing: a
+  directory holding one unreadable file now exits **4** (batch partial) where it used to exit 0,
+  and `openreading parse doc.txt --backend pymupdf` gets pymupdf's own refusal rather than the
+  CLI's pre-check, with the same information in it.
+- **One MIME resolver, and it never guesses PDF.** Core carried six extension-to-MIME tables and
+  five defaulted an unrecognised input to `application/pdf`, so seventeen of the twenty-six
+  extensions the batch layer already knew about, `.svg`, `.html`, `.epub`, `.txt` and more,
+  reached a backend labelled as PDFs. That is worse than misjudging a capability: the vendor
+  accepts the bytes and returns confident output, so nothing raises and no fallback fires.
+  `openreading.derive.mime.resolve_mime_type` is the one decision point now, taking the caller's
+  explicit type, else the bytes by signature, else the filename, else **`None`**. Content beats
+  filename because a name is a claim and bytes are a fact: a PDF saved as `scan.txt` now resolves
+  to `application/pdf`. Adds `puremagic>=1.30,<2` (MIT, pure Python, no system package).
+- **A document core cannot identify is refused, not relabelled.** `anthropic-claude`,
+  `google-gemini`, `google-document-ai` and `mistral-ocr` each guessed their own media type and
+  fell back to PDF. They now read the resolved type and raise `unsupported_input` when it is
+  absent, naming `document.mime_type` as the fix. This supersedes D-v2-9's rule that bytes with no
+  `mime_type` are a PDF: unnamed bytes are the case core knows least about, which made it the
+  least defensible place to invent a type.
+- **`granularity: page` re-parses only the failing pages, on the backends that can.**
+  `_supports_page_ranges` read `page_range_selection` through `getattr` on `Capabilities`, which
+  is `extra="allow"`, and no shipped descriptor declared it. The lookup could not raise, so it
+  answered `False` for all fifteen backends and every page-granularity rung silently ran document
+  granularity, re-parsing whole documents. The field is declared now, and `pymupdf`, `tesseract`,
+  `qwen-vl` and `mistral-ocr` set it, each having read `pages.ranges` all along. `open-ocr` does
+  not: `max_pages` is a ceiling, not a selection. Editing those four descriptors changes
+  `config_hash`, which folds a digest per descriptor by design (BL-163), so a run journaled before
+  this release and resumed after it is refused with a hash mismatch. Finish in-flight runs before
+  upgrading, or re-run them.
+- **Core quotes no price for anything.** Cost was three things wearing one word. An
+  **observation**: `pages_processed`, `credits`, `input_tokens`, `output_tokens` are counters the
+  vendor returned for this call, and `duration_ms` comes off a clock on this machine. Those stay.
+  An **assertion**: `descriptor.cost.usd_per_page_equiv_low`/`_high` on fifteen adapters, plus
+  private price tables inside four of them, one dated `accessed 2026-06-24` in its own comment.
+  Someone read a pricing page and typed numbers into Python. And a **derivation** laundering the
+  second into the first: `router/cost.py` multiplied the tables out into `response.usage.cost_usd`
+  and set it beside `input_tokens`, where no caller could tell which number was counted and which
+  was guessed. The assertion and the derivation are gone. **Removed:** `descriptor.cost` and
+  `provisioning.billing_target` (**`adapter-descriptor` v0.8**), `usage.cost_usd` and
+  `usage.cost_basis` (**`response` v0.3**), `summary.cost_usd` and `summary.cost_bases`
+  (**`batch-result` v0.2**), the `cost_outlier` compare finding and the per-subject cost columns
+  (**`comparison-report` v0.2**), the leaderboard's `cost_per_doc` column
+  (**`leaderboard-report` v0.1**), the `CostBasis` enum, `StepCost` on the ledger record
+  (**`step` v0.1**, **`journal` v0.1**), the strategy engine's whole money fold (`_set_total_cost`,
+  `_fold_basis`, `_branch_cost`, `_rung_basis`, `Attempt.cost_usd`/`cost_basis`,
+  `Trace.total_cost`, `DecisionVerdict.cost_usd`, `JudgeVerdict.cost_usd`), `calibrate`'s
+  `cost_per_doc` and its `--max-cost-per-doc` flag, and the benchmark spending preflight
+  (`estimate_cost`, `CostEstimate`, `CONFIRM_ABOVE_USD`). `CostReport` keeps `native_unit`,
+  `native_quantity`, `breakdown` and `duration_ms`. Every schema touched is an unreleased cut, so
+  no released file moves.
+- **Two tie-breaks and one gate change behaviour.** `pick: best` and `pick: merge` broke a tie on
+  the cheaper backend, read from `descriptor.cost`; they break on the **first-listed** branch now,
+  which is the author's own statement of preference and a fact core can actually check. The
+  benchmark confirmation prompt fired above one dollar; it fires above **25 pages** on a hosted
+  target, or whenever a target's call count cannot be stated at all, which is what a `strategy:`
+  target is.
+- **`openreading help cost` is now `openreading help usage`,** and `cost` is an alias so the old
+  spelling still opens it. The chapter reports what a run consumes rather than what it charges.
+  `benchmark estimate` and the batch `[preflight]` advisory both count calls and pages instead of
+  multiplying a rate: `[preflight] 16 items on hosted backend reducto: 16 call(s) on your own key`.
+- **`config_hash` moves again.** Deleting `cost` from every descriptor changes the per-descriptor
+  digest it folds (BL-163), so a run journaled before this release cannot be resumed after it.
+  Same remedy as the `page_range_selection` change above: finish in-flight runs first, or re-run.
+- **`policy.backends` is a default chain, and the API-key scope is the boundary.** The removal set
+  left the documentation claiming that nothing widens the list, "not a fallback, not a named
+  `--backend`, not a strategy rung". Two of those three were never true of the code. A request that
+  names NO backend resolves through the list and `routing.fallback` reorders within it; naming a
+  backend, on the command line or as a rung inside your own strategy file, runs that backend, list
+  or no list. On one machine the operator and the caller are the same person, and refusing what
+  they just typed helps nobody. Where they are two different people, the server's API-key scope
+  (`OPENREADING_API_KEY_SCOPES`) is the boundary: it refuses an out-of-scope backend with
+  `scope_denied` before any credential is resolved, whatever the request named, and prunes a
+  strategy's rungs to what the token may reach. Behaviour is unchanged; every page that said
+  otherwise now says this.
+- **`openreading strategy plan` crashed under any written policy.** `_canonical_router_config`
+  dispatches on field type so a future `RouterConfig` field cannot fall through to a
+  nondeterministic `default=str` (BL-163). `backends` is a TUPLE, which the dispatch did not
+  recognise, so every strategy compile under a `policy.backends` list raised `TypeError:
+  RouterConfig.backends is a tuple` at the hash rather than routing. Ordered types are now hashed
+  in written order, never sorted: the order IS the chain, and two lists naming the same ids in
+  different orders are two different runs.
+- **The `compliance` decider downgrade reason is removed** from the closed `DOWNGRADE_REASONS` set.
+  Its only producer was a `ScopeRefused` from the compliance filter, and the filter is gone, so it
+  could never be emitted. `scope_denied` remains and is the reason a decider or judge backend
+  outside the caller's allow-list is refused. Also gone with it: `evals.dataset`'s forwarding of a
+  per-case `compliance` block into `request_body`, which the request schema now rejects outright;
+  the `compliance` route fact, which matched on a posture core computed from that same table; and
+  the `strategy validate` unreachable-step warning, whose evaluator row 4 deleted underneath it.
+- **A URL-sourced document is no longer written to the ledger, and such a run cannot be resumed.**
+  `document.url` is secret-class: a presigned URL is a live credential, and routinely the only
+  thing standing between a reader of the file and the object. It used to be routed through the
+  blob store, which was defensible while that store was encrypted. Removing the cipher removed the
+  defence, so the URL is not persisted at all: the header records `document_is_url` with no
+  document, and `openreading resume` on that run exits 3 with `payload_missing` instead of
+  replaying against an input it does not hold. Materialize the document before arming the ledger
+  if a URL-sourced run has to be resumable. Runs from `bytes_base64` are unaffected.
+- **A strategy pins every backend it can dispatch, not only the ones its policy chain names.**
+  `policy.backends` is a default chain, so a strategy may name a backend outside it and that
+  backend runs. Everything derived from the chain missed it: the ledger pinned an incomplete
+  `pinned_eligible`, the URL-materialization check consulted the wrong descriptors, `config_hash`
+  folded no digest for it, and — the one that matters — the `Sanitizer` was armed without its
+  credentials, so a failure message carrying that backend's key would have been journaled to a
+  plaintext file unredacted. `CompiledPlan` now carries `dispatchable` beside `eligible`: the
+  concrete ids the tree names. (It also carried the whole candidate chain when a leaf was `auto`,
+  until `auto` was removed above.)
+- **A descriptor's vendor claims are documentation, and core never branches on one.** The removal
+  set deleted three features that read a per-vendor table and decided with it: the compliance
+  filter, the capability gate and the cost scorer. That left the fields themselves, read at zero
+  sites, and a proposal to delete them too. They stay instead. A maintainer's dated reading of a
+  vendor's own documentation is useful to a person choosing a backend; what core has no business
+  doing is BEHAVING on it, because a claim about a company this project does not control goes
+  stale without notice and nothing here can detect that. `openreading.types.descriptor` now states
+  which fields are load-bearing (`id`, `type`, `wait_modes`, `protocol_version`,
+  `credentials_spec`, and the rest of what core verifies every run) and which are claims, and
+  `tests/test_descriptor_is_documentation.py` asserts all 28 claim fields are read at zero sites.
+  A change that starts branching on `capabilities.ocr` or `max_pages_per_request` now fails
+  `make verify` and has to say what happens when the vendor revises it. Keeping the claims current
+  is a documentation job with its own procedure in the `openreading.adapters` runbook: re-read the
+  pages a backend's `sources` names, update the cells that moved, and set `accessed` in the same
+  commit.
+- **Every page that described the removed machinery is rewritten**, not annotated: the `router`,
+  `config`, `api`, `schemas`, `batch`, `server`, `strategies` and `openreading` package docstrings,
+  the adapters catalog (its compliance table is replaced by where each backend runs, its license
+  and its signup page), the strategies guide's policy walkthrough, the CLI manual, the tutorial and
+  the root README. `openreading help cost` is `openreading help usage`.
 - **`--pages` explains the argparse trap it falls into.** `parse --pages 1 doc.pdf` feeds the
   file to `--pages`, and the error named a private function at the reader.
 - **`anthropic-claude` sends an image as an image.** A PNG or JPEG was labeled `application/pdf`

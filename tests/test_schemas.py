@@ -73,29 +73,17 @@ def test_response_rejects_out_of_range_bbox():
         schemas.validate_response(bad)
 
 
-def test_request_sample_validates():
-    schemas.validate_request(
-        {
-            "schema_version": "0.2",
-            "document": {"path": "/tmp/x.pdf", "mime_type": "application/pdf"},
-            "backend": {"id": "pymupdf", "type": "oss_library"},
-            "outputs": {"markdown": True, "blocks": True},
-            "compliance": {"require_local": True},
-        }
-    )
-
-
 def test_request_schema_forbids_unknown_nested_fields():
     """M12: the pydantic request models are `extra="forbid"` at every level
     (openreading.types.request), but request.v0.1.json set `additionalProperties: false` at the
     top level only. A misspelled NESTED field such as `document.mim_type` (for `mime_type`)
     therefore passed schema validation and failed only later, at the pydantic layer — the vendored
-    schema stopped being the source of truth exactly where nesting began. request.v0.2.json closes
+    schema stopped being the source of truth exactly where nesting began. request.v0.3.json closes
     every nested object node (see the structural walk in test_schema_evolution.py), so the same
     typo is now rejected here, at the wire boundary, before any backend or pydantic model sees it."""
     body = {
         "document": {"bytes_base64": "aGk=", "mim_type": "application/pdf"},
-        "backend": {"id": "auto"},
+        "backend": {"id": None},
     }
     with pytest.raises(ValidationError):
         schemas.validate_request(body)

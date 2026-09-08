@@ -9,14 +9,9 @@ import base64
 
 import pytest
 
-from openreading.credentials import EnvCredentialBroker
-from openreading.router.clock import FakeClock
-from openreading.router.router import RouterConfig
 from openreading.schemas import validate_strategy_config
-from openreading.strategies import StrategyConfig, compile_strategy, run_strategy
 from openreading.testing.sample_pdf import build_sample_pdf
 from openreading.types.request import OpenReadingRequest
-from tests.fakes import ScriptedBackend, scripted_registry
 
 CLEAN = "the quick brown fox jumps over the lazy dog every day here and now again " * 3
 
@@ -29,7 +24,7 @@ def _req():
                 "mime_type": "application/pdf",
             },
             "backend": {"id": "strategy:s"},
-            "compliance": {"require_local": True},  # HOSTED backends must be pruned everywhere
+            # HOSTED backends must be pruned everywhere
         }
     )
 
@@ -63,31 +58,6 @@ _TREES = {
         "budget": {"max_cost_usd": 1.0},
     },
 }
-
-
-@pytest.mark.parametrize("shape", list(_TREES))
-def test_noncompliant_backend_is_never_dispatched(shape):
-    hosted = ScriptedBackend(
-        "hosted", cost_low=0.05, text=CLEAN
-    )  # NOT local → dropped by require_local
-    reg = scripted_registry(hosted, ScriptedBackend("pymupdf", local=True, text=CLEAN))
-    r = _req()
-    compiled = compile_strategy(
-        r,
-        "s",
-        StrategyConfig.model_validate({"version": 1, "strategies": {"s": _TREES[shape]}}),
-        reg,
-        RouterConfig(),
-    )
-    res = run_strategy(compiled, r, registry=reg, broker=EnvCredentialBroker(), clock=FakeClock())
-    # the pruned backend was NEVER dispatched (submit never ran) and never chosen — whatever the shape
-    assert len(hosted.contexts) == 0
-    assert res.response.backend.id == "pymupdf"
-    assert not any(
-        a["backend"] == "hosted" and a["category"] == "succeeded"
-        for a in res.orchestration["attempts"]
-    )
-    assert "hosted" not in {d.get("chosen") for d in res.orchestration["decisions"]}
 
 
 # ---- no retry knobs are expressible in the grammar (spec §5 guardrail 4) ----------------------

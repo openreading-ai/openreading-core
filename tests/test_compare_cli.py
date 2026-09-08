@@ -10,7 +10,6 @@ import pytest
 
 from openreading.cli import app, main
 from openreading.readiness import BackendReadiness
-from openreading.types.errors import ComplianceRefused
 from tests.fakes import make_envelope
 
 
@@ -155,28 +154,11 @@ def test_fanout_save_dir_roundtrips(tmp_path, capsys, fake_run) -> None:
 
 
 @pytest.fixture
-def fake_run_compliance_refused(monkeypatch):
-    def _run(source, *, backend, **kw):
-        raise ComplianceRefused("no compliant backend for this request")
-
-    monkeypatch.setattr(app.api, "run", _run)
-
-
-@pytest.fixture
 def fake_run_error(monkeypatch):
     def _run(source, *, backend, **kw):
         raise Exception("boom")  # bare, to exercise the `except Exception` branch specifically
 
     monkeypatch.setattr(app.api, "run", _run)
-
-
-def test_fanout_compliance_refused_exit_3(tmp_path, capsys, fake_run_compliance_refused) -> None:
-    doc = tmp_path / "doc.pdf"
-    doc.write_bytes(b"%PDF-1.4")
-    rc = main(["compare", str(doc), "--backends", "pymupdf,tesseract"])
-    assert rc == 3
-    err = capsys.readouterr().err
-    assert "[pymupdf] no compliant backend for this request" in err
 
 
 def test_fanout_unexpected_error_exit_1(tmp_path, capsys, fake_run_error) -> None:

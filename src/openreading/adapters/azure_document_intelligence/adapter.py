@@ -28,13 +28,11 @@ from openreading.derive import (
     order_by_position,
 )
 from openreading.types.blocks import Block, Citation, TypedField
-from openreading.types.cost import CostBasis, CostReport
+from openreading.types.cost import CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     ConfigField,
-    Cost,
     CredentialField,
     Output,
     OutputChannels,
@@ -76,8 +74,6 @@ N = ChannelGrade.NATIVE
 D = ChannelGrade.DERIVABLE
 
 _API_VERSION = "2024-11-30"
-# modelId → estimated $/page (azure profile: Read 1.5/1k, Layout/prebuilt 10/1k, custom 30/1k).
-_MODEL_PRICE = {"prebuilt-read": 0.0015, "prebuilt-layout": 0.01, "prebuilt-invoice": 0.01}
 _ROLE_MAP = {
     "title": BlockType.TITLE,
     "sectionHeading": BlockType.SECTION_HEADER,
@@ -163,9 +159,7 @@ def _descriptor() -> AdapterDescriptor:
         protocol_version=2,
         adapter_impl="http",
         operations=["prebuilt-read", "prebuilt-layout", "prebuilt-invoice", "custom"],
-        provisioning=Provisioning(
-            byo_mode=["api_key"], auth="api_key", billing_target="caller_account"
-        ),
+        provisioning=Provisioning(byo_mode=["api_key"], auth="api_key"),
         wait_modes=[WaitMode.POLL],
         capabilities=Capabilities(
             ocr="verified",
@@ -181,24 +175,6 @@ def _descriptor() -> AdapterDescriptor:
             languages=["en", "de", "fr", "es", "it", "nl", "pt"],
             input_formats=["pdf", "png", "jpg", "tiff", "bmp", "docx", "xlsx", "pptx", "html"],
             max_pages_per_request="2000",
-        ),
-        cost=Cost(
-            native_unit="page",
-            basis="estimated",
-            usd_per_page_equiv_low=0.0006,
-            usd_per_page_equiv_high=0.03,
-            lossiness="none",
-        ),
-        compliance=ComplianceProfile(
-            hipaa_baa="yes",
-            soc2="verified",
-            gdpr="verified",
-            pci="verified",
-            trains_on_customer_data="no",
-            data_region_options=["eastus", "westus", "westeurope", "northeurope", "us", "eu"],
-            data_retention="analyze results auto-purged after 24h; input not stored",
-            max_retention_hours=24,
-            runs_fully_local=False,
         ),
         runtime=RuntimeProfile(
             offline_capable=False, license="proprietary", version_pin="api-version 2024-11-30"
@@ -218,8 +194,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="medium",
-            integration_priority="P0",
-            priority_reason="Deepest lending prebuilt set; markdown mode; self-serve BAA.",
         ),
         credentials_spec=[
             CredentialField(key="key", required=True, env=["AZURE_DOCUMENT_INTELLIGENCE_KEY"]),
@@ -618,17 +592,10 @@ class AzureDocumentIntelligenceAdapter(BackendAdapter):
         return tf
 
     def report_cost(self, job: Job) -> CostReport:
-        model_id = (job.raw.object_class if job.raw else None) or "prebuilt-layout"
+        """The pages Azure returned in `analyzeResult`, unpriced."""
         raw = job.raw.payload if job.raw else {}
         pages = len((raw.get("analyzeResult") or {}).get("pages", [])) or 1
-        price = _MODEL_PRICE.get(model_id, 0.01)
-        return CostReport(
-            native_unit="page",
-            native_quantity=float(pages),
-            cost_usd=price * pages,
-            basis=CostBasis.ESTIMATED,
-            billing_target="caller_account",
-        )
+        return CostReport(native_unit="page", native_quantity=float(pages))
 
 
 def _spans_overlap(spans_a: list, spans_b: list) -> bool:

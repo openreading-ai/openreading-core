@@ -14,7 +14,7 @@ every response guarantees, and the commands that print the live truth from the i
 You need the package installed as the root README describes. You also need `sample.pdf` from the
 root README for every command here that parses a document, and `jq` for the commands that filter
 JSON. OpenReading accepts any document some backend can read. A descriptor is the static record in
-which a backend declares its formats, its environment variables and its compliance posture. Each
+which a backend declares its formats, environment variables, and response channels. Each
 backend's descriptor lists the formats it reads. The [Backend adapters](../adapters/README.md)
 page carries that list.
 
@@ -35,7 +35,7 @@ uv run python -m openreading.schemas validate
 ```
 
 ```text
-schemas: request.v0.2.json OK, response.v0.3.json OK, adapter-descriptor.v0.7.json OK, … journal.v0.1.json OK
+schemas: request.v0.3.json OK, response.v0.3.json OK, adapter-descriptor.v0.8.json OK, … journal.v0.1.json OK
 fixtures: 0 checked, 0 invalid
 ```
 
@@ -61,12 +61,12 @@ consumer gets. The adapter-descriptor family validates a descriptor.
 
 | family | current file | constant | validator | in-band version |
 |---|---|---|---|---|
-| request | `request.v0.2.json` | `REQUEST_SCHEMA_FILE` | `validate_request` | optional `schema_version` const `"0.2"` |
+| request | `request.v0.3.json` | `REQUEST_SCHEMA_FILE` | `validate_request` | optional `schema_version` const `"0.3"` |
 | response | `response.v0.3.json` | `RESPONSE_SCHEMA_FILE` | `validate_response` | required `schema_version` const `"0.3"` |
-| adapter-descriptor | `adapter-descriptor.v0.7.json` | `DESCRIPTOR_SCHEMA_FILE` | `validate_descriptor` | none, filename and `$id` only |
-| strategy-config | `strategy-config.v0.3.json` | `STRATEGY_CONFIG_SCHEMA_FILE` | `validate_strategy_config` | required integer `version` const `1` |
+| adapter-descriptor | `adapter-descriptor.v0.8.json` | `DESCRIPTOR_SCHEMA_FILE` | `validate_descriptor` | none, filename and `$id` only |
+| strategy-config | `strategy-config.v0.4.json` | `STRATEGY_CONFIG_SCHEMA_FILE` | `validate_strategy_config` | required integer `version` const `1` |
 | comparison-report | `comparison-report.v0.2.json` | `COMPARISON_REPORT_SCHEMA_FILE` | `validate_comparison_report` | required `schema_version` const `"0.2"` |
-| batch-result | `batch-result.v0.1.json` | `BATCH_RESULT_SCHEMA_FILE` | `validate_batch_result` | required `schema_version` const `"0.1"` |
+| batch-result | `batch-result.v0.2.json` | `BATCH_RESULT_SCHEMA_FILE` | `validate_batch_result` | required `schema_version` const `"0.2"` |
 | corpus-report | `corpus-report.v0.1.json` | `CORPUS_REPORT_SCHEMA_FILE` | `validate_corpus_report` | required `schema_version` const `"0.1"` |
 | leaderboard-report | `leaderboard-report.v0.1.json` | `LEADERBOARD_REPORT_SCHEMA_FILE` | `validate_leaderboard_report` | required `schema_version` const `"0.1"` |
 | liveness-report | `liveness-report.v0.1.json` | `LIVENESS_REPORT_SCHEMA_FILE` | `validate_liveness_report` | required `schema_version` const `"0.1"` |
@@ -140,8 +140,7 @@ fixing. In the required column, n/a marks a row that names a whole object rather
 | `BBox.bbox_native` | no | the raw source geometry, untouched | n/a | 62–91 |
 | `BBox.bbox_native.origin` | no | one of `top_left`, `bottom_left` | closed, `MAJOR` only | 73–76 |
 | `BBox.bbox_native.unit` | no | one of `normalized`, `pdf_point`, `pixel`, `inch` | closed, `MAJOR` only | 79–84 |
-| `usage.cost_usd` | no | a number when the backend reports a cost. Absent on both local backends today, by the same absence rule as `warnings`. Never sum it without checking `cost_basis` first | n/a | 539–542 |
-| `usage.cost_basis` | no | `billed` means the backend charged this run, so the number is real money. `estimated` means a published rate was applied to a page count, so it is a projection and not spend. `infra_only` means a local backend ran and `cost_usd` is absent, so your only cost is your own compute. `unknown` means the backend reported no basis at all | closed, `MAJOR` only | 543–550 |
+| `usage.pages_processed` `credits` `input_tokens` `output_tokens` `duration_ms` | no | numbers, each in the unit the backend meters in, absent when the backend reported none. No dollar field: `cost_usd` and `cost_basis` were removed with the per-vendor price tables that filled them | n/a | 522–540 |
 | `warnings[]` | no | items are `{code, message, field}`, all strings. The key is **absent** when nothing warned, never present and empty | `code` is open, `MINOR` | 580–597 |
 | `orchestration` | no | object, present only for a run a strategy or a fallback chain drove. It is declared `additionalProperties: true` with no properties of its own, so the schema names nothing inside it and a validator checks nothing you read there. Every closed set within it is a promise made by code instead, listed field by field in the docs home's [open and closed register](../README.md#what-is-closed-and-what-only-looks-closed) | nothing inside it is closed at the schema level | 627–631 |
 | `channel_provenance` | no | map of channel name to `native` or `derived`. A channel is one kind of output inside the envelope, such as text, markdown or blocks. Marked `x-stability: experimental` | experimental, so outside the guarantees entirely | 632–642 |
@@ -168,8 +167,9 @@ uv run openreading parse sample.pdf --backend tesseract | jq -c 'keys'
 ```
 
 **You should see** `warnings` on the pymupdf run, which reports `confidence_unavailable`, and no
-`warnings` key at all on the tesseract run. The same rule governs `usage.cost_usd`, which is
-absent on a local run, and `typed_fields`, which is absent when no backend produced any.
+`warnings` key at all on the tesseract run. The same rule governs every `usage` counter, each
+absent when the backend reported none, and `typed_fields`, which is absent when no backend
+produced any.
 
 ### Reading an error
 
@@ -282,8 +282,8 @@ run happened, so stamp your own time at the moment you ingest a row. The `durati
 measure an interval and never name an instant, so they cannot stand in for one.
 
 A journal record does carry the time. Its `started_epoch_ms` and `ended_epoch_ms` are absolute UTC
-epoch milliseconds, and so is the retention stamp's `expires_epoch_ms`, so a loader can read them
-as timestamps directly. Those values name a moment because they cross a process boundary. The
+epoch milliseconds, so a loader can read them as timestamps directly. Those values name a moment
+because they cross a process boundary. The
 engine measures its own durations against a monotonic clock that no clock adjustment can move.
 [The run ledger](../ledger/README.md) is where a journal comes from.
 
@@ -380,8 +380,8 @@ entry naming it, so the warning reaches you before the removal does.
 - [Docs home](../README.md)
 - `uv run python -m pydoc openreading.types` prints the pydantic mirror of these files.
 - `uv run python -m pydoc openreading.server` prints the HTTP status code for each error.
-- [Backend adapters](../adapters/README.md) lists every backend with its formats, its env vars and
-  its compliance posture.
+- [Backend adapters](../adapters/README.md) lists every backend with its environment variables and
+  output channels.
 - [`tests/test_schema_evolution.py`](../../../tests/test_schema_evolution.py) holds the byte pins
   on older files.
 

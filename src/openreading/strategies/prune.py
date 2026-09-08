@@ -1,15 +1,14 @@
-"""The compile pipeline (integration.md §2): request + config -> a pruned tree the engine walks.
+"""The compile pipeline: request + config becomes the tree the engine walks.
 
-1. **Route once, up front.** Run the existing 3-stage `Router.route` for the eligible set + drop
-   reasons. When a strategy engages, `routing.fallback` is stripped first so `auto` leaves see
-   pure stage-3 order (integration.md §2a).
+1. **Resolve the ordered candidate set once.** Run `Router.route` for the chain an unnamed
+   request would walk. Strip `routing.fallback` because the strategy owns its own fallback
+   structure. No leaf resolves against that set any more (every leaf names its backend), so it is
+   reported rather than dispatched from. `strategy plan` prints it.
 2. **Normalize** each strategy (extends resolved, shorthand expanded).
-3. **Prune** every leaf whose backend the router dropped, carrying the `DropReason`; collapse a
-   composite whose children all vanish; a fully-pruned root is today's terminal
-   `no_compliant_backend` refusal — never a silent downgrade.
+3. **Apply caller scope.** Prune leaves outside the server API-key scope, collapse empty
+   composites, and refuse a fully pruned root.
 
-The executor consumes only pruned trees — the current executor invariant ("consumes ONLY the
-RoutePlan, can never widen eligibility") lifted to trees.
+Named leaves may sit outside `policy.backends`, because naming one is an explicit selection.
 """
 
 from __future__ import annotations
@@ -19,9 +18,7 @@ import json
 from dataclasses import dataclass, field, fields
 from typing import Any
 
-from openreading.adapters.registry import BUILTIN_ADAPTERS
 from openreading.config import apply as apply_policy
-from openreading.config import union_compliance
 from openreading.credentials import EnvCredentialBroker
 from openreading.router.compliance import DropReason
 from openreading.router.registry import Registry
@@ -30,14 +27,12 @@ from openreading.strategies.model import DeciderLLM, StrategyConfig
 from openreading.strategies.normalize import normalize_strategy
 from openreading.strategies.presets import PRESET_NAMES
 from openreading.strategies.trace import DropRecord
-from openreading.types.descriptor import AdapterDescriptor
-from openreading.types.errors import ComplianceRefused, ScopeRefused
-from openreading.types.request import Compliance, OpenReadingRequest
+from openreading.types.errors import ScopeRefused
+from openreading.types.request import OpenReadingRequest
 
 _DURATION_UNITS = {"ms": 1, "s": 1000, "m": 60_000, "h": 3_600_000}
 
-# The caller allow-list drop. Stage 0, not 1 or 2: it is neither the compliance filter nor the
-# capability filter but a ceiling on the CALLER, applied to whatever those two already allowed.
+# The caller allow-list drop. Stage 0 marks API-key scope before any backend dispatch.
 # The code is the wire word the server answers with (403 `scope_denied`), so a trace and an
 # error body name the same thing.
 _SCOPE_CODE = "scope_denied"
@@ -51,33 +46,36 @@ _SCOPE_DROP = DropReason(
 @dataclass
 class CompiledPlan:
     """The output of compilation: the pruned root tree, the pruned tree of every strategy (for
-    `use:` reference resolution), the eligible-backend order, drop records, and provenance."""
+    `use:` reference resolution), the reported candidate chain, dispatchable ids, drops, and
+    provenance."""
 
     name: str
     root: dict[str, Any]
     trees: dict[str, dict[str, Any] | None]
+    # The chain an unnamed request would walk, after policy and the caller's scope. Reported, not
+    # dispatched from: no node resolves against it, since every leaf names its own backend.
+    # `strategy plan` prints it. The ledger pins `dispatchable` below, which is the set the tree
+    # can actually reach.
     eligible: list[str]
     dropped: list[DropRecord]
     config_hash: str
+    # Concrete ids the tree can reach. The ledger pins this set for resume and sanitizer safety.
+    dispatchable: list[str] = field(default_factory=list)
     overrides_fallback: bool = False
     warnings: list[tuple[str, str]] = field(default_factory=list)  # (code, message)
-    # the post-union effective compliance (request ∪ file policy:) — feeds route facts
-    effective_compliance: dict[str, Any] = field(default_factory=dict)
     # `limits:` operator time ceiling wrapping every strategy-engaged run (spec §6.4)
     max_duration_ms: int | None = None
     # the root strategy was authored in the Plain dialect (internal/design/simple-strategies.md §9) —
     # run_strategy tags gate records with their Plain source word for `explain` grouping.
     plain_sourced: bool = False
     # the file `decider.llm` block (M4) + the effective RouterConfig, so run_strategy can run the
-    # two-key enablement + compliance gate on the decider backend (decider.md §1, §3.5).
+    # two-key enablement + scope gate on the decider backend (decider.md §1, §3.5).
     decider: DeciderLLM | None = None
     router_config: RouterConfig = field(default_factory=RouterConfig)
-    # RoutePlan.baa_tier_notes, carried through so the engine can warn on the responding backend.
-    baa_tier_notes: dict[str, str] = field(default_factory=dict)
     # The caller's backend allow-list, carried so the engine can re-check every id it actually
-    # dispatches. Belt and braces on purpose: the prune above bounds `auto` by SHORTENING a
-    # list, and a list is not a filter — nothing downstream re-reads it, so a future node type
-    # that resolves a backend some other way would reopen the hole in silence. None = unscoped.
+    # dispatches. Belt and braces on purpose: the prune above removes out-of-scope leaves from the
+    # tree, and a removal is not a filter — nothing downstream re-reads the list, so a future node
+    # type that resolves a backend some other way would reopen the hole in silence. None = unscoped.
     backend_allowlist: frozenset[str] | None = None
 
 
@@ -91,30 +89,24 @@ def compile_strategy(
     backend_allowlist: frozenset[str] | None = None,
     broker: EnvCredentialBroker | None = None,
 ) -> CompiledPlan:
-    """Compile `name` for `req`. Raises ComplianceRefused when the root prunes to nothing (the
-    same terminal outcome the `auto` arm gives on an empty plan). `plain_info` (from the loader)
-    marks a Plain-dialect root so run_strategy can tag gate records for `explain` grouping (§9).
+    """Compile `name` for `req`. Raises ScopeRefused when the root prunes to nothing.
+    `plain_info` (from the loader) marks a Plain-dialect root so run_strategy can tag gate records
+    for `explain` grouping (§9).
 
     `backend_allowlist` is the CALLER's ceiling on which backends this walk may reach at all —
     the server's `OPENREADING_API_KEY_SCOPES` allow-list for the presented token; None means
     unscoped and nothing here changes. It is enforced HERE, in the same pass that already prunes
-    for compliance, for three reasons:
+    for caller scope, for three reasons:
 
-    - It is the only place that bounds an `auto` leaf. `auto` names no backend, so a reachable set
-      computed by reading the config cannot bound it: `max_accuracy` is `steps: [auto, auto]` and
-      names none at all. `auto` resolves at walk time against `eligible` and nothing else
-      (engine._resolve_backend), so narrowing `eligible` narrows `auto` exactly, with no need to
-      conservatively assume the whole registry and refuse every scoped token.
     - It runs before any adapter is constructed and before any credential is resolved, which is
       the property the allow-list is FOR: an out-of-scope backend must never get as far as having
       its vendor key read, let alone spent.
-    - It keeps the allow-list the same KIND of thing the compliance filter is — a subtraction from
-      the eligible set. A `strategy:<name>` id was previously exempt from the check entirely,
+    - It subtracts from the eligible set. A `strategy:<name>` id was previously exempt entirely,
       which made any strategy id (including the four presets, which need no config file and so are
       available to every caller of every deployment) a universal bypass of the allow-list.
 
     Never a widening: `backend_allowlist` only ever removes, so no scope can readmit a backend
-    compliance already dropped.
+    another filter removed.
     """
     router_config = router_config or RouterConfig()
     info = plain_info.get(name) if plain_info else None
@@ -128,33 +120,33 @@ def compile_strategy(
     # first version of this change removed the fold from here on the grounds that `api` had done
     # it, which is true of every caller inside this package and of none outside it.
     req, router_config = apply_policy(req, config.policy, router_config)
-    effective_compliance = union_compliance(req.compliance, None)
 
-    # (1) build the effective request: unioned compliance + stripped routing.fallback (so auto
-    # leaves see pure stage-3 order).
+    # (1) build the effective request: strip routing.fallback so an unnamed leaf resolves through
+    # the same three rules the router applies everywhere else.
     updates: dict[str, Any] = {}
-    if effective_compliance:
-        updates["compliance"] = Compliance(**effective_compliance)
     overrides_fallback = bool(req.routing and req.routing.fallback)
     if overrides_fallback and req.routing is not None:
         updates["routing"] = req.routing.model_copy(update={"fallback": None})
     route_req = req.model_copy(update=updates) if updates else req
 
     plan = Router(registry, router_config, broker=broker).route(route_req)
-    eligible = plan.eligible_ids  # chosen + fallbacks, in stage-3 order
-    drop_reasons = plan.dropped  # id -> DropReason
+    eligible = plan.eligible_ids  # chosen + fallbacks, in the caller's own written order
+    drop_reasons = dict(plan.dropped)  # id -> DropReason
 
     # (1b) subtract the caller's allow-list. Order matters: this runs AFTER the router, over the
     # set the router already approved, so it can only ever shorten `eligible` — the one thing an
-    # allow-list must never be able to do is put a backend back. Narrowing `eligible` is also what
-    # bounds every `auto` leaf in the tree, since `auto` is resolved against nothing else.
+    # allow-list must never be able to do is put a backend back. The leaves themselves are pruned
+    # against the allow-list directly, below; this shortens the chain the plan REPORTS to match.
     if backend_allowlist is not None:
+        for slug in eligible:
+            if slug not in backend_allowlist:
+                drop_reasons[slug] = _SCOPE_DROP
         eligible = [s for s in eligible if s in backend_allowlist]
 
     # (2)+(3) normalize + prune every strategy (so `use:` refs resolve against pruned trees).
     # BL-168: iterate in a fixed order — `set()` iteration order is hash-seed-dependent, and it
-    # reached `trace.dropped`, `orchestration["dropped"]`, and the ComplianceRefused message below,
-    # so the explanation shown for *why a compliant run was refused* was not reproducible.
+    # reached `trace.dropped`, `orchestration["dropped"]`, and the ScopeRefused message below,
+    # so the explanation shown for why a scoped run was refused was not reproducible.
     all_names = sorted(set(config.strategies) | PRESET_NAMES | {name})
     trees: dict[str, dict[str, Any] | None] = {}
     dropped_records: dict[str, DropRecord] = {}
@@ -166,7 +158,7 @@ def compile_strategy(
     for sname in all_names:
         tree = normalize_strategy(sname, config)
         records = root_records if sname == name else dropped_records
-        trees[sname] = _prune_node(tree, eligible, drop_reasons, records, backend_allowlist)
+        trees[sname] = _prune_node(tree, drop_reasons, records, backend_allowlist)
     for slug, rec in root_records.items():
         dropped_records.setdefault(slug, rec)
 
@@ -176,9 +168,7 @@ def compile_strategy(
         dropped_list = ", ".join(f"{d.backend}:{d.code}" for d in sorted_dropped)
         # Which refusal the caller gets decides which file they go and edit, so the two causes
         # stay apart: an allow-list that removed the last runnable backend is the token's problem
-        # and answers `scope_denied`; anything else is the policy's and answers the compliance
-        # refusal this has always raised. A tree emptied by BOTH reports scope, because scope is
-        # the narrower and later subtraction — relaxing the policy alone would not make it run.
+        # and answers `scope_denied`. Anything else names the written policy that dropped them.
         scope_drops = sorted(d.backend for d in root_records.values() if d.code == _SCOPE_CODE)
         if scope_drops:
             raise ScopeRefused(
@@ -186,14 +176,16 @@ def compile_strategy(
                 f"(denied: {', '.join(scope_drops)})",
                 backend_code=scope_drops[0],
             )
-        raise ComplianceRefused(
-            f"strategy {name!r} has no compliant backend for this request (dropped: {dropped_list})",
-            constraint="no_compliant_backend",
+        raise ScopeRefused(
+            f"strategy {name!r} has no backend available from the declared policy "
+            f"(dropped: {dropped_list})",
+            constraint="no_backend_in_policy",
         )
 
-    config_hash = _compute_config_hash(
-        root, effective_compliance, router_config, registry, plan, config.policy
-    )
+    # Every leaf names its backend, so what the tree can dispatch is exactly what it names.
+    concrete = _concrete_backend_ids(root, trees)
+    dispatchable: list[str] = list(concrete)
+    config_hash = _compute_config_hash(root, router_config, registry, plan, config.policy, concrete)
 
     warnings: list[tuple[str, str]] = []
     if overrides_fallback:
@@ -216,48 +208,41 @@ def compile_strategy(
         root=root,
         trees=trees,
         eligible=eligible,
+        dispatchable=dispatchable,
         dropped=sorted(dropped_records.values(), key=lambda d: d.backend),
         config_hash=config_hash,
         overrides_fallback=overrides_fallback,
         warnings=warnings,
-        effective_compliance=effective_compliance,
         max_duration_ms=max_dur,
         decider=(config.decider.llm if config.decider else None),
         router_config=router_config,
         plain_sourced=plain_sourced,
-        baa_tier_notes=dict(plan.baa_tier_notes),
         backend_allowlist=backend_allowlist,
     )
 
 
 def _compute_config_hash(
     root: dict[str, Any],
-    effective_compliance: dict[str, Any],
     router_config: RouterConfig,
     registry: Registry,
     plan: RoutePlan,
     file_policy=None,
+    concrete_ids: list[str] | None = None,
 ) -> str:
-    """BL-163: `config_hash` must change whenever the COMPLIANCE POSTURE changes eligibility, not
-    only when the pruned tree's shape happens to change. Hashing `root` alone let three mutually
-    exclusive constraints (`require_baa`, `require_local`, `data_region`) share one digest with
-    "no compliance at all" whenever they happened to prune the same leaves — and since
+    """BL-163: `config_hash` must change whenever the POLICY changes which backends can run, not
+    only when the pruned tree's shape happens to change. Hashing `root` alone let two different
+    allow-lists share one digest whenever they happened to prune the same leaves — and since
     `decision_id = sha256(config_hash|node_path|seq)` and `openreading replay` uses `config_hash`
-    as its match key, that meant a trace recorded under one compliance posture could silently
-    replay into a run executing under another (`_replay_decision`'s `trace_missing` downgrade is
+    as its match key, that meant a trace recorded under one policy could silently replay into a
+    run executing under another (`_replay_decision`'s `trace_missing` downgrade is
     NOT changed here — that per-decision fallback is documented behavior, out of this item's
     scope; this closes the WHOLE-TRACE mismatch at load time instead, in `cli/app.py`).
 
-    `file_policy` is the `policy:` block AS WRITTEN, and it is folded in beside the effect it had
-    (law PF3). The effect alone is not enough for a resume. The ledger stores the request after
-    the block was folded into it, so REMOVING a constraint from the file left the stored request
-    still carrying it, the recomputed effective compliance identical, and the digest unchanged:
-    the resume ran under a policy the file no longer asked for and reported no mismatch. Adding a
-    constraint was always caught, because it changes the effect. Hashing the source catches both
-    directions. It is the parsed block rather than the file's bytes, so reindenting or reordering
-    keys is not a different run.
+    `file_policy` is the `policy:` block as written. The parsed block belongs in the identity so a
+    changed default chain cannot replay under an earlier configuration. Formatting and key order
+    do not change the hash.
 
-    Folds `root`, `effective_compliance`, `router_config`, the file policy, and a descriptor
+    Folds `root`, `router_config`, the file policy, and a descriptor
     digest per backend the router actually classified (`eligible` + `dropped` — together every registered backend, since
     `Router.route` classifies each one or the other) into ONE JSON structure before hashing, rather
     than concatenating pre-hashed pieces with a delimiter — this sidesteps any "is `AB`+`C` distinct
@@ -266,31 +251,25 @@ def _compute_config_hash(
     sorted to lists first, or the digest would inherit BL-168's exact nondeterminism.
 
     What is deliberately NOT in here: the ordered eligible ids. They are an OUTPUT of routing over
-    the live registry rather than an input an operator controls, and they reorder when an
-    `integration_priority` changes, when an install extra is added or removed, and when a
-    descriptor is edited. None of those is a policy change, and each would refuse every in-flight
-    resume on the machine. Every input that produces the order is already here: the descriptor
-    digests catch a changed descriptor, the effective compliance catches a changed constraint, and
-    the written block catches a changed file. An order that moves with no input change would be a
-    stage-3 bug rather than a reason to widen the identity.
-
-    The effective `optimize_for` is not here either, and does not need to be. A resume takes no
-    request, so a caller-supplied preference comes from the stored header and cannot move. A
-    file-supplied one lives in `file_policy`, so changing or removing it already changes the
-    digest.
+    the live registry rather than an input an operator controls, and they move when an install
+    extra is added or removed and when a descriptor is edited. Neither is a policy change, and
+    each would refuse every in-flight resume on the machine. Every input that produces the order
+    is already here: the descriptor digests catch a changed descriptor, and the written block
+    catches a changed file. An order that moved with no input change would be a routing bug rather
+    than a reason to widen the identity.
 
     Never include `credentials_ref`, resolved credentials, or anything secret-bearing — every
-    input here is either the pruned tree (backend ids/config, no secrets), the compliance posture,
-    deployment-level compliance confirmations (backend ids only), or a backend's own descriptor
-    (public capability/compliance metadata)."""
+    input here is either the pruned tree, router settings, written policy, or public adapter
+    descriptors."""
     router_config_canonical = _canonical_router_config(router_config)
-    participating_ids = set(plan.eligible_ids) | set(plan.dropped)
+    participating_ids = set(plan.eligible_ids) | set(plan.dropped) | set(concrete_ids or [])
     descriptor_digests = sorted(
-        f"{bid}:{_hash_json(_descriptor_for(registry, bid).to_schema_dict())}"
+        f"{bid}:{_hash_json(adapter.descriptor.to_schema_dict())}"
         for bid in participating_ids
+        if (adapter := registry.get(bid)) is not None
     )
     written = file_policy.model_dump(exclude_none=True) if file_policy is not None else None
-    payload = [root, effective_compliance, router_config_canonical, descriptor_digests, written]
+    payload = [root, router_config_canonical, descriptor_digests, written]
     return "sha256:" + _hash_json(payload)
 
 
@@ -309,6 +288,12 @@ def _canonical_router_config(router_config: RouterConfig) -> dict[str, Any]:
         value = getattr(router_config, f.name)
         if isinstance(value, (frozenset, set)):
             canonical[f.name] = sorted(value)
+        elif isinstance(value, tuple | list):
+            # `backends` is ORDERED, so it is kept in written order rather than sorted: the order
+            # is the fallback chain, and two lists naming the same ids in different orders are two
+            # different runs. Sorting here would give them one digest and let a resume cross
+            # between them.
+            canonical[f.name] = list(value)
         elif isinstance(value, (bool, str, int, float, type(None))):
             canonical[f.name] = value
         else:
@@ -318,15 +303,6 @@ def _canonical_router_config(router_config: RouterConfig) -> dict[str, Any]:
                 "this function before adding a field of this shape"
             )
     return canonical
-
-
-def _descriptor_for(registry: Registry, backend_id: str) -> AdapterDescriptor:
-    # BL-163 review: every id here comes from plan.eligible_ids/plan.dropped, both
-    # populated by Router.route iterating this SAME registry (router.py) — so a miss is a
-    # programming error in the caller, not a runtime possibility this function should degrade for.
-    adapter = registry.get(backend_id)
-    assert adapter is not None, f"{backend_id!r} was classified by the router but isn't registered"
-    return adapter.descriptor
 
 
 def _hash_json(value: Any) -> str:
@@ -344,7 +320,6 @@ def _duration_ms(value: Any) -> int | None:
 
 def _prune_node(
     node: dict[str, Any],
-    eligible: list[str],
     drop_reasons: dict[str, Any],
     dropped_records: dict[str, DropRecord],
     backend_allowlist: frozenset[str] | None = None,
@@ -352,14 +327,10 @@ def _prune_node(
     """Return the node with dropped-backend leaves removed, or None if it collapses entirely."""
     if "backend" in node:
         slug = node["backend"]
-        if slug == "auto":
-            # Bounded by `eligible`, which compile_strategy has already intersected with the
-            # allow-list — an `auto` leaf can only resolve to something in it.
-            return node
         if backend_allowlist is not None and slug not in backend_allowlist:
             # Checked against the allow-list DIRECTLY, not against `eligible`: an id the router
             # never ranked (an unknown slug, or one dropped for an unrelated reason) must still
-            # not survive as a leaf the walk would dispatch. Ahead of the compliance branch below
+            # not survive as a leaf the walk would dispatch. Ahead of the drop-reason branch below
             # only so the drop carries the reason that is actually actionable for the caller.
             _record_drop(slug, _SCOPE_DROP, dropped_records)
             return None
@@ -375,7 +346,7 @@ def _prune_node(
         kept = [
             p
             for s in node["steps"]
-            if (p := _prune_node(s, eligible, drop_reasons, dropped_records, backend_allowlist))
+            if (p := _prune_node(s, drop_reasons, dropped_records, backend_allowlist))
         ]
         if not kept:
             return None
@@ -385,7 +356,7 @@ def _prune_node(
         kept = [
             p
             for b in node["parallel"]
-            if (p := _prune_node(b, eligible, drop_reasons, dropped_records, backend_allowlist))
+            if (p := _prune_node(b, drop_reasons, dropped_records, backend_allowlist))
         ]
         if not kept:
             return None
@@ -395,14 +366,10 @@ def _prune_node(
         r = node["route"]
         rules = []
         for rule in r.get("rules", []):
-            pruned = _prune_node(
-                rule["use"], eligible, drop_reasons, dropped_records, backend_allowlist
-            )
+            pruned = _prune_node(rule["use"], drop_reasons, dropped_records, backend_allowlist)
             if pruned is not None:
                 rules.append({**rule, "use": pruned})
-        default = _prune_node(
-            r["default"], eligible, drop_reasons, dropped_records, backend_allowlist
-        )
+        default = _prune_node(r["default"], drop_reasons, dropped_records, backend_allowlist)
         if default is None:
             return None  # a route with no reachable default collapses (integration.md §2c)
         return {**node, "route": {**r, "rules": rules, "default": default}}
@@ -412,11 +379,9 @@ def _prune_node(
         among = [
             p
             for m in d["among"]
-            if (p := _prune_node(m, eligible, drop_reasons, dropped_records, backend_allowlist))
+            if (p := _prune_node(m, drop_reasons, dropped_records, backend_allowlist))
         ]
-        otherwise = _prune_node(
-            d["otherwise"], eligible, drop_reasons, dropped_records, backend_allowlist
-        )
+        otherwise = _prune_node(d["otherwise"], drop_reasons, dropped_records, backend_allowlist)
         # BL-54: the operator's own configured otherwise: was itself pruned while at least one
         # among: survivor remains (integration.md §2c) — mark the substitution below so the engine
         # can trace it (decision_record's downgraded field) instead of it reading identically to
@@ -435,6 +400,43 @@ def _prune_node(
     return node
 
 
+def _concrete_backend_ids(
+    root: dict[str, Any], trees: dict[str, dict[str, Any] | None]
+) -> list[str]:
+    """Every backend id the reachable tree names, in first-seen order."""
+    found: list[str] = []
+    seen_ids: set[str] = set()
+    seen_refs: set[str] = set()
+
+    def add(slug: str) -> None:
+        if slug not in seen_ids:
+            seen_ids.add(slug)
+            found.append(slug)
+
+    def walk(value: Any) -> None:
+        if isinstance(value, list):
+            for item in value:
+                walk(item)
+            return
+        if not isinstance(value, dict):
+            return
+        backend = value.get("backend")
+        if isinstance(backend, str):
+            add(backend)
+        reference = value.get("use")
+        if isinstance(reference, str) and reference not in seen_refs:
+            seen_refs.add(reference)
+            target = trees.get(reference)
+            if target is not None:
+                walk(target)
+        for key, child in value.items():
+            if key != "use" or not isinstance(child, str):
+                walk(child)
+
+    walk(root)
+    return found
+
+
 def _record_drop(slug: str, reason: Any, dropped_records: dict[str, DropRecord]) -> None:
     if slug in dropped_records:
         return
@@ -442,7 +444,3 @@ def _record_drop(slug: str, reason: Any, dropped_records: dict[str, DropRecord])
     code = getattr(reason, "code", "dropped")
     detail = getattr(reason, "detail", "")
     dropped_records[slug] = DropRecord(backend=slug, stage=stage, code=code, detail=detail)
-
-
-def is_known_backend(slug: str) -> bool:
-    return slug in BUILTIN_ADAPTERS

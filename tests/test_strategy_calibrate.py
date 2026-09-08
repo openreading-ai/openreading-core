@@ -18,7 +18,7 @@ from openreading.strategies.calibrate import (
     calibrate_strategy,
     sweep_predicate,
 )
-from openreading.types.errors import ComplianceRefused, RetryableError, TerminalError
+from openreading.types.errors import RetryableError, TerminalError
 from tests.fakes import ConfigurableBackend, make_backend
 
 # ---- pure sweep (no backend) ------------------------------------------------------------------
@@ -37,7 +37,7 @@ def test_calibratable_predicates_only_numeric():
 
 def test_sweep_emits_operating_points_across_the_domain():
     obs = _obs([("a", 0.9, 0.95), ("b", 0.5, 0.40), ("c", 0.7, 0.85)])
-    sweep = sweep_predicate(obs, "confidence_below", rung1_cost=0.0, rung2_cost=0.10)
+    sweep = sweep_predicate(obs, "confidence_below")
     assert sweep.predicate == "confidence_below"
     assert [p.threshold for p in sweep.points] == [round(i / 20, 2) for i in range(21)]
     # escalation rate is monotonic non-decreasing in the threshold for a *_below predicate
@@ -49,36 +49,22 @@ def test_sweep_emits_operating_points_across_the_domain():
 def test_sweep_recommends_threshold_closest_to_target_escalation():
     # confidences 0.4/0.6/0.9/0.95 → target 0.25 (1 of 4 escalates) → threshold ~0.5 fires only 0.4
     obs = _obs([("a", 0.40, 0.3), ("b", 0.60, 0.9), ("c", 0.90, 0.95), ("d", 0.95, 0.97)])
-    sweep = sweep_predicate(
-        obs, "confidence_below", rung1_cost=0.0, rung2_cost=0.10, target_escalation=0.25
-    )
+    sweep = sweep_predicate(obs, "confidence_below", target_escalation=0.25)
     assert sweep.recommended is not None
     assert sweep.recommended.escalation_rate == 0.25  # exactly one of four
-
-
-def test_sweep_budget_is_a_hard_filter():
-    obs = _obs([("a", 0.40, 0.3), ("b", 0.60, 0.4), ("c", 0.90, 0.95), ("d", 0.95, 0.97)])
-    # rung-2 is pricey; a tight budget forbids high escalation → recommend a low-escalation threshold
-    sweep = sweep_predicate(
-        obs, "confidence_below", rung1_cost=0.01, rung2_cost=1.0, max_cost_per_doc=0.30
-    )
-    assert sweep.recommended is not None
-    assert sweep.recommended.cost_per_doc <= 0.30 + 1e-9
 
 
 def test_sweep_agreement_tracks_the_scorer():
     # the two low-confidence docs are exactly the two low-scorer docs → a mid threshold agrees fully
     obs = _obs([("a", 0.30, 0.2), ("b", 0.40, 0.3), ("c", 0.90, 0.95), ("d", 0.95, 0.97)])
-    sweep = sweep_predicate(
-        obs, "confidence_below", rung1_cost=0.0, rung2_cost=0.1, quality_bar=0.8
-    )
+    sweep = sweep_predicate(obs, "confidence_below", quality_bar=0.8)
     best = max(sweep.points, key=lambda p: p.scorer_agreement)
     assert best.scorer_agreement == 1.0  # a threshold exists that fires iff the scorer says bad
 
 
 def test_missing_signal_never_escalates():
     obs = [Observation("x", {"doc_confidence": None}, 0.2)]
-    sweep = sweep_predicate(obs, "confidence_below", rung1_cost=0.0, rung2_cost=0.1)
+    sweep = sweep_predicate(obs, "confidence_below")
     assert all(p.escalation_rate == 0.0 for p in sweep.points)  # unavailable → never fires (§6)
 
 
@@ -92,9 +78,7 @@ def test_sweep_agreement_excludes_unscored_observations_not_false_agreement():
     obs = _obs([("a", 0.2, 0.1), ("b", 0.2, 0.2), ("c", 0.2, 0.05)]) + [
         Observation("unlabeled", {"doc_confidence": 0.2}, None)
     ]
-    sweep = sweep_predicate(
-        obs, "confidence_below", rung1_cost=0.0, rung2_cost=0.1, quality_bar=0.8
-    )
+    sweep = sweep_predicate(obs, "confidence_below", quality_bar=0.8)
     best = max(sweep.points, key=lambda p: p.scorer_agreement)
     assert best.scorer_agreement == 1.0
     # the unscored doc still counts toward escalation_rate/cost — those are signal-only, no label
@@ -105,7 +89,7 @@ def test_sweep_agreement_excludes_unscored_observations_not_false_agreement():
 
 def test_sweep_is_deterministic():
     obs = _obs([("a", 0.4, 0.3), ("b", 0.9, 0.95)])
-    kw = dict(rung1_cost=0.0, rung2_cost=0.1, target_escalation=0.5)
+    kw = dict(target_escalation=0.5)
     a = sweep_predicate(obs, "confidence_below", **kw)
     b = sweep_predicate(obs, "confidence_below", **kw)
     assert [p.as_dict() for p in a.points] == [p.as_dict() for p in b.points]
@@ -214,7 +198,7 @@ def _registry():
 
     reg = Registry()
     reg.register(_VaryingBackend("cheap", [0.30, 0.50, 0.90, 0.95]))
-    reg.register(ConfigurableBackend(make_backend("premium", cost_low=0.05).descriptor))
+    reg.register(ConfigurableBackend(make_backend("premium").descriptor))
     return reg
 
 
@@ -280,7 +264,7 @@ def test_calibrate_strategy_scorer_agreement_ignores_unlabeled_cases(tmp_path):
 
     reg = Registry()
     reg.register(_VaryingBackend("cheap", [0.20]))  # constant low confidence for every case
-    reg.register(ConfigurableBackend(make_backend("premium", cost_low=0.05).descriptor))
+    reg.register(ConfigurableBackend(make_backend("premium").descriptor))
 
     report = calibrate_strategy(str(ds), _cfg(), "s", reg, quality_bar=0.8)
     assert report.n_docs == 4
@@ -340,7 +324,7 @@ def _fault_registry(fake):
 
     reg = Registry()
     reg.register(fake)
-    reg.register(ConfigurableBackend(make_backend("premium", cost_low=0.05).descriptor))
+    reg.register(ConfigurableBackend(make_backend("premium").descriptor))
     return reg
 
 
@@ -394,7 +378,7 @@ def test_calibrate_strategy_plain_crash_from_normalize_wraps_into_a_clean_termin
 
 
 class _CountingBackend(ConfigurableBackend):
-    """Counts real submit() calls, so a compliance-refusal test can prove ComplianceRefused fires
+    """Counts real submit() calls, so a compliance-refusal test can prove ScopeRefused fires
     before adapter.submit() is ever reached — not merely that the report ends up empty."""
 
     def __init__(self, descriptor):
@@ -428,24 +412,8 @@ def _registry_with(cheap):
 
     reg = Registry()
     reg.register(cheap)
-    reg.register(ConfigurableBackend(make_backend("premium", cost_low=0.05).descriptor))
+    reg.register(ConfigurableBackend(make_backend("premium").descriptor))
     return reg
-
-
-def test_calibrate_strategy_refuses_a_noncompliant_rung1_backend_before_submit(tmp_path):
-    # The strategy file's own policy: block requires a local backend; "cheap" (rung 1) is a
-    # non-local, no-BAA hosted vendor. Before this fix, calibrate_strategy never read
-    # router_config/config.policy at all and ran the hosted backend to completion regardless of
-    # policy — this must now raise ComplianceRefused before adapter.submit() is ever called,
-    # matching compile_strategy's own behavior for the identical policy + backend pair.
-    fake = _CountingBackend(make_backend("cheap", local=False, hipaa_baa="no").descriptor)
-    reg = _registry_with(fake)
-    cfg = _cfg_with_policy({"require_local": True})
-
-    with pytest.raises(ComplianceRefused):
-        calibrate_strategy(_dataset(tmp_path, 4), cfg, "s", reg, target_escalation=0.5)
-
-    assert fake.submit_calls == 0  # refused before any backend call
 
 
 def test_calibrate_strategy_compliant_rung1_backend_is_unaffected(tmp_path):
@@ -454,83 +422,9 @@ def test_calibrate_strategy_compliant_rung1_backend_is_unaffected(tmp_path):
     # file's own policy: block runs to completion exactly as before.
     fake = _CountingBackend(make_backend("cheap", local=True).descriptor)
     reg = _registry_with(fake)
-    cfg = _cfg_with_policy({"require_local": True})
+    cfg = _cfg_with_policy({})
 
     report = calibrate_strategy(_dataset(tmp_path, 4), cfg, "s", reg, target_escalation=0.5)
 
     assert report.n_docs == 4
     assert fake.submit_calls == 4
-
-
-def test_calibrate_strategy_refuses_on_a_per_case_compliance_field_once_forwarded(tmp_path):
-    # The second, non-blocking channel (acceptance criteria's "or by a request-level compliance
-    # field, once evals/dataset.py forwards one"): a case.json's own compliance block, forwarded
-    # by load_case (the sub-requirement), must gate exactly like the file policy: block above —
-    # with NO strategy-file policy: set at all, so this exercises req.compliance alone.
-    fake = _CountingBackend(make_backend("cheap", local=False, hipaa_baa="no").descriptor)
-    reg = _registry_with(fake)
-    cfg = _cfg()  # no policy: block
-
-    ds = tmp_path / "dataset"
-    ds.mkdir()
-    case_dir = ds / "case_00"
-    case_dir.mkdir()
-    case_dir.joinpath("case.json").write_text(
-        json.dumps(
-            {
-                "name": "c0",
-                "input": {"builtin_sample": True},
-                "compliance": {"require_local": True},
-                "expected": {"text_contains": ["clean"]},
-            }
-        )
-    )
-
-    with pytest.raises(ComplianceRefused):
-        calibrate_strategy(str(ds), cfg, "s", reg, target_escalation=0.5)
-
-    assert fake.submit_calls == 0
-
-
-def test_calibrate_strategy_two_cases_may_carry_two_different_compliance_blocks(tmp_path):
-    # Per-case gating (not once, unlike _run_native's uniform-batch invariant): case 0 is
-    # unconstrained and must succeed; case 1 requires a local backend the hosted rung-1 backend
-    # can't satisfy and must refuse — proving the gate runs fresh for each case rather than being
-    # decided once for the whole sample.
-    fake = _CountingBackend(make_backend("cheap", local=False, hipaa_baa="no").descriptor)
-    reg = _registry_with(fake)
-    cfg = _cfg()  # no policy: block — only the per-case field is in play
-
-    ds = tmp_path / "dataset"
-    ds.mkdir()
-    ds.joinpath("case_00").mkdir()
-    ds.joinpath("case_00", "case.json").write_text(
-        json.dumps(
-            {"name": "c0", "input": {"builtin_sample": True}, "expected": {"text_contains": []}}
-        )
-    )
-    ds.joinpath("case_01").mkdir()
-    ds.joinpath("case_01", "case.json").write_text(
-        json.dumps(
-            {
-                "name": "c1",
-                "input": {"builtin_sample": True},
-                "compliance": {"require_local": True},
-                "expected": {},
-            }
-        )
-    )
-
-    with pytest.raises(ComplianceRefused) as exc_info:
-        calibrate_strategy(str(ds), cfg, "s", reg, target_escalation=0.5)
-
-    # BL-123: the compliance gate (BL-112) sits outside BL-107's own per-case fault-isolation try,
-    # so a ComplianceRefused past case 0 reached the caller with no case name and no "already
-    # scored" count — unlike every other AdapterError this same loop raises. Same assertion style
-    # as test_calibrate_strategy_retryable_error_from_submit_fails_fast_naming_the_case above.
-    msg = str(exc_info.value)
-    assert "c1" in msg  # names the failing case
-    assert "1 case(s) already scored" in msg  # c0 succeeded first
-
-    # c0 (no compliance constraint) genuinely ran before c1's refusal stopped the loop.
-    assert fake.submit_calls == 1

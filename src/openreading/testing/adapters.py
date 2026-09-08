@@ -17,8 +17,6 @@ from openreading.types.cost import CostReport, infra_only
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
-    Cost,
     Output,
     OutputChannels,
     Provisioning,
@@ -27,7 +25,6 @@ from openreading.types.descriptor import (
 from openreading.types.enums import (
     BackendType,
     ChannelGrade,
-    CostBasis,
     JobState,
     ResponseState,
     WaitMode,
@@ -54,13 +51,9 @@ class NullAdapter(BackendAdapter):
             id=backend_id,
             type=BackendType.OSS_LIBRARY,
             protocol_version=2,
-            provisioning=Provisioning(byo_mode=["pip"], auth="none", billing_target="caller_infra"),
+            provisioning=Provisioning(byo_mode=["pip"], auth="none"),
             wait_modes=[WaitMode.INLINE],
             capabilities=Capabilities(),
-            cost=Cost(native_unit="cpu_second", basis="infra_only"),
-            compliance=ComplianceProfile(
-                hipaa_baa="na_local", trains_on_customer_data="na_local", runs_fully_local=True
-            ),
             runtime=RuntimeProfile(
                 offline_capable=True, license="Apache-2.0", sandbox="in_process"
             ),
@@ -132,13 +125,4 @@ class FixtureAdapter(BackendAdapter):
         return self._factory(slim_req, job.raw)
 
     def report_cost(self, job: Job) -> CostReport:
-        target = self.descriptor.provisioning.billing_target
-        if target == "caller_infra":
-            return infra_only(self.descriptor.cost.native_unit, 1.0)
-        return CostReport(
-            native_unit=self.descriptor.cost.native_unit,
-            native_quantity=1.0,
-            cost_usd=self.descriptor.cost.usd_per_page_equiv_low,
-            basis=CostBasis.ESTIMATED,
-            billing_target="caller_account",
-        )
+        return infra_only("page", 1.0)

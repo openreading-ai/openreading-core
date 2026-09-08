@@ -1,7 +1,7 @@
 # OpenReading: an intelligent, policy-aware router for document processing
 
 [![CI](https://github.com/multiversal-ventures/openreading-core/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/multiversal-ventures/openreading-core/actions/workflows/ci.yml)
-[![coverage](https://img.shields.io/badge/coverage-%E2%89%A591%25-brightgreen)](#status-and-versioning)
+[![coverage](https://img.shields.io/badge/coverage-%E2%89%A594%25-brightgreen)](#status-and-versioning)
 [![python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
@@ -159,7 +159,7 @@ better page layout analysis. It is not an error, and it does not reach your JSON
       "blocks": [ { "type": "text", "native_type": "text", "text": "First National Bank", "reading_order": 0,
         "bbox": { "x": 0.0588, "y": 0.0265, "w": 0.2085, "h": 0.0243, "page": 1,
                   "bbox_native": { "coords": [36.0, 21.02, 163.58, 40.3], "origin": "top_left", "unit": "pdf_point" } } } ] } ] },
-  "usage": { "pages_processed": 1, "cost_basis": "infra_only" },
+  "usage": { "pages_processed": 1 },
   "warnings": [ { "code": "confidence_unavailable", "field": "block_confidence",
                   "message": "PyMuPDF is a deterministic parser; per-element confidence does not exist" } ] }
 ```
@@ -265,50 +265,38 @@ one. `✗ DIVERGENT` labels the CONTENT section rather than the whole run. The r
 verdict is `equivalent`, because one misread label is not enough to call a winner.
 `--format diffs` is where the disagreement itself lives.
 
-**Route.** Route decides which backends may see a sensitive document, and prints the plan before
-anything runs. A bank statement is the everyday case. It names a person, an account and every place
-they spent money, and plenty of teams may not ship one to an arbitrary vendor. `require_baa` keeps
-out every vendor that does not publish a BAA, the HIPAA contract a vendor signs before handling
-regulated data. `no_train_on_data` refuses vendors that train on what you send:
+**Route.** Route prints the chain that would run, before anything runs. A bank statement is the
+everyday case. It names a person, an account and every place they spent money, and plenty of teams
+may not ship one to an arbitrary vendor. So you say which vendors may see it:
 
 ```bash
 cat > openreading.yaml <<'YAML'
 version: 1
 policy:
-  require_baa: true
-  no_train_on_data: true
+  backends: [pymupdf, tesseract]
 YAML
 uv run openreading route examples/john_smith_1000_2026_01.pdf
 ```
 ```json
 { "chosen": "pymupdf",
-  "fallbacks": ["docling", "azure-document-intelligence", "google-document-ai", "tesseract", "qwen-vl", "anthropic-claude"],
-  "dropped": { "reducto": { "stage": 1, "code": "no_baa", "reason": "require_baa set but hipaa_baa='tier_gated' and 'reducto' is not in baa_tier_confirmed" },
-               "…": "7 more" },
+  "fallbacks": ["tesseract"],
+  "dropped": {},
   "terminal_reason": null }
 ```
 
-That printed a plan and read nothing, and no flag named the policy: every command finds
+That printed a chain and read nothing, and no flag named the list: every command finds
 `openreading.yaml` in the working directory the same way. Add `--run` to execute the chosen
-backend and get the envelope back beside the plan. Reducto is dropped because its BAA is offered only on some tiers
-and none is confirmed here. The three hosted vendors that survive each publish a BAA. That claim
-comes from the backend's descriptor, its static self-description of formats, variables and
-compliance posture. That is a vendor's advertised offer read on a date, not an agreement you hold,
-so `require_baa` narrows the field without finishing the job. Confirm your own signed paperwork
-before real data moves, and see [the catalog](src/openreading/adapters/README.md#catalog) for where
-each claim came from. A BAA is a HIPAA control, and this example uses a bank statement because those
-are the documents this clone ships. A policy gates five things: the BAA, training on your data, the
-data region, retention, and local-only execution. Descriptors also record `soc2`, `gdpr` and `pci`,
-which no policy key reads
-([Backend adapters](src/openreading/adapters/README.md#where-those-compliance-claims-come-from)).
+backend and get the envelope back beside the chain. `fallbacks` is the order a `--run` tries next
+if `pymupdf` fails, and reordering your list reorders it.
 
-The `fallbacks` list is the order a `--run` tries next if `pymupdf` fails. A dropped backend never
-joins that list, because a fallback that readmits it would leak the statement silently. Your
-`policy:` block is the only thing that sets the eligible set, the backends allowed to run. Three of the
-policy's keys widen that set on purpose, which
-[Routing and keys](src/openreading/router/README.md#how-it-decides) names. A key the router does
-not recognise is refused rather than ignored. That way a typo cannot leave you with a clean exit
-code and no filter.
+`policy:` has one key. Earlier versions had nine, asking the engine to enforce a compliance
+posture by reading a per-vendor table it kept in its own source: whether each vendor signs a BAA,
+trains on your data, or retains a document for so many hours. That table could not be true. Every
+entry was a claim about a company this project does not control, published on a page that changes
+without notice, and a stale entry did not fail loudly, it routed your document to a backend you
+believed was excluded. You already know which vendors you hold agreements with, so `backends:` is
+that conclusion written by the one party who can reach it. An empty list permits nothing, and a
+key the loader does not recognise is refused rather than ignored.
 
 **Strategy.** A strategy gives you the cheap result when it is good enough and the stronger one
 when it is not. It checks each output against quality gates. A gate is one test on a result, for
@@ -321,15 +309,15 @@ uv run openreading explain strat.json
 ```
 ```
 strategy offline_first  →  pymupdf (ok)
-  root.steps[0]    pymupdf      succeeded                     41ms  $0
+  root.steps[0]    pymupdf      succeeded                     41ms
       scanned_pages_detected     obs=False thr=True  ok
       garbled                    obs=0.0189 thr=True  ok
       empty_pages_over           obs=0.0 thr=0.2  ok
       confidence_below           obs=None thr=0.6  skipped
 ```
 
-The trace shows PyMuPDF ran, three gates passed, and the run stopped there, with no second backend
-and no cost. The fourth gate is `skipped` rather than failed, because PyMuPDF reports no
+The trace shows PyMuPDF ran, three gates passed, and the run stopped there, so no second backend
+was ever called. The fourth gate is `skipped` rather than failed, because PyMuPDF reports no
 confidence. A missing measurement never counts as a passing one. Timings vary between machines.
 Write your own strategy with `uv run openreading strategy --help`. Set `OPENREADING_LEDGER` to a
 directory before a long `--strategy` run and every step is journaled there, so an interruption
@@ -351,18 +339,17 @@ Its `summary` tells you at a glance whether the sweep went as expected, and the 
 between machines:
 
 ```json
-{ "total": 3, "succeeded": 2, "failed": 0, "skipped": 1, "duration_ms": 82.0,
-  "cost_bases": ["infra_only"], "pages_processed": 2, "backends": { "pymupdf": 2 } }
+{ "total": 3, "succeeded": 2, "failed": 1, "duration_ms": 82.0,
+  "pages_processed": 2, "backends": { "pymupdf": 2 } }
 ```
 
-The total is three because `examples/README.md` is in that folder too. It is skipped with
-`skip_reason: "unsupported_format"` rather than dropped in silence, so the count you get back
-always accounts for every file you pointed at. `scripts/batch_demo.sh path/to/docs` runs the same
+The total is three because `examples/README.md` is in that folder too. It comes back as a failed
+item carrying PyMuPDF's own `unsupported_format` reason rather than being dropped in silence, so
+the count you get back always accounts for every file you pointed at. `scripts/batch_demo.sh path/to/docs` runs the same
 sweep with both local backends and compares the two corpora.
 
-The command above ran with no compliance filter in force, because that directory holds no
-`openreading.yaml`. Write one with a `policy:` block and the same command gates every document in
-the folder, whether it names a backend or runs a strategy.
+The command above names its backend explicitly. A `policy.backends` list supplies the default
+chain only when a request names no backend.
 [Routing and keys](src/openreading/router/README.md#recipes) runs it both ways.
 
 ## Bring your own key
@@ -381,10 +368,11 @@ billed to your account.
 
 Never run `cp .env.example .env`. That file ships `DOCLING_SERVE_URL` and `QWEN_VL_ENDPOINT` with
 values rather than blanks. A copy therefore marks `docling` and `qwen-vl` configured on a machine
-where neither is running. The cost is a different data path rather than extra configuration. Under
-a `require_local` policy the copy makes the router send your scan to `http://localhost:5001`, and
-the envelope records `docling TerminalError (ConnectError)`. Without the copy the same command
-records `docling skipped (missing_credentials)` and the document never reaches a socket.
+where neither is running. What it costs you is a different data path rather than extra
+configuration. Put `docling` in your `policy.backends` after that copy and the router sends your
+scan to `http://localhost:5001`, and the envelope records `docling TerminalError (ConnectError)`.
+Without the copy the same command records `docling skipped (missing_credentials)` and the document
+never reaches a socket.
 
 Two things about that `echo`. `.env` is already in this repo's `.gitignore`, so the file you just
 wrote inside a clone is not committed by accident. Your shell records the line itself, which puts
@@ -403,7 +391,7 @@ doc = "examples/john_smith_1000_2026_01.pdf"
 resp = openreading.run(doc, backend="pymupdf")                    # dict
 print(resp["status"]["state"], resp["backend"]["id"])            # succeeded pymupdf
 plan = openreading.route(doc)                                    # ./openreading.yaml
-print(plan.eligible_ids[0], plan.dropped["reducto"].code)        # pymupdf no_baa
+print(plan.eligible_ids)                                         # ['pymupdf', 'tesseract']
 delta = openreading.compare([resp, openreading.run(doc, backend="tesseract")])
 print(delta["headline"]["verdict"])                              # equivalent
 ```
@@ -509,11 +497,11 @@ command.
 | **the full documentation, every guide, and how an agent uses it** | [`src/openreading/README.md`](src/openreading/README.md), then `uv run openreading --help` and `uv run openreading <cmd> --help` for every flag |
 | **how to get from a fresh clone to a working strategy, one step at a time** | [`examples/tutorial.md`](examples/tutorial.md), the guided walkthrough over the shipped documents |
 | what the shipped example documents contain and where they came from | [`examples/README.md`](examples/README.md) |
-| each backend's variables and compliance posture, and the env-var precedence rules | [`src/openreading/adapters/README.md`](src/openreading/adapters/README.md), then `uv run python -m pydoc openreading.credentials` |
+| each backend's variables, runtime location, and env-var precedence rules | [`src/openreading/adapters/README.md`](src/openreading/adapters/README.md), then `uv run python -m pydoc openreading.credentials` |
 | the exact JSON shapes (the contract) | [`src/openreading/schemas/README.md`](src/openreading/schemas/README.md), then the `*.json` files beside it |
 | how to cascade backends under quality gates, race them, or compare them from one file | [Strategies](src/openreading/strategies/README.md) |
 | what differs between two backends' readings of the same document | [Compare](src/openreading/comparison/README.md) |
-| which backends a compliance policy allows, and where each key comes from | [Routing and keys](src/openreading/router/README.md) |
+| how `policy.backends` chooses the default chain and where each key comes from | [Routing and keys](src/openreading/router/README.md) |
 | how to run a folder of documents and read one result | [Batch runs](src/openreading/batch/README.md) |
 | how to resume an interrupted run, replay one offline, or erase what it recorded | [The run ledger](src/openreading/ledger/README.md) |
 | how to put the same engine behind an HTTP API on your own machine | [The HTTP server](src/openreading/server/README.md) |
@@ -521,7 +509,7 @@ command.
 | every command, its flags, and the exit code your script branches on | `uv run openreading help` for the manual's topic index, `uv run openreading help <topic>` for one chapter, and [The command line](src/openreading/cli/README.md) for the walkthrough |
 | why a response leaves a field out instead of inventing it | [The channel contract](src/openreading/derive/README.md) |
 | the Python API, every reference section, and how to add a backend | `uv run python -m pydoc openreading`, then the same command with `.<module>` appended. For a new backend, `uv run python -m pydoc openreading.adapters`, then `scripts/new_adapter.py` |
-| the checks a change must pass | `make verify` runs lint, types, pytest at a 91% coverage floor, and the schema and smoke checks. `uv run pytest -m "not live" --collect-only` prints the offline test count. |
+| the checks a change must pass | `make verify` runs lint, types, pytest at a 94% coverage floor, and the schema and smoke checks. `uv run pytest -m "not live" --collect-only` prints the offline test count. |
 
 ## Contributing · Security · License
 
@@ -530,6 +518,6 @@ command.
 ([`LICENSE`](LICENSE)). The `[pymupdf]` extra is the one copyleft component, as the Install section
 says.
 
-`openreading-core` is the engine itself: the schemas, every backend adapter, the compliance-first
+`openreading-core` is the engine itself: the schemas, every backend adapter, the
 router, strategies, compare, batch, the ledger, the local server, and the benchmark harness.
 [`AGENTS.md`](AGENTS.md) states which additions belong in this repository and which do not.

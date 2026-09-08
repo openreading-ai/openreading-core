@@ -52,7 +52,7 @@ def main() -> int:
     print(
         f"leaderboard-smoke: OK. {len(report['backends'])} backend(s) ranked over "
         f"{report['dataset']['case_count']} case(s); best={best['backend_id']} "
-        f"mean={best['mean_score']:.3f} cost/doc={best['cost_per_doc']:.4f}"
+        f"mean={best['mean_score']:.3f} errors={best['errors']}"
     )
     return 0
 

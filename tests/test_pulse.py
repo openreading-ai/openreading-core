@@ -11,11 +11,8 @@ from pathlib import Path
 import pytest
 
 from openreading.adapters.pulse import PulseAdapter
-from openreading.adapters.registry import build_registry
-from openreading.router import RouterConfig
 from openreading.router.clock import FakeClock
 from openreading.router.driver import run_to_completion
-from openreading.router.router import Router
 from openreading.testing import ConformanceCase, check_adapter_conformance
 from openreading.types import BlockType, JobState
 from openreading.types.enums import WaitMode
@@ -171,23 +168,9 @@ def _phi_req() -> OpenReadingRequest:
     return OpenReadingRequest.model_validate(
         {
             "document": {"path": "/d.pdf", "mime_type": "application/pdf"},
-            "backend": {"id": "auto"},
-            "compliance": {"no_train_on_data": True},
+            "backend": {"id": None},
         }
     )
-
-
-def test_no_train_policy_drops_pulse_by_default():
-    plan = Router(build_registry(), RouterConfig()).route(_phi_req())
-    assert plan.dropped["pulse"].code == "trains_unverified"
-    assert "pulse" not in plan.eligible_ids
-
-
-def test_allow_unverified_compliance_readmits_pulse():
-    plan = Router(build_registry(), RouterConfig(allow_unverified_compliance=True)).route(
-        _phi_req()
-    )
-    assert "pulse" in plan.eligible_ids  # UNVERIFIED no-train allowed only under the explicit flag
 
 
 # --- live (keyed; skipped without PULSE_API_KEY) --------------------------------------

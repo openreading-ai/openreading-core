@@ -1,7 +1,8 @@
 """open-ocr.com adapter — an OCR *aggregator* as a backend (P1). One POST /v1/ocr fans out to
 ~20 engines (openocr/tesseract, easyocr, vision LLMs …) selected via the `engine` config; the
-platform meters per page and returns the ACTUAL USD debit (`cost_debited`) on every response,
-so this is the one backend whose cost basis is BILLED, not estimated. `mode: sync` (default)
+platform meters per page. It also returns the actual amount debited (`cost_debited`) on every
+response, which stays in `job.raw` and never reaches `usage`: core carries no money at all.
+`mode: sync` (default)
 completes inside submit() → INLINE; `mode: async` returns a request_id to poll
 (GET /v1/ocr/{id}) or a webhook delivery → POLL/WEBHOOK.
 
@@ -11,7 +12,7 @@ never fabricated. `markdown` is D and DELIVERED as the plain text: a structure-f
 has no headings/tables to synthesize, so `markdown == text` is the honest projection (§4.2 —
 it must be POPULATED, not silently absent); provenance marks it derived. The API's own
 `output_format: markdown` variant is NOT used — it swaps the JSON envelope for a text/markdown
-body and would drop the cost/latency metadata. The single overall `confidence` scalar surfaces
+body and would drop the usage/latency metadata. The single overall `confidence` scalar surfaces
 on `document.confidence` [0,1] (never smeared onto fabricated blocks); `applied_settings.language`
 → `document.language`.
 
@@ -31,13 +32,11 @@ from typing import Any, Protocol
 
 from openreading.adapters._http import error_for_status
 from openreading.adapters.base import BackendAdapter
-from openreading.types.cost import CostBasis, CostReport
+from openreading.types.cost import CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     ConfigField,
-    Cost,
     CredentialField,
     Output,
     OutputChannels,
@@ -126,9 +125,7 @@ def _descriptor() -> AdapterDescriptor:
         protocol_version=2,
         adapter_impl="http",
         operations=["parse"],
-        provisioning=Provisioning(
-            byo_mode=["api_key"], auth="api_key", billing_target="caller_account"
-        ),
+        provisioning=Provisioning(byo_mode=["api_key"], auth="api_key"),
         wait_modes=[WaitMode.INLINE, WaitMode.POLL, WaitMode.WEBHOOK],
         capabilities=Capabilities(
             ocr="claimed",
@@ -138,19 +135,6 @@ def _descriptor() -> AdapterDescriptor:
             input_formats=["pdf", "png", "jpg", "gif", "webp", "tiff", "bmp"],
             max_pages_per_request="engine-dependent: 200 (tesseract) / 5-20 (vision LLMs)",
             max_file_size="10MB request body",
-        ),
-        cost=Cost(
-            native_unit="page",
-            basis="billed",  # cost_debited on every response IS the charge — no estimation
-            usd_per_page_equiv_low=0.0005,
-            lossiness="none",
-        ),
-        compliance=ComplianceProfile(
-            hipaa_baa="no",
-            soc2=False,
-            gdpr=False,
-            trains_on_customer_data="unverified",  # no public no-train statement → fail closed
-            runs_fully_local=False,
         ),
         runtime=RuntimeProfile(offline_capable=False, license="proprietary", version_pin="v1"),
         output=Output(
@@ -167,10 +151,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="low",
-            integration_priority="P1",
-            priority_reason="Aggregator-as-backend: one adapter fans out to ~20 OCR engines "
-            "with per-page USD billing returned on every response (the only BILLED-basis "
-            "backend). Text channel only — routes when structure isn't needed.",
         ),
         credentials_spec=[
             CredentialField(
@@ -405,16 +385,15 @@ class OpenOCRAdapter(BackendAdapter):
         return resp
 
     def _usage(self, raw: dict) -> Usage | None:
+        """Pages and latency. `cost_debited` stays in `job.raw` and off the response, with every
+        other backend's money."""
         if not raw:
             return None
-        cost = raw.get("cost_debited")
         usage = Usage(
             pages_processed=raw.get("pages"),
-            cost_usd=cost,
-            cost_basis="billed" if cost is not None else None,
             duration_ms=raw.get("provider_latency_ms"),
         )
-        has_data = (usage.pages_processed, usage.cost_usd, usage.duration_ms)
+        has_data = (usage.pages_processed, usage.duration_ms)
         return usage if any(v is not None for v in has_data) else None
 
     @staticmethod
@@ -439,16 +418,17 @@ class OpenOCRAdapter(BackendAdapter):
         return None
 
     def report_cost(self, job: Job) -> CostReport:
+        """The pages OpenOCR reported.
+
+        The response also carries `cost_debited`, a real amount OpenOCR says it took off the
+        caller's balance, and this used to forward it as `cost_usd`. There is no money on a
+        response any more: the figure was indistinguishable, once on
+        `usage`, from the fourteen other backends' derived guesses, and the caller's own OpenOCR
+        balance is the authority on it either way. `job.raw` still carries it verbatim.
+        """
         raw = (job.raw.payload or {}) if job.raw else {}
-        cost = raw.get("cost_debited")
         pages = raw.get("pages", 1) or 1
-        return CostReport(
-            native_unit="page",
-            native_quantity=float(pages),
-            cost_usd=float(cost) if cost is not None else None,
-            basis=CostBasis.BILLED if cost is not None else CostBasis.UNKNOWN,
-            billing_target="caller_account",
-        )
+        return CostReport(native_unit="page", native_quantity=float(pages))
 
     def _map_error(self, e: Exception):
         if isinstance(e, (TerminalError, RetryableError)):

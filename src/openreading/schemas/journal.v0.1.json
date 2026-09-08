@@ -25,15 +25,6 @@
         "taxonomy": { "type": "string" },
         "detail": { "type": ["string", "null"] }
       }
-    },
-    "StepCost": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["usd"],
-      "properties": {
-        "usd": { "type": "number", "minimum": 0 },
-        "basis": { "type": ["string", "null"] }
-      }
     }
   },
   "type": "object",
@@ -56,7 +47,6 @@
       ]
     },
     "error": { "anyOf": [{ "$ref": "#/$defs/StepError" }, { "type": "null" }] },
-    "cost": { "anyOf": [{ "$ref": "#/$defs/StepCost" }, { "type": "null" }] },
     "started_epoch_ms": { "type": ["integer", "null"], "description": "Absolute UTC epoch milliseconds (wall clock, Clock.now_wall_ms) at which the dispatch was issued. Not a monotonic reading: this value is written by one process and read by another, so it must name a moment, not measure an interval." },
     "ended_epoch_ms": { "type": ["integer", "null"], "description": "Absolute UTC epoch milliseconds (wall clock, Clock.now_wall_ms) at which the step reached a terminal outcome. Subtracting started_epoch_ms gives elapsed wall time, which a clock adjustment can distort; the engine measures its own durations off the monotonic clock instead." },
     "resolved_version": { "type": ["string", "null"] },

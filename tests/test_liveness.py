@@ -33,8 +33,6 @@ from openreading.liveness import (
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
-    Cost,
     CredentialField,
     LivenessProbe,
     Provisioning,
@@ -64,8 +62,6 @@ def _descriptor(slug="fake", *, probe="none", creds=None, config=None, **kw) -> 
         provisioning=Provisioning(byo_mode=["api_key"], auth="api_key"),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(ocr="claimed"),
-        cost=Cost(native_unit="page"),
-        compliance=ComplianceProfile(hipaa_baa="no"),
         runtime=RuntimeProfile(offline_capable=False),
         credentials_spec=creds if creds is not None else [],
         config_spec=config if config is not None else [],
@@ -222,61 +218,6 @@ def test_golden_liveness_report_validates():
     schemas.validate_liveness_report(
         json.loads((GOLDEN / "liveness-report" / "v0.1.json").read_text())
     )
-
-
-def test_descriptor_accepts_a_liveness_block():
-    # This used to also pin DESCRIPTOR_SCHEMA_FILE to v0.5. v0.6 (BL-166/BL-164 — idempotency and
-    # cancel declarations) is now current, and the "which file is current" pin moved with it to
-    # tests/test_descriptor_idempotency_cancel.py::test_descriptor_v06_is_current. What this test
-    # is actually FOR is unchanged and is the thing that must keep holding: a descriptor carrying a
-    # liveness block stays valid under whatever version is current (additivity, §8).
-    desc = {
-        "id": "x",
-        "type": "hosted_api",
-        "provisioning": {"byo_mode": ["api_key"], "auth": "api_key"},
-        "wait_modes": ["inline"],
-        "capabilities": {"ocr": "verified"},
-        "cost": {"native_unit": "page"},
-        "compliance": {"hipaa_baa": "no"},
-        "runtime": {"offline_capable": False},
-        "liveness": {"probe": "endpoint", "method": "GET /health", "timeout_s": 5.0},
-    }
-    schemas.validate_descriptor(desc)
-
-
-def test_descriptor_v05_is_additive_a_v04_descriptor_still_validates():
-    """The backward-compatibility guarantee in one assertion: adding `liveness` must not
-    invalidate a single existing descriptor, in this repo or a third party's."""
-    schemas.validate_descriptor(
-        {
-            "id": "x",
-            "type": "hosted_api",
-            "provisioning": {"auth": "api_key"},
-            "wait_modes": ["poll"],
-            "capabilities": {"ocr": "verified"},
-            "cost": {"native_unit": "page"},
-            "compliance": {"hipaa_baa": "no"},
-            "runtime": {"offline_capable": False},
-            "batch": {"native": "claimed", "max_items": 100},
-        }
-    )
-
-
-def test_descriptor_liveness_block_rejects_an_unknown_field():
-    with pytest.raises(ValidationError):
-        schemas.validate_descriptor(
-            {
-                "id": "x",
-                "type": "hosted_api",
-                "provisioning": {"auth": "api_key"},
-                "wait_modes": ["inline"],
-                "capabilities": {},
-                "cost": {"native_unit": "page"},
-                "compliance": {"hipaa_baa": "no"},
-                "runtime": {"offline_capable": False},
-                "liveness": {"probe": "vendor", "billable": True},
-            }
-        )
 
 
 # --------------------------------------------------------------------------- the protocol
@@ -784,21 +725,6 @@ def test_offline_suite_never_reaches_a_real_probe():
 
     backend_readiness(adapter, broker=_broker(FAKE_API_KEY="sk-x"))
     assert adapter.calls == 0
-
-
-def test_liveness_is_never_routing_input():
-    """Compliance is not relaxed by this feature, and the guarantee is structural: no module under
-    `router/` (nor the strategy engine) imports liveness, so no plan, filter, score or fallback can
-    consult a LivenessReport — a backend the compliance gate refuses stays refused whatever its
-    pulse (§7)."""
-    root = Path(__file__).resolve().parents[1] / "src" / "openreading"
-    offenders = [
-        path.relative_to(root).as_posix()
-        for folder in ("router", "strategies", "comparison", "evals", "batch")
-        for path in (root / folder).rglob("*.py")
-        if "openreading.liveness" in path.read_text() or "import liveness" in path.read_text()
-    ]
-    assert offenders == []
 
 
 def test_a_probe_signature_cannot_carry_caller_content():

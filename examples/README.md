@@ -142,11 +142,12 @@ Every document as a batch. Pointing `parse` at a directory is what turns on batc
 uv run openreading parse examples/ --backend pymupdf > batch.json
 ```
 
-The run touches seven files, not five. The terminal prints `[1/7] README.md skipped
+The run touches seven files, not five. The terminal prints `[3/7] README.md failed
 unsupported_format` and the same line for `tutorial.md`. Inside `batch.json`, `summary` records
-`"total": 7, "succeeded": 5, "failed": 0, "skipped": 2`. Two markdown files sit in this
-directory, and PyMuPDF does not read `.md`. The batch records each one with
-`skip_reason: "unsupported_format"` rather than dropping it in silence.
+`"total": 7, "succeeded": 5, "failed": 2`. Two markdown files sit in this directory, and PyMuPDF
+does not read `.md`. Every source is offered to the backend, so each one comes back carrying
+PyMuPDF's own reason rather than being filtered out before it was tried, and the batch exits 4 as
+partial.
 
 Your own test documents belong in `samples/` at the clone root, which is gitignored for that
 purpose. `scripts/batch_demo.sh` reads that folder by default, and a path argument such as

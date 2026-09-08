@@ -2,7 +2,7 @@
 
 Drives the engine with ScriptedBackends + FakeClock (offline, deterministic). Covers the
 Outcome laws (accept / escalate / keep-best), classify_error, on_error routing, credential skip,
-auto-leaf attempted-set, the compile/prune pipeline, and the orchestration trace.
+the compile/prune pipeline, and the orchestration trace.
 """
 
 from __future__ import annotations
@@ -15,9 +15,7 @@ from openreading.router.executor import execute_plan
 from openreading.router.router import RoutePlan, RouterConfig
 from openreading.strategies import StrategyConfig, classify_error, compile_strategy, run_strategy
 from openreading.strategies.engine import on_error_action
-from openreading.types import CostBasis, CostReport, Job
 from openreading.types.errors import (
-    ComplianceRefused,
     PlanExhaustedError,
     RetryableError,
     TerminalError,
@@ -28,22 +26,6 @@ from tests.fakes import ScriptedBackend, scripted_registry
 
 CLEAN = "The quick brown fox jumps over the lazy dog, and it does this every single day here. " * 4
 GARBLED = "Ã©Ã¨ÃªÃ«Å â€™Ã±Â§Â¶ Ã Ã¢Ã¤ Ãµ Ã¼Ã¿ â‚¬Â£Â¥ Ã˜Ã† Ã‡Ã‰ " * 4
-
-
-class _BilledScriptedBackend(ScriptedBackend):
-    """A ScriptedBackend whose `report_cost` reports a real `CostBasis.BILLED` basis (BL-126). The
-    base `ScriptedBackend.report_cost` is hardcoded to `infra_only(...)` regardless of `cost_usd`,
-    which can never exercise "a billed rung contributed" — this subclass makes that case
-    reproducible without touching the shared fixture every other test relies on."""
-
-    def report_cost(self, job: Job) -> CostReport:
-        return CostReport(
-            native_unit="page",
-            native_quantity=1.0,
-            cost_usd=self._cost_usd,
-            basis=CostBasis.BILLED,
-            billing_target="caller_account",
-        )
 
 
 def _req(compliance=None, fallback=None):
@@ -78,178 +60,10 @@ def _cats(result):
 # ---- honest money: a cascade sums every billed rung ------------------------------------------
 
 
-def test_cascade_usage_sums_escalated_and_winning_rungs():
-    # the cheap rung escalates (billed 0.05) and the premium rung wins (billed 0.10); the returned
-    # response's usage.cost_usd must be the TOTAL 0.15, not just the winner's own cost.
-    reg = scripted_registry(
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN, confidence=0.5, cost_usd=0.05),
-        ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN, confidence=0.95, cost_usd=0.10),
-    )
-    cfg = {
-        "version": 1,
-        "strategies": {
-            "s": {
-                "steps": [
-                    {"backend": "reducto", "escalate_if": {"confidence_below": 0.85}},
-                    "aws-textract",
-                ],
-                "budget": {"max_cost_usd": 1.0},
-            }
-        },
-    }
-    res = _run(cfg, "s", reg)
-    assert res.response.backend.id == "aws-textract"
-    assert res.response.usage.cost_usd == pytest.approx(0.15)  # 0.05 escalated + 0.10 winner
-
-
-def test_cascade_folds_billed_rungs_into_a_composite_terminal_step():
-    # a cheap leaf escalates (billed 0.05), then a nested-cascade step wins (its own cost 0.10); the
-    # returned total must include BOTH — the outer billed rung is not dropped by the composite return.
-    reg = scripted_registry(
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN, confidence=0.5, cost_usd=0.05),
-        ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN, cost_usd=0.10),
-    )
-    cfg = {
-        "version": 1,
-        "strategies": {
-            "s": {
-                "steps": [
-                    {"backend": "reducto", "escalate_if": {"confidence_below": 0.85}},
-                    {"steps": ["aws-textract"]},  # nested-cascade (composite) terminal step
-                ],
-                "budget": {"max_cost_usd": 1.0},
-            }
-        },
-    }
-    res = _run(cfg, "s", reg)
-    assert res.response.backend.id == "aws-textract"
-    assert res.response.usage.cost_usd == pytest.approx(0.15)  # 0.05 escalated + 0.10 composite
-
-
 # ---- BL-126: honest money — usage.cost_basis reconciles alongside cost_usd --------------------
 
 
-def test_cascade_reconciles_cost_basis_when_a_billed_rung_escalates_to_a_free_winner():
-    # the escalated-away rung is a real BILLED cost; the winner is free/local. cost_usd already
-    # summed the escalated spend (BL-120) — before this fix, _set_total_cost never touched
-    # cost_basis at all, so it silently kept the free winner's own "infra_only", asserting
-    # something weaker than what actually happened (a real vendor charge occurred).
-    billed = _BilledScriptedBackend("reducto", cost_usd=0.05, text=CLEAN, confidence=0.5)
-    reg = scripted_registry(
-        billed, ScriptedBackend("pymupdf", local=True, text=CLEAN, confidence=0.95)
-    )
-    cfg = {
-        "version": 1,
-        "strategies": {
-            "s": {
-                "steps": [
-                    {"backend": "reducto", "escalate_if": {"confidence_below": 0.85}},
-                    "pymupdf",
-                ],
-                "budget": {"max_cost_usd": 1.0},
-            }
-        },
-    }
-    res = _run(cfg, "s", reg)
-    assert res.response.backend.id == "pymupdf"
-    assert res.response.usage.cost_usd == pytest.approx(0.05)
-    assert res.response.usage.cost_basis == "billed"
-
-
-def test_cascade_reconciles_cost_basis_across_a_composite_terminal_step():
-    # the escalated leaf is a real BILLED cost; the composite terminal step's own leaf reports
-    # "infra_only" (ScriptedBackend.report_cost's own hardcoded default). cost_usd already summed
-    # both (BL-120) — cost_basis must not silently prefer the composite's own weaker basis just
-    # because it ran last and wrote the returned response object.
-    billed = _BilledScriptedBackend("reducto", cost_usd=0.05, text=CLEAN, confidence=0.5)
-    reg = scripted_registry(
-        billed, ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN, cost_usd=0.10)
-    )
-    cfg = {
-        "version": 1,
-        "strategies": {
-            "s": {
-                "steps": [
-                    {"backend": "reducto", "escalate_if": {"confidence_below": 0.85}},
-                    {"steps": ["aws-textract"]},  # nested-cascade (composite) terminal step
-                ],
-                "budget": {"max_cost_usd": 1.0},
-            }
-        },
-    }
-    res = _run(cfg, "s", reg)
-    assert res.response.backend.id == "aws-textract"
-    assert res.response.usage.cost_usd == pytest.approx(0.15)  # 0.05 escalated + 0.10 composite
-    assert res.response.usage.cost_basis == "billed"
-
-
-def test_cascade_reconciles_cost_basis_at_best_effort_exhausted():
-    # pymupdf (free/local) is retained as best-so-far; reducto also escalates, contributing a real
-    # BILLED cost, before azure-di's hard error ends the walk — on_quality_exhausted defaults to
-    # "best_effort", returning pymupdf's own deficient result. cost_usd already summed reducto's
-    # spend into it (BL-120) — cost_basis must not silently keep pymupdf's own "infra_only" once a
-    # real vendor charge has been folded into the total.
-    reg = scripted_registry(
-        ScriptedBackend("pymupdf", local=True, text=GARBLED),
-        _BilledScriptedBackend("reducto", cost_usd=0.05, text=GARBLED),
-        ScriptedBackend(
-            "azure-di", cost_low=0.01, error=TerminalError("boom", backend_code="server")
-        ),
-    )
-    res = _run(
-        {
-            "version": 1,
-            "strategies": {
-                "s": {"steps": ["pymupdf", "reducto", "azure-di"], "escalate_if": "default"}
-            },
-        },
-        "s",
-        reg,
-    )
-    assert res.response.backend.id == "pymupdf"  # first retained best-so-far (equal-quality tie)
-    assert res.orchestration["outcome"] == "degraded"
-    assert res.response.usage.cost_usd == pytest.approx(0.05)  # reducto's escalated spend only
-    assert res.response.usage.cost_basis == "billed"
-
-
 # ---- BL-134: a rung with known cost but unset basis is folded as contributing nothing -----
-
-
-def test_cascade_a_raising_report_cost_never_leaves_a_billed_rung_looking_free():
-    # report_cost() can raise AFTER normalize() already set usage.cost_usd — the documented "an
-    # adapter meters a channel itself" pattern (router/cost.py's own module docstring).
-    # apply_cost_report's own except clause degrades gracefully but never runs merge_cost_report, so
-    # usage.cost_basis stays unset on that rung. Before this fix, _eval_cascade's own leaf-accept
-    # fold read that bare None straight through, and the escalated rung's own genuine "infra_only"
-    # tag outranked the coalesced "unknown" by priority — asserting the run was free despite a real,
-    # nonzero total.
-    reg = scripted_registry(
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN, confidence=0.5, cost_usd=0.05),
-        ScriptedBackend(
-            "aws-textract",
-            cost_low=0.01,
-            text=CLEAN,
-            confidence=0.95,
-            cost_usd=0.10,
-            report_cost_error=RuntimeError("meter exploded"),
-        ),
-    )
-    cfg = {
-        "version": 1,
-        "strategies": {
-            "s": {
-                "steps": [
-                    {"backend": "reducto", "escalate_if": {"confidence_below": 0.85}},
-                    "aws-textract",
-                ],
-                "budget": {"max_cost_usd": 1.0},
-            }
-        },
-    }
-    res = _run(cfg, "s", reg)
-    assert res.response.backend.id == "aws-textract"
-    assert res.response.usage.cost_usd == pytest.approx(0.15)  # 0.05 escalated + 0.10 winner
-    assert res.response.usage.cost_basis not in (None, "infra_only")
 
 
 # ---- classify_error (spec §5.1 table) ---------------------------------------------------------
@@ -279,7 +93,7 @@ def test_classify_error_table(exc, expected):
 def test_first_step_accepted_when_clean():
     reg = scripted_registry(
         ScriptedBackend("pymupdf", local=True, text=CLEAN),
-        ScriptedBackend("reducto", cost_low=0.01, text="unused"),
+        ScriptedBackend("reducto", text="unused"),
     )
     res = _run(
         {
@@ -297,7 +111,7 @@ def test_first_step_accepted_when_clean():
 def test_escalation_on_garbled_quality():
     reg = scripted_registry(
         ScriptedBackend("pymupdf", local=True, text=GARBLED),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN),
+        ScriptedBackend("reducto", text=CLEAN),
     )
     res = _run(
         {
@@ -319,9 +133,7 @@ def test_keep_best_when_all_escalate_and_final_errors():
     # pymupdf escalates (garbled), reducto (final, gated explicitly) errors -> keep pymupdf deficient
     reg = scripted_registry(
         ScriptedBackend("pymupdf", local=True, text=GARBLED),
-        ScriptedBackend(
-            "reducto", cost_low=0.01, error=TerminalError("boom", backend_code="server")
-        ),
+        ScriptedBackend("reducto", error=TerminalError("boom", backend_code="server")),
     )
     res = _run(
         {
@@ -339,9 +151,7 @@ def test_keep_best_when_all_escalate_and_final_errors():
 def test_on_quality_exhausted_fail_raises():
     reg = scripted_registry(
         ScriptedBackend("pymupdf", local=True, text=GARBLED),
-        ScriptedBackend(
-            "reducto", cost_low=0.01, error=TerminalError("boom", backend_code="server")
-        ),
+        ScriptedBackend("reducto", error=TerminalError("boom", backend_code="server")),
     )
     with pytest.raises(PlanExhaustedError):
         _run(
@@ -368,7 +178,7 @@ def test_invalid_input_fails_the_cascade_by_default():
         ScriptedBackend(
             "pymupdf", local=True, error=TerminalError("corrupt", backend_code="corrupt_document")
         ),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN),
+        ScriptedBackend("reducto", text=CLEAN),
     )
     with pytest.raises(PlanExhaustedError) as ei:
         _run({"version": 1, "strategies": {"s": {"steps": ["pymupdf", "reducto"]}}}, "s", reg)
@@ -378,9 +188,7 @@ def test_invalid_input_fails_the_cascade_by_default():
 
 def test_transient_error_advances():
     reg = scripted_registry(
-        ScriptedBackend(
-            "reducto", cost_low=0.01, error=TerminalError("5xx", backend_code="server")
-        ),
+        ScriptedBackend("reducto", error=TerminalError("5xx", backend_code="server")),
         ScriptedBackend("pymupdf", local=True, text=CLEAN),
     )
     res = _run({"version": 1, "strategies": {"s": {"steps": ["reducto", "pymupdf"]}}}, "s", reg)
@@ -390,9 +198,7 @@ def test_transient_error_advances():
 
 def test_on_error_fail_override_stops_chain():
     reg = scripted_registry(
-        ScriptedBackend(
-            "reducto", cost_low=0.01, error=TerminalError("5xx", backend_code="server")
-        ),
+        ScriptedBackend("reducto", error=TerminalError("5xx", backend_code="server")),
         ScriptedBackend("pymupdf", local=True, text=CLEAN),
     )
     with pytest.raises(PlanExhaustedError):
@@ -410,9 +216,7 @@ def test_step_on_error_overrides_the_cascade_map_via_the_transient_alias():
     # the cascade advances on anything; the failing step stops on any transient class (§5.3). Proves
     # the step map is the most-specific argument at the leaf call site, not just at the unit level.
     reg = scripted_registry(
-        ScriptedBackend(
-            "reducto", cost_low=0.01, error=TerminalError("5xx", backend_code="server")
-        ),
+        ScriptedBackend("reducto", error=TerminalError("5xx", backend_code="server")),
         ScriptedBackend("pymupdf", local=True, text=CLEAN),
     )
     cfg = {
@@ -494,9 +298,7 @@ def test_on_error_action_most_specific_map_decides_first():
 
 def test_missing_credentials_skips():
     reg = scripted_registry(
-        ScriptedBackend(
-            "reducto", cost_low=0.01, required_env=["OPENREADING_TEST_NEVERSET_KEY"], text=CLEAN
-        ),
+        ScriptedBackend("reducto", required_env=["OPENREADING_TEST_NEVERSET_KEY"], text=CLEAN),
         ScriptedBackend("pymupdf", local=True, text=CLEAN),
     )
     res = _run({"version": 1, "strategies": {"s": {"steps": ["reducto", "pymupdf"]}}}, "s", reg)
@@ -504,56 +306,7 @@ def test_missing_credentials_skips():
     assert _cats(res) == [("reducto", "skipped(missing_credentials)"), ("pymupdf", "succeeded")]
 
 
-# ---- auto leaf + attempted set ----------------------------------------------------------------
-
-
-def test_auto_leaf_picks_untried_eligible():
-    # steps [pymupdf, auto]: pymupdf escalates, auto must pick reducto (not re-pick pymupdf)
-    reg = scripted_registry(
-        ScriptedBackend("pymupdf", local=True, text=GARBLED),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN),
-    )
-    res = _run(
-        {
-            "version": 1,
-            "strategies": {"s": {"steps": ["pymupdf", "auto"], "escalate_if": "default"}},
-        },
-        "s",
-        reg,
-    )
-    assert res.response.backend.id == "reducto"
-    assert [a["backend"] for a in res.orchestration["attempts"]] == ["pymupdf", "reducto"]
-
-
 # ---- compile / prune pipeline -----------------------------------------------------------------
-
-
-def test_compile_prunes_noncompliant_backend():
-    reg = scripted_registry(
-        ScriptedBackend("pymupdf", local=True, text=CLEAN),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN),  # non-local
-    )
-    req = _req(compliance={"require_local": True})
-    res = _run(
-        {
-            "version": 1,
-            "strategies": {"s": {"steps": ["pymupdf", "reducto"], "escalate_if": "default"}},
-        },
-        "s",
-        reg,
-        req=req,
-    )
-    # reducto pruned before execution; only pymupdf remains, and it's recorded in dropped[]
-    dropped = {d["backend"] for d in res.orchestration.get("dropped", [])}
-    assert "reducto" in dropped
-    assert res.response.backend.id == "pymupdf"
-
-
-def test_fully_pruned_root_refuses():
-    reg = scripted_registry(ScriptedBackend("reducto", cost_low=0.01, text=CLEAN))  # only non-local
-    req = _req(compliance={"require_local": True})
-    with pytest.raises(ComplianceRefused):
-        _run({"version": 1, "strategies": {"s": ["reducto"]}}, "s", reg, req=req)
 
 
 def test_routing_fallback_overridden_warns():
@@ -570,12 +323,12 @@ def test_routing_fallback_desugars_to_escalate_off_cascade():
     document (today's chain is a point in the design, not a second engine)."""
     err = TerminalError("boom", backend_code="server")
     plain_req = OpenReadingRequest.model_validate(
-        {"document": {"path": "/d.pdf"}, "backend": {"id": "auto"}}
+        {"document": {"path": "/d.pdf"}, "backend": {"id": None}}
     )
     # legacy fallback chain: a fails → b wins
     legacy = execute_plan(
         RoutePlan(
-            chosen=ScriptedBackend("a", cost_low=0.01, error=err),
+            chosen=ScriptedBackend("a", error=err),
             fallbacks=[ScriptedBackend("b", local=True, text=CLEAN)],
         ),
         plain_req,
@@ -583,7 +336,7 @@ def test_routing_fallback_desugars_to_escalate_off_cascade():
     )
     # equivalent desugared cascade
     reg = scripted_registry(
-        ScriptedBackend("a", cost_low=0.01, error=err),
+        ScriptedBackend("a", error=err),
         ScriptedBackend("b", local=True, text=CLEAN),
     )
     strat = _run(
@@ -596,7 +349,7 @@ def test_routing_fallback_desugars_to_escalate_off_cascade():
 def test_reference_resolves():
     reg = scripted_registry(
         ScriptedBackend("pymupdf", local=True, text=GARBLED),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN),
+        ScriptedBackend("reducto", text=CLEAN),
     )
     cfg = {
         "version": 1,
@@ -636,7 +389,7 @@ def test_response_stays_v01_schema_valid():
 
 def test_parallel_branch_recovers_from_a_plain_normalize_crash_and_redacts_it():
     # _run_branch's own `except (TerminalError, RetryableError, UnsupportedFeatureError,
-    # ComplianceRefused)` clause (execution.md §3) never matched a plain, non-AdapterError exception
+    # ScopeRefused)` clause (execution.md §3) never matched a plain, non-AdapterError exception
     # out of normalize() — it isn't one of the five _ADAPTER_ERRORS taxonomy types. Uncaught, it
     # propagated out of the branch's asyncio.Task and blew up the whole parallel node, not just the
     # one losing branch. `_BranchOutcome`/the trace's own aggregation never carries a branch error's
@@ -648,11 +401,10 @@ def test_parallel_branch_recovers_from_a_plain_normalize_crash_and_redacts_it():
     reg = scripted_registry(
         ScriptedBackend(
             "reducto",
-            cost_low=0.01,
             required_env=["OPENREADING_TEST_BRANCH_PLAIN_KEY"],
             normalize_error=crash,
         ),
-        ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN),
+        ScriptedBackend("aws-textract", text=CLEAN),
     )
     broker = EnvCredentialBroker({"OPENREADING_TEST_BRANCH_PLAIN_KEY": canary})
     res = _run(
@@ -725,7 +477,7 @@ def _deadline_cfg():
 def test_deadline_overrun_emits_budget_exhausted_not_a_quality_warning():
     reg = scripted_registry(
         _SlowScriptedBackend("pymupdf", local=True, text=GARBLED, sleep_s=0.08),
-        ScriptedBackend("reducto", cost_low=0.01, text=CLEAN),
+        ScriptedBackend("reducto", text=CLEAN),
     )
     res = _run_realtime(_deadline_cfg(), "s", reg)
 
@@ -740,9 +492,7 @@ def test_a_genuine_quality_exhaustion_still_says_quality_below_threshold():
     # the control: same keep-best ending, no deadline involved — the existing signal is unchanged
     reg = scripted_registry(
         ScriptedBackend("pymupdf", local=True, text=GARBLED),
-        ScriptedBackend(
-            "reducto", cost_low=0.01, error=TerminalError("boom", backend_code="server")
-        ),
+        ScriptedBackend("reducto", error=TerminalError("boom", backend_code="server")),
     )
     res = _run(
         {
@@ -755,37 +505,3 @@ def test_a_genuine_quality_exhaustion_still_says_quality_below_threshold():
     codes = {w.code for w in (res.response.warnings or [])}
     assert "quality_below_threshold" in codes
     assert "budget_exhausted" not in codes
-
-
-def test_a_failing_rung_records_the_backend_s_own_error_code(monkeypatch):
-    """A29: with the `tesseract` binary off PATH, a `try: [tesseract, pymupdf]` strategy exits 0,
-    `outcome: ok`, warning `fallback_used`, and the attempt reads `error(provider_error)` — the
-    same category a rate-limit or a network blip gets, though a missing local binary is permanent
-    and will fail identically on every run until someone installs it.
-
-    The engine's error CLASS is a closed, schema-versioned set with an `on_error` routing contract
-    (`strategy-config` `$defs.on_error`, `additionalProperties: false`), and no uniform, cheap way
-    exists to tell "permanent host fault" from "transient provider fault" without branching on
-    backend type — the one thing the router is forbidden to do. So the class stays
-    `provider_error`, and what ships instead is the discriminator the adapter already computed and
-    the trace was throwing away: `TerminalError.backend_code`, recorded as the attempt's `code`
-    exactly as a compliance drop records its own. `detail` is prose for a human; `code` is what a
-    monitor groups by."""
-    reg = scripted_registry(
-        ScriptedBackend(
-            "tesseract",
-            local=True,
-            error=TerminalError(
-                "tesseract failed: tesseract is not installed or it's not in your PATH.",
-                backend_code="TesseractNotFoundError",
-            ),
-        ),
-        ScriptedBackend("pymupdf", local=True, text=CLEAN),
-    )
-    res = _run({"version": 1, "strategies": {"s": {"steps": ["tesseract", "pymupdf"]}}}, "s", reg)
-
-    failed = res.orchestration["attempts"][0]
-    assert failed["category"] == "error(provider_error)"
-    assert failed["code"] == "TesseractNotFoundError"
-    # the succeeding rung carries no code — the key is present only when there is one
-    assert "code" not in res.orchestration["attempts"][1]

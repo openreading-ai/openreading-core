@@ -1,4 +1,4 @@
-"""Pydantic mirrors of the Manifest (v0.6) envelope families: batch-result.v0.1 and
+"""Pydantic mirrors of the envelope families: batch-result.v0.2 and
 corpus-report.v0.1. Envelopes (`BatchResult`, `CorpusReport`) are extra="ignore" — forward-tolerant
 of a newer producer's additive top-level fields, dropping them on re-serialization (Canon §8);
 nested payload models keep extra="forbid" so construction typos are caught. `to_schema_dict()`
@@ -55,10 +55,9 @@ class BatchItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source: SourceRef
-    state: Literal["succeeded", "failed", "skipped"]
+    state: Literal["succeeded", "failed"]
     response: dict[str, Any] | None = None  # a full response.v0.3 envelope (validated separately)
     error: BatchItemError | None = None
-    skip_reason: Literal["unsupported_format", "unknown_format"] | None = None
     transport: Literal["platform", "native"] | None = None
 
 
@@ -68,10 +67,7 @@ class BatchSummary(BaseModel):
     total: int
     succeeded: int
     failed: int
-    skipped: int
     duration_ms: float | None = None
-    cost_usd: float | None = None
-    cost_bases: list[str] = Field(default_factory=list)
     pages_processed: int | None = None
     backends: dict[str, int] = Field(default_factory=dict)
 
@@ -107,7 +103,7 @@ class BatchResult(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    schema_version: str = "0.1"
+    schema_version: str = "0.2"
     status: BatchStatus
     request: BatchRequestEcho | None = None
     items: list[BatchItem] = Field(default_factory=list)

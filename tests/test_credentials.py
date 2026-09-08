@@ -12,7 +12,6 @@ from openreading import api
 from openreading import credentials as cred
 from openreading.adapters.registry import make_adapter
 from openreading.credentials import (
-    DEFAULT_DEADLINE_MS,
     EnvCredentialBroker,
     build_run_context,
     load_dotenv,
@@ -243,22 +242,6 @@ def test_qwen_config_and_credentials_split():
 
 
 # --- build_run_context wiring ----------------------------------------------------------
-
-
-def test_build_run_context_fills_budget_compliance_idempotency():
-    body = {
-        "document": {"path": "/d.pdf", "mime_type": "application/pdf"},
-        "backend": {"id": "reducto"},
-        "compliance": {"require_baa": True},
-        "idempotency_key": "idem-123",
-    }
-    req = OpenReadingRequest.model_validate(body)
-    ctx = build_run_context(
-        req, _desc("reducto"), broker=EnvCredentialBroker({"REDUCTO_API_KEY": "k"})
-    )
-    assert ctx.deadline_ms == DEFAULT_DEADLINE_MS
-    assert ctx.compliance["require_baa"] is True  # full compliance block passed through
-    assert ctx.idempotency_key == "idem-123"
 
 
 # --- BL-166: a caller-omitted idempotency_key defaults to content_key(...) ------------
@@ -497,7 +480,7 @@ def test_execute_plan_redacts_secret_from_a_failing_backend_error():
     plan = RoutePlan(chosen=bad, fallbacks=[make_backend("good", local=True)])
     broker = EnvCredentialBroker({"CANARY_EXEC_KEY": canary})
 
-    resp = execute_plan(plan, _req("auto"), broker=broker)
+    resp = execute_plan(plan, _req(None), broker=broker)
 
     assert resp.backend.id == "good"  # fell back past the failing backend
     # the SAME exception instance execute_plan caught is scrubbed in place — str(exc) is exactly
@@ -518,7 +501,7 @@ def test_execute_plan_auth_rejected_hint_is_not_further_mangled():
     plan = RoutePlan(chosen=bad, fallbacks=[make_backend("good", local=True)])
     broker = EnvCredentialBroker({"CANARY_HINT_KEY": canary})
 
-    execute_plan(plan, _req("auto"), broker=broker)
+    execute_plan(plan, _req(None), broker=broker)
 
     assert exc.message == "key was found but rejected by bad: check CANARY_HINT_KEY"
     assert canary not in exc.message
@@ -623,7 +606,7 @@ def test_execute_plan_redacts_a_plain_normalize_crash_and_falls_back():
     plan = RoutePlan(chosen=bad, fallbacks=[make_backend("good", local=True)])
     broker = EnvCredentialBroker({"CANARY_EXECPLAN_PLAIN_KEY": canary})
 
-    resp = execute_plan(plan, _req("auto"), broker=broker)
+    resp = execute_plan(plan, _req(None), broker=broker)
 
     assert resp.backend.id == "good"  # fell back past the crashing backend, not an uncaught crash
     assert canary not in str(exc)
@@ -634,7 +617,7 @@ def test_run_request_named_backend_redacts_a_plain_normalize_crash(monkeypatch):
     # run_request's named-backend branch had no try/except of any kind around its
     # `with auth_hinted(...)` block — a plain ValueError out of normalize() propagated straight past
     # every caller's typed except clauses (server's _ADAPTER_ERRORS catch, the CLI's own
-    # (TerminalError, ComplianceRefused) catch) to a bare, undocumented crash. Converting it into a
+    # (TerminalError, ScopeRefused) catch) to a bare, undocumented crash. Converting it into a
     # TerminalError gives it the identical structured handling those callers already give BL-85's
     # three async-job sinks; auth_hinted's own widening (proven directly above) has already redacted
     # the message by the time it reaches here.
@@ -664,7 +647,6 @@ def test_strategy_engine_leaf_redacts_leaked_secret_from_attempt_detail():
     reg = scripted_registry(
         ScriptedBackend(
             "leaky",
-            cost_low=0.01,
             required_env=["OPENREADING_TEST_BL47_ENGINE_KEY"],
             error=TerminalError(f"upstream echoed key={canary}", backend_code="server"),
         ),
@@ -691,14 +673,13 @@ def test_strategy_engine_leaf_redacts_a_plain_normalize_crash():
     # BL-99: the same _execute_leaf_sync boundary as immediately above, but the one substitution
     # BL-47's own test (and BL-85's/BL-93's eight tests) never makes — a plain, non-AdapterError
     # exception (not a TerminalError) out of normalize(). Pre-BL-99, _run_leaf's enclosing
-    # `except (TerminalError, RetryableError, UnsupportedFeatureError, ComplianceRefused)` clause
+    # `except (TerminalError, RetryableError, UnsupportedFeatureError, ScopeRefused)` clause
     # does not match a plain ValueError at all, so it propagated straight out of the cascade
     # uncaught — the second, healthy backend was never reached.
     canary = "sk_CANARY_bl99_leaf_plain"
     reg = scripted_registry(
         ScriptedBackend(
             "leaky",
-            cost_low=0.01,
             required_env=["OPENREADING_TEST_BL99_LEAF_PLAIN_KEY"],
             normalize_error=ValueError(f"malformed page structure, saw key={canary}"),
         ),
@@ -729,7 +710,6 @@ def test_calibrate_strategy_redacts_leaked_secret(tmp_path, monkeypatch):
     reg = scripted_registry(
         ScriptedBackend(
             "cheap",
-            cost_low=0.01,
             required_env=["OPENREADING_TEST_BL47_CALIBRATE_KEY"],
             error=TerminalError(f"upstream echoed key={canary}", backend_code="server"),
         )
@@ -750,7 +730,6 @@ def test_run_case_redacts_leaked_secret():
     canary = "sk_CANARY_bl47_runner"
     backend = ScriptedBackend(
         "cheap",
-        cost_low=0.01,
         required_env=["OPENREADING_TEST_BL47_RUNNER_KEY"],
         error=TerminalError(f"upstream echoed key={canary}", backend_code="server"),
     )

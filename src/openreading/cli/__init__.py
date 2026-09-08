@@ -74,8 +74,8 @@ Invariants shared by every subcommand
   `strategy show` prints YAML. Read that chapter before building a pipeline.
 - A `<file>` starting with `http(s)://` is a URL: backends that ingest URLs
   natively get it as-is, the rest download to bytes first.
-- No fallback widens the set of backends allowed by the policy (D7, D7a).
-  A policy that leaves nothing compliant prevents dispatch. `route`, including
+- No fallback widens the policy's default backend chain (D7, D7a).
+  A policy with no registered backend prevents dispatch. `route`, including
   `route --run`, prints the empty plan and exits 4. Other commands report the
   refusal through their own exit codes or per-case results.
 - The CLI passes no result cache (DECISIONS D-v3-3): silent memoization inside
@@ -106,13 +106,13 @@ than a coded exit.
 
 stderr lines carry a bracket tag. `[<command>]` (`[route]`, `[resume]`,
 `[compare]`, `[calibrate]`, ...) is the common shape. A single-document `parse`
-tags its error lines with the RUN LABEL instead of the command: the backend
-slug, `strategy:<name>` or `auto` (`[pymupdf] missing credentials ...`). On
+tags its error lines with the run label instead of the command: the backend
+slug, `strategy:<name>` or `router` (`[pymupdf] missing credentials ...`). On
 that path `[parse]` appears only on selector misuse, a slug that fails catalog
 lookup, and the interrupt lines. A batch `parse` prints `[batch]` for usage and
 unexpected errors and for the `empty_batch` warning, `[i/N]` for progress, and
-`[preflight]` for the two pre-run advisories (cost, and a `--jobs` request the
-named backend's descriptor caps). Its exit-3 cannot-run line carries the run
+`[preflight]` when `--jobs` exceeds the named backend's descriptor cap.
+Its exit-3 cannot-run line carries the run
 label, not `[batch]`. A `compare` fan-out tags `[<backend>]` on a fanned-out
 backend's FAILURE; a fan-out that succeeds prints nothing per backend.
 
@@ -127,8 +127,7 @@ The exit code is the third stream, and it is the one a script reads. Branch on
 it before you parse anything: see the "Exit codes" ladder below, or run
 `openreading help exit-codes`. Exit 0 does not mean every document was read,
 and on a strategy run it does not mean nothing was gated. Read `summary.failed`
-and `summary.skipped` on a batch, and `orchestration.outcome` and `warnings[]`
-on a single response.
+on a batch, and `orchestration.outcome` and `warnings[]` on a single response.
 
 Environment variables this module reads
 ---------------------------------------
@@ -159,10 +158,6 @@ These are the variables the CLI itself changes behaviour on.
                             payloads on disk by accident. Only a strategy
                             dispatch journals, so a named `--backend` run
                             writes nothing while appearing armed.
-  OPENREADING_LEDGER_RETENTION_HOURS
-                            the run's starting retention ceiling, default 24.
-                            Each dispatched backend's descriptor may tighten
-                            it and none may widen it.
   OPENREADING_LLM_DECIDER   the second enablement key for the LLM decider.
                             Set `1`, `true`, `yes` or `on` to enable it.
                             Unset, a configured decision point downgrades to
@@ -271,55 +266,56 @@ answer different questions, so no arrow joins them.
     openreading parse examples/ --strategy fast > all.json
     openreading explain all.json
 
-What a run costs, and how to spend less
----------------------------------------
-Every response carries a `usage` block, and `usage.cost_basis` is the honest
-label on the number beside it: `billed` came from the vendor, `estimated` came
-from a descriptor's published rate, `infra_only` means nothing was billed
-because the backend ran on your machine, and `unknown` means neither is
-available. A batch-result rolls the labels up as `summary.cost_bases`, so one
-line tells you whether a folder run spent anything at all.
+What a run uses, and how to use less
+------------------------------------
+Every response carries a `usage` block, and it reports what the backend
+consumed in the unit that backend meters in: `pages_processed`, `credits`,
+`input_tokens`, `output_tokens`, `duration_ms`. A counter the backend did not
+report is absent rather than zero.
 
     $ jq -c .usage out.json
-    {"pages_processed":1,"cost_basis":"infra_only"}
+    {"pages_processed":1}
 
-Per-page backends charge for pages, so document count alone understates a
-multi-page corpus. Forty forty-page documents contain forty times the pages
-of forty single-page documents. Other backends bill tokens or operations.
-Their per-page equivalent rates are estimates, when available, rather than
-the vendor's billing unit.
+There is no dollar figure anywhere in this package. `usage.cost_usd` and
+`usage.cost_basis` were removed along with the per-vendor price tables that
+filled them. Turning a page count into money needed a rate read off a vendor
+page and typed into this source, which nothing here could verify and nothing
+could tell had gone stale. The derived figure then sat on `usage` beside
+counters that were genuinely measured, and no reader could tell which was
+which. Multiply these counters by the prices on your own invoice, which is the
+one rate card carrying your tier and your negotiated rate.
 
-Four commands can spend more than you expect, each for its own reason.
+Four commands do more work than you may expect, each for its own reason.
 
   parse <folder>      one run per document. A hosted backend with more than ten
-                      live items prints a `[preflight]` estimate to stderr
-                      before it starts, stated per page with the single-page
-                      total multiplied out.
+                      live items prints a `[preflight]` line to stderr first,
+                      naming how many calls leave your machine and on whose
+                      key.
   compare --backends  one full run per subject. Three backends on one document
-                      is three billed runs of that document, not one.
+                      is three runs of that document, not one.
   leaderboard         cases times backends. `--all-ready` over a real dataset
-                      is the largest bill in this CLI.
+                      is the largest run in this CLI.
   benchmark run       someone else's corpus, so it runs two documents unless
-                      you say otherwise, prints pages and a dollar range first,
-                      and asks before anything unpriced or over a dollar. CI
+                      you say otherwise, prints pages and a call count first,
+                      and asks before a large or unbounded hosted run. CI
                       passes `--yes`.
 
-How to spend less.
+How to use less.
 
-Start local. `pymupdf` and `tesseract` need no key and bill nothing, so a
+Start local. `pymupdf` and `tesseract` need no key and no network, so a
 pipeline is worth debugging on them before a hosted backend ever sees it. Ask
 first. `openreading route doc.pdf` and `openreading strategy
 plan doc.pdf --strategy main` print what WOULD run and execute nothing. Cascade
-instead of fanning out. A `try:` strategy pays for the expensive backend only
-on the documents the cheap one could not read, where `compare:` pays for both
-on every document. Keep the sample small. `calibrate` and `benchmark run` both
+instead of fanning out. A `try:` strategy reaches the expensive backend only on
+the documents the cheap one could not read, where `compare:` calls both on
+every document. Keep the sample small. `calibrate` and `benchmark run` both
 take a subset, and a threshold found on 30 documents transfers to 3000. Raise
-`--jobs` freely. Concurrency changes how long a folder takes and never what it
-costs.
+`--jobs` freely. Concurrency changes how long a folder takes and never how many
+calls it makes.
 
-A skipped file costs nothing, because the skip decision is taken before the
-document is sent. A failed one may still have been billed, because the request
-left. `openreading help batch` has the difference.
+Every source is dispatched, so a file a backend cannot read still costs one
+call: it comes back as a failed item carrying that backend's own reason.
+`openreading help batch` has the shape.
 
 parse <file|url|dir|glob ...>
 -----------------------------
@@ -341,7 +337,7 @@ Single-document flags:
   --strategy NAME     a strategy or preset; the response then carries an
                       `orchestration` block. An unknown name is exit 2
                       (`unknown_strategy`, DECISIONS D-v3-2).
-  --no-strategy       force the router's `auto` choice, ignoring
+  --no-strategy       force the router's configured chain, ignoring
                       `defaults.strategy` (`strategy:none`, the reserved escape
                       hatch back to the plain router).
   --config PATH       an `openreading.yaml`; else `OPENREADING_CONFIG`, else
@@ -377,11 +373,12 @@ Single-document exits: 0 printed; 2 selector misuse, unknown backend/strategy,
 unresolvable source; 3 cannot run (missing credentials -- the message names the
 exact vars and signup URL -- `auth_rejected` with its `check <VAR>` hint,
 `unsupported_format` for a named backend, `unsupported_feature`,
-`ComplianceRefused`, an exhausted `auto` plan, or a
+`ScopeRefused`, an exhausted router plan, or a
 `RetryableError` reaching a directly-named backend: rate-limit exhaustion or a
 poll job past its deadline / `MAX_CONSECUTIVE_FAULTS`
 (`openreading.router.driver`, 120), which has no next rung to fall back to the
-way `auto` does); 6 interrupted while the ledger was armed (below); 1 anything
+way a resolved chain does); 6 interrupted while the ledger was armed
+(below); 1 anything
 else. Every other backend error message has any resolved secret value redacted
 to `***`.
 
@@ -428,14 +425,13 @@ Batch flags (in addition to the single-document ones):
                       `DIR/<relpath>.json`.
 
 A file whose format the backend cannot take is a SKIPPED item with a reason
-(`unsupported_format` / `unknown_format`) -- never a crash, never a silent
+(the backend's own `unsupported_format`) -- never a crash, never a silent
 omission. Per-item isolation (M6) means a failure never raises out of the
 batch, so the stderr progress line (`[i/N] <path> <state> <code>: <message>`)
-is the only place a failed item's message is read. Two `[preflight]` advisories
-print before the run, for a directly named backend only (`auto` and `strategy:`
-resolve per item, so neither number exists yet): the cost of >10 live items on
-a `hosted_api` backend, stated per PAGE with the single-page total multiplied
-out; and, whatever the item count, a `--jobs N` above that backend's
+is the only place a failed item's message is read. A `[preflight]` advisory
+prints when requested concurrency exceeds a named backend's declared
+limit. A
+`--jobs N` above that backend's
 `descriptor.batch.max_concurrency`, naming N and the cap, because only the
 capped value survives into `request.jobs`. A source list that resolves to zero
 documents prints the envelope's `empty_batch` warning to stderr so silence is
@@ -445,18 +441,16 @@ file, so it lands here with the same hint on stderr AND each item's `error` --
 `code: unknown_strategy` -- in the envelope); 2 unresolvable source,
 `--max-items` or `--max-jobs` exceeded; 3 cannot run at all, which on a batch
 means only a native-batch backend's one vendor call refusing before any item
-ran (missing credentials, `ComplianceRefused`, or a `RetryableError` / deadline
+ran (missing credentials, `ScopeRefused`, or a `RetryableError` / deadline
 from `submit_many`, which has no next rung and does not retry), or an
 `openreading.yaml` that will not load; 6 interrupted while
 `OPENREADING_LEDGER` was set -- per-item runs may be individually resumable,
 but batch-level resume is not supported, so no single run id is named.
 
-Exit 0 does NOT mean every document was read. A file a backend does not accept
-is SKIPPED, not failed, so a folder of 40 PDFs and one stray `.txt` exits 0
-with `summary.skipped: 1` and `status.state: succeeded`. Skipped is a decision,
-taken before the document is sent, and each item carries its own reason; failed
-is an attempt that did not come back. Only the second moves the exit code.
-Branch on `summary.failed` and `summary.skipped`, never on exit 0 alone.
+Exit 0 does NOT mean every document was read. Every source is dispatched, so a
+folder of 40 PDFs and one stray `.txt` sends all 41 and the `.txt` comes back
+as a FAILED item carrying the backend's own reason. That batch is `partial` and
+exits 4. Branch on `summary.failed`, never on exit 0 alone.
 
 The same missing key that exits 3 on one file exits 1 on a folder. Per-item
 isolation is the point of a batch: one item's failure never stops the rest, so
@@ -492,27 +486,23 @@ different run:
              (sha256 3f9a... -> c21b...)
     [resume] a resumed run replays recorded decisions; start a new run instead
 
-The `policy:` block counts as part of that config. Editing it, in either
-direction, refuses the resume. Removing a constraint used to resume quietly and
-keep enforcing the removed one, because the ledger stores the request after the
-block was folded into it, so the block itself is now part of `config_hash`.
+The `policy:` block counts as part of that config. Editing its default backend
+chain refuses the resume because it changes the compiled plan.
 
 Also exit 3: an unknown `RUN_ID`, `OPENREADING_LEDGER` unset, or a run whose
-payloads the retention reaper has already crypto-shredded (`PayloadExpired`).
+payload files are missing or fail their recorded digest check.
 Python: `openreading.resume(id)`.
 
 route <file|url> [--config FILE] [--run]
 ----------------------------------------
-Print the compliance-first plan; with `--run`, execute the whole chain (chosen,
-then fallbacks). The policy comes from `openreading.yaml`, found in the working
+Print the chain that would run; with `--run`, execute it (chosen, then
+fallbacks). The list comes from `openreading.yaml`, found in the working
 directory or named with `--config`.
 
     cat > openreading.yaml <<'YAML'
     version: 1
     policy:
-      require_baa: true
-      no_train_on_data: true
-      optimize_for: accuracy
+      backends: [pymupdf, tesseract, aws-textract]
     YAML
     openreading route loan.pdf
     openreading route loan.pdf --run > plan.json
@@ -520,60 +510,36 @@ directory or named with `--config`.
 
 `route --run` puts the response inside its plan's `result` field. Check the
 exit code before extracting it for `compare` or other response consumers.
-`parse` reads the same file and applies the same block, so a plan you print
-here is the plan a `parse` in that directory runs under. A different posture is
-a different file: `openreading route loan.pdf --config airgapped.yaml`.
+`parse` reads the same file and the same list, so a chain you print here is the
+chain a `parse` in that directory runs. A different list is a different file:
+`openreading route loan.pdf --config airgapped.yaml`.
 
-`policy:` keys: `require_baa`, `no_train_on_data`, `data_region`,
-`require_local`, `max_retention`, `optimize_for`,
-`allow_unverified_compliance`, `train_optout_confirmed`, `baa_tier_confirmed`.
-Those nine are the whole grammar. Any other key is refused by name (with a `did
-you mean` for a near miss), and a value of the wrong type is refused too, so a
-malformed block is exit 3 before a backend is contacted, because a compliance
-constraint that can be turned off by a typo is not a constraint. A policy never
-names a backend: it names a requirement, and each backend's descriptor either
-meets it or does not.
+`policy:` has one key, `backends`: the default backend ids for an unnamed
+request, in preference order. A request or strategy may name another backend
+explicitly. Any other policy key is refused by name (with a `did you mean` for
+a near miss), and a value of the wrong type is refused too. A malformed block
+is exit 3 before a backend is contacted.
 
-When a caller ALSO sends constraints -- an HTTP request body's `compliance`, or
-a `compliance=` override from Python -- the two sources intersect and neither
-weakens the other. Booleans OR. `max_retention` keeps the LOWER ceiling, so a
-request asking for `48h` under a file requiring `zero` still gets `zero`.
-`data_region` has no ordering and a request cannot name two at once, so a file
-requiring `eu` against a request asking for `us` refuses with `region_conflict`
-rather than one of them winning. `optimize_for` is the one key the request
-takes outright, because it orders the survivors and never changes the set. No
-flag in this CLI sends compliance, so this governs `serve` and Python callers
-rather than anything typed here.
+Nine keys used to live here, asking the engine to enforce a compliance posture
+from a per-vendor table it kept in its own source: whether each vendor signs a
+BAA, trains on customer data, or retains a document for so many hours. Nothing
+in this tool can observe any of that, so a stale entry did not fail loudly. It
+routed a document to a backend the operator believed was excluded, and the run
+succeeded. You already know which vendors you hold agreements with; `backends:`
+is that conclusion, written by the one party who can reach it.
 
-Output is `{chosen, fallbacks, dropped: {id: {stage,
-code, reason}}, terminal_reason}` plus, with `--run`, a `result`. `--run` never
-widens the plan; a fallback actually used is recorded in the result's
-`warnings[]`. Exits: 0; 4 no compliant backend (the empty plan is still printed
-as JSON); 3 an unloadable config file, an unreadable document, or a
-plan-exhausted `--run` (the plan is still printed; the stderr trail names each
-backend's failure and a `check <VAR>` hint for every rejected key).
+Selection with no list is a lookup, not a guess: the backend you named, else
+`policy.backends` in order, else `pymupdf`, which needs no key and no config.
+An EMPTY list permits nothing and refuses.
 
-The last three keys are router configuration, not request fields
-(`openreading.config.router_config` folds them into `RouterConfig`, DECISIONS
-D7 / D7a), and they are two different kinds of knob.
-`allow_unverified_compliance` is a
-TOLERANCE switch (default `false` = fail closed): it admits a backend whose own
-disclosure is unverified on the axis you asked about
-(`openreading.router.compliance`) -- training posture (`trains_unverified`),
-declared regions under `data_region` (`region_unverified`) or retention under
-`max_retention` (`retention_unverified`). It asserts nothing about your
-deployment and never excuses a `max_retention` string that does not parse
-(`retention_unparseable` is a caller error and fails closed unconditionally).
-The last TWO keys are DEPLOYMENT assertions about facts the vendor makes
-conditional, and both fail closed when absent: `train_optout_confirmed` lists
-backends whose training opt-out you have applied (`trains_on_customer_data:
-opt_out`); `baa_tier_confirmed` lists backends whose BAA you have actually
-signed where the vendor gates it behind a higher plan (`hipaa_baa: tier_gated`
--- Reducto Growth+, Chunkr Enterprise, Pulse Pro). Without them `require_baa` /
-`no_train_on_data` drop those backends at stage 1; with them the run carries a
-`baa_tier_confirmed` warning naming the confirmation its compliance rests on.
-Without this, `require_baa` could route PHI to a vendor with nothing signed and
-nothing said.
+Output is `{chosen, fallbacks, dropped, terminal_reason}` plus, with `--run`, a
+`result`. `dropped` carries a backend your own allow-list excluded, never a
+judgement about a vendor. `--run` never widens the chain; a fallback actually
+used is recorded in the result's `warnings[]`. Exits: 0; 4 no backend left in
+scope (the empty plan is still printed as JSON); 3 an unloadable config file,
+an unreadable document, or a plan-exhausted `--run` (the plan is still printed;
+the stderr trail names each backend's failure and a `check <VAR>` hint for
+every rejected key).
 
 backends [--check SLUG[,SLUG...]|all] [--timeout SECONDS]
 ---------------------------------------------------------
@@ -674,7 +640,7 @@ corpus mode. Corpus mode also refuses `--baseline`, `--truth` and
 Exits: 0; 2 misuse (<2 subjects, fan-out with more than one document, <2 or
 unknown fan-out backends, `--format diff` with != 2 subjects, mixed subject
 kinds); 3 a fanned-out backend cannot run (missing credentials,
-`ComplianceRefused`, `unsupported_feature`, `RetryableError`); 5 inputs are not
+`ScopeRefused`, `unsupported_feature`, `RetryableError`); 5 inputs are not
 schema-valid responses (unreadable file, invalid envelope) or `--from` on a run
 that kept no candidates (the message explains completed parallel alternatives
 and `--keep-candidates`, DECISIONS D-v4-14); 1 anything else.
@@ -719,17 +685,13 @@ Usage: `leaderboard DIR (--backends a,b | --all-ready) [--config FILE]
 Rank N registered backends on ONE dataset -- measured, not vendor-claimed. Runs
 the same `case.json` corpus (`openreading.evals.dataset`; the repo ships one
 under `src/openreading/evals/sample`) through the unchanged
-`openreading.evals.runner.run_case` path for every named backend -- the same
-per-case compliance gate, the same five-dimension scorer, no second scoring or
-gating path -- and prints one ranked `BenchmarkReport`: measured mean score,
-per-dimension breakdown, per-case result table, error tally, and each backend's
-cost basis alongside its score (never a rank without the price that produced
-it).
+`openreading.evals.runner.run_case` path for every named backend. It uses the
+same five-dimension scorer and prints one ranked `BenchmarkReport`: measured
+mean score,
+per-dimension breakdown, per-case result table, and error tally.
 
-`--config` gates the ranking. The file's `policy:` block is applied to every
-case before the backend is called, so a backend the policy refuses is scored as
-a compliance error rather than ranked. Ranking a backend your own policy will
-not let you run is a number nobody can act on.
+Each named backend is an explicit benchmark target. `--config` supplies shared
+runtime settings.
 
     openreading leaderboard datasets/paystubs/ \
       --backends aws-textract,google-document-ai
@@ -754,7 +716,7 @@ one labeled sample. The per-case block states `winner=`, `tie=`, `no winner
 and totals the four, because the report's own `winner` field breaks a tie
 alphabetically for byte-stability and printing that as a result turns ties and
 mutual failures into a clean sweep for anyone tallying the block. The JSON
-`winner` is unchanged. A backend's per-case compliance refusal, or any other
+`winner` is unchanged. Any backend per-case fault
 per-case fault, is that backend's own scored, error-carrying case -- in its
 error tally, excluded from its mean -- never a silently skipped case, never a
 crash. Every backend makes a REAL call per case: `--all-ready` over a large
@@ -815,8 +777,8 @@ executes every repeated `--target`, and writes publisher artifacts beneath
 replaces complete publisher artifacts, while an ordinary rerun resumes by
 letting the official harness skip valid results.
 
-What a benchmark run costs, and how to spend less
-................................................
+What a benchmark run uses, and how to use less
+.............................................
 `run` prints the comparison when it finishes, ranked by the publisher's own
 numbers, and writes `openreading-run.json` beside the artifacts so a later
 reader can tell which pipeline was which target. `report` prints that same
@@ -825,8 +787,8 @@ json` for a script. Neither computes a score: both read the publisher's
 `_evaluation_report.json` back, so the terminal and the publisher's dashboard
 cannot disagree.
 
-`run` touches **two documents** unless you say otherwise, because it spends
-your money on someone else's API. `--limit N` runs N, `--limit 0` runs the
+`run` touches **two documents** unless you say otherwise, because it calls
+someone else's API on your key. `--limit N` runs N, `--limit 0` runs the
 whole prepared corpus, and `--doc NAME` (repeatable) runs documents you name by
 id (`table/doc1`) or file stem. A limited run is written out as a corpus in the
 publisher's own format, so every metric and report behaves exactly as it does
@@ -836,24 +798,25 @@ place.
 Documents under `--limit` are chosen round-robin across the corpus's
 categories, so two documents span two categories rather than two charts. The
 order is stable, so the same `--limit` picks the same documents and a rerun
-resumes instead of re-billing.
+resumes instead of running them again.
 
 Before a target runs, `run` prints the documents it chose, their PAGE count,
-and a dollar range per target. Pages expose volume that document counts hide:
-ExtractBench is 370 documents and 4,869 pages. A range, because a descriptor
-carries a low and a high rate and
-both are shown. Two things stay deliberately unpriced rather than guessed low:
-a `strategy:` target, which escalates and so bills one or more calls per
-document, and a token-billed backend that publishes no per-page rate.
+and the call count per target. Pages expose volume that document counts hide:
+ExtractBench is 370 documents and 4,869 pages. It quotes no price: the rates it
+used to multiply were a vendor rate card typed into this package's own source,
+unverifiable from here. One target reports its calls as a floor rather than a
+count: a `strategy:` target escalates, so one document is one or more calls,
+and nothing here knows how many rungs fire.
 
-Anything unpriced, or above one dollar at the high end, asks before it spends.
-`--yes` answers in advance. With no terminal attached the question is not asked
-and the run refuses, naming `--yes`, because a CI job hung on stdin is worse
-than one that stops.
+A hosted run above twenty-five pages, or one whose call count cannot be stated
+at all, asks before it starts. `--yes` answers in advance. With no terminal
+attached the question is not asked and the run refuses, naming `--yes`, because
+a CI job hung on stdin is worse than one that stops.
 
 Every document calls `openreading.run`, including a `strategy:NAME` target
-selected with `--config`. The file's `policy:` block therefore keeps its normal
-compliance behavior. The raw publisher artifact retains the complete
+selected with `--config`. The file's `policy.backends` remains the default
+chain for null-backend
+requests. The raw publisher artifact retains the complete
 OpenReading response. The official normalized artifact receives Markdown and
 layout for ParseBench,
 or typed values and citations for ExtractBench. Two or more successful targets
@@ -868,7 +831,7 @@ could start.
 
 A per-document fault is the publisher's to record, not this command's to raise.
 The official harness catches whatever one document's provider call throws,
-marks that case failed, and keeps going, so a `ComplianceRefused` or a missing
+marks that case failed, and keeps going, so a `ScopeRefused` or a missing
 key on document 40 of 300 surfaces as exit 1 with a failed case in the
 publisher's report, never as exit 3. Read the report to find out which
 documents fell over and why. Exit 3 is left for a fault raised outside that
@@ -883,8 +846,8 @@ strategy <verb>: list, show, validate, normalize, plan
 ------------------------------------------------------
 Inspect and drive `openreading.yaml` strategies. `openreading.strategies` maps
 the package and `openreading.strategies.model` is the grammar reference. Every
-verb takes `--config PATH` (else the discovery order above), and the compliance
-context is that file's own `policy:` block. `validate`, `plan`, `normalize`,
+verb takes `--config PATH` (else the discovery order above). `validate`,
+`plan`, `normalize`,
 `replay` and `calibrate` need a config and exit 3 without one ("no
 openreading.yaml found"); `list` and `show` run config-free on the built-in
 presets (an unparseable config is exit 3 for every verb).
@@ -897,7 +860,6 @@ presets (an unparseable config is exit 3 for every verb).
     openreading explain response.json
     openreading replay doc.pdf --trace response.json [--strategy NAME]
     openreading calibrate samples/ --strategy NAME [--target-escalation 0.15]
-      [--max-cost-per-doc 0.05]
 
 - `validate`: grammar (schema) + world-consistency check of the whole file,
   then per strategy a dialect badge (`dialect: plain` or `dialect: advanced
@@ -911,7 +873,7 @@ presets (an unparseable config is exit 3 for every verb).
 - `plan`: the Terraform-style speculative plan -- the pruned tree for THIS
   document + policy (`{strategy, config_hash, eligible, dropped[], tree}`), no
   execution. Exit 3 on an unreadable document or config file, an unknown
-  strategy, or `ComplianceRefused`.
+  strategy, or `ScopeRefused`.
 - `show NAME`: a strategy or preset body AS WRITTEN (a Plain strategy prints
   Plain); `--longhand` prints the canonical desugared full-grammar tree
   instead. Unknown name: exit 3.
@@ -923,7 +885,7 @@ presets (an unparseable config is exit 3 for every verb).
 explain <response.json | batch-result.json | comparison-report.json>
 ..................................................................
 Render a response's `orchestration` block as a story (strategy, chosen backend
-and outcome; each attempt's node, backend, category, duration and cost; gate
+and outcome; each attempt's node, backend, category and duration; gate
 rows -- grouped under their Plain source word when present -- with
 observed/threshold and FIRED/skipped/ok; decisions with `decider=` and, when a
 point resolved to something other than its configured choice, `downgraded=`;
@@ -942,10 +904,10 @@ choice logged in `--trace` (a saved response or bare orchestration JSON) -- the
 TraceDecider (`decider: "trace"` in the new records, DECISIONS D-v3-18). A
 decision absent from the trace takes the engine default (`trace_missing`).
 Deterministic and offline for local backends; it consults no LLM, so the
-LLM-enablement and decider-compliance gates are moot. The strategy name comes
+LLM-enablement gate is moot. The strategy name comes
 from `--strategy` or the trace (neither: exit 2). A trace whose `config_hash`
 differs from the freshly compiled one is REFUSED (exit 3): its logged decisions
-were made under a different configuration or compliance posture, not merely a
+were made under a different configuration, not merely a
 different document; a trace with no `config_hash` at all is left to the
 per-decision `trace_missing` downgrade.
 
@@ -954,13 +916,10 @@ calibrate <dataset> --strategy NAME
 Derive gate thresholds from a sample (a dataset dir of `*/case.json`). Runs the
 strategy's rung-1 backend over the sample, scores each result with the eval
 scorers, sweeps each gated threshold, and prints candidate operating points
-(threshold -> predicted escalation rate, cost/doc, scorer agreement) plus a
-ready-to-paste `escalate_if:` RECOMMENDATION for your `--target-escalation` /
-`--max-cost-per-doc`. It PROPOSES; it never rewrites the config (DECISIONS
-D-v3-21) -- the file you commit is the authority. Each case's rung-1 run is
-gated first (the request and the file's own `policy:` block union
-most-restrictive-wins); a non-compliant case refuses with `ComplianceRefused`
-(exit 3) before the document is sent. A case whose `expected` names none of the
+(threshold -> predicted escalation rate and scorer agreement) plus a
+ready-to-paste `escalate_if:` recommendation for `--target-escalation`. It
+never rewrites the config (DECISIONS D-v3-21). A case whose `expected` names
+none of the
 scorer's five recognized dimensions is an ordinary "not labeled yet" case:
 excluded from `scorer_agreement` rather than silently required; the report's
 `n_scored` (next to `n_docs`) says how many contributed and a `[calibrate]`
@@ -1053,7 +1012,7 @@ Exit codes
      `unsupported_feature`, an unreadable `--config` / document / `--trace` /
      `explain` argument, a `policy:` block that is not a policy (an unknown
      key, a non-object block, or a value of the wrong type), a
-     `ComplianceRefused` refusal (from
+     `ScopeRefused` refusal (from
      `parse`, `strategy plan`, `replay`, `calibrate`, `compare`, `leaderboard`;
      under `benchmark` only when it is raised outside the publisher's own
      per-document boundary, which otherwise records the refusal as a failed
@@ -1072,8 +1031,8 @@ Exit codes
      `openreading.router.driver.MAX_CONSECUTIVE_FAULTS` -- a named backend has
      no next rung to fall back to); `help` under `python -OO`, which discarded
      the manual's docstrings.
-  4  `route`: no compliant backend for the policy (the empty plan is printed as
-     JSON); batch `parse`: partial -- some items failed.
+  4  `route`: no registered backend permitted by policy (the empty plan is
+     printed as JSON); batch `parse`: partial -- some items failed.
   5  `compare`: inputs are not schema-valid responses, or `--from` on a run
      that kept no candidates.
   6  interrupted, resumable: `parse` was interrupted while `OPENREADING_LEDGER`

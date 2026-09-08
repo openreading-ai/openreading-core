@@ -253,18 +253,3 @@ def test_truth_all_correct_with_tables_expected_empty_scores_overall_one_not_hal
 
 
 # --- cost_outlier -----------------------------------------------------------------------
-
-
-def test_cost_outlier_finding() -> None:
-    a = make_envelope("a", text="x", cost_usd=0.01)
-    b = make_envelope("b", text="x", cost_usd=0.01)
-    c = make_envelope("c", text="x", cost_usd=0.50)  # ≫ 3× the others' mean
-    report = compare([a, b, c])
-    outlier = next(f for f in report["findings"] if f["code"] == "cost_outlier")
-    assert outlier["subjects"] == ["c"]
-
-
-def test_no_cost_outlier_when_comparable() -> None:
-    a = make_envelope("a", text="x", cost_usd=0.01)
-    b = make_envelope("b", text="x", cost_usd=0.012)
-    assert not any(f["code"] == "cost_outlier" for f in compare([a, b])["findings"])

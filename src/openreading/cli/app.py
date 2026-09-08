@@ -3,7 +3,7 @@ credentials from the environment (`.env` / process env), dispatches to a backend
 and prints the one response schema.
 
     openreading parse   <file> --backend reducto        # run one backend
-    openreading route   <file> --run                    # compliance-first plan (+ execute chain)
+    openreading route   <file> --run                    # the resolved chain (+ execute it)
     openreading backends                                # which backends are configured, and why not
     openreading backends --check docling                # ...and is it actually answering? (probes)
     openreading benchmark list                          # public corpora and their terms lanes
@@ -29,15 +29,14 @@ Environment this module reads itself
   is an ordinary KeyboardInterrupt, byte-for-byte the pre-ledger behavior (an unset-ledger SIGTERM
   is caught one level up, by `_terminate_as_interrupt`, and exits 143 with one line). The
   single-document path does not read the variable: it relies on `api.run`'s `on_run_armed`
-  callback, which fires only when the ledger actually armed for THAT run, so a named-backend /
-  `auto` run (which never
-  journals) cannot print a run id that does not exist. Which runs journal is `api._arm_ledger`'s
+  callback, which fires only when the ledger actually armed for THAT run, so a run through the
+  router (named backend or not), which never journals, cannot print a run id that does not exist. Which runs journal is `api._arm_ledger`'s
   call graph, documented in `openreading.api` and internal/design/ledger.md.
 
 Every other knob is read where it is used, not here: `OPENREADING_CONFIG` and `./openreading.yaml`
 discovery in `openreading.strategies.loader` (behind `--config`), `OPENREADING_LLM_DECIDER` in
 `openreading.strategies.decider`, backend credentials in `openreading.credentials`, and the
-server-only auth / compliance-posture variables in `openreading.server.app` -- setting one of those
+server-only authentication variables in `openreading.server.app` -- setting one of those
 in a shell and running the CLI does nothing.
 """
 
@@ -64,12 +63,10 @@ from openreading.batch.sources import (
     SourceNotFoundError,
     is_url,
     looks_batch,
-    normalize_input_format,
 )
 from openreading.cli.help import cmd_help
 from openreading.credentials import EnvCredentialBroker, load_dotenv
 from openreading.ledger.header import HeaderMismatch
-from openreading.ledger.ports import PayloadExpired
 from openreading.liveness import check_liveness, probe_kind
 from openreading.readiness import (
     auth_rejected_backends,
@@ -89,9 +86,9 @@ from openreading.strategies import (
     validate_config,
 )
 from openreading.types.errors import (
-    ComplianceRefused,
     PlanExhaustedError,
     RetryableError,
+    ScopeRefused,
     TerminalError,
     UnsupportedFeatureError,
 )
@@ -108,7 +105,7 @@ from openreading.types.liveness import ProbeKind
 # `_cmd_parse_batch` reuses the same constant too (BL-128) rather than hand-rolling its own third
 # tuple — the identical gap, one call site later, for a native-batch backend's submit_many/
 # run_to_completion.
-_CLEAN_EXIT3_ERRORS = (TerminalError, ComplianceRefused, RetryableError, UnsupportedFeatureError)
+_CLEAN_EXIT3_ERRORS = (TerminalError, ScopeRefused, RetryableError, UnsupportedFeatureError)
 
 # `benchmark run` defaults small because it spends the reader's money on someone else's API. Two
 # documents is enough to see every target produce output and a score, and cheap enough that
@@ -183,32 +180,15 @@ def cmd_parse(args) -> int:
             file=sys.stderr,
         )
         return 2
-    label = args.backend or (f"strategy:{args.strategy}" if args.strategy else "auto")
+    label = args.backend or (f"strategy:{args.strategy}" if args.strategy else "default")
     if args.backend:
         # belt to argparse's `choices` braces: the slug must also resolve in the catalog, so a
         # divergence surfaces as exit 2 here rather than a traceback deeper in the run.
         try:
-            adapter = make_adapter(args.backend)
+            make_adapter(args.backend)
         except KeyError as e:
             print(f"[parse] {e}", file=sys.stderr)
             return 2
-        # A single document in a format the named backend does not read is refused here, in the
-        # word the batch path already uses for it (`skip_reason: unsupported_format`). Dispatching
-        # anyway hands the reader the parsing library's own stream error, which names neither the
-        # format nor the fix. Guarded on a known extension and a descriptor that declares formats,
-        # so an extensionless file and a silent descriptor dispatch exactly as before.
-        if not looks_batch(args.files) and not is_url(args.files[0]):
-            fmt = normalize_input_format(Path(args.files[0]).suffix.lstrip("."))
-            supported = {
-                normalize_input_format(f) for f in adapter.descriptor.capabilities.input_formats
-            }
-            if fmt and supported and fmt not in supported:
-                print(
-                    f"[{args.backend}] unsupported_format: {args.backend} does not read "
-                    f".{fmt}. It reads {', '.join(sorted(supported))}.",
-                    file=sys.stderr,
-                )
-                return 3
 
     overrides: dict[str, Any] = {}
     if args.pages:
@@ -236,8 +216,8 @@ def cmd_parse(args) -> int:
     # BL-169: --deadline is CLI-friendly SECONDS; api.run's own deadline_ms= parameter (and every
     # internal deadline field it feeds) is milliseconds — same seconds-to-ms conversion
     # _cmd_parse_batch already applies for native-batch dispatch. Only affects a directly-named
-    # backend (run()'s own docstring); `auto`/`--strategy` dispatch manages its own time budget and
-    # silently ignores it.
+    # backend (run()'s own docstring); an unnamed or `--strategy` dispatch manages its own time
+    # budget and silently ignores it.
     deadline_ms = int(args.deadline_s * 1000) if args.deadline_s is not None else None
 
     # Ledger T3 (plan §4.4): captured the instant the ledger arms (api.run's own on_run_armed
@@ -259,7 +239,8 @@ def cmd_parse(args) -> int:
         # any process-chosen exit code at all, but Ctrl-C is an ordinary exception Python's default
         # SIGINT handler raises, so catching it here is enough to make "interrupted, resumable" a
         # reachable outcome. Only resumable when the ledger actually armed for this run (a plain
-        # named-backend/`auto` run never touches the ledger at all — nothing to resume); otherwise
+        # router run, named backend or not, never touches the ledger at all — nothing to resume);
+        # otherwise
         # this re-raises unchanged, exactly today's behavior (L1's zero-delta).
         if armed_run_id:
             rid = armed_run_id[0]
@@ -283,7 +264,7 @@ def cmd_parse(args) -> int:
         # router.executor.execute_plan — BL-37). A RetryableError reaching here (rate-limit
         # exhaustion, or router.driver's poll loop past its deadline/MAX_CONSECUTIVE_FAULTS) gets the
         # identical clean exit — a directly-named backend has no next rung to fall back to the way
-        # `auto`'s execute_plan does (BL-122).
+        # a router chain's execute_plan does (BL-122).
         print(f"[{label}] {e}", file=sys.stderr)
         return 3
     except SourceNotFoundError as e:
@@ -324,13 +305,6 @@ def _save_batch_items(env: dict, save_dir: str) -> None:
         out.write_text(json.dumps(item["response"], indent=2))
 
 
-def _usd(v: float) -> str:
-    """A dollar amount for the cost preflight. Cents below a dollar-scale total, but four places
-    once rounding to the cent would print `$0.00` for a real (if small) bill — the preflight's
-    whole job is to be a number the reader can multiply, and zero multiplies to zero."""
-    return f"${v:,.2f}" if v >= 0.01 else f"${v:.4f}"
-
-
 def _page_number(raw: str) -> int:
     """argparse type for --pages. A page number below 1 is a typo on a 1-based flag, and letting
     it reach the request model turns it into a pydantic dump and exit 1, where every other bad
@@ -353,7 +327,7 @@ def _page_number(raw: str) -> int:
 
 
 def _cmd_parse_batch(args, overrides: dict, label: str) -> int:
-    """Batch parse (Manifest v0.6): one envelope over many documents. Progress + cost preflight go
+    """Batch parse (Manifest v0.6): one envelope over many documents. Progress + scope preflight go
     to stderr; stdout stays the single batch-result JSON. Exit 4 = partial (some items failed)."""
     bkwargs: dict[str, Any] = {**overrides, "config": args.config, "operation": args.operation}
     if getattr(args, "keep_candidates", False):
@@ -368,7 +342,7 @@ def _cmd_parse_batch(args, overrides: dict, label: str) -> int:
 
     def on_progress(done: int, total: int, item) -> None:
         loc = item.source.relpath or item.source.filename
-        extra = (item.error.code if item.error else None) or item.skip_reason or ""
+        extra = (item.error.code if item.error else None) or ""
         # Per-item isolation (M6) means a failure never raises out of the batch, so this line is
         # the only place its message is read — stdout is the envelope, usually redirected to a file.
         if item.error and item.error.message:
@@ -377,9 +351,9 @@ def _cmd_parse_batch(args, overrides: dict, label: str) -> int:
 
     def on_preflight(resolved, backend: str) -> None:
         # Both advisories describe what `api.run_batch` is about to do to a DIRECTLY NAMED backend:
-        # `auto` and strategies resolve per item inside the router, so neither the rate nor the
+        # unnamed requests and strategies resolve per item inside the router, so neither the rate nor the
         # concurrency cap below is knowable here — and run_batch skips the cap for them too.
-        if backend == "auto" or backend.startswith("strategy:"):
+        if backend is None or backend.startswith("strategy:"):
             return
         try:
             d = make_adapter(backend).descriptor
@@ -400,31 +374,21 @@ def _cmd_parse_batch(args, overrides: dict, label: str) -> int:
                 file=sys.stderr,
             )
 
-        live = [r for r in resolved if r.skip_reason is None]
+        live = list(resolved)
         if len(live) <= 10 or d.type.value != "hosted_api":
             return
-        # The rate is per PAGE, and items are documents. Naming the item count beside a per-page
-        # rate invites multiplying the two, which under-reads a real corpus by its average page
-        # count. So: state the basis in words, then multiply out the ONE total that is actually
-        # computable before any file is opened (intake reads no bytes and never fetches a URL, so
-        # page counts do not exist yet) and label it as the single-page floor it is.
+        # This advisory used to price the run from `descriptor.cost`, a per-page range this
+        # package wrote down about someone else's rate card. What it
+        # says now is what core actually knows before a byte is read: how many calls are about to
+        # leave this machine, to whom, on whose key. Pages are deliberately absent — intake reads
+        # no bytes and never fetches a URL, so no page count exists yet, and one call per item is
+        # the floor a multi-page document only ever exceeds.
         n = len(live)
-        ends = [v for v in (d.cost.usd_per_page_equiv_low, d.cost.usd_per_page_equiv_high) if v]
-        rate = (
-            "-".join(f"${v}" for v in ends) if ends else "billed per page-equiv"
-        )  # one endpoint published, or two, or none
-        basis = f"~{rate} per page-equiv" if ends else rate
         print(
-            f"[preflight] {n} items on hosted backend {backend}: {basis}, not per item",
+            f"[preflight] {n} items on hosted backend {backend}: {n} call(s) on your own key, "
+            "one per item and more if a document is paged",
             file=sys.stderr,
         )
-        if ends:
-            total = "-".join(_usd(v * n) for v in ends)
-            print(
-                f"[preflight] {n} items would cost ~{total} if every item is one page; multiply by "
-                "your average page count (pages are not counted before the run)",
-                file=sys.stderr,
-            )
 
     try:
         with contextlib.redirect_stdout(sys.stderr):  # backend chatter → stderr; stdout stays JSON
@@ -475,7 +439,7 @@ def _cmd_parse_batch(args, overrides: dict, label: str) -> int:
         # missing_credentials msg names vars + signup; a RetryableError reaching here (a
         # native-batch backend's submit_many rate-limit exhaustion, or router.driver's poll loop
         # past its deadline/MAX_CONSECUTIVE_FAULTS) gets the identical clean exit — a directly-named
-        # backend has no next rung to fall back to the way `auto`'s execute_plan does (BL-128, the
+        # backend has no next rung to fall back to the way a router chain's execute_plan does (BL-128, the
         # batch-dispatch sibling of BL-122's cmd_parse/cmd_compare fix).
         print(f"[{label}] {e}", file=sys.stderr)
         return 3
@@ -533,9 +497,6 @@ def cmd_resume(args) -> int:
     except LookupError as e:
         print(f"[resume] {e}", file=sys.stderr)
         return 3
-    except PayloadExpired as e:
-        print(f"[resume] {e}", file=sys.stderr)
-        return 3
     except PlanExhaustedError as e:
         # Finding 6/7 (Phase C round-1): `cmd_parse` already routes the identical exception
         # through `_print_exhausted` (above) for its own `auth_rejected`-hint enrichment — a resumed
@@ -558,7 +519,7 @@ def cmd_resume(args) -> int:
 
 
 def cmd_route(args) -> int:
-    """`openreading route`: print the compliance-first plan as JSON, and with `--run` execute the
+    """`openreading route`: print the routing plan as JSON, and with `--run` execute the
     whole chain. The plan is still printed when the chain is exhausted."""
     try:
         loaded = config.load(args.config)
@@ -566,7 +527,7 @@ def cmd_route(args) -> int:
         print(f"[route] {e}", file=sys.stderr)
         return 3
     try:
-        req = api.build_request(args.file, "auto")
+        req = api.build_request(args.file, None)
     except OSError as e:
         print(f"[route] cannot read {args.file}: {_describe_read_error(e)}", file=sys.stderr)
         return 3
@@ -582,7 +543,7 @@ def cmd_route(args) -> int:
         "terminal_reason": plan.terminal_reason,
     }
     if args.run and plan.chosen:
-        # execute the WHOLE chain chosen→fallbacks (compliance already enforced; never widened).
+        # Execute the whole caller-declared chain from chosen backend through its fallbacks.
         # Backend stdout advisories (e.g. PyMuPDF find_tables) → stderr so stdout is only the JSON.
         try:
             with contextlib.redirect_stdout(sys.stderr):
@@ -901,7 +862,7 @@ def _print_strategy_summaries(loaded) -> None:
 
 
 def cmd_strategy_plan(args) -> int:
-    """Terraform-style speculative plan: the pruned tree for THIS document + policy, no execution."""
+    """Print the compiled tree and policy candidate chain without executing it."""
     from openreading.strategies import compile_strategy
 
     try:
@@ -913,7 +874,7 @@ def cmd_strategy_plan(args) -> int:
         print("[strategy plan] no openreading.yaml found (use --config PATH)", file=sys.stderr)
         return 3
     try:
-        req = api.build_request(args.file, "auto")
+        req = api.build_request(args.file, None)
     except OSError as e:
         print(
             f"[strategy plan] cannot read {args.file}: {_describe_read_error(e)}", file=sys.stderr
@@ -924,7 +885,7 @@ def cmd_strategy_plan(args) -> int:
         compiled = compile_strategy(
             req, args.strategy, loaded.config, build_registry(), router_config
         )
-    except (NormalizeError, ComplianceRefused) as e:
+    except (NormalizeError, ScopeRefused) as e:
         print(f"[strategy plan] {e}", file=sys.stderr)
         return 3
     out = {
@@ -945,9 +906,8 @@ def _render_orchestration(orch: dict) -> None:
         f"strategy {orch.get('strategy')}  →  {orch.get('chosen_backend')} ({orch.get('outcome')})"
     )
     for a in orch.get("attempts", []):
-        cost = f"${a['cost_usd']:.4f}" if a.get("cost_usd") else "$0"
         dur = f"{a['duration_ms']}ms" if a.get("duration_ms") is not None else "-"
-        print(f"  {a['node']:<16} {a['backend']:<12} {a['category']:<26} {dur:>7}  {cost}")
+        print(f"  {a['node']:<16} {a['backend']:<12} {a['category']:<26} {dur:>7}")
 
         def _mark(g):
             return "FIRED" if g["fired"] else ("skipped" if g.get("skipped") else "ok")
@@ -1075,7 +1035,7 @@ def cmd_replay(args) -> int:
         print("[replay] no openreading.yaml found (use --config PATH)", file=sys.stderr)
         return 3
     try:
-        req = api.build_request(args.file, "auto")
+        req = api.build_request(args.file, None)
     except OSError as e:
         print(f"[replay] cannot read {args.file}: {_describe_read_error(e)}", file=sys.stderr)
         return 3
@@ -1084,7 +1044,7 @@ def cmd_replay(args) -> int:
     try:
         compiled = compile_strategy(req, name, loaded.config, registry, router_config)
         # BL-163: a whole-trace check, before any decision point is consulted — `config_hash`
-        # captures the compliance posture + eligible/dropped backend set a trace was recorded
+        # captures the configuration and eligible/dropped backend set a trace was recorded
         # under, so a mismatch means this trace's logged decisions were made against a DIFFERENT
         # configuration than the one compiling right now, not merely a different document. A trace
         # missing config_hash entirely (an older or hand-built trace) has nothing to compare
@@ -1095,7 +1055,7 @@ def cmd_replay(args) -> int:
             print(
                 f"[replay] trace config_hash {trace_config_hash!r} does not match the freshly "
                 f"compiled config_hash {compiled.config_hash!r}. Refusing to replay a trace "
-                f"recorded under a different configuration or compliance posture.",
+                "recorded under a different configuration.",
                 file=sys.stderr,
             )
             return 3
@@ -1108,7 +1068,7 @@ def cmd_replay(args) -> int:
                 clock=RealClock(),
                 replay=decisions,
             )
-    except (NormalizeError, ComplianceRefused) as e:
+    except (NormalizeError, ScopeRefused) as e:
         print(f"[replay] {e}", file=sys.stderr)
         return 3
     except PlanExhaustedError as e:
@@ -1118,7 +1078,7 @@ def cmd_replay(args) -> int:
     # full-repo grep for `raise TerminalError(` inside strategies/engine.py and prune.py (no call
     # site) and by 0% coverage — every backend-level TerminalError raised during run_strategy's
     # walk is already absorbed into PlanExhaustedError by a per-node catch (engine.py's three
-    # `except (TerminalError, RetryableError, UnsupportedFeatureError, ComplianceRefused)` sites),
+    # `except (TerminalError, RetryableError, UnsupportedFeatureError, ScopeRefused)` sites),
     # caught above. The same class of dead clause BL-107 already removed from cmd_calibrate.
     result.response.orchestration = result.orchestration
     out = result.response.to_schema_dict()
@@ -1154,7 +1114,6 @@ def cmd_calibrate(args) -> int:
                 args.strategy,
                 build_registry(),
                 target_escalation=args.target_escalation,
-                max_cost_per_doc=args.max_cost_per_doc,
                 router_config=config.router_config(loaded.config.policy),
             )
     # calibrate_strategy resolves and drives its rung-1 backend directly — no Router/execute_plan/
@@ -1175,7 +1134,6 @@ def cmd_calibrate(args) -> int:
         RetryableError,
         TerminalError,
         UnsupportedFeatureError,
-        ComplianceRefused,
     ) as e:
         print(f"[calibrate] {e}", file=sys.stderr)
         return 3
@@ -1186,7 +1144,7 @@ def cmd_calibrate(args) -> int:
         print(
             f"[calibrate] 0 of {report.n_docs} cases were scored. None named a dimension "
             "scorers.score() recognizes, so scorer_agreement is not measured at any threshold "
-            "(only escalation_rate/cost_per_doc are real signal here)",
+            "(only escalation_rate is real signal here)",
             file=sys.stderr,
         )
     elif report.n_scored < report.n_docs:
@@ -1209,8 +1167,7 @@ def _render_leaderboard_table(report: Any) -> str:
     lines = [
         f"dataset: {d.path}  ({d.case_count} case(s): {', '.join(d.case_names)})",
         "",
-        f"{'rank':>4}  {'backend':<28} {'mean':>6} {'scored':>7} {'cost/doc':>10} "
-        f"{'errors':>7}  dimensions",
+        f"{'rank':>4}  {'backend':<28} {'mean':>6} {'scored':>7} {'errors':>7}  dimensions",
     ]
     for b in report.backends:
         dims = " ".join(f"{k}={v:.2f}" for k, v in b.dimensions.items())
@@ -1224,7 +1181,7 @@ def _render_leaderboard_table(report: Any) -> str:
         mean = f"{b.mean_score:>6.3f}" if b.n_scored else f"{'—':>6}"
         lines.append(
             f"{b.rank:>4}  {b.backend_id:<28} {mean} {f'{b.n_scored}/{b.n_cases}':>7} "
-            f"{b.cost_per_doc:>10.4f} {b.errors:>7}  {dims}{nd}"
+            f"{b.errors:>7}  {dims}{nd}"
         )
     lines.append("")
     lines.append("per-case result:")
@@ -1265,7 +1222,7 @@ def cmd_leaderboard(args) -> int:
     evals.runner.run_case path (internal/product/specs/eval-leaderboard.product-spec.md) — one
     BenchmarkReport: measured mean score, per-dimension breakdown, a per-case winner table, an
     error tally, and each backend's cost basis reported alongside its score. Reuses run_case's
-    existing per-case compliance gate; never a second scoring or gating path (AC-1/AC-2)."""
+    existing per-case runner; never a second scoring path (AC-1/AC-2)."""
     from openreading.evals.leaderboard import run_leaderboard
 
     try:
@@ -1425,43 +1382,36 @@ def _benchmark_targets(args):
 
 
 def _render_benchmark_estimate(descriptor, preset: str, targets) -> str:
-    """Price the whole published corpus, in pages, before anything is downloaded.
+    """How big the whole published corpus is, before anything is downloaded.
 
-    Pages, not documents, because every hosted backend charges per page and the two differ by a
-    lot. This is the ceiling: `run` defaults to a handful of documents and prints the real count.
+    Pages as well as documents, because every hosted backend meters per page and the two differ by
+    a lot. This is the ceiling: `run` defaults to a handful of documents and prints the real count.
+    It used to also multiply those pages by each backend's declared rate; the rates are gone
+    and the counts, which come from the publisher, are what is left.
     """
-    from openreading.evals.preflight import _backend_target_cost
+    from openreading.evals.preflight import _backend_target_scope
 
     lines = [f"estimate: {descriptor.id} {preset}, {len(targets)} target(s)"]
     if preset != "full":
         lines.append("documents: publisher smoke subset, counted after preparation")
-        lines.append("`benchmark run` prints the real page count and cost before it spends")
+        lines.append("`benchmark run` prints the real page count before it runs")
         return "\n".join(lines)
 
     documents = descriptor.estimated_documents
     pages = descriptor.estimated_pages
     lines.append(f"documents: {documents if documents is not None else 'publisher-defined'}")
-    lines.append(f"pages (the billing unit): {pages if pages is not None else 'publisher-defined'}")
-    if pages is None:
+    lines.append(f"pages (the metered unit): {pages if pages is not None else 'publisher-defined'}")
+    if documents is None:
         return "\n".join(lines)
-    low = high = 0.0
     for target in targets:
         if target.kind == "strategy":
             lines.append(
-                f"  {target.reference}: not priced (a strategy escalates, so one document is one "
-                "or more billed calls)"
+                f"  {target.reference}: at least {documents} call(s) — a strategy escalates, so "
+                "one document is one or more calls"
             )
             continue
-        cost = _backend_target_cost(target.reference, target.name, pages)
-        if cost.priced:
-            low += cost.low_usd or 0.0
-            high += cost.high_usd or 0.0
-            lines.append(f"  {target.reference}: ${cost.low_usd:.2f} to ${cost.high_usd:.2f}")
-        else:
-            lines.append(f"  {target.reference}: not priced ({cost.note})")
-    if targets:
-        lines.append(f"  total (priced targets): ${low:.2f} to ${high:.2f}")
-    lines.append("  a range from each backend's declared per-page rates, not a quote")
+        lines.append(_backend_target_scope(target.reference, target.name, documents).render())
+    lines.append("  a hosted target bills your own account; the rates are on your invoice")
     return "\n".join(lines)
 
 
@@ -1520,7 +1470,7 @@ def _benchmark_subset(args, descriptor, data_dir: Path, targets) -> Path | None:
     """
     import hashlib
 
-    from openreading.evals.preflight import confirm, estimate_cost
+    from openreading.evals.preflight import confirm, scope_run
     from openreading.evals.subset import CorpusError, materialize_subset, plan_subset
 
     try:
@@ -1529,12 +1479,12 @@ def _benchmark_subset(args, descriptor, data_dir: Path, targets) -> Path | None:
         print(f"[benchmark] {exc}", file=sys.stderr)
         return None
 
-    estimate = estimate_cost(plan, targets)
-    print(estimate.render())
+    scope = scope_run(plan, targets)
+    print(scope.render())
     for document in plan.documents:
         print(f"  document: {document.doc_id}")
-    if not confirm(estimate, assume_yes=args.yes):
-        print("[benchmark] stopped before spending", file=sys.stderr)
+    if not confirm(scope, assume_yes=args.yes):
+        print("[benchmark] stopped before running", file=sys.stderr)
         return None
 
     if plan.is_complete:
@@ -2045,18 +1995,16 @@ expired, or a refusal because openreading.yaml changed since the first run.
 More: openreading help resume, openreading help exit-codes""",
     "route": """\
 Examples:
-  printf 'version: 1\\npolicy: {require_baa: true, no_train_on_data: true}\\n' \\
+  printf 'version: 1\\npolicy: {backends: [pymupdf, tesseract]}\\n' \\
     > openreading.yaml
   openreading route examples/john_smith_1000_2026_01.pdf
   openreading route doc.pdf --run > out.json
 
-A policy is the policy: block of your openreading.yaml, and these nine keys
-are the whole grammar. An unknown key is refused by name, at exit 3:
-  require_baa   no_train_on_data   data_region   require_local
-  max_retention   optimize_for
-  allow_unverified_compliance   train_optout_confirmed   baa_tier_confirmed
-Nothing widens the set a policy allows. The plan prints as JSON either way,
-naming every dropped backend with the stage and code that dropped it.
+A policy is the policy: block of your openreading.yaml, and one key is the
+whole grammar: backends, a list of ids in the order you want them tried. An
+unknown key is refused by name, at exit 3. The list is the chain a request that
+names no backend resolves to, and --fallback reorders within it. Naming a
+backend runs that backend, list or no list. The plan prints as JSON either way.
 
 Then:
   openreading backends --check pymupdf   # is the chosen backend answering
@@ -2065,7 +2013,7 @@ Exits: 0 a plan. 4 an empty plan, also with --run. The plan still prints.
 3 an openreading.yaml that will not load, an unreadable document, or --run on
 a plan every backend in which failed.
 
-More: openreading help compliance, openreading help backends""",
+More: openreading help backends-policy, openreading help backends""",
     "backends": """\
 Examples:
   openreading backends                   # what runs here, offline and free
@@ -2130,8 +2078,8 @@ Then:
   openreading parse examples/ --strategy fast   # run documents through one
   openreading explain out.json     # what the finished run actually decided
 
-Exits: 0 ok. 3 no config, an unparseable one, a validate error, an unknown
-name, or a compliance refusal. A warning never fails a validate.
+Exits: 0 ok. 3 no config, an unparseable one, a validate error, or an unknown
+name. A warning never fails a validate.
 
 More: openreading help strategy""",
     "strategy show": """\
@@ -2216,17 +2164,17 @@ This verb needs an openreading.yaml even to plan a built-in preset, so pass
 --config when yours is not in the working directory.
 
 You get {strategy, config_hash, eligible, dropped[], tree} as JSON and no
-execution at all, which makes this the plan step: see what this document under
-this policy would do before it spends anything. Every dropped backend carries
+execution at all, which makes this the plan step: see what this configuration
+would do. Every dropped backend carries
 the stage and the code that dropped it.
 
 Then:
   openreading parse doc.pdf --strategy fast    # run the plan you printed
 
-Exits: 0 ok. 3 an unreadable document or policy, an unknown strategy, no
-openreading.yaml found, or a compliance refusal.
+Exits: 0 ok. 3 an unreadable document or config, an unknown strategy, or no
+openreading.yaml found.
 
-More: openreading help strategy, openreading help compliance""",
+More: openreading help strategy, openreading help backends-policy""",
     "compare": """\
 Examples:
   openreading compare a.json b.json --format table   # two saved responses
@@ -2290,8 +2238,7 @@ Then:
   openreading compare run.json again.json --format diffs   # or where not
 
 Exits: 0 ok. 2 no strategy name in either --strategy or the trace. 3 an
-unreadable document, trace, config or policy, a config_hash mismatch, or a
-compliance refusal.
+unreadable document, trace, or config, or a config_hash mismatch.
 
 More: openreading help replay, openreading help exit-codes""",
     "calibrate": """\
@@ -2299,7 +2246,6 @@ Examples:
   openreading calibrate src/openreading/evals/sample --strategy main \\
     --config openreading.yaml       # the sample dataset that ships here
   openreading calibrate samples/ --strategy main --target-escalation 0.15
-  openreading calibrate samples/ --strategy main --max-cost-per-doc 0.05
 
 This needs an openreading.yaml, because it tunes a strategy you wrote. A gate
 is a threshold your strategy sets for a result it will accept. This
@@ -2313,8 +2259,8 @@ Then:
   openreading strategy validate     # after you paste the recommendation
   openreading parse examples/ --strategy main   # run with the new gate
 
-Exits: 0 ok. 3 no openreading.yaml, an unreadable dataset or policy, a
-compliance refusal on a case, or a first-rung backend that cannot run.
+Exits: 0 ok. 3 no openreading.yaml, an unreadable dataset or config, or a
+first-rung backend that cannot run.
 
 More: openreading help calibrate, openreading help datasets""",
     "benchmark": """\
@@ -2339,7 +2285,7 @@ Exits: 0 complete. 1 the publisher recorded a failure, scoring included.
 2 an unknown profile, target, preset or document, a missing package, or a run
 you stopped at the spending prompt. 3 a fault outside the publisher run.
 
-More: openreading help benchmark, openreading help cost""",
+More: openreading help benchmark, openreading help usage""",
     "benchmark list": """\
 Examples:
   openreading benchmark list                  # every profile, offline
@@ -2416,7 +2362,7 @@ Then:
 Exits: 0 ok. 2 an unknown or cataloged profile, a bad target or preset, or a
 terms acknowledgement you have not given.
 
-More: openreading help benchmark, openreading help cost""",
+More: openreading help benchmark, openreading help usage""",
     "benchmark report": """\
 Examples:
   openreading benchmark report                        # ./benchmark-results
@@ -2458,7 +2404,7 @@ Exits: 0 complete. 1 the publisher recorded a failed document, or scoring
 failed. 2 a bad profile, target, preset, --jobs or --doc, a missing package,
 or a run stopped at the prompt. 3 a fault outside the publisher's boundary.
 
-More: openreading help benchmark, openreading help cost""",
+More: openreading help benchmark, openreading help usage""",
     "rules": """\
 Examples:
   openreading rules src/openreading/evals/sample   # print what it would add
@@ -2546,7 +2492,7 @@ I WANT TO ...                          RUN
   read a folder, a glob, or a list     openreading parse DIR/ --backend SLUG
   let OpenReading pick the backend     openreading parse FILE --no-strategy
   follow a plan I wrote down           openreading parse FILE --strategy NAME
-  know which backends a policy allows  openreading route FILE
+  inspect the default backend chain     openreading route FILE
   see where two backends disagree      openreading compare A.json B.json
   know why a run chose what it chose   openreading explain RUN.json
   rank backends on my labeled dataset  openreading leaderboard DIR --all-ready
@@ -2685,7 +2631,7 @@ def build_parser() -> argparse.ArgumentParser:
     choose.add_argument(
         "--no-strategy",
         action="store_true",
-        help="force the router's auto choice, ignoring defaults.strategy",
+        help="route through policy.backends, ignoring defaults.strategy",
     )
     choose.add_argument(
         "--config", default=None, metavar="PATH", help="path to an openreading.yaml"
@@ -2765,7 +2711,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help="absolute time budget override, in seconds. It applies to a single document "
         "run with --backend NAME, and to a batch a backend runs natively. It has no "
-        "effect on `auto` or `--strategy` dispatch, which manage their own time budget. "
+        "effect on null-backend or `--strategy` dispatch, which manage their own time budget. "
         "A value of 0 or less means fail fast, so nothing waits. `openreading help parse` "
         "has the per-dispatch defaults",
     )
@@ -2798,9 +2744,8 @@ def build_parser() -> argparse.ArgumentParser:
     route = sub.add_parser(
         "route",
         parents=[common],
-        help="show the compliance-first routing plan for a document",
-        description="Show which backends your compliance policy allows for a document, and why "
-        "the rest were dropped, before anything runs.",
+        help="show the routing plan for a document",
+        description="Show the configured backend chain for a document before anything runs.",
     )
     route.add_argument("file", help="path or http(s):// URL")
     route.add_argument("--config", default=None, metavar="PATH", help="path to an openreading.yaml")
@@ -2868,8 +2813,8 @@ def build_parser() -> argparse.ArgumentParser:
         '  max_time: "2m"      give up after this long\n'
         "\n"
         "escalate_when takes any of:  looks_bad, low_confidence, missing: [field, ...], disagree\n"
-        "  (disagree is compare-only).  auto = the best remaining backend, usable as a try rung\n"
-        "  or a then: target."
+        "  (disagree is compare-only).  Every rung names a backend; set the order you prefer once\n"
+        "  in policy.backends and an unnamed request walks it."
     )
     strategy = sub.add_parser(
         "strategy",
@@ -2922,7 +2867,7 @@ def build_parser() -> argparse.ArgumentParser:
     st_plan = strat_sub.add_parser(
         "plan",
         help="pruned tree for a document (no execution)",
-        description="Print the pruned tree this document would walk under this policy, and "
+        description="Print the tree this document would walk under this configuration, and "
         "execute none of it.",
     )
     st_plan.add_argument("file", help="path or http(s):// URL")
@@ -3060,9 +3005,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="fraction of docs that should escalate past rung 1 (e.g. 0.15)",
-    )
-    calibrate.add_argument(
-        "--max-cost-per-doc", type=float, default=None, help="budget ceiling per doc (e.g. 0.05)"
     )
     calibrate.set_defaults(func=cmd_calibrate)
 

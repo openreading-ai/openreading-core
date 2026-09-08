@@ -37,7 +37,7 @@ def test_directory_produces_one_batch_envelope(tmp_path, capsys):
     rc = main(["parse", str(d), "--backend", "pymupdf"])
     env = json.loads(capsys.readouterr().out)
     assert rc == 0
-    assert env["schema_version"] == "0.1" and "items" in env  # batch-result envelope
+    assert env["schema_version"] == "0.2" and "items" in env  # batch-result envelope
     assert env["summary"]["succeeded"] == 2 and env["status"]["state"] == "succeeded"
     schemas.validate_batch_result(env)
 
@@ -81,22 +81,24 @@ def test_stdout_is_pure_json_progress_on_stderr(tmp_path, capsys):
     assert "[1/2]" in cap.err or "[2/2]" in cap.err  # progress went to stderr
 
 
-def test_skip_reaches_the_progress_counter_on_stderr(tmp_path, capsys):
-    # Tier 2/1 (BL-147): a healthy batch with one skip used to leave the [N/total] stderr counter
-    # stalled short of total, with no line at all for the skipped file — reading as an incomplete
-    # or stalled run even though the batch finished cleanly. It must now reach [3/3] and print the
-    # skip's own line (state + skip_reason), same as the openreading.cli docstring's own worked example.
+def test_every_item_reaches_the_progress_counter_on_stderr(tmp_path, capsys):
+    # Tier 2/1 (BL-147): the [N/total] stderr counter must reach total and print a line per item.
+    # Skipping is gone, so the third file is dispatched and fails on the backend's own terms
+    # rather than being counted without ever running.
     d = tmp_path / "c"
     _pdf(d / "a.pdf")
     _pdf(d / "b.pdf")
-    (d / "c.docx").write_bytes(b"not really a docx")  # unsupported format for pymupdf → skipped
+    (d / "c.docx").write_bytes(b"not really a docx")  # pymupdf refuses it first-hand
     rc = main(["parse", str(d), "--backend", "pymupdf"])
     cap = capsys.readouterr()
     env = json.loads(cap.out)
-    assert env["status"]["state"] == "succeeded" and rc == 0
-    assert env["summary"]["skipped"] == 1
-    assert "[3/3]" in cap.err  # counter now reaches total, not stalled short of it
-    assert "c.docx" in cap.err and "unsupported_format" in cap.err  # the skip's own stderr line
+    # Exit 4 is the documented "batch parse: partial, some items failed". A directory holding a
+    # file the backend cannot read used to exit 0 because the file was skipped without ever being
+    # tried; it is now attempted, fails honestly, and the exit code says so.
+    assert env["status"]["state"] == "partial" and rc == 4
+    assert env["summary"]["failed"] == 1 and "skipped" not in env["summary"]
+    assert "[3/3]" in cap.err  # counter reaches total
+    assert "c.docx" in cap.err  # the failing item still gets its own stderr line
 
 
 def test_empty_directory_produces_empty_batch_warning_and_stderr_line(tmp_path, capsys):
@@ -164,8 +166,8 @@ def test_batch_keep_candidates_reaches_every_item(tmp_path, capsys, monkeypatch)
         api,
         "build_registry",
         lambda: scripted_registry(
-            ScriptedBackend("reducto", cost_low=0.01, text=GARBLED),
-            ScriptedBackend("aws-textract", cost_low=0.01, text=CLEAN),
+            ScriptedBackend("reducto", text=GARBLED),
+            ScriptedBackend("aws-textract", text=CLEAN),
         ),
     )
     d = tmp_path / "c"
@@ -189,7 +191,7 @@ def test_batch_keep_candidates_reaches_every_item(tmp_path, capsys, monkeypatch)
 
 
 def test_preflight_warns_before_a_big_hosted_batch(tmp_path, capsys, monkeypatch):
-    # >10 live items on a hosted backend arms the cost preflight; with no key every item then
+    # >10 live items on a hosted backend arms the scope preflight; with no key every item then
     # fails offline at the credential check, so nothing here touches the network.
     for var in ("REDUCTO_API_KEY", "OPENREADING_REDUCTO_API_KEY"):
         monkeypatch.delenv(var, raising=False)
@@ -199,7 +201,7 @@ def test_preflight_warns_before_a_big_hosted_batch(tmp_path, capsys, monkeypatch
     main(["parse", str(d), "--backend", "reducto"])
     err = capsys.readouterr().err
     assert "[preflight] 11 items on hosted backend reducto" in err
-    assert "per page-equiv" in err or "billed per page" in err
+    assert "11 call(s) on your own key" in err
 
 
 # --- BL-84: --jobs floor/ceiling on the CLI surface --------------------------------------
@@ -256,14 +258,16 @@ def test_batch_jobs_within_a_raised_max_jobs_still_runs(tmp_path, capsys):
     assert env["summary"]["succeeded"] == 2
 
 
-# --- the two stderr advisories: what a run will cost, and what --jobs actually did ---------
+# --- the two stderr advisories: what a run will do, and what --jobs actually did -----------
 
 
-def test_preflight_cost_line_cannot_be_read_as_a_per_item_price(tmp_path, capsys, monkeypatch):
-    # The line used to read `12 items → hosted backend reducto (~$0.015-$0.06/page-equiv each)`.
-    # "12 items ... each" reads as a per-ITEM price, so the reader multiplies rate x items and
-    # under-reads a multi-page corpus by its average page count. The line must name the per-page
-    # basis in words and multiply out a total the reader can scale by their own page count.
+def test_preflight_line_quotes_no_price_at_all(tmp_path, capsys, monkeypatch):
+    """The line used to read `12 items → hosted backend reducto (~$0.015-$0.06/page-equiv each)`.
+
+    Every number in it came from `descriptor.cost`, a rate card this package had written down and
+    could not verify, so the advisory presented a guess in the same breath as a real item count.
+    What it names now is what core knows before a byte is read: how many calls leave this machine,
+    to whom, and on whose key."""
     for var in ("REDUCTO_API_KEY", "OPENREADING_REDUCTO_API_KEY"):
         monkeypatch.delenv(var, raising=False)
     d = tmp_path / "c"
@@ -271,10 +275,11 @@ def test_preflight_cost_line_cannot_be_read_as_a_per_item_price(tmp_path, capsys
         _pdf(d / f"f{i:02d}.pdf")
     main(["parse", str(d), "--backend", "reducto"])
     err = capsys.readouterr().err
-    assert "per page-equiv, not per item" in err  # the basis, in the unit's own words
-    assert "~$0.18-$0.72" in err  # 12 items x 1 page x $0.015-$0.06, multiplied out
-    assert "if every item is one page" in err  # ... and the assumption that total rests on
-    assert "each)" not in err  # the ambiguous wording is gone
+    preflight = [ln for ln in err.splitlines() if ln.startswith("[preflight]")]
+    assert preflight, "the advisory still fires for a big hosted batch"
+    assert all("$" not in ln for ln in preflight)
+    assert "12 call(s) on your own key" in err  # the count, which is a fact
+    assert "more if a document is paged" in err  # ... and why it is a floor
 
 
 def test_jobs_above_a_backend_cap_says_so_on_stderr(tmp_path, capsys):

@@ -135,7 +135,7 @@ class _ThreadRecordingDeciderPort:
 
     def decide(self, dp):
         self.thread = threading.current_thread()
-        return DecisionVerdict(action=self.action, cost_usd=0.0, rationale="fake")
+        return DecisionVerdict(action=self.action, rationale="fake")
 
 
 def test_decider_port_call_runs_off_the_event_loop_thread():
@@ -144,7 +144,7 @@ def test_decider_port_call_runs_off_the_event_loop_thread():
     main_thread = threading.current_thread()
     port = _ThreadRecordingDeciderPort("escalate")
     reg = scripted_registry(
-        ScriptedBackend("reducto", cost_low=0.01, confidence=0.5),  # low conf → review band fires
+        ScriptedBackend("reducto", confidence=0.5),  # low conf → review band fires
         ScriptedBackend("pymupdf", local=True),
     )
     cfg = {
@@ -187,7 +187,7 @@ def test_gate_escalation_appends_a_follow_on_revision_not_a_silent_overwrite():
     # creation must show up as a follow-on `revisions` entry, not just a silently-changed final
     # value — the Attempt's own identity (backend/node) is unchanged, satisfying no-schema-break.
     reg = scripted_registry(
-        ScriptedBackend("reducto", cost_low=0.01, confidence=0.5),  # low conf → review band fires
+        ScriptedBackend("reducto", confidence=0.5),  # low conf → review band fires
         ScriptedBackend("pymupdf", local=True),
     )
     cfg = {

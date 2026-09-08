@@ -53,18 +53,18 @@ publisher's dashboard cannot disagree.
 
 Use Python 3.12 or newer for the two runnable profiles. Install only the profile you need.
 
-### The five verbs, and which ones spend
+### The five verbs, and which ones call a backend
 
-| Command | What it does | Costs |
+| Command | What it does | Uses |
 |---|---|---|
 | `benchmark list` | every profile, its status and its terms lane | nothing, offline |
 | `benchmark show NAME` | sources, both licenses, published scale, install extra | nothing, offline |
-| `benchmark estimate NAME --preset full --target …` | prices the whole published corpus, in pages | nothing, offline |
+| `benchmark estimate NAME --preset full --target …` | sizes the whole published corpus, in pages | nothing, offline |
 | `benchmark prepare NAME` | downloads the corpus to `~/.cache/openreading/benchmarks` | bandwidth and disk |
 | `benchmark run NAME --target …` | **the only verb that calls a backend** | two documents unless `--limit` says otherwise |
 
 `run` flags worth knowing before the first one: `--limit N` (default 2, `0` for everything),
-`--doc NAME` for documents you name, `--yes` to skip the spending confirmation, `--output-dir`
+`--doc NAME` for documents you name, `--yes` to skip the confirmation, `--output-dir`
 (default `./benchmark-results`), and `--jobs` for concurrency.
 
 ### Try it for nothing, in three commands
@@ -124,22 +124,25 @@ worst at, so both backends score 0.000 and the run looks broken when it is not. 
 until you know a corpus.
 
 **That last command touches two documents, not the corpus.** `run` defaults to two because it
-spends your money on someone else's API, and two is enough to watch every target produce output
+calls someone else's API on your key, and two is enough to watch every target produce output
 and a score. Scale up deliberately with `--limit N`, or `--limit 0` for the whole prepared corpus.
 Run documents you name with `--doc table/doc1`, repeatable.
 
 The two documents are drawn round-robin across the corpus's categories, so a small run spans a
 chart and a table rather than two charts. The choice is stable, so a rerun picks the same
-documents and the publisher resumes instead of re-billing.
+documents and the publisher resumes instead of re-running them.
 
-Before anything runs you get the documents it chose, their **page** count, and a dollar range per
-target. Pages, because every hosted backend bills per page while the publishers count documents:
-ExtractBench is 370 documents and 4,869 pages, so a document count understates a bill about
-thirteen times. Anything unpriced, or over a dollar, asks first. `--yes` answers in advance, and
-is required when no terminal is attached.
+Before anything runs you get the documents it chose, their **page** count, and the call count per
+target. Pages, because every hosted backend meters per page while the publishers count documents:
+ExtractBench is 370 documents and 4,869 pages, so a document count understates the work about
+thirteen times. It quotes no price: the per-page rates this used to multiply were a vendor rate
+card typed into this package's own source, unverifiable here. A hosted
+target above twenty-five pages, or one whose call count core cannot state, asks first. `--yes`
+answers in advance, and is required when no terminal is attached.
 
-A `strategy:` target is deliberately never priced. A strategy escalates, so one document is one or
-more billed calls across backends at different rates, and nothing here knows how many rungs fire.
+A `strategy:` target's call count is deliberately reported as a floor, and it always asks. A
+strategy escalates, so one document is one or more calls across backends, and nothing here knows
+how many rungs fire.
 
 The smoke preset is the default and controls which corpus is downloaded. ParseBench selects three
 files per category, ExtractBench six documents, and `--limit` then caps what actually runs out of
@@ -168,7 +171,7 @@ ExtractBench reports Unified value F1 plus word and page grounding F1. Its curre
 Every repeated target gets a separate publisher report. Two or more successful targets also get
 the publisher's cross-pipeline leaderboard. This is the direct test for whether an OpenReading
 strategy improves over the backends it can invoke. The raw result retains `usage`, `warnings`, and
-`orchestration`, so you can inspect cost, latency, missing channels, and escalation behavior beside
+`orchestration`, so you can inspect usage, latency, missing channels, and escalation behavior beside
 the official quality result.
 
 ### Choose the corpus for the question
@@ -199,8 +202,8 @@ It is not legal advice. A research-only profile requires `--allow-research-only`
 profile requires the separate `--allow-unverified-terms` flag after you review every source.
 Cataloged profiles do not download or run yet, even after acknowledgement.
 
-No public accuracy corpus proves compliance filtering, retry taxonomy, interruption recovery, or
-batch isolation. Those are engine invariants. The offline suite tests them with controlled faults.
+No public accuracy corpus proves caller-scope enforcement, retry taxonomy, interruption recovery,
+or batch isolation. Those are engine invariants. The offline suite tests them with controlled faults.
 Use the private-dataset workflow below to test whether public quality results transfer to your own
 documents.
 
@@ -213,9 +216,7 @@ to your traffic. It costs labeling work, which is why it comes second.
 ### Mental model
 
 A dataset is a directory of case directories, and each case directory holds a `case.json` with the
-input plus `expected`. A policy is a short list of requirements a backend must meet, and the
-compliance gate drops every backend that fails one. The runner sends each case to one backend
-through the same compliance gate a normal run uses. The runner then scores only the dimensions
+input plus `expected`. The runner sends each case to the explicitly selected backend, then scores only the dimensions
 `expected` names, so a case with no expected tables is never scored on tables. The leaderboard
 repeats that for every backend and ranks them by mean score. `calibrate` and `compare --truth` reuse
 the same three scorers rather than carrying their own. Nothing feeds back into routing, and the
@@ -238,9 +239,9 @@ uv run openreading leaderboard src/openreading/evals/sample --backends pymupdf,t
 ```text
 dataset: src/openreading/evals/sample  (1 case(s): loan_page1)
 
-rank  backend                        mean  scored   cost/doc  errors  dimensions
-   1  pymupdf                       1.000     1/1     0.0000       0  text_contains=1.00 table_cell_accuracy=1.00
-   2  tesseract                     0.500     1/1     0.0000       0  text_contains=1.00 table_cell_accuracy=0.00
+rank  backend                        mean  scored  errors  dimensions
+   1  pymupdf                       1.000     1/1       0  text_contains=1.00 table_cell_accuracy=1.00
+   2  tesseract                     0.500     1/1       0  text_contains=1.00 table_cell_accuracy=0.00
 
 per-case result:
   loan_page1: winner=pymupdf  (pymupdf=1.00, tesseract=0.50)
@@ -310,7 +311,7 @@ lines one side has and the other does not ([Compare](../comparison/README.md)).
 
 `--format json` prints the schema-valid `leaderboard-report.v0.1`. It carries a `schema_version` of
 `"0.1"` plus three parts: `dataset {path, case_count, case_names}`, `backends[] {backend_id, rank,
-mean_score, n_cases, n_scored, errors, cost_per_doc, non_deterministic, dimensions}`, and `cases[]
+mean_score, n_cases, n_scored, errors, non_deterministic, dimensions}`, and `cases[]
 {name, winner, scores}`. The JSON `winner` field is byte-stable and blunt. It names one backend on a
 tie, breaking the tie alphabetically, and it names one on a case every backend scored zero. The
 human `per-case result` block distinguishes those, so tally wins from it and never from
@@ -361,9 +362,9 @@ uv run openreading leaderboard mydata --backends pymupdf,tesseract
 ```text
 dataset: mydata  (3 case(s): first, neither, tie)
 
-rank  backend                        mean  scored   cost/doc  errors  dimensions
-   1  pymupdf                       0.667     3/3     0.0000       0  text_contains=0.67 table_cell_accuracy=1.00
-   2  tesseract                     0.500     3/3     0.0000       0  text_contains=0.67 table_cell_accuracy=0.00
+rank  backend                        mean  scored  errors  dimensions
+   1  pymupdf                       0.667     3/3       0  text_contains=0.67 table_cell_accuracy=1.00
+   2  tesseract                     0.500     3/3       0  text_contains=0.67 table_cell_accuracy=0.00
 
 per-case result:
   first: winner=pymupdf  (pymupdf=1.00, tesseract=0.50)
@@ -464,9 +465,9 @@ uv run openreading leaderboard mydata --backends pymupdf,tesseract
 ```text
 dataset: mydata  (1 case(s): invoice)
 
-rank  backend                        mean  scored   cost/doc  errors  dimensions
-   1  pymupdf                       1.000     1/1     0.0000       0  text_contains=1.00 rule_pass_rate=1.00
-   2  tesseract                     0.833     1/1     0.0000       0  text_contains=1.00 rule_pass_rate=0.67
+rank  backend                        mean  scored  errors  dimensions
+   1  pymupdf                       1.000     1/1       0  text_contains=1.00 rule_pass_rate=1.00
+   2  tesseract                     0.833     1/1       0  text_contains=1.00 rule_pass_rate=0.67
 
 per-case result:
   invoice: winner=pymupdf  (pymupdf=1.00, tesseract=0.83)
@@ -550,26 +551,24 @@ case names, rules included, so a case asserting both kinds gets one mean over bo
 
 ### Recipes
 
-**Rank under a compliance policy.**
+**Rank a backend this machine cannot run.**
 ```bash
-printf 'version: 1\npolicy:\n  require_local: true\n' > local.yaml
-uv run openreading leaderboard mydata --backends pymupdf,tesseract,reducto --config local.yaml
+uv run openreading leaderboard mydata --backends pymupdf,tesseract,reducto
 ```
 ```text
-   3  reducto                           —     0/3     0.3750       3  
+   3  reducto                           —     0/3       3  
 …
   first: winner=pymupdf  (pymupdf=1.00, tesseract=0.50, reducto=—)
 ```
-A backend the policy refuses is counted as an error in its own tally and excluded from its mean,
-never silently skipped. `scored 0/3` with three errors is how you read that reducto never ran.
-That is a different row from a backend that ran and scored zero. The `cost/doc` column is a model
-rather than a price anyone quoted. It takes the low end of the backend's declared per-page range and
-multiplies it by a fixed assumption of 25 pages a document. That is why reducto reads `0.3750` for a
-rate of `$0.015` a page. The figure drops the high end of the range, which is four times the low end
-on reducto and wider still on others. It is also wrong by the ratio of your real average page count
-to 25. Price a corpus from the [cost and limits
-table](../adapters/README.md#what-each-backend-charges-and-the-ceilings-on-one-request) and your own
-page counts instead. `--all-ready` replaces `--backends` with every configured backend. Every
+A backend that cannot run, here because no `REDUCTO_API_KEY` is set, is counted as an error in
+its own tally and excluded from its mean, never silently skipped. `scored 0/3` with three errors
+is how you read that reducto never ran.
+That is a different row from a backend that ran and scored zero. The table used to carry a
+`cost/doc` column beside those measurements. It was not measured by the benchmark at all: it took
+the low end of the backend's declared per-page rate and multiplied it by a fixed assumption of 25
+pages a document, so it moved with neither your corpus nor your invoice. It is gone with the rest
+of core's money. Price a corpus from your own provider invoice and your
+own page counts. `--all-ready` replaces `--backends` with every configured backend. Every
 backend makes a real call per case, so with N backends and M cases a hosted key bills N × M calls.
 
 **Tune a strategy's gates from the sample (the calibrate bridge).** A strategy is a named plan over
@@ -593,7 +592,7 @@ uv run openreading calibrate mydata --strategy main --target-escalation 0.34 \
   | jq -c '{n_docs, n_scored, points: (.sweeps[0].points[0:3]), recommended}'
 ```
 ```json
-{"n_docs":3,"n_scored":3,"points":[{"threshold":0.0,"escalation_rate":0.0,"cost_per_doc":0.0,"scorer_agreement":0.6667},{"threshold":100.0,"escalation_rate":0.0,"cost_per_doc":0.0,"scorer_agreement":0.6667},{"threshold":200.0,"escalation_rate":1.0,"cost_per_doc":0.0,"scorer_agreement":0.3333}],"recommended":{"escalate_if":{"chars_per_page_below":0.0}}}
+{"n_docs":3,"n_scored":3,"points":[{"threshold":0.0,"escalation_rate":0.0,"scorer_agreement":0.6667},{"threshold":100.0,"escalation_rate":0.0,"scorer_agreement":0.6667},{"threshold":200.0,"escalation_rate":1.0,"scorer_agreement":0.3333}],"recommended":{"escalate_if":{"chars_per_page_below":0.0}}}
 ```
 Sample size is not what fills `sweeps`. The gate's shape is. The same strategy written in Plain, as
 `try: [pymupdf, tesseract]` with `escalate_when: looks_bad`, returns `"sweeps": []` on three
@@ -631,9 +630,8 @@ print(run_dataset(make_adapter("tesseract"), "mydata").summary())   # backend=te
 - There is one scoring path. `leaderboard` and `calibrate` call the same `run_case` and `score` a
   plain dataset run uses, so two harnesses can never disagree about one document. See
   `openreading.evals.leaderboard`.
-- The compliance gate runs before every case, and a refusal is that backend's scored error. Without
-  this rule a benchmark could send protected health information to a backend the policy forbids.
-  See `openreading.evals.runner.run_case`.
+- Each leaderboard backend is explicit. The harness records adapter failures as scored errors and
+  continues through the remaining cases. See `openreading.evals.runner.run_case`.
 - Unscored is not zero. A case naming no recognized dimension scores `None` and leaves the mean, so
   a precise-looking number never reports a measurement that did not happen. See `scorers.score`
   and `DatasetReport.mean_overall`.
@@ -656,8 +654,8 @@ print(run_dataset(make_adapter("tesseract"), "mydata").summary())   # backend=te
   pipeline name to the target that produced it, which the publisher does not record. See
   `openreading.evals.report`.
 - A public benchmark run is small until you say otherwise. `benchmark run` touches two documents
-  by default and prices the rest in pages before it spends, because the failure it avoids is a
-  command typed once that bills a full corpus across several hosted backends. See
+  by default and counts the rest in pages and calls before it starts, because the failure it
+  avoids is a command typed once that runs a full corpus across several hosted backends. See
   `openreading.evals.subset` and `openreading.evals.preflight`.
 - Ties break on backend id, so a rerun is byte-identical and rank order never depends on the order
   you typed. Scores never feed the router, so a benchmark never quietly becomes routing policy. See
@@ -675,11 +673,11 @@ print(run_dataset(make_adapter("tesseract"), "mydata").summary())   # backend=te
 - `uv run python -m pydoc openreading.evals.scorers` describes the three scorers and the five
   dimensions.
 - `uv run python -m pydoc openreading.evals.leaderboard` states what the leaderboard never does.
-- `uv run openreading benchmark run --help` for every flag that changes what a public run
-  touches or costs, and `uv run openreading leaderboard --help` and
+- `uv run openreading benchmark run --help` for every flag that changes a public run, and
+  `uv run openreading leaderboard --help` and
   `uv run openreading calibrate --help` for the labeled-dataset path.
 - `uv run python -m pydoc openreading.evals.subset` for how a corpus is cut down,
-  `uv run python -m pydoc openreading.evals.preflight` for how the run is priced, and
+  `uv run python -m pydoc openreading.evals.preflight` for call-count estimates, and
   `uv run python -m pydoc openreading.evals.report` for how a finished run is read back.
 - `src/openreading/schemas/leaderboard-report.v0.1.json` is described in
   [JSON Schemas](../schemas/README.md), and `scripts/leaderboard_smoke.py` is the `make verify`

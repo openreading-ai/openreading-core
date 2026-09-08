@@ -73,7 +73,7 @@ def item_idempotency_key(base: str | None, sha256: str | None) -> str | None:
 
 def batch_state(succeeded: int, failed: int) -> Literal["succeeded", "partial", "failed"]:
     """M5 status rule: succeeded = >=1 succeeded and 0 failed; partial = some of each; failed =
-    0 succeeded (all failed, all skipped, or empty — nothing was produced)."""
+    0 succeeded (all failed, or empty, so nothing was produced)."""
     if succeeded and not failed:
         return "succeeded"
     if succeeded and failed:
@@ -86,7 +86,7 @@ def _error_code(exc: Exception) -> str:
 
 
 def _run_item(src: ResolvedSource, run_one: RunOne, base_key: str | None) -> BatchItem:
-    """Execute one non-skipped source in isolation (M6): a raised exception becomes a `failed`
+    """Execute one source in isolation (M6): a raised exception becomes a `failed`
     item carrying the error, never aborting the batch."""
     idem = item_idempotency_key(base_key, src.ref.sha256)
     try:
@@ -102,15 +102,10 @@ def _run_item(src: ResolvedSource, run_one: RunOne, base_key: str | None) -> Bat
 
 def _summarize(items: list[BatchItem], duration_ms: int) -> BatchSummary:
     succeeded = [i for i in items if i.state == "succeeded"]
-    costs, bases, pages = [], set(), []
+    pages: list[int] = []
     backends: dict[str, int] = {}
     for it in succeeded:
         usage = (it.response or {}).get("usage") or {}
-        c = usage.get("cost_usd")
-        if isinstance(c, (int, float)) and not isinstance(c, bool):
-            costs.append(float(c))
-        if usage.get("cost_basis"):
-            bases.add(str(usage["cost_basis"]))
         p = usage.get("pages_processed")
         if isinstance(p, int) and not isinstance(p, bool):
             pages.append(p)
@@ -121,28 +116,10 @@ def _summarize(items: list[BatchItem], duration_ms: int) -> BatchSummary:
         total=len(items),
         succeeded=len(succeeded),
         failed=sum(1 for i in items if i.state == "failed"),
-        skipped=sum(1 for i in items if i.state == "skipped"),
         duration_ms=duration_ms,
-        cost_usd=round(sum(costs), 6) if costs else None,  # None when NO item reported a cost (M8)
-        cost_bases=sorted(bases),
         pages_processed=sum(pages) if pages else None,
         backends=backends,
     )
-
-
-def _skip_warnings(items: list[BatchItem]) -> list[BatchWarning]:
-    reasons: dict[str, int] = {}
-    for it in items:
-        if it.state == "skipped" and it.skip_reason:
-            reasons[it.skip_reason] = reasons.get(it.skip_reason, 0) + 1
-    if not reasons:
-        return []
-    detail = ", ".join(f"{n} {reason}" for reason, n in sorted(reasons.items()))
-    return [
-        BatchWarning(
-            code="items_skipped", message=f"{sum(reasons.values())} file(s) skipped: {detail}"
-        )
-    ]
 
 
 def run_batch(
@@ -154,9 +131,10 @@ def run_batch(
     request_echo: BatchRequestEcho | None = None,
     on_progress: OnProgress | None = None,
 ) -> BatchResult:
-    """Run every non-skipped source through `run_one` (serial when jobs==1, else a bounded thread
+    """Run every source through `run_one` (serial when jobs==1, else a bounded thread
     pool), collect per-item results in INPUT order (M1), aggregate honestly (M8), and assemble the
-    batch envelope. Skipped sources become `skipped` items without ever calling run_one — but still
+    batch envelope. Every source the caller named is run: intake does not pre-judge one by its
+    extension, so a format a backend cannot read arrives as that backend's own refusal. But still
     reach `on_progress`/`_emit` at the point they're classified, so a skip gets its own progress
     line and the `[N/total]` counter always reaches `total`, not just for items actually run."""
     items: list[BatchItem | None] = [None] * len(sources)
@@ -174,12 +152,9 @@ def run_batch(
             assert item is not None
             on_progress(done, total, item)
 
-    for idx, src in enumerate(sources):
-        if src.skip_reason is not None:
-            items[idx] = BatchItem(source=src.ref, state="skipped", skip_reason=src.skip_reason)
-            _emit(idx)
-        else:
-            to_run.append(idx)
+    # Every source runs. Intake no longer pre-judges a document by its extension, so a format a
+    # backend cannot read arrives as that backend's own refusal on a failed item.
+    to_run.extend(range(len(sources)))
 
     if jobs <= 1:
         for idx in to_run:
@@ -221,7 +196,9 @@ def assemble_result(
             BatchWarning(code="empty_batch", message="no source resolved to a document to process")
         ]
     else:
-        warnings = _skip_warnings(items) or None
+        # Nothing is skipped any more, so there is no skip summary to warn about. A file the
+        # backend could not read is a failed item carrying that backend's own reason.
+        warnings = None
     return BatchResult(
         status=BatchStatus(state=batch_state(summary.succeeded, summary.failed)),
         request=request_echo,

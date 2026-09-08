@@ -26,9 +26,8 @@ Cost is ESTIMATED, never claimed as the caller's billed amount: ``usage_info.pag
 multiplied by the public list prices accessed below ($4/1000 OCR pages, $5/1000 Document AI pages
 when annotations are requested). There is no documented request idempotency or vendor cancellation
 mechanism on this synchronous endpoint, so both declarations are false. No native batch or
-liveness probe is declared. Hosted compliance claims are deliberately fail-closed here:
-HIPAA/SOC2/GDPR are not credited and training posture is unverified until a vendor-owned public
-source establishes the exact API-account contract.
+liveness probe is declared. Core makes no claim about the configured account's legal or data-use
+terms.
 
 Capability grades are ``claimed`` because this implementation has not been run against a real
 Mistral account as of 2026-09-02. The offline fixture is documentation-shaped evidence only. A
@@ -49,20 +48,17 @@ from __future__ import annotations
 import base64
 import contextlib
 import json
-import mimetypes
 from typing import Any, Protocol
 
 from openreading.adapters._http import error_for_status
 from openreading.adapters.base import BackendAdapter
 from openreading.derive import html_table_to_table, md_to_text, table_to_text
 from openreading.types.blocks import Block, Table, TypedField
-from openreading.types.cost import CostBasis, CostReport
+from openreading.types.cost import CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     ConfigField,
-    Cost,
     CredentialField,
     Output,
     OutputChannels,
@@ -105,8 +101,6 @@ D = ChannelGrade.DERIVABLE
 
 _BASE_URL = "https://api.mistral.ai"
 _DEFAULT_MODEL = "mistral-ocr-latest"
-_OCR_USD_PER_PAGE = 0.004
-_ANNOTATED_USD_PER_PAGE = 0.005
 
 # The image formats the OCR endpoint documents; the data: URL MIME is derived from the extension
 # when the caller gives none, because a PNG labelled image/jpeg is rejected or mis-decoded.
@@ -197,9 +191,7 @@ def _descriptor() -> AdapterDescriptor:
         protocol_version=2,
         adapter_impl="http",
         operations=["parse", "extract"],
-        provisioning=Provisioning(
-            byo_mode=["api_key"], auth="api_key", billing_target="caller_account"
-        ),
+        provisioning=Provisioning(byo_mode=["api_key"], auth="api_key"),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(
             ocr="claimed",
@@ -213,21 +205,8 @@ def _descriptor() -> AdapterDescriptor:
             figures_charts="claimed",
             custom_schema_extraction="claimed",
             vlm_based="claimed",
+            page_range_selection=True,
             input_formats=["pdf", "docx", "pptx", "png", "jpg", "jpeg", "avif"],
-        ),
-        cost=Cost(
-            native_unit="page",
-            basis="estimated",
-            usd_per_page_equiv_low=_OCR_USD_PER_PAGE,
-            usd_per_page_equiv_high=_ANNOTATED_USD_PER_PAGE,
-            lossiness="none",
-        ),
-        compliance=ComplianceProfile(
-            hipaa_baa="no",
-            soc2=False,
-            gdpr=False,
-            trains_on_customer_data="unverified",
-            runs_fully_local=False,
         ),
         runtime=RuntimeProfile(offline_capable=False, license="proprietary", version_pin="api"),
         output=Output(
@@ -247,12 +226,7 @@ def _descriptor() -> AdapterDescriptor:
                 table_cells=D,
             ),
         ),
-        router=RouterHints(
-            normalization_difficulty="low",
-            integration_priority="P1",
-            priority_reason="Native OCR Markdown, layout blocks, confidence, and optional "
-            "schema annotations through one synchronous hosted endpoint.",
-        ),
+        router=RouterHints(normalization_difficulty="low"),
         credentials_spec=[
             CredentialField(key="api_key", required=True, env=["MISTRAL_API_KEY"], example="...")
         ],
@@ -334,15 +308,6 @@ class MistralOCRAdapter(BackendAdapter):
             return mime_type.lower().startswith("image/")
         return any(_bare_name(name).endswith(suffix) for suffix in _IMAGE_MIME_TYPES)
 
-    @staticmethod
-    def _guess_mime_type(name: str | None) -> str:
-        bare = _bare_name(name)
-        for suffix, mime_type in _IMAGE_MIME_TYPES.items():
-            if bare.endswith(suffix):
-                return mime_type
-        guessed, _ = mimetypes.guess_type(bare)
-        return guessed or "application/pdf"
-
     def _document_arg(self, req: OpenReadingRequest) -> dict[str, str]:
         document = req.document
         name = document.filename or document.url
@@ -358,7 +323,16 @@ class MistralOCRAdapter(BackendAdapter):
                     "Mistral OCR inline input must contain valid base64 document bytes",
                     backend_code="unsupported_input",
                 ) from exc
-            mime_type = document.mime_type or self._guess_mime_type(name)
+            # `openreading.derive.mime` resolved this before the request was built. A private
+            # guesser here was a sixth extension table with its own PDF default, which is how an
+            # unidentified input reached the vendor labelled as a document.
+            mime_type = document.mime_type
+            if not mime_type:
+                raise TerminalError(
+                    "Mistral OCR needs a media type and core could not identify this document; "
+                    "pass document.mime_type explicitly",
+                    backend_code="unsupported_input",
+                )
             return {
                 "type": chunk_type,
                 chunk_type: f"data:{mime_type};base64,{document.bytes_base64}",
@@ -794,12 +768,4 @@ class MistralOCRAdapter(BackendAdapter):
             pages = float(value)
         elif isinstance(raw.get("pages"), list):
             pages = float(len(raw["pages"]))
-        annotated = bool(job.raw and job.raw.object_class == "extract")
-        price = _ANNOTATED_USD_PER_PAGE if annotated else _OCR_USD_PER_PAGE
-        return CostReport(
-            native_unit="page",
-            native_quantity=pages or 0.0,
-            cost_usd=None if pages is None else pages * price,
-            basis=CostBasis.UNKNOWN if pages is None else CostBasis.ESTIMATED,
-            billing_target="caller_account",
-        )
+        return CostReport(native_unit="page", native_quantity=pages or 0.0)

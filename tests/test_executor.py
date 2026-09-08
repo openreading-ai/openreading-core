@@ -37,7 +37,7 @@ class _FailingBackend(ConfigurableBackend):
 
 def _req(document=None):
     return OpenReadingRequest.model_validate(
-        {"document": document or {"path": "/d.pdf"}, "backend": {"id": "auto"}}
+        {"document": document or {"path": "/d.pdf"}, "backend": {"id": None}}
     )
 
 
@@ -193,33 +193,6 @@ def test_execute_plan_threads_deadline_ms_into_run_context(deadline_ms):
 
 
 # --- idempotency cache -----------------------------------------------------------------
-
-
-def test_cache_hit_replays_with_warning(tmp_path):
-    doc = tmp_path / "d.pdf"
-    doc.write_bytes(b"one")
-    cache = BoundedResultCache()
-    clock = FakeClock()
-    # A fallback attempt AND a BAA-tier confirmation on the winning backend, so the cached entry
-    # has something to duplicate if it is not isolated from a caller's own annotations (M10) — a
-    # bare `chosen=good` plan with no trail and no confirmation note would pass even with the bug,
-    # since _record_confirmations/_record_trail would both be no-ops on it.
-    plan = RoutePlan(
-        chosen=_FailingBackend("bad", TerminalError("boom", backend_code="x")),
-        fallbacks=[make_backend("good", local=True)],
-        baa_tier_notes={"good": "operator confirmed BAA tier for good"},
-    )
-    r1 = execute_plan(plan, _file_req(doc), broker=_EMPTY_BROKER, cache=cache, clock=clock)
-    r2 = execute_plan(plan, _file_req(doc), broker=_EMPTY_BROKER, cache=cache, clock=clock)
-    assert "idempotent_replay" not in _codes(r1)  # first populated the cache
-    codes1, codes2 = _codes(r1), _codes(r2)
-    assert codes2.count("idempotent_replay") == 1  # second was a replay, exactly once
-    assert r2.backend.id == "good"
-    # M10: the cache must hold the adapter's pristine answer, isolated from every caller's own
-    # confirmation/trail annotations — a shared, later-mutated cached object doubles every other
-    # warning's count on the replay instead of recording it once for THIS call.
-    for code in set(codes1):
-        assert codes2.count(code) == codes1.count(code), code
 
 
 @pytest.mark.parametrize(

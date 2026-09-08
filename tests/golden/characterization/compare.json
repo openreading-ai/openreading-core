@@ -1,0 +1,124 @@
+{
+  "alignment": {
+    "capable_subjects": 1,
+    "iou_min": 0.3,
+    "merge_lookahead": 4,
+    "method": "text_first/v1",
+    "tau_text": 0.6
+  },
+  "blocks": {
+    "pages": []
+  },
+  "fields": {
+    "rows": []
+  },
+  "findings": [
+    {
+      "bbox": null,
+      "code": "text_divergence",
+      "detail": "pymupdf vs fixture-ocr: text similarity 0.01 < 0.5",
+      "field": null,
+      "page": null,
+      "severity": "warn",
+      "subjects": [
+        "fixture-ocr",
+        "pymupdf"
+      ]
+    }
+  ],
+  "headline": {
+    "channels": {
+      "table_cells": {
+        "agreement": "partial",
+        "detail": null,
+        "score": null
+      },
+      "text": {
+        "agreement": "diverge",
+        "detail": null,
+        "score": null
+      }
+    },
+    "nondeterministic_subjects": [],
+    "verdict": "mixed"
+  },
+  "mode": "pairwise",
+  "schema_version": "0.2",
+  "subjects": [
+    {
+      "backend": {
+        "id": "pymupdf",
+        "output_paradigm": [
+          "block_tree"
+        ],
+        "type": "oss_library"
+      },
+      "facts": {
+        "blocks": 2,
+        "chars": 4204,
+        "fields": 0,
+        "pages": 1,
+        "state": "succeeded",
+        "warning_codes": [
+          "confidence_unavailable"
+        ]
+      },
+      "label": "pymupdf",
+      "source": "file"
+    },
+    {
+      "backend": {
+        "id": "fixture-ocr",
+        "type": "oss_library"
+      },
+      "facts": {
+        "blocks": 0,
+        "chars": 41,
+        "fields": 0,
+        "pages": 0,
+        "state": "succeeded",
+        "warning_codes": []
+      },
+      "label": "fixture-ocr",
+      "source": "file"
+    }
+  ],
+  "text": {
+    "matrix": [
+      [
+        1.0,
+        0.0084
+      ],
+      [
+        0.0042,
+        1.0
+      ]
+    ],
+    "pairs": [
+      {
+        "a": "pymupdf",
+        "a_only_chars": 4170,
+        "b": "fixture-ocr",
+        "b_only_chars": 7,
+        "similarity": 0.0084
+      }
+    ]
+  },
+  "warnings": [
+    {
+      "code": "descriptor_unavailable",
+      "detail": "<str:105>",
+      "subject": "fixture-ocr"
+    },
+    {
+      "code": "blocks_unavailable",
+      "detail": "fixture-ocr produced no blocks; excluded from the structural delta",
+      "subject": "fixture-ocr"
+    },
+    {
+      "code": "confidence_unavailable",
+      "detail": "pymupdf reports it cannot produce per-element confidence",
+      "subject": "pymupdf"
+    }
+  ]
+}

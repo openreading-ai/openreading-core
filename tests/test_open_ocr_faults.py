@@ -13,7 +13,6 @@ import pytest
 
 from openreading.adapters.open_ocr import OpenOCRAdapter
 from openreading.types import JobState
-from openreading.types.cost import CostBasis
 from openreading.types.errors import RetryableError, TerminalError, UnsupportedFeatureError
 from openreading.types.request import OpenReadingRequest
 from openreading.types.runtime import RunContext
@@ -248,19 +247,21 @@ def test_disabled_outputs_suppress_channels_and_raw():
 # ---- cost -------------------------------------------------------------------------------------
 
 
-def test_report_cost_is_billed_when_debit_present():
+def test_report_cost_returns_the_page_count_not_the_debit():
+    """OpenOCR is the one backend whose response carries a real dollar debit (`cost_debited`).
+
+    It stays in `job.raw` and off the response. A caller reading `usage` cannot tell a forwarded
+    debit from the derived guesses fourteen other backends used to produce, and the caller's own
+    OpenOCR balance is the authority either way."""
     adapter = OpenOCRAdapter(client=_ScriptedClient())
     job = adapter.submit(_req(), RunContext())
     cost = adapter.report_cost(job)
-    assert cost.basis is CostBasis.BILLED  # the platform returns the actual debit
-    assert cost.cost_usd == pytest.approx(0.001)
     assert cost.native_unit == "page" and cost.native_quantity == 2.0
-    assert cost.billing_target == "caller_account"
+    assert job.raw is not None and job.raw.payload["cost_debited"] == pytest.approx(0.001)
 
 
-def test_report_cost_unknown_before_result():
+def test_report_cost_before_a_result_reports_one_page_not_zero():
     adapter = OpenOCRAdapter(client=_ScriptedClient(create=_async_running()))
     job = _async_job(adapter)
-    cost = adapter.report_cost(job)  # nothing debited yet → nothing invented
-    assert cost.basis is CostBasis.UNKNOWN and cost.cost_usd is None
+    cost = adapter.report_cost(job)  # nothing counted yet → the schema default, nothing invented
     assert cost.native_quantity == 1.0

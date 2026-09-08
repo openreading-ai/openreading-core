@@ -5,15 +5,14 @@
 one place a strategy file's semantics turn into backend calls: cascades (`steps:`), `route:`,
 `parallel:` with race / best / merge + hedge / shadow / drain, `decide:` nodes and gate bands
 through the decision layer (`openreading.strategies.decider`), `use:` references, single-leaf
-strategies, and `granularity: page` cascades. It consumes ONLY pruned trees: compliance and
-capability filtering happened once in compile, dropped backends do not exist in the tree it sees,
-so execution is structurally incapable of widening eligibility. "The eligible set" below is the
-router's stage-1/2 survivors for this request, computed once, up front. Pruning collapses upward
+strategies, and `granularity: page` cascades. It consumes trees pruned to the API key's scope.
+Every leaf names its own backend, so a leaf is independent of `policy.backends`, which supplies
+the chain an unnamed request walks instead. Pruning collapses upward
 (`prune._prune_node` returns `None`): a composite whose children all vanish — a cascade with no
 rungs, a parallel with no branches, a route rule whose target is gone, a decide whose `among:`
 empties — disappears and its parent re-evaluates; a route whose `default:` target is fully
 pruned collapses whole (matched or not, so `_eval_route` may assume `r["default"]` exists);
-the root collapsing is the terminal `no_compliant_backend` refusal before any attempt.
+the root collapsing is a terminal scope or empty-policy refusal before any attempt.
 `strategy validate` flags each leaf unreachable under the file's policy — a `default:` target
 included — per leaf, not as a route-specific warning.
 
@@ -21,12 +20,12 @@ Hook point and surfaces (wiring facts)
 --------------------------------------
 - The strategy layer engages in exactly one place: inside `openreading.api.run_request`, after
   validation and before any backend is dispatched, and only when a strategy actually engages
-  (`backend.id: "strategy:<name>"`, or `defaults.strategy` on an `auto` request). The legacy
-  paths are the literal old code — the `auto` arm still calls `router.executor.execute_plan`,
+  (`backend.id: "strategy:<name>"`, or `defaults.strategy` on a null-backend request). The legacy
+  paths are the literal old code. The null-backend arm still calls `router.executor.execute_plan`,
   the named arm still calls the driver directly, and a named-backend run imports nothing from
   `openreading.strategies` (pinned by a subprocess test). "No file ⇒ no change" is a
   byte-identical-output test obligation, never an assumption that this engine "reduces to" the
-  old behaviour through shared code. `execute_plan` stays the executor for the no-strategy `auto`
+  old behaviour through shared code. `execute_plan` stays the executor for the no-strategy chain
   path and for `openreading route --run`, which builds a `RoutePlan` and never reads the config.
 - `strategy:` is a documented reserved prefix of the free-string `backend.id` (no request-schema
   bump); `strategy:none` forces the legacy path. Both `make_adapter` call sites in
@@ -43,14 +42,14 @@ Hook point and surfaces (wiring facts)
   (`strategy:none`) and `--config PATH`; `route` takes only `file [--config PATH] [--run]` (plus
   the shared `--env-file`) and never consults a strategy. Subcommands (each takes `[--config
   PATH]` except `explain`, which takes only the shared `--env-file` and its positional):
-  `strategy validate` — grammar + world-consistency of every strategy, flagging steps unreachable
-  under the file's own `policy:` block; `strategy plan <file> --strategy <name>` —
-  the normalized, PRUNED tree for this document / policy, no execution; `strategy show <name>
+  `strategy validate` performs grammar and world-consistency checks. `strategy plan <file>
+  --strategy <name>` prints the normalized tree and policy candidate chain without execution.
+  `strategy show <name>
   [--longhand]` — the body of a named strategy or built-in preset as written (or normalized);
   `strategy normalize` — shorthand → canonical longhand; `strategy list` — named strategies +
   presets in scope; `explain <response.json>` — the orchestration block as a narrative; `replay
   <file> --trace <trace.json> [--strategy]` — re-execute taking each logged choice;
-  `calibrate <dataset> --strategy <name> [--target-escalation F] [--max-cost-per-doc $]` —
+  `calibrate <dataset> --strategy <name> [--target-escalation F]` performs
   threshold tuning from a target escalation rate (proposes, never rewrites). Python:
   `openreading.run(source, strategy=..., config=...)`.
 - Server: config comes ONLY from `OPENREADING_CONFIG` (never cwd sniffing, same posture as the
@@ -58,13 +57,12 @@ Hook point and surfaces (wiring facts)
   strategy job wraps the whole walk as one synthetic `JobRecord` — the walk runs to completion
   inside the POST itself (threadpool-offloaded `api.run_request`, exactly as `/v1/parse`) and the
   record is created already `succeeded` with the response and its `orchestration` attached; there
-  is no worker task and no observable `processing` state. `"auto"` / `strategy:none` on `/v1/jobs`
-  stay rejected.
-- When a strategy engages, compile strips `routing.fallback` before calling `Router.route` so
-  `auto` leaves see pure stage-3 score order (warning `strategy_overrides_fallback`).
-  `optimize_for` keeps exactly its role: stage-3 weights at `auto` leaves and the comparator's
-  tiebreak input; it never overrides a named leaf. `limits:` binds only here (strategy runs),
-  never a direct-named request.
+  is no worker task and no observable `processing` state. A null `backend.id` and `strategy:none`
+  on `/v1/jobs` stay rejected.
+- When a strategy engages, compile strips `routing.fallback` before calling `Router.route`, so
+  the resolved set is the caller's own list in its own written order (warning
+  `strategy_overrides_fallback`). `limits:` binds only here (strategy runs), never a
+  direct-named request.
 
 Value domain: Outcomes
 ----------------------
@@ -108,9 +106,8 @@ fixed point).
 - Law 3 (recovery): if any step is `Ok`, the cascade is `Ok`; earlier failures and escalations
   become `warnings[]` (`fallback_used`, `quality_escalated`), never errors.
 - Attempted set (T12): one request-wide set of backend ids shared across rungs, parallel
-  branches (shadows and losers included) and nested strategies. `backend: auto` picks the first
-  not-yet-attempted backend in stage-3 order; none left → `Err(exhausted)` with detail
-  `no_untried_backend`. Scoping the set per node would silently re-run backends at `auto` leaves.
+  branches (shadows and losers included) and nested strategies. It is what keeps a `route`
+  default or a repeated reference from re-running a backend the walk already tried.
 - Law 4 (keep-best): when the steps run out or the deadline ends the walk, a retained
   `Deficient` is returned — highest quality wins; ties keep the earliest-retained rung (the
   comparison is strict-greater). The spec asks for the opposite tiebreak — highest rung index
@@ -122,11 +119,13 @@ fixed point).
   `budget_exhausted`, `invalid_input` alike — raises `PlanExhaustedError` (itself a
   `TerminalError`) carrying the node-path-annotated trail, the class named in the message; there
   is no distinct exception type per class.
-- Honest money: every billed rung (escalated and winner) is summed into the returned response's
-  `usage.cost_usd`; `usage.cost_basis` folds by the priority reduction `billed > estimated >
-  infra_only > unknown`, monotonically non-decreasing (never last-write-wins, so a weaker later
-  rung cannot downgrade a `billed` rung); a real cost with no basis coalesces to `unknown`, and a
-  nonzero total can never leave `cost_basis` at `infra_only` or unset (BL-126 / BL-134).
+- Every rung on the record, and none of them priced. Each rung that runs is an `Attempt` in
+  `orchestration.attempts[]`, so a reader counts the calls a walk made. The engine used to also
+  sum them into `usage.cost_usd` and fold a `cost_basis` across them by the priority reduction
+  `billed > estimated > infra_only > unknown`. Most of what that summed came from per-vendor
+  price tables core kept in its own source and could not verify, and once totalled it was
+  indistinguishable from money someone was actually charged. The
+  returned response's `usage` describes the rung that produced it, in that backend's own unit.
 
 Parallel evaluation (`parallel:`)
 ---------------------------------
@@ -181,22 +180,21 @@ Parallel evaluation (`parallel:`)
    - The spec's promise is that the response never blocks past the node deadline waiting for a
      drain or a cancel. The CANCEL half holds on every clock (next bullet). The DRAIN half is
      enforced only under a coordinated `FakeClock`: `_drain` cuts a branch whose next virtual wake
-     lands past the deadline, recording it (loser or shadow, detail `drain_over_deadline`) with
-     NO cost — never awaited to completion, its cost is unknown, not fabricated. Under a
+     lands past the deadline, recording it (loser or shadow, detail `drain_over_deadline`) —
+     never awaited to completion, so what it consumed is unknown, not fabricated. Under a
      `RealClock` `_drain` has no wake to inspect and waits until every remaining task completes,
      and a parallel leaf's own driver runs with `DEFAULT_DEADLINE_MS` rather than the node's
      remaining budget — so in production a drained loser CAN hold the response past the node
-     deadline. A completed loser's real cost stays billed (`cost_basis: "billed"`). T9's
-     variant — a drained loser outliving the response records `cost_basis: "estimated"` — is
-     not implemented: such a loser or shadow carries neither cost nor basis, only the detail.
+     deadline. A completed loser is recorded as a real attempt, because its call reached the
+     vendor. A drained one carries only the detail.
    - Cancel calls are dispatched concurrently on `_CANCEL_DISPATCH_EXECUTOR`, a dedicated pool,
      and awaited only up to the node's remaining deadline; one still running is abandoned, not
      retried. It is NOT the default `to_thread` executor on purpose: `asyncio.run()` (one per
      `run_strategy`) waits for every outstanding default-executor future at shutdown, so an
      abandoned cancel there would still add its full duration to the response.
-   - `usage.cost_usd` on the final response totals ALL attempts — winners, losers, shadows,
-     judges, deciders — with the per-attempt breakdown in `orchestration.attempts[]`. A
-     composite branch's spend lives on its nested response and is folded in the same way.
+   - `orchestration.attempts[]` records ALL of them — winners, losers, shadows, judges,
+     deciders — so a reader can count what a node dispatched. A composite branch records its own
+     attempts at its own level. The final response's `usage` describes the winner alone.
 8. `pick: best` also computes the worst pairwise text disagreement (1 − token Jaccard) across
    the compared branches; it is exposed to the enclosing step gate as `disagreement_over` and
    recorded on the winner attempt. `pick: merge` votes `typed_fields` per field — majority
@@ -216,7 +214,7 @@ Route, decide, use, leaf, page granularity
   `openreading.strategies.facts`). Byte-dependent facts (`pages_over` / `pages_under`,
   `size_over_mb` / `size_under_mb`, `sample_percent`) read `document.bytes_base64` only: compile
   (`api._run_strategy_request`) materializes a URL document before fact computation whenever any
-  ELIGIBLE backend's descriptor lacks `accepts_url` (mirroring the `auto` arm); the spec's second
+  ELIGIBLE backend's descriptor lacks `accepts_url`; the spec's second
   trigger — a byte-dependent fact or signal referenced by the tree — is not implemented, so a
   URL document every eligible backend accepts reaches fact computation un-materialized and those
   facts are `unavailable`. Route adds no class of its own.
@@ -238,26 +236,24 @@ Route, decide, use, leaf, page granularity
   `document.text` stays rung 0's. No keep-best across rungs, and no forward escalation of a
   failed rung either: a rung that raises (or returns non-ok) `break`s the walk and the pages
   stitched so far from earlier rungs are returned as they stand — only gate-failing PAGES move
-  forward to the next rung. Every rung's cost is summed (BL-120).
+  forward to the next rung. The trace records every rung that ran.
 
 Decision layer, judge, masking, replay
 --------------------------------------
 - Enablement is two keys, resolved ONCE per walk so every decision point binds identically: a
   file `decider:` block AND `OPENREADING_LLM_DECIDER`. No request field can enable it. Downgrade
   reasons, in priority: no block → pure engine (no annotation); block but env off →
-  `env_disabled`; env on but the decider backend compliance-dropped (checked via
-  `Router.check_eligible` against request ∪ policy compliance) → `compliance`; enabled + eligible
+  `env_disabled`; env on but the decider backend outside API-key scope → `scope_denied`; enabled
   but no `DeciderPort` wired → `unavailable`; at call time `malformed` (port raised, or an
   out-of-set action) or `refusal` (`None`). `timeout` is a member of the decider's
   `DOWNGRADE_REASONS` but has no producer: the port call runs via `to_thread` with no per-call
   deadline (deferred work), so a hanging port is bounded only by the enclosing walk deadline.
   Every downgrade resolves to the deterministic engine default — an LLM outage can never fail a
   parse. The action space is a closed candidate
-  list; the engine re-validates whatever the port returns and meters each call as a
-  `decider_call` attempt at its backend-reported cost. The port sees signals, candidates, intent
-  and remaining time budget only — never compliance (rail 4).
-- Judge (`pick: best` + `judge:`): per-node enablement with the SAME env gate and compliance
-  filter, keyed on the judge block's own backend; the port compares ONE positional pair with
+  list; the engine re-validates whatever the port returns and records each call as a
+  `decider_call` attempt. The port sees signals, candidates, intent, and remaining time.
+- Judge (`pick: best` + `judge:`): per-node enablement with the same environment and scope gates,
+  keyed on the judge block's own backend; the port compares one positional pair with
   sources hidden (labels A/B, capped excerpt, masked `typed_fields`); the engine runs both
   orderings (position-bias guard), calls an inconsistent verdict a tie broken like the engine
   comparator, and runs single elimination in listed order (n−1 pairs), metering `judge_call`s.
@@ -269,7 +265,7 @@ Decision layer, judge, masking, replay
   `json.dumps(orchestration)`.
 - Replay (`run_strategy(replay=<decisions>)`, `openreading replay --trace`) is a decision MODE,
   not a live port: every decision point takes its logged choice by `decision_id`
-  (`decider: "trace"`), no LLM is called, and the env / compliance gates are bypassed. A point
+  (`decider: "trace"`), no LLM is called, and environment gates are bypassed. A point
   absent from the trace, or whose logged choice is no longer a candidate, takes the engine
   default traced `trace_missing`. The judge replays by logged winner backend. `replay=[]` is a
   valid empty trace (mode ON — everything `trace_missing`), distinguished from `None` by
@@ -326,10 +322,10 @@ Concurrency contract
 - T5 — idempotency cache: the engine consults NONE; a strategy run does the work every time
   (D-v3-3 — the dead seam was removed rather than left threaded-but-unread). The only cache is
   the server's: one `BoundedResultCache` per `create_app` at `app.state.result_cache`, passed by
-  `/v1/parse` into `run_request(cache=…)` → `execute_plan` for the legacy `auto` chain only;
+  `/v1/parse` into `run_request(cache=…)` → `execute_plan` for the legacy router chain only;
   `run()`, the CLI and `/v1/batch` pass none. Whoever builds it (Law 7) must:
   key per backend id (sibling branches cannot share a backend, so no collisions); count a hit as a
-  `succeeded` attempt at `cost_usd: 0` with the `idempotent_replay` warning — an instant success,
+  `succeeded` attempt with the `idempotent_replay` warning — an instant success,
   so a hit racing a live sibling resolves `pick: fastest` at once and cancels the rest; never cache
   cancelled
   or partial results; cache `Deficient` results (real, complete responses); read/write only on
@@ -355,27 +351,26 @@ Concurrency contract
 
 The orchestration block
 -----------------------
-`trace.orchestration()` yields: `strategy`, `config_hash` (compliance-aware — it folds in the
-effective compliance block, the `RouterConfig`, and a per-backend eligible/dropped digest, so two
-runs with identical pruned trees compiled under different postures hash differently),
+`trace.orchestration()` yields: `strategy`, `config_hash` (the compiled tree, router configuration,
+and participating descriptor digests),
 `chosen_backend`, `fallback_depth` (rungs advanced past before the returned result —
 implemented as the count of non-`succeeded` attempts, `openreading.strategies.trace`), `outcome`
 (`ok` | `degraded`), `attempts[]` (the full trail), `decisions[]` (decision points — gate
 bands, decide nodes, judges — plus one `point: "route"` rule-evaluation record per route node;
 never plain attempts), and when non-empty `dropped[]`
-(compliance/capability prunes — NOT attempts — carrying the
-router's `DropReason {backend, stage, code, detail}` verbatim), `pages[]`, `merge[]`,
+(scope prunes, which are not attempts, carrying the router's
+`DropReason {backend, stage, code, detail}`), `pages[]`, `merge[]`,
 `webhook_dropped[]`; plus `candidates[]` when `keep_candidates=True` (every completed non-winner
 parallel branch's full envelope, for `compare --from`; default off for payload size; cascade
 rungs are not retained — D-v4-14). Each attempt carries backend, category, node path / label,
-duration, cost + `cost_basis`, and for gate events each predicate's observed vs threshold, fired
+duration, and for gate events each predicate's observed vs threshold, fired
 or `signal_unavailable`. Closed category vocabulary: `succeeded` · `error(<class>)` ·
 `skipped(missing_credentials)` · `skipped(circuit_open)` · `deadline_pruned` ·
 `quality_escalated` · `review_escalated` · `raced_lost` · `judged_lost` · `shadow` ·
 `merge_base` · `merge_source` · `decider_call` · `judge_call`. `skipped(circuit_open)` is
 reserved vocabulary (`openreading.strategies.trace`) with NO emitter: no circuit breaker exists
 anywhere in `src/` — `defaults.advanced.circuit_breaker` is schema-accepted and unread — so the
-spec's T6 floor (never bench a request's last compliance-eligible backend) is designed, not
+spec's T6 floor (never bench the last backend in a request's chain) is designed, not
 shipped. Warnings this module puts on the final response: the compile-time warnings
 (`strategy_overrides_fallback` among them),
 `fallback_used` and `quality_escalated` (one per rung walked past, naming from → to),
@@ -413,12 +408,11 @@ Edge-case catalog
    waits for the drain; a drain past the deadline is recorded with no cost (Law 6).
 2. `confidence_below` on a confidence-less backend — inapplicable: does not fire, recorded
    `signal_unavailable`. Gates that can never bind anywhere are load-time errors; the default
-   bundle degrades by design. Bindability checks skip `auto` leaves (no fixed descriptor).
+   bundle degrades by design.
 3. Outer 3 s remaining, inner `max_duration` 10 s — the inner clamps to 3 s; a hedge past it is
    `deadline_pruned`; a deadline ending a walk with nothing retained is `budget_exhausted`.
-4. Escalation target compliance-dropped — the cascade simply has one fewer rung (the drop is in
-   `orchestration.dropped[]`); every rung pruned → terminal `no_compliant_backend` before any
-   attempt, never a silent downgrade.
+4. API scope excludes an escalation target — the cascade has one fewer rung, recorded in
+   `orchestration.dropped[]`. A fully pruned tree refuses before any attempt.
 5. WEBHOOK backend in a race — one Job state machine; a cancelled loser's late delivery is
    acknowledged and dropped; interior branches degrade to polling where no webhook bus exists.
 6. Decider returns out-of-set / goes rogue — closed strict-tool action space, so out-of-set is
@@ -462,8 +456,8 @@ Decisions (internal/decisions/DECISIONS.md)
 - D-v3-19: merge composes `typed_fields` only; base wins document channels; provenance in trace.
 - D-v3-20: page granularity is its own evaluator; range support is the `page_range_selection`
   capability.
-- D-v3-23: audit close-out — cascade honest money, deadline-bounded drain, webhook drop marker,
-  `/v1/jobs` synthetic job, no eager strategy import, compliance-never-widened property test.
+- D-v3-23: audit close-out — deadline-bounded drain, webhook drop marker,
+  `/v1/jobs` synthetic job, no eager strategy import, and caller-scope property tests.
 - D-v3-24: `otherwise_pruned` downgrade reason.
 - D-v4-14: `keep_candidates` retains parallel branches only; threaded as a Python param, never a
   request-schema field (the vendored schema is `additionalProperties: false`).
@@ -490,7 +484,6 @@ from openreading.ledger.step import ExecResult, StepRequest
 from openreading.readiness import auth_hinted, missing_required
 from openreading.router.cache import content_key, document_digest
 from openreading.router.clock import Clock, FakeClock
-from openreading.router.compliance import BAA_TIER_CONFIRMED_WARNING
 from openreading.router.cost import apply_cost_report
 from openreading.router.driver import run_to_completion
 from openreading.router.registry import Registry
@@ -515,7 +508,6 @@ from openreading.strategies.signals import evaluate_gate, probe
 from openreading.strategies.trace import Attempt, GateRecord, Trace
 from openreading.types.enums import WaitMode
 from openreading.types.errors import (
-    ComplianceRefused,
     PlanExhaustedError,
     RetryableError,
     ScopeRefused,
@@ -526,8 +518,7 @@ from openreading.types.job import Job
 from openreading.types.request import OpenReadingRequest
 from openreading.types.response import NormalizedResponse
 
-# Default on_error action per class (spec §5.1). `missing_credentials` is skip (handled before
-# on_error); `compliance` is uncatchable (pruned).
+# Default on_error action per class (spec §5.1). `missing_credentials` is handled before this map.
 _DEFAULT_ACTION = {
     "timeout": "next",
     "rate_limited": "next",
@@ -637,10 +628,9 @@ class _WalkCtx:
     clock: Clock
     trace: Trace
     trees: dict[str, dict[str, Any] | None]
-    eligible: list[str]
     # The caller's backend allow-list (the server's OPENREADING_API_KEY_SCOPES entry for the
     # presented token), or None when the caller is unscoped. compile_strategy has already pruned
-    # the tree and shortened `eligible` with it; this copy exists so the id the walk is ABOUT to
+    # every out-of-scope leaf out of the tree; this copy exists so the id the walk is ABOUT to
     # dispatch is re-checked against the allow-list itself rather than trusted because an earlier
     # pass was supposed to have handled it (_resolve_backend).
     backend_allowlist: frozenset[str] | None = None
@@ -658,7 +648,6 @@ class _WalkCtx:
     plain_sourced: bool = False
     # per-node judge enablement (a judge backend is on the node, so its gate is resolved lazily):
     env: Mapping[str, str] = field(default_factory=dict)
-    effective_compliance: Mapping[str, Any] = field(default_factory=dict)
     router_config: Any = None
     mask_fields: list[str] = field(default_factory=list)  # decider.llm.mask_fields (§5, both sinks)
     # replay (14.3): decision_id -> logged decision record; when set, every decision point takes its
@@ -699,7 +688,7 @@ def _response_payload(result: ExecResult) -> NormalizedResponse:
     dispatch. A REPLAYED "ok" record's payload came back through the journal/blob store as plain
     JSON (`InlineExecutor` is deliberately response-type-agnostic — `ledger/inline.py` never
     imports a concrete response type) and is reconstructed here, where the real type is known, so
-    every downstream consumer (`_branch_quality`, `_actual_cost`, gate evaluation, the final
+    every downstream consumer (`_branch_quality`, gate evaluation, the final
     envelope) sees the identical object shape whether the step ran live or replayed."""
     if result.replayed:
         return NormalizedResponse.model_validate(result.payload)
@@ -769,8 +758,8 @@ def run_strategy(
     `os.environ`) — the second of the two enablement keys (decider.md §1).
 
     `run_id`/`executor` (Ledger T1, internal/design/ledger.md §5): `api.py`'s `run()`/`run_request()`
-    mint a `run_id` and construct an armed `InlineExecutor` (real `JsonlJournal`/`LocalFsBlobStore`/
-    `LocalFsKeyStore`) when `OPENREADING_LEDGER` is set, and pass both through. Every other caller
+    mint a `run_id` and construct an armed `InlineExecutor` (real `JsonlJournal` and
+    `LocalFsBlobStore`) when `OPENREADING_LEDGER` is set, and pass both through. Every other caller
     — every existing test included — omits them and gets `_WalkCtx.__post_init__`'s L1-preserving
     default: a fresh `run_id` and an unarmed `InlineExecutor(journal=NullJournal(), blobs=None)`.
 
@@ -789,7 +778,6 @@ def run_strategy(
         decider=compiled.decider,
         req=req,
         registry=registry,
-        effective_compliance=compiled.effective_compliance,
         router_config=compiled.router_config,
         env=os.environ if env is None else env,
         port=decider_llm,
@@ -804,9 +792,8 @@ def run_strategy(
         clock=clock,
         trace=trace,
         trees=compiled.trees,
-        eligible=list(compiled.eligible),
         backend_allowlist=compiled.backend_allowlist,
-        facts=compute_facts(req, compiled.effective_compliance or None),
+        facts=compute_facts(req),
         deadline_ms=clock.now_ms()
         + _resolve_outer_budget_ms(compiled.max_duration_ms, deadline_ms),
         decider_status=decider_status,
@@ -816,7 +803,6 @@ def run_strategy(
         strategy_name=compiled.name,
         plain_sourced=compiled.plain_sourced,
         env=os.environ if env is None else env,
-        effective_compliance=compiled.effective_compliance,
         router_config=compiled.router_config,
         mask_fields=list(compiled.decider.mask_fields or []) if compiled.decider else [],
         # `replay=[]` is a valid empty trace (replay mode ON → every point trace_missing); only
@@ -840,9 +826,6 @@ def run_strategy(
         _summarize_trail(resp, trace, chosen)  # fallback_used / quality_escalated on the FINAL resp
         for code, msg in compiled.warnings:
             resp.add_warning(code, msg)
-        baa_note = compiled.baa_tier_notes.get(chosen or "")
-        if baa_note is not None:
-            resp.add_warning(BAA_TIER_CONFIRMED_WARNING, baa_note, chosen)
         degraded = outcome.kind == "deficient"
         if degraded:
             # A deadline overrun and a quality exhaustion are both `degraded` keep-best endings,
@@ -970,8 +953,8 @@ async def _resolve_decision_point(
     """Build one DecisionPoint, resolve it (replay → the logged choice; else engine default unless
     an enabled+eligible LLM executor overrides), meter any decider_call, append the one-shape
     decision record, and return `(chosen action, the decision record dict, by reference)`.
-    Compliance never enters the DecisionPoint (decider.md §3.3 rail 4); masked typed_fields never
-    enter it either (§5).
+    Caller scope never enters the DecisionPoint (decider.md §3.3 rail 4). Masked typed fields do
+    not enter it either (§5).
 
     Returns the record by reference (Ledger T2 §7.3/§4.2) rather than making a caller re-find it
     via `ctx.trace.decisions[-1]` — defensive hardening, not a fix for a proven live bug: asyncio's
@@ -1039,8 +1022,7 @@ async def _decide(dp: DecisionPoint, ctx: _WalkCtx) -> tuple[str, str, str | Non
         return dp.engine_default, "engine", "malformed", {}
 
     # record the call as a decider_call attempt with its honest backend-reported cost, if any.
-    cost = verdict.cost_usd or 0.0
-    ctx.trace.record(Attempt(status.backend, "decider_call", dp.node_path, cost_usd=cost or None))
+    ctx.trace.record(Attempt(status.backend, "decider_call", dp.node_path))
 
     action, reason = revalidate_action(verdict.action, dp.candidates)
     if reason is not None:
@@ -1069,8 +1051,7 @@ def _replay_decision(
 
 
 def _budget_snapshot(ctx: _WalkCtx) -> dict[str, Any]:
-    """The remaining time budget the decider is allowed to see (decider.md §6) — no compliance
-    surface, no cost pool (removed)."""
+    """The remaining time budget the decider may see, with no scope or cost surface."""
     snap: dict[str, Any] = {}
     if ctx.deadline_ms is not None:
         snap["duration_ms"] = max(0, round(ctx.deadline_ms - ctx.clock.now_ms()))
@@ -1126,7 +1107,6 @@ class _BranchOutcome:
     backend: str = ""
     response: NormalizedResponse | None = None
     error_class: str | None = None
-    cost: float | None = None
     quality: float = 1.0
     # Ledger T3 (§4.0/§4.1): the leaf's own ExecResult.journal_seq/replayed, additive fields that
     # default to values reproducing today's behavior for any path that doesn't populate them. A
@@ -1254,8 +1234,6 @@ async def _run_branch(
         )
 
     backend = _resolve_backend(branch["backend"], ctx)
-    if backend is None:
-        return _BranchOutcome(i, "error", error_class="exhausted")
     adapter = ctx.registry.get(backend)
     if adapter is None:
         ctx.attempted.add(backend)
@@ -1308,7 +1286,7 @@ async def _run_branch(
                 adapter, ctx.req, ctx.broker, ctx.clock, DEFAULT_DEADLINE_MS, on_submit=record
             ),
         )
-    except (TerminalError, RetryableError, UnsupportedFeatureError, ComplianceRefused) as e:
+    except (TerminalError, RetryableError, UnsupportedFeatureError, ScopeRefused) as e:
         return _BranchOutcome(i, "error", backend, error_class=classify_error(e))
     except Exception as e:
         # BL-99: adapter.normalize() is ordinary adapter code, not one of the four taxonomy types
@@ -1324,8 +1302,7 @@ async def _run_branch(
     # Ledger T3 §4.0: exec() now hands back an ExecResult, not the bare payload — "ok" carries the
     # real response (live or reconstructed from a replay's own blob-resolved JSON); anything else
     # ("skipped"/"cancelled" — "failed" always raises above instead of reaching here) is a real,
-    # journaled non-dispatch outcome, not a crash on `_branch_quality(None, ...)`/`_actual_cost
-    # (None)`.
+    # journaled non-dispatch outcome, not a crash on `_branch_quality(None, ...)`.
     if result.status != "ok":
         status = (
             "skip" if result.status == "skipped" else result.status
@@ -1340,7 +1317,6 @@ async def _run_branch(
         "ok",
         backend,
         response=resp,
-        cost=_actual_cost(resp),
         quality=quality,
         journal_seq=result.journal_seq,
         replayed=result.replayed,
@@ -1572,13 +1548,18 @@ def _cancel_loser_job(ctx: _WalkCtx, job: Job | None) -> None:
 
 
 def _pick_best(results: dict[int, _BranchOutcome], ctx: _WalkCtx, shadows: set[int]) -> int | None:
-    """Highest composite quality among NON-SHADOW successes; ties → cheaper backend, then index."""
+    """Highest composite quality among NON-SHADOW successes; ties → the first-listed branch.
+
+    The tie-break used to consult a `_cost_midpoint` off `descriptor.cost`, so the cheaper backend
+    won a tie. That price was a number this package wrote down about someone else's rate card, so
+    a tie resolved on an unverifiable fact rather than on something the author wrote. Listed order is the author's own statement of preference, and it
+    is the whole rule now: put the backend you want to win a tie first."""
     succ = [
         r for r in results.values() if r.index not in shadows and r.status in ("ok", "composite_ok")
     ]
     if not succ:
         return None
-    best = max(succ, key=lambda r: (r.quality, -_cost_midpoint(r.backend, ctx), -r.index))
+    best = max(succ, key=lambda r: (r.quality, -r.index))
     return best.index
 
 
@@ -1591,16 +1572,6 @@ def _branch_quality(resp: NormalizedResponse, ctx: _WalkCtx) -> float:
     if not applicable:
         return 1.0
     return sum(1 for p in applicable if not p.fired) / len(applicable)
-
-
-def _cost_midpoint(backend: str, ctx: _WalkCtx) -> float:
-    adapter = ctx.registry.get(backend)
-    if adapter is None:
-        return 0.0
-    c = adapter.descriptor.cost
-    lo, hi = c.usd_per_page_equiv_low, c.usd_per_page_equiv_high
-    vals = [v for v in (lo, hi) if v is not None]
-    return sum(vals) / len(vals) if vals else 0.0
 
 
 # --------------------------------------------------------------------------- judge (decider.md §4)
@@ -1652,7 +1623,6 @@ async def _select_best(
         judge_backend=judge_cfg["backend"],
         req=ctx.req,
         registry=ctx.registry,
-        effective_compliance=ctx.effective_compliance,
         router_config=ctx.router_config,
         env=ctx.env,
         port=ctx.judge_llm,
@@ -1678,7 +1648,7 @@ async def _pairwise_judge(
 ) -> _BranchOutcome:
     """Single-elimination against the current best in listed order — n−1 pairs (decider.md §4).
     Each pair is judged in BOTH orderings; an inconsistent verdict is a tie broken deterministically
-    (identically to the engine comparator: cheaper backend, then first-listed)."""
+    (identically to the engine comparator: the first-listed candidate)."""
     excerpt_chars = int(judge_cfg.get("excerpt_chars", 4000))
     intent = judge_cfg.get("intent")
     best = succ[0]
@@ -1704,14 +1674,14 @@ async def _judge_pair(
     cb = _judge_candidate("B", b, excerpt_chars, ctx)
     # both orderings — position-bias guard (decider.md §4); sources are hidden behind the labels.
     v1 = await asyncio.to_thread(ctx.judge_llm.compare, ca, cb, intent)
-    _meter_judge_call(ctx, backend, path, v1.cost_usd)
+    _meter_judge_call(ctx, backend, path)
     v2 = await asyncio.to_thread(
         ctx.judge_llm.compare,
         _judge_candidate("A", b, excerpt_chars, ctx),
         _judge_candidate("B", a, excerpt_chars, ctx),
         intent,
     )
-    _meter_judge_call(ctx, backend, path, v2.cost_usd)
+    _meter_judge_call(ctx, backend, path)
     pick1 = a if v1.winner == "A" else b  # ordering 1: a=A, b=B
     pick2 = b if v2.winner == "A" else a  # ordering 2: b=A, a=B
     if pick1.index == pick2.index:
@@ -1747,17 +1717,13 @@ def _fields_view(fields: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _tie_break_pair(a: _BranchOutcome, b: _BranchOutcome, ctx: _WalkCtx) -> _BranchOutcome:
-    """Deterministic tie-break identical to the engine comparator: cheaper backend, then the
-    first-listed (lower branch index)."""
-    ka = (_cost_midpoint(a.backend or "", ctx), a.index)
-    kb = (_cost_midpoint(b.backend or "", ctx), b.index)
-    return a if ka <= kb else b
+    """Deterministic tie-break identical to the engine comparator: the first-listed candidate."""
+    return a if a.index <= b.index else b
 
 
-def _meter_judge_call(ctx: _WalkCtx, backend: str, path: str, cost: float) -> None:
-    """Record one pairwise call as a `judge_call` attempt with its honest backend-reported cost, if
-    any (decider.md §4, execution.md §7)."""
-    ctx.trace.record(Attempt(backend, "judge_call", f"{path}.judge", cost_usd=cost or None))
+def _meter_judge_call(ctx: _WalkCtx, backend: str, path: str) -> None:
+    """Record one pairwise call as a `judge_call` attempt (decider.md §4, execution.md §7)."""
+    ctx.trace.record(Attempt(backend, "judge_call", f"{path}.judge"))
 
 
 def _label_of(index: int | None, results: dict[int, _BranchOutcome]) -> str:
@@ -1807,69 +1773,37 @@ def _resolve_parallel(
     disagreement = _branch_disagreement(results, shadows) if pick == "best" else None
     if pick == "merge":
         _merge_fields(winner, results, path, ctx, shadows)  # compose typed_fields into the base
-    total_cost = 0.0
-    total_basis: str | None = None  # BL-126: priority-ordering reduction alongside total_cost
     for i in sorted(results):
         r = results[i]
         spath = f"{path}.parallel[{i}]"
         bk = r.backend or labels.get(i, "?")
         if r.status.startswith("composite"):
-            if i != winner and r.status == "composite_ok":
-                # BL-134: a composite branch's real spend lives on its nested response's own
-                # usage, never on _BranchOutcome.cost (_run_branch's own composite construction
-                # never passes cost=, so it is always None there) — a composite branch that LOSES
-                # pick: best/merge, or that SHADOWS and completes within the node deadline, must
-                # still have that real cost/basis folded in exactly like a leaf loser/shadow below.
-                # Only the composite WINNER's own fold is handled separately, once, after this loop
-                # (BL-126).
-                total_cost += _branch_cost(r) or 0.0
-                total_basis = _fold_basis(total_basis, _branch_basis(r))
             continue  # a composite branch recorded its own attempts; no additional trace entry
         if i in shadows:  # a shadow runs and is recorded but never wins (execution.md §3.1(5))
             if r.status in ("ok", "cancelled", "drained"):
                 # a shadow that outlived the node deadline is still recorded (§4 M3: shadows are
-                # always recorded), with no measured cost (Law 6) — never silently dropped.
+                # always recorded) — never silently dropped.
                 drained = r.status == "drained"
                 ctx.trace.record(
                     Attempt(
                         bk,
                         "shadow",
                         spath,
-                        cost_usd=r.cost,
-                        cost_basis="billed" if r.cost else None,
                         detail="drain_over_deadline" if drained else "",
                     )
                 )
                 _keep_candidate(ctx, bk, spath, "shadow", r.response)
-                total_cost += r.cost or 0.0
-                total_basis = _fold_basis(total_basis, _branch_basis(r))
             continue
         if i == winner:
             # under merge the winner is the base whose document channels are kept wholesale (§2.4)
             cat = "merge_base" if pick == "merge" else "succeeded"
-            ctx.trace.record(
-                Attempt(
-                    bk,
-                    cat,
-                    spath,
-                    cost_usd=r.cost,
-                    cost_basis="billed" if r.cost else None,
-                    disagreement=disagreement,
-                )
-            )
-            total_cost += r.cost or 0.0
-            total_basis = _fold_basis(total_basis, _branch_basis(r))
+            ctx.trace.record(Attempt(bk, cat, spath, disagreement=disagreement))
         elif r.status == "ok":
             cat = "merge_source" if pick == "merge" else loser_cat
-            ctx.trace.record(
-                Attempt(bk, cat, spath, cost_usd=r.cost, cost_basis="billed" if r.cost else None)
-            )
+            ctx.trace.record(Attempt(bk, cat, spath))
             _keep_candidate(ctx, bk, spath, cat, r.response)  # a discarded loser worth comparing
-            total_cost += r.cost or 0.0  # a completed loser is still billed (T9)
-            total_basis = _fold_basis(total_basis, _branch_basis(r))
         elif r.status == "drained":
-            # Law 6: a drain that would outlive the node deadline — recorded, but with no measured
-            # cost (it was never awaited to completion).
+            # Law 6: a drain that would outlive the node deadline is recorded all the same.
             ctx.trace.record(Attempt(bk, loser_cat, spath, detail="drain_over_deadline"))
             _keep_candidate(ctx, bk, spath, loser_cat, r.response)
         elif r.status == "error":
@@ -1887,24 +1821,6 @@ def _resolve_parallel(
         assert resp is not None
         # per-page provenance: the winner/base supplied document.pages wholesale (§2.4/§2.7).
         _tag_source_backend(resp, wr.backend or labels.get(winner, "?"))
-        # a composite winner recorded its own attempts (skipped from total_cost above); its own
-        # internal spend already lives on resp.usage — fold it in so overwriting doesn't drop it.
-        own = (
-            (resp.usage.cost_usd or 0.0)
-            if wr.status.startswith("composite") and resp.usage
-            else 0.0
-        )
-        if wr.status.startswith("composite") and resp.usage and resp.usage.cost_usd is not None:
-            # the composite winner's own basis is already correctly folded (it went through this
-            # same reconciliation internally); fold it into the sibling total via the shared,
-            # coalescing _branch_basis helper (BL-134) — not a raw passthrough, so a composite
-            # winner whose own cost lacks a resolved basis coalesces to "unknown" here too, rather
-            # than silently folding as if it contributed nothing.
-            total_basis = _fold_basis(total_basis, _branch_basis(wr))
-        if total_cost + own > 0:
-            _set_total_cost(
-                resp, total_cost + own, total_basis
-            )  # honest money: all billed attempts summed, basis reconciled (T9, BL-126)
         out = Outcome.ok(resp, wr.quality)
         out.disagreement = disagreement  # the enclosing step gate reads it as `disagreement_over`
         return out
@@ -1918,87 +1834,6 @@ def _resolve_parallel(
     if err_classes and all(c == "invalid_input" for c in err_classes):
         return Outcome.err("invalid_input")  # unanimity
     return Outcome.err("exhausted")
-
-
-_COST_BASIS_PRIORITY: dict[str, int] = {"billed": 3, "estimated": 2, "infra_only": 1, "unknown": 0}
-
-
-def _fold_basis(current: str | None, contributed: str | None) -> str | None:
-    """Priority-ordering reduction for `usage.cost_basis` as each rung/branch's cost folds into a
-    running total (BL-126): `billed > estimated > infra_only > unknown`, monotonically
-    non-decreasing as more contributions fold in — never last-write-wins, so a cheap `billed` rung
-    can never be silently downgraded by a later, weaker-basis rung's own value."""
-    if contributed is None:
-        return current
-    if current is None:
-        return contributed
-    if _COST_BASIS_PRIORITY.get(contributed, -1) > _COST_BASIS_PRIORITY.get(current, -1):
-        return contributed
-    return current
-
-
-def _branch_cost(r: _BranchOutcome) -> float | None:
-    """The real cost contributed by a parallel branch, leaf or composite (BL-134). `_BranchOutcome.
-    cost` is populated for a leaf branch, but `_run_branch`'s own composite-branch construction
-    never passes `cost=`, so it is always `None` there — a composite branch's real spend instead
-    lives on its nested response's own `usage.cost_usd`, already correctly totalled by that
-    response's own recursive fold."""
-    if r.cost is not None:
-        return r.cost
-    if r.response is not None and r.response.usage is not None:
-        return r.response.usage.cost_usd
-    return None
-
-
-def _branch_basis(r: _BranchOutcome) -> str | None:
-    """The basis to fold for a parallel branch, leaf or composite (BL-126, extended BL-134) — None
-    unless the branch contributed a genuinely non-null cost (`_branch_cost`, which — unlike a bare
-    `r.cost` check — also recognizes a composite branch's nested cost), so a branch that reported no
-    cost at all can never dilute the reduction. Coalesces a confirmed-but-unset `cost_basis` to
-    `"unknown"` rather than a bare `None` (BL-134) — a real cost with no known basis must
-    never be folded as if it contributed nothing at all."""
-    if _branch_cost(r) is None or r.response is None or r.response.usage is None:
-        return None
-    return r.response.usage.cost_basis or "unknown"
-
-
-def _rung_basis(resp: NormalizedResponse | None, cost: float | None) -> str | None:
-    """The basis to fold for a cascade/paged-cascade rung (BL-134) — the non-parallel sibling of
-    `_branch_basis`, for the two call shapes that fold a rung's `NormalizedResponse` + already-
-    extracted cost directly rather than a `_BranchOutcome`. None unless the rung contributed a
-    genuinely non-null cost, so a rung that reported no cost at all can never dilute the reduction.
-    Coalesces a confirmed-but-unset `cost_basis` to `"unknown"` rather than a bare `None`
-    (BL-134) — a real cost with no known basis must never be folded as if it contributed
-    nothing at all."""
-    if cost is None or resp is None or resp.usage is None:
-        return None
-    return resp.usage.cost_basis or "unknown"
-
-
-def _set_total_cost(resp: NormalizedResponse, total: float, basis: str | None = None) -> None:
-    """Write the folded `usage.cost_usd` and, when given, `usage.cost_basis` (BL-126). `basis` is
-    the CALLER's own priority-ordering reduction (`_fold_basis`) over every rung/branch that
-    contributed a non-null cost as it was folded into `total` — this function applies it, it does
-    not compute it.
-
-    BL-134 hardening: a nonzero `total` must never leave `cost_basis` at the "zero-cost"
-    label `infra_only`, or unset (`None`) — reachable even after every fold site coalesces a bare
-    `None` contribution to `"unknown"` (the fold-site fix alone), because `_COST_BASIS_PRIORITY`
-    ranks `unknown` BELOW `infra_only`: a genuinely-free branch/rung's own correct `infra_only` tag
-    can still outrank a billed-but-basis-unset branch/rung's coalesced `"unknown"` tag in the SAME
-    reduction, landing here as an `infra_only`-tagged response despite a real, nonzero, partly-
-    unexplained total. When that happens, downgrade honestly to `"unknown"` rather than assert a
-    zero-cost label on a response that just got a nonzero total."""
-    from openreading.types.response import Usage
-
-    if resp.usage is None:
-        resp.usage = Usage(cost_usd=total, cost_basis=basis)
-    else:
-        resp.usage.cost_usd = total
-        if basis is not None:
-            resp.usage.cost_basis = basis
-    if total > 0 and resp.usage.cost_basis in (None, "infra_only"):
-        resp.usage.cost_basis = "unknown"
 
 
 def _tag_source_backend(resp: NormalizedResponse, backend: str) -> None:
@@ -2018,7 +1853,7 @@ def _merge_fields(
 ) -> None:
     """`pick: merge` (§2.4): vote-merge `typed_fields` across the completed non-shadow branches into
     the base (best-scoring) response. Per field: majority value; tie → highest reported confidence;
-    still tied → cheaper backend, then first-listed. The chosen field is a REAL backend's TypedField
+    still tied → first-listed. The chosen field is a REAL backend's TypedField
     — its value and confidence are never fabricated; a field no branch produced stays absent. Text /
     markdown / pages are the base's, wholesale. Per-field provenance is recorded in the trace."""
     if winner is None:
@@ -2056,8 +1891,7 @@ def _merge_fields(
 
 def _vote_field(entries: list[tuple[int, str, Any]], ctx: _WalkCtx) -> tuple[int, str, Any]:
     """Choose one (index, backend, TypedField) for a field: majority value, then highest reported
-    confidence, then cheaper backend, then first-listed (§2.4). `None` confidence sorts lowest —
-    never invented."""
+    confidence, then first-listed (§2.4). `None` confidence sorts lowest — never invented."""
     votes: dict[str, int] = {}
     for _, _, tf in entries:
         votes[_value_key(tf)] = votes.get(_value_key(tf), 0) + 1
@@ -2065,8 +1899,8 @@ def _vote_field(entries: list[tuple[int, str, Any]], ctx: _WalkCtx) -> tuple[int
     def rank(entry: tuple[int, str, Any]) -> tuple:
         idx, backend, tf = entry
         conf = tf.confidence if tf.confidence is not None else -1.0
-        # highest votes for this value, then highest confidence, then cheaper backend, then index
-        return (votes[_value_key(tf)], conf, -_cost_midpoint(backend, ctx), -idx)
+        # highest votes for this value, then highest confidence, then index
+        return (votes[_value_key(tf)], conf, -idx)
 
     return max(entries, key=rank)
 
@@ -2100,7 +1934,7 @@ async def _eval_reference(
             backend_code="strategy_reference_cycle",
         )
     tree = ctx.trees.get(name)
-    if tree is None:  # referenced strategy pruned to nothing under this request's compliance
+    if tree is None:  # referenced strategy pruned to nothing under this caller's scope
         return Outcome.err("exhausted")
     return await _eval_node(tree, f"{path}->{name}", ctx, visited | {name})
 
@@ -2115,12 +1949,13 @@ async def _eval_paged_cascade(node: dict[str, Any], path: str, ctx: _WalkCtx) ->
     Results are stitched per page, each output page carrying `pages[].source_backend`; per-page
     provenance also lands in `orchestration.pages[]`. PDF-only; a rung that fails escalates the whole
     page set forward (no keep-best rungs here — the page is simply re-parsed by a stronger backend).
-    Honest money (BL-120): `base_resp` is frozen to whichever rung ran first, so every later rung's
-    real cost is folded into the final response's `usage` here, mirroring `_eval_cascade`'s own
-    `billed_total` accumulator — a rung's spend is never dropped just because it wasn't first.
-    `cost_basis` folds via the same priority-ordering reduction as every other cascade/parallel
-    return path (BL-126), coalescing a confirmed-but-unset basis rather than a bare `None`
-    (BL-134)."""
+
+    `base_resp` is frozen to whichever rung ran first, so its `usage` describes that rung and no
+    other. This used to also fold every later rung's dollar cost into it. The dollars are gone,
+    and the counters are not summed in their place: a page re-parsed by
+    a second rung would count twice, and a `pages_processed` that exceeds the document is a number
+    nobody can act on. The trace names every rung that ran, which is where per-rung consumption
+    belongs."""
     from openreading.types.request import PageRange, Pages
 
     steps = node["steps"]
@@ -2128,14 +1963,10 @@ async def _eval_paged_cascade(node: dict[str, Any], path: str, ctx: _WalkCtx) ->
     stitched: dict[int, tuple[Any, str]] = {}  # page_number -> (Page, source_backend)
     base_resp: NormalizedResponse | None = None
     escalate_from: list[int] | None = None  # None = parse the whole doc; else these page numbers
-    billed_total = 0.0  # honest money: sum every billed rung, not just whichever ran first
-    billed_basis: str | None = None  # BL-126: priority-ordering reduction, not last-write-wins
 
     for si, step in enumerate(steps):
         spath = f"{path}.steps[{si}]"
         backend = _resolve_backend(step["backend"], ctx)
-        if backend is None:
-            break
         ctx.attempted.add(backend)
         adapter = ctx.registry.get(backend)
         if adapter is None:
@@ -2173,7 +2004,7 @@ async def _eval_paged_cascade(node: dict[str, Any], path: str, ctx: _WalkCtx) ->
                     ),
                 ),
             )
-        except (TerminalError, RetryableError, UnsupportedFeatureError, ComplianceRefused) as e:
+        except (TerminalError, RetryableError, UnsupportedFeatureError, ScopeRefused) as e:
             ctx.trace.record(Attempt(backend, f"error({classify_error(e)})", spath))
             break
         except Exception as e:
@@ -2194,15 +2025,7 @@ async def _eval_paged_cascade(node: dict[str, Any], path: str, ctx: _WalkCtx) ->
             break
         resp_i = _response_payload(result)
 
-        cost = _actual_cost(resp_i)
-        ctx.trace.record(
-            Attempt(
-                backend, "succeeded", spath, cost_usd=cost, cost_basis="billed" if cost else None
-            )
-        )
-        if cost is not None:
-            billed_total += cost  # honest money: sum every billed rung (escalated + first)
-            billed_basis = _fold_basis(billed_basis, _rung_basis(resp_i, cost))
+        ctx.trace.record(Attempt(backend, "succeeded", spath))
         if base_resp is None:
             base_resp = resp_i
         for pg in (resp_i.document.pages if resp_i.document else None) or []:
@@ -2224,18 +2047,17 @@ async def _eval_paged_cascade(node: dict[str, Any], path: str, ctx: _WalkCtx) ->
     if base_resp.document is not None and ordered:
         base_resp.document.pages = [pg for _pn, (pg, _bk) in ordered]
     ctx.trace.assign_pages([{"page": pn, "backend": bk} for pn, (_pg, bk) in ordered])
-    if billed_total > 0:
-        # honest money: every rung, not just rung 1 (BL-120); basis is the priority-ordering
-        # reduction over every contributing rung, not base_resp's own single-rung value, and never
-        # last-write-wins (BL-126).
-        _set_total_cost(base_resp, billed_total, billed_basis)
     return Outcome.ok(base_resp)
 
 
 def _supports_page_ranges(desc) -> bool:
-    """A backend advertises native page-range selection via the (extra-allowed) capability
-    `page_range_selection` (§2.7). Absent/false → the rung runs document granularity."""
-    return bool(getattr(desc.capabilities, "page_range_selection", False))
+    """A backend advertises native page-range selection via `capabilities.page_range_selection`
+    (§2.7). False → the rung runs document granularity and re-parses the whole document.
+
+    Read as a real attribute, not through `getattr`. While the field was undeclared on
+    `Capabilities`, which is `extra="allow"`, the lookup could not raise and simply answered False
+    for every shipped backend, so this branch was unreachable outside `tests/fakes.py`."""
+    return bool(desc.capabilities.page_range_selection)
 
 
 def _page_gate_fires(pg: Any, gate: dict[str, Any]) -> bool:
@@ -2270,10 +2092,6 @@ async def _eval_cascade(
     best: tuple[float, int, NormalizedResponse, bool] | None = None
     ran = 0
     deadline_hit = False
-    billed_total = (
-        0.0  # honest money: sum every billed rung (escalated + winner), not just the last
-    )
-    billed_basis: str | None = None  # BL-126: priority-ordering reduction, not last-write-wins
 
     for i, step in enumerate(steps):
         spath = f"{path}.steps[{i}]"
@@ -2296,12 +2114,6 @@ async def _eval_cascade(
                 continue
 
             if _gated_parallel_step(step) and outcome.response is not None:
-                # honest money: the composite's own spend joins the running total exactly as a
-                # leaf's does, so a later accept / keep-best reports every billed rung.
-                own = (outcome.response.usage.cost_usd or 0.0) if outcome.response.usage else 0.0
-                billed_total += own
-                if outcome.response.usage and outcome.response.usage.cost_usd is not None:
-                    billed_basis = _fold_basis(billed_basis, outcome.response.usage.cost_basis)
                 snap = probe(
                     outcome.response,
                     doc_bytes=doc_bytes(ctx.req),
@@ -2318,22 +2130,8 @@ async def _eval_cascade(
                     if best is None or g.quality > best[0]:
                         best = (g.quality, i, outcome.response, outcome.budget_exhausted)
                     continue
-                if billed_total > 0:
-                    _set_total_cost(outcome.response, billed_total, billed_basis)
                 return outcome
 
-            # a gate-less composite step → accept, folding prior escalated rungs' billed cost.
-            if billed_total > 0 and outcome.response is not None:
-                own_usage = outcome.response.usage
-                own_cost = own_usage.cost_usd if own_usage is not None else None
-                own_basis = (
-                    own_usage.cost_basis if own_usage is not None and own_cost is not None else None
-                )
-                _set_total_cost(
-                    outcome.response,
-                    (own_cost or 0.0) + billed_total,
-                    _fold_basis(billed_basis, own_basis),
-                )
             return outcome
 
         # a leaf step
@@ -2363,9 +2161,6 @@ async def _eval_cascade(
 
         # success — this leaf ran
         ran += 1
-        if rr.cost is not None:
-            billed_total += rr.cost  # honest money: sum every billed rung
-            billed_basis = _fold_basis(billed_basis, _rung_basis(rr.response, rr.cost))
         resp = rr.response
         assert resp is not None
         snap = probe(resp, doc_bytes=doc_bytes(ctx.req), mime_type=ctx.req.document.mime_type)
@@ -2403,16 +2198,10 @@ async def _eval_cascade(
             if best is None or g.quality > best[0]:
                 best = (g.quality, i, resp, False)
             continue
-        if billed_total > 0:
-            _set_total_cost(
-                resp, billed_total, billed_basis
-            )  # honest money: all billed rungs, not just the winner (basis reconciled, BL-126)
         return Outcome.ok(resp, g.quality)
 
     # exhausted (or the deadline ended the walk)
     if best is not None and on_quality_exhausted == "best_effort":
-        if billed_total > 0:
-            _set_total_cost(best[2], billed_total, billed_basis)
         return Outcome.deficient(best[2], best[0], budget_exhausted=deadline_hit or best[3])
     if deadline_hit:
         return Outcome.err("budget_exhausted")
@@ -2425,7 +2214,6 @@ class _RunResult:
     backend: str = ""
     response: NormalizedResponse | None = None
     error_class: str | None = None
-    cost: float | None = None
     # Ledger T2 §7.3/§4.2: the exact Attempt this call appended (status == "ok" only), returned by
     # reference so a caller binds gates/category to the RIGHT record directly rather than
     # re-deriving "the last one" via `ctx.trace.attempts[-1]`. Defensive hardening, not a fix for a
@@ -2444,11 +2232,6 @@ async def _run_leaf(
     step: dict[str, Any], path: str, ctx: _WalkCtx, deadline_ms: float
 ) -> _RunResult:
     backend = _resolve_backend(step["backend"], ctx)
-    if backend is None:
-        ctx.trace.record(
-            Attempt(step["backend"], "error(exhausted)", path, detail="no_untried_backend")
-        )
-        return _RunResult("exhausted")
     ctx.attempted.add(backend)  # walk-wide (T12)
     adapter = ctx.registry.get(backend)
     if adapter is None:
@@ -2470,7 +2253,7 @@ async def _run_leaf(
                 adapter, ctx.req, ctx.broker, ctx.clock, int(deadline_ms - started)
             ),
         )
-    except (TerminalError, RetryableError, UnsupportedFeatureError, ComplianceRefused) as e:
+    except (TerminalError, RetryableError, UnsupportedFeatureError, ScopeRefused) as e:
         cls = classify_error(e)
         ctx.trace.record(
             Attempt(
@@ -2518,21 +2301,17 @@ async def _run_leaf(
         return _RunResult("skip", backend, journal_seq=result.journal_seq, replayed=result.replayed)
 
     resp = _response_payload(result)
-    cost = _actual_cost(resp)
     attempt = Attempt(
         backend,
         "succeeded",
         path,
         duration_ms=int(ctx.clock.now_ms() - started),
-        cost_usd=cost,
-        cost_basis="billed" if cost else None,
     )
     ctx.trace.record(attempt)
     return _RunResult(
         "ok",
         backend,
         response=resp,
-        cost=cost,
         attempt=attempt,
         journal_seq=result.journal_seq,
         replayed=result.replayed,
@@ -2607,7 +2386,7 @@ def _execute_leaf_sync(
 ) -> NormalizedResponse:
     """The synchronous submit→drive→normalize→meter path — runs in a worker thread (T2), so
     run_to_completion's asyncio.run is safe. Mirrors executor.execute_plan's inner loop, metering
-    included: every rung's own `usage.cost_usd` is what the honest-money aggregation sums.
+    included: every rung's own `usage` counters are what `apply_cost_report` fills.
 
     `on_submit` (parallel branches) hands the accepted Job back to the orchestration loop before
     the drive begins, so a loser's live backend job can be cancelled (execution.md §3.3)."""
@@ -2683,7 +2462,7 @@ def _apply_gates(
 
 def _gate_signals(records: list[GateRecord]) -> dict[str, Any]:
     """The observed-vs-threshold signals a gate-band decider is shown (decider.md §3.1, §5) — only
-    the predicates that actually reported (available), never a compliance surface."""
+    the predicates that actually reported, with unavailable values omitted."""
     return {
         r.predicate: {"observed": r.observed, "threshold": r.threshold}
         for r in records
@@ -2714,36 +2493,27 @@ def _child_ctx(ctx: _WalkCtx, deadline_ms: float) -> _WalkCtx:
     return replace(ctx, deadline_ms=deadline_ms)
 
 
-def _resolve_backend(slug: str, ctx: _WalkCtx) -> str | None:
-    """The concrete backend id this step will dispatch, or None when `auto` has nothing left.
+def _resolve_backend(slug: str, ctx: _WalkCtx) -> str:
+    """The concrete backend id this step will dispatch.
 
-    The last point at which the id is known and nothing has been built yet — every leaf-dispatch
-    site (`_run_leaf`, `_run_branch`, `_eval_paged_cascade`) passes through here before the
-    registry lookup, so it is also the last place the caller's allow-list can be enforced.
+    Every leaf now names its own backend, so this is a pass-through with one gate on it. It stays
+    a function because it is the last point at which the id is known and nothing has been built
+    yet: every leaf-dispatch site (`_run_leaf`, `_run_branch`, `_eval_paged_cascade`) passes
+    through here before the registry lookup, so it is the last place the caller's allow-list can
+    be enforced.
 
     That enforcement is redundant with compile_strategy's prune, and is here anyway. An allow-list
     is a security control, and the cost of the two layers disagreeing is asymmetric: a spurious
     refusal is a support ticket, while a missed one spends someone else's vendor credits and looks
-    exactly like normal traffic. `auto` in particular is bounded only by the CONTENTS of
-    `ctx.eligible`, so anything that ever puts an id into that list by another route — or a node
-    type added later that resolves a backend without going through the prune — silently reopens
-    the hole. Failing closed here means it cannot.
+    exactly like normal traffic. A node type added later that resolves a backend without going
+    through the prune would silently reopen the hole. Failing closed here means it cannot.
     """
-    resolved: str | None = slug
-    if slug == "auto":
-        resolved = next((c for c in ctx.eligible if c not in ctx.attempted), None)
-        if resolved is None:
-            return None
-    if ctx.backend_allowlist is not None and resolved not in ctx.backend_allowlist:
+    if ctx.backend_allowlist is not None and slug not in ctx.backend_allowlist:
         raise ScopeRefused(
-            f"this API key is not scoped to reach backend {resolved!r}",
-            backend_code=resolved,
+            f"this API key is not scoped to reach backend {slug!r}",
+            backend_code=slug,
         )
-    return resolved
-
-
-def _actual_cost(resp: NormalizedResponse) -> float | None:
-    return resp.usage.cost_usd if resp.usage and resp.usage.cost_usd is not None else None
+    return slug
 
 
 def _is_composite(node: dict[str, Any]) -> bool:

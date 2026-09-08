@@ -1,5 +1,5 @@
-"""Tesseract adapter — the first SubprocessAdapter. Local OCR with zero data egress (offline
-compliance floor for scanned docs). pytesseract shells out to the system `tesseract` binary.
+"""Tesseract adapter, the first SubprocessAdapter. Local OCR with zero data egress for scanned
+documents. pytesseract shells out to the system `tesseract` binary.
 
 Tesseract is the LOCAL EXCEPTION that genuinely has confidence: image_to_data returns per-word
 conf 0-100, so block_confidence is NATIVE (not the "deterministic parser has no confidence" case).
@@ -30,8 +30,6 @@ from openreading.types.descriptor import (
     AdapterDescriptor,
     BatchIntake,
     Capabilities,
-    ComplianceProfile,
-    Cost,
     LivenessProbe,
     Output,
     OutputChannels,
@@ -125,7 +123,7 @@ def _descriptor() -> AdapterDescriptor:
         # cached on self) — verified against the real R1/R2 conformance kit, not assumed.
         protocol_version=2,
         adapter_impl="subprocess",
-        provisioning=Provisioning(byo_mode=["pip"], auth="none", billing_target="caller_infra"),
+        provisioning=Provisioning(byo_mode=["pip"], auth="none"),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(
             ocr="verified",
@@ -137,15 +135,8 @@ def _descriptor() -> AdapterDescriptor:
             reading_order="claimed",
             multi_column=False,
             languages=["eng", "and 100+ via traineddata"],
+            page_range_selection=True,
             input_formats=["png", "jpg", "tiff", "bmp", "pdf (rasterized)"],
-        ),
-        cost=Cost(native_unit="cpu_second", basis="infra_only", usd_per_page_equiv_low=0.0),
-        compliance=ComplianceProfile(
-            hipaa_baa="na_local",
-            trains_on_customer_data="na_local",
-            runs_fully_local=True,
-            data_region_options=["*"],
-            max_retention_hours=0,
         ),
         runtime=RuntimeProfile(
             offline_capable=True,
@@ -173,8 +164,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="low",
-            integration_priority="P1",
-            priority_reason="Offline OCR floor for scanned loan/clinical docs; first subprocess adapter.",
         ),
         # v0.4 (Manifest v0.6): no native multi-doc API (a local subprocess). CPU-bound OCR, so cap
         # platform batch concurrency near the core count (the runner takes min(--jobs, this)).

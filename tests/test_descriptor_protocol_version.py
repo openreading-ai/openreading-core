@@ -1,4 +1,4 @@
-"""Ledger T4a (AC-8) — the `adapter-descriptor.v0.7.json` bump: the optional `protocol_version`
+"""Ledger T4a (AC-8) — the `adapter-descriptor.v0.8.json` bump: the optional `protocol_version`
 integer on the wire schema, and the pydantic `AdapterDescriptor` model's own, stricter requirement
 that every in-process construction declare it explicitly (no default).
 """
@@ -20,25 +20,23 @@ def _desc(**over) -> dict:
         "provisioning": {"auth": "api_key"},
         "wait_modes": ["inline"],
         "capabilities": {"ocr": "verified"},
-        "cost": {"native_unit": "page"},
-        "compliance": {"hipaa_baa": "no"},
         "runtime": {"offline_capable": False},
     }
     body.update(over)
     return body
 
 
-def test_descriptor_v07_is_current():
+def test_descriptor_v08_is_current():
     # the "which file is current" pin migrates forward with each bump (established convention —
     # see tests/test_descriptor_idempotency_cancel.py's own comment on the v0.6->v0.7 move).
-    assert schemas.DESCRIPTOR_SCHEMA_FILE == "adapter-descriptor.v0.7.json"
+    assert schemas.DESCRIPTOR_SCHEMA_FILE == "adapter-descriptor.v0.8.json"
 
 
 def test_v07_descriptor_is_additive_a_v06_descriptor_still_validates():
     """The backward-compatibility guarantee in one assertion: adding `protocol_version` to the
     WIRE schema must not invalidate a single existing (v0.6-shaped, no protocol_version)
     descriptor — the JSON schema deliberately leaves it optional (see the field's own description
-    in adapter-descriptor.v0.7.json) even though the pydantic model requires it."""
+    in adapter-descriptor.v0.8.json) even though the pydantic model requires it."""
     schemas.validate_descriptor(_desc())
 
 

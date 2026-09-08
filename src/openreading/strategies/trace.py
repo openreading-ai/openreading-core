@@ -73,8 +73,6 @@ class Attempt:
     category: str  # a member of CATEGORIES, or "error(<class>)"
     node: str  # node path / label
     duration_ms: int | None = None
-    cost_usd: float | None = None
-    cost_basis: str | None = None  # backend-reported basis for cost_usd, e.g. "billed"
     detail: str = ""
     # The adapter's OWN machine-readable failure code (`TerminalError.backend_code`), forwarded
     # rather than classified. The engine's error CLASS is a closed, schema-versioned set with an
@@ -104,10 +102,6 @@ class Attempt:
         d: dict[str, Any] = {"backend": self.backend, "category": self.category, "node": self.node}
         if self.duration_ms is not None:
             d["duration_ms"] = self.duration_ms
-        if self.cost_usd is not None:
-            d["cost_usd"] = self.cost_usd
-        if self.cost_basis is not None:
-            d["cost_basis"] = self.cost_basis
         if self.detail:
             d["detail"] = self.detail
         if self.code:
@@ -170,9 +164,6 @@ class Trace:
         n = self._dp_seq
         self._dp_seq += 1
         return n
-
-    def total_cost(self) -> float:
-        return sum(a.cost_usd or 0.0 for a in self.attempts)
 
     def orchestration(self, *, chosen_backend: str | None, outcome: str) -> dict[str, Any]:
         """Build the orchestration dict. `fallback_depth` = attempts that reached a backend

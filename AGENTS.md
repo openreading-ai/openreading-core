@@ -58,14 +58,15 @@ understands what the package is for and how it fits the whole:
 - **The design decisions that would otherwise look arbitrary.** Write down the failure each
   choice avoids, because that failure is invisible from the code that resulted. Three this repo
   already carries:
-  - Compliance is a hard filter that no fallback relaxes. A fallback that readmits a backend with
-    no signed business associate agreement (BAA) leaks protected health information silently.
+  - Core holds no fact it cannot verify. A compliance filter reading a per-vendor table of BAAs
+    and training postures looked authoritative and could not be true, so a stale entry routed a
+    document to a backend the operator believed was excluded and the run succeeded.
   - A channel is one named part of the response, such as text, tables, or confidence. A channel a
     backend cannot produce is omitted with a `warnings[]` entry, never fabricated, because a
     fabricated confidence is indistinguishable from a measured one downstream.
   - The router never branches on backend type. Write one `if type == …` and every new backend
     needs a router change.
-- **How it relates to its siblings**: name the module (`openreading.router.compliance`), not a
+- **How it relates to its siblings**: name the module (`openreading.router.router`), not a
   markdown file.
 
 Condense, don't transcribe. Narrative, build history, and sprint chatter do not belong.
@@ -128,7 +129,7 @@ them. A guide demonstrates, never restates.
 
 ## Golden rules
 
-- **`make verify` green is the finish line.** Lint + typecheck + tests at a 91% coverage floor
+- **`make verify` green is the finish line.** Lint + typecheck + tests at a 94% coverage floor
   (`uv run pytest -m "not live" --collect-only` for the offline count) + schema-validate +
   extras-parity + CLI/strategy/compare/leaderboard smoke. Offline: no keys, no network.
 - **`make sync` before anything else.** That target runs `uv sync --all-extras --dev`. A venv
@@ -138,8 +139,12 @@ them. A guide demonstrates, never restates.
   injected faults. Real API behaviour is proven only in the keyed live lane
   (`make verify-live`), which skips cleanly without keys. Never add a network-dependent test to
   `make verify`.
-- **Compliance is never relaxed by fallback.** Unverified compliance fails closed. No
-  strategy/route construct may widen the compliance-eligible set.
+- **Core holds no fact it cannot verify.** A constraint core cannot check is a constraint core
+  must not appear to enforce. `policy.backends` supplies the default chain, while an explicitly
+  named backend runs directly. Server API-key scope is the caller authorization boundary. Being
+  wrong about a capability costs one round trip, because the
+  backend refuses and the chain moves on; being wrong about a vendor claim cost a silent
+  exclusion nothing recovered from.
 - **Schemas are the contract.** Change `src/openreading/schemas/*.json` deliberately. The
   pydantic models in `openreading.types` mirror them and are round-trip tested.
 - **Evals are a benchmark harness.** `openreading.evals` ships scorers, a runner, a leaderboard,
@@ -161,7 +166,7 @@ src/openreading/
   schemas/     vendored JSON Schemas + validator              (docstring: the contract, versions)
   types/       pydantic models + control-plane dataclasses
   adapters/    one package per backend + registry              (docstring: adding a backend)
-  router/      driver + 3-stage compliance-first router
+  router/      driver + backend resolution (the caller's list, in the caller's order)
   strategies/  optional openreading.yaml orchestration         (docstrings: grammar in model.py,
                execution in engine.py, signals, decider, cookbook in presets.py, Plain in plain.py)
   comparison/  cross-backend delta, pure over responses        (docstring: the semantics)
@@ -214,7 +219,7 @@ or assume anything outside this package.
 
 Here lives the whole 3×3 grid, which is parse, compare and strategy across the CLI, the Python
 API and the agent surface. That means the contract (schemas, types, geometry), every adapter and
-the compliance-first router, the credential broker, strategies (grammar, engine, signals,
+the router, the credential broker, strategies (grammar, engine, signals,
 calibrate, explain, replay, decision points), compare, batch, the ledger, `derive/`, the
 conformance kit, the thin JSON server, and the benchmark **harness** with one synthetic case.
 
@@ -242,7 +247,10 @@ of those is closed, not reviewed.
   shipped code is exactly the authoritative-and-wrong document the rule exists to prevent.
 - Do not commit run scratch (`GOAL*.md`, `PROGRESS.md`, prompts) at the root. That is the
   company repo's `runs/`.
-- Do not widen the compliance-eligible set from a strategy, route, or fallback.
+- Do not let `routing.fallback` add to the default chain. It reorders within the resolved set and
+  never widens it. Do not reintroduce a node that resolves its own backend: every strategy leaf
+  names the backend it runs, which is why a file can be read. Server API-key scope narrows every
+  dispatch, including explicitly named strategy leaves.
 - Do not add a test that needs a key or the network to `make verify`.
 - Do not lower `--cov-fail-under`. Raise it as coverage climbs, and the README badge with it.
 

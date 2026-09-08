@@ -26,13 +26,11 @@ from openreading.derive import (
     utf8_slice,
 )
 from openreading.types.blocks import Block, Citation, TypedField
-from openreading.types.cost import CostBasis, CostReport
+from openreading.types.cost import CostReport
 from openreading.types.descriptor import (
     AdapterDescriptor,
     Capabilities,
-    ComplianceProfile,
     ConfigField,
-    Cost,
     CredentialField,
     Output,
     OutputChannels,
@@ -132,9 +130,7 @@ def _descriptor() -> AdapterDescriptor:
         protocol_version=2,
         adapter_impl="http",
         operations=["OCR", "FormParser", "LayoutParser", "CustomExtractor"],
-        provisioning=Provisioning(
-            byo_mode=["cloud_credential"], auth="gcp_adc", billing_target="caller_account"
-        ),
+        provisioning=Provisioning(byo_mode=["cloud_credential"], auth="gcp_adc"),
         wait_modes=[WaitMode.INLINE],
         capabilities=Capabilities(
             ocr="verified",
@@ -150,24 +146,6 @@ def _descriptor() -> AdapterDescriptor:
             languages=["en", "and 200+ (OCR)"],
             input_formats=["pdf", "tiff", "gif", "png", "jpg", "bmp", "webp"],
             max_pages_per_request="15 sync / 500 batch",
-        ),
-        cost=Cost(
-            native_unit="page",
-            basis="estimated",
-            usd_per_page_equiv_low=0.0006,
-            usd_per_page_equiv_high=0.03,
-            lossiness="none",
-        ),
-        compliance=ComplianceProfile(
-            hipaa_baa="yes",
-            soc2="verified",
-            gdpr="verified",
-            pci="verified",
-            trains_on_customer_data="no",
-            data_region_options=["us", "eu", "europe-west2", "europe-west3", "asia-south1"],
-            data_retention="in-memory sync processing (~0 retention)",
-            max_retention_hours=24,
-            runs_fully_local=False,
         ),
         runtime=RuntimeProfile(
             offline_capable=False, license="proprietary", version_pin="documentai v1"
@@ -187,8 +165,6 @@ def _descriptor() -> AdapterDescriptor:
         ),
         router=RouterHints(
             normalization_difficulty="high",
-            integration_priority="P0",
-            priority_reason="Best-in-class hosted PHI path: self-serve BAA + verified no-train + handwriting.",
         ),
         # Document AI authenticates by ADC (ambient); credentials_path (BL-155) is graded secret
         # even though it is only a path, not a bearer token — its resolved value is where the
@@ -300,7 +276,13 @@ class GoogleDocumentAIAdapter(BackendAdapter):
                 "Document AI sync needs document bytes/path", backend_code="unsupported_input"
             )
         try:
-            raw = client.process(name, content, d.mime_type or "application/pdf")
+            if not d.mime_type:
+                raise TerminalError(
+                    "Document AI needs a media type and core could not identify this document; "
+                    "pass document.mime_type explicitly",
+                    backend_code="unsupported_input",
+                )
+            raw = client.process(name, content, d.mime_type)
         except (RetryableError, TerminalError):
             raise
         except Exception as e:  # noqa: BLE001
@@ -623,10 +605,4 @@ class GoogleDocumentAIAdapter(BackendAdapter):
     def report_cost(self, job: Job) -> CostReport:
         raw = job.raw.payload if job.raw else {}
         pages = len((raw.get("document", raw) or {}).get("pages", [])) or 1
-        return CostReport(
-            native_unit="page",
-            native_quantity=float(pages),
-            cost_usd=0.0015 * pages,
-            basis=CostBasis.ESTIMATED,
-            billing_target="caller_account",
-        )
+        return CostReport(native_unit="page", native_quantity=float(pages))

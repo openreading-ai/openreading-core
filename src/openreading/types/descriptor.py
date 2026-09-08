@@ -1,9 +1,37 @@
 """AdapterDescriptor: the static, machine-readable record each adapter ships.
 
-The router reads it to check eligibility, rank candidates, and
-build the capability matrix — which is what keeps the router from ever branching on backend
-type. Mirrors the file `openreading.schemas.DESCRIPTOR_SCHEMA_FILE` names, currently
-`src/openreading/schemas/adapter-descriptor.v0.7.json`. Bump the constant and this line
+Two kinds of field live here, and only one of them is allowed to change what core does.
+
+**Facts about this machine and this process.** `id`, `type`, `wait_modes`, `protocol_version`,
+`credentials_spec`, `config_spec`, `signup_url`, `accepts_url`, `batch`, `liveness`. Core verifies
+each of these every run: the id is what the registry resolves, the credentials either are in the
+environment or are not, the adapter either implements the protocol version it claims or fails
+registration. These are load-bearing, and they are safe to be load-bearing because being wrong
+about one produces an error rather than a quieter success.
+
+**Claims about a vendor.** `capabilities.*`, `runtime.*`, `input_formats`, `max_pages_per_request`,
+`languages`, `idempotency_supported`, `cancel_supported`, `router.normalization_difficulty`. Every
+one is a maintainer's reading of a docs page owned by a company this project does not control.
+**Core never branches on these.** They are documentation, and `tests/test_descriptor_is_documentation.py`
+holds them to it: each is asserted to be read at zero sites outside this module and the adapter
+that fills it in.
+
+The reason is not tidiness. Three features used to read exactly this kind of field and decide with
+it: the compliance filter, the capability gate, and the cost scorer. All three are gone. Each was
+wrong the same way. A vendor revises a page, nothing here detects the drift, and the failure is
+silent: the run succeeds having routed a document somewhere the operator believed was excluded, or
+having skipped a backend that would have worked. **A fact core cannot verify must not change what
+core does.** Being wrong must produce an error, not a quieter success.
+
+Keeping them current is a documentation job, not a correctness one, which is the point: a stale
+`languages` list misinforms a person reading the catalog and cannot mis-route a document. Every
+claim carries its evidence in `sources`, a list of `{url, accessed, supports}` — the URL a
+maintainer read, the day they read it, and what it established. That dated citation is the honest
+form for a fact about someone else, because it lets a reader judge staleness instead of trusting
+it. The refresh procedure lives in the `openreading.adapters` runbook.
+
+Mirrors the file `openreading.schemas.DESCRIPTOR_SCHEMA_FILE` names, currently
+`src/openreading/schemas/adapter-descriptor.v0.8.json`. Bump the constant and this line
 together.
 """
 
@@ -26,8 +54,6 @@ class Provisioning(BaseModel):
         Literal["api_key", "cloud_credential", "pip", "container", "weights", "endpoint"]
     ] = Field(default_factory=list)
     auth: Literal["none", "api_key", "sigv4", "oauth2", "entra", "gcp_adc"] = "none"
-    # 'openreading' (resale) is intentionally never emitted; kept in the enum for schema parity.
-    billing_target: Literal["caller_account", "openreading", "caller_infra"] = "caller_account"
 
 
 class CredentialField(BaseModel):
@@ -79,6 +105,12 @@ class Capabilities(BaseModel):
     human_in_the_loop: CapabilityValue = False
     languages: list[str] = Field(default_factory=list)
     input_formats: list[str] = Field(default_factory=list)
+    # §2.7: the backend can parse a NAMED SUBSET of pages, so a page-granularity cascade can
+    # re-run only the pages that failed a gate. A ceiling like `max_pages` is not selection and
+    # does not qualify. Declared rather than left to `extra="allow"`: `_supports_page_ranges`
+    # reads it through `getattr`, so while it was undeclared it returned False for every backend
+    # and the whole per-page path was unreachable outside the fakes in `tests/fakes.py`.
+    page_range_selection: bool = False
     max_pages_per_request: int | str | None = None
     max_file_size: str | None = None
 
@@ -108,41 +140,6 @@ class Output(BaseModel):
     block_granularity: Literal["word", "line", "paragraph", "section", "element"] | None = None
 
 
-class Cost(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    native_unit: Literal[
-        "page", "credit", "token", "doc", "gpu_second", "cpu_second", "subscription"
-    ] = "page"
-    usd_per_page_equiv_low: float | None = None
-    usd_per_page_equiv_high: float | None = None
-    basis: Literal["billed", "estimated", "infra_only", "unknown"] = "unknown"
-    lossiness: Literal["none", "page-def", "per-doc", "credit", "subscription"] = "none"
-
-
-class ComplianceProfile(BaseModel):
-    # extra="allow" keeps forward-compat for any future §4.3 field an adapter carries.
-    model_config = ConfigDict(extra="allow")
-
-    hipaa_baa: Literal["yes", "tier_gated", "no", "na_local"] = "no"
-    soc2: CapabilityValue = False
-    gdpr: CapabilityValue = False
-    pci: CapabilityValue = False
-    data_region_options: list[str] = Field(default_factory=list)
-    data_retention: str | None = None
-    # 'unverified' = the vendor's no-train claim is unconfirmed → the router fails closed unless
-    # RouterConfig.allow_unverified_compliance is set
-    # (internal/research/openreading/routing_and_compliance.md §3/§4).
-    trains_on_customer_data: Literal["yes", "no", "opt_out", "na_local", "unverified"] = "no"
-    runs_fully_local: bool = False
-    # richer §4.3 fields the compliance filter reads
-    # (internal/research/openreading/routing_and_compliance.md):
-    max_retention_hours: float | None = None
-    train_opt_out_precondition: str | None = None
-    zdr_flag: str | None = None
-    phi_path_constraints: list[str] = Field(default_factory=list)
-
-
 class RuntimeProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -163,8 +160,6 @@ class RouterHints(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     normalization_difficulty: Literal["low", "medium", "high"] | None = None
-    integration_priority: Literal["P0", "P1", "P2"] | None = None
-    priority_reason: str | None = None
 
 
 class Source(BaseModel):
@@ -220,8 +215,6 @@ class AdapterDescriptor(BaseModel):
     provisioning: Provisioning
     wait_modes: list[WaitMode]
     capabilities: Capabilities
-    cost: Cost
-    compliance: ComplianceProfile
     runtime: RuntimeProfile
     operations: list[str] = Field(default_factory=list)
     adapter_impl: Literal["http", "in_process", "subprocess", "container"] | None = None
@@ -232,7 +225,7 @@ class AdapterDescriptor(BaseModel):
     batch: BatchIntake | None = None
     # v0.5 — liveness-probe declaration (Pulse). None ⇒ no probe; the platform infers a status
     # from configuration instead. Never read by the router: liveness is a diagnostic, never
-    # routing input, so it cannot widen the compliance-eligible set (internal/design/liveness.md §7).
+    # routing input, so it cannot widen the resolved backend set (internal/design/liveness.md §7).
     liveness: LivenessProbe | None = None
     # v0.2 — BYO-credential declaration (drives the env broker + readiness UI; the router never
     # branches on backend type, and the broker never hard-codes per-adapter keys).

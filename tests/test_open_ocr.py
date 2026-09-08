@@ -146,8 +146,6 @@ def test_text_pages_and_billed_usage():
     assert resp.document.page_count == 2
     assert resp.backend.version == "openocr/tesseract"  # which aggregated engine ran
     assert resp.usage is not None
-    assert resp.usage.cost_usd == pytest.approx(0.001)  # the ACTUAL debit, not an estimate
-    assert resp.usage.cost_basis == "billed"
     assert resp.usage.duration_ms == 148
     # blocks are channel X and requested by default → warned, never fabricated
     assert resp.document.pages is None

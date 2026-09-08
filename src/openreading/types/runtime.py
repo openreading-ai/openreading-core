@@ -26,7 +26,6 @@ class ResolvedCredentials:
 @dataclass
 class RunContext:
     credentials: ResolvedCredentials | None = None
-    compliance: dict | None = None  # request.compliance, already checked; for adapter self-checks
     idempotency_key: str | None = None
     runtime: dict | None = (
         None  # request.backend.runtime (mode/image/endpoint/device/system_deps_ok)

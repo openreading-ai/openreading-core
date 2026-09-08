@@ -6,10 +6,9 @@ one document. Neither covers the cell this module fills
 
 `run_leaderboard` runs the SAME dataset (the evals.dataset case.json shape) across N named,
 registered backends through the UNCHANGED `evals.runner.run_dataset`/`run_case` path — same
-per-case compliance gate, same five-dimension scorer, no second scoring or gating code path (AC-1)
+per-case execution path, same five-dimension scorer, and no second scoring path (AC-1)
 — and ranks backends by measured mean score on that one dataset. Everything below is aggregation
-over `DatasetReport`s `run_dataset` already produces; nothing here re-implements or re-decides
-compliance or scoring.
+over `DatasetReport`s `run_dataset` already produces; nothing here re-implements execution or scoring.
 
 Deliberately narrow: never touches `Router._score` / `_QUALITY_BY_PRIORITY` / any adapter's
 `integration_priority` (AC-9); never persists a run store or trend history across invocations (one
@@ -76,14 +75,14 @@ def run_leaderboard(
     router_config: RouterConfig | None = None,
 ) -> BenchmarkReport:
     """Run every case in `dataset_dir` against every named backend through the unchanged
-    `evals.runner.run_dataset` path (itself just `run_case` per case — AC-1/AC-2's compliance gate
+    `evals.runner.run_dataset` path (itself just `run_case` per case, with the same scorer
     and AC-3's honest-unscored convention carry over unmodified), and rank backends by
     `DatasetReport.mean_overall` on this one dataset.
 
     Raises `ValueError` for fewer than two backends or a backend id `registry` doesn't know
     (mirroring `strategies.calibrate.calibrate_strategy`'s identical `rung1_backend` check); a
     per-case backend fault (missing credentials, a real submit/poll/normalize failure, a
-    compliance refusal) never raises here — it is scored, per `run_case`'s own existing contract.
+    backend refusal) never raises here. It is scored per `run_case`'s existing contract.
     """
     # Lazy (function-local), not module-level: comparison.report and strategies.calibrate each sit
     # behind an import chain that reaches back into evals.* at THEIR OWN module-load time (e.g.
@@ -92,7 +91,6 @@ def run_leaderboard(
     # cross-package pull in this file already happens to be cycle-safe at module level; these two
     # are the only ones that aren't, so only these two are deferred.
     from openreading.comparison.report import _NON_DETERMINISTIC
-    from openreading.strategies.calibrate import _descriptor_cost
 
     if len(backend_ids) < 2:
         raise ValueError(f"leaderboard needs at least two backends (got {len(backend_ids)})")
@@ -138,7 +136,6 @@ def run_leaderboard(
             n_cases=len(reports[bid].results),
             n_scored=_n_scored(reports[bid]),
             errors=reports[bid].errors,
-            cost_per_doc=_descriptor_cost(adapters[bid].descriptor),  # REUSE, not reinvented
             non_deterministic=bid in _NON_DETERMINISTIC,
             dimensions=_dimension_means(reports[bid]),
         )
