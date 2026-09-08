@@ -35,7 +35,7 @@ them.
   stage reads it and a key that does nothing in a file that gates compliance is one a reader will
   try to rely on. The config `version` const stays `1`: no file that was valid and meaningful
   becomes invalid.
-- **`examples/tutorial.md`, the guided walkthrough.** Seventeen steps from `uv sync` to a
+- **`tutorial/README.md`, the guided walkthrough.** Seventeen steps from `uv sync` to a
   policy, a self-escalating strategy, a folder run and `openreading serve`, over the documents in
   `examples/`. It needs no key and no network, because it runs on `pymupdf` and `tesseract` only.
   Three IRS forms join the two bank statements there: `schedule_a_2024.pdf` and `1040_2024.pdf`

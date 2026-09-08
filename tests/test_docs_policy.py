@@ -1,7 +1,7 @@
 """Documentation lives in code (AGENTS.md). This test is what makes that rule enforceable.
 
 Tracked markdown is limited to the root project files, the GitHub templates under `.github/`,
-one `README.md` per directory, the one guided walkthrough at `examples/tutorial.md`, and design
+one `README.md` per directory (the guided walkthrough is `tutorial/README.md`), and design
 records for work that is **not built yet** under `design/` and `product/specs/`. Everything else — reference docs, research packs, run logs —
 belongs in a module docstring next to the code it describes, or in the private
 `openreading` company repo (which checks this repo out as `core/`). A separate
@@ -47,12 +47,12 @@ ALLOWED_ROOT_MD = frozenset(
 # the code they propose to change, and deleted when that code lands (AGENTS.md).
 DESIGN_DIRS = frozenset({"design", "product"})
 
-# The one guided walkthrough, listed by exact path rather than by a pattern anyone could widen.
-# It teaches the CLI over the documents in `examples/`, so it lives beside them, and it
-# demonstrates rather than restates: every command it prints is one a reader pastes, and every
-# strategy block in it is executed by `tests/test_docs_truth.py`. A second file here would be the
-# shredded-docs failure the allowlist exists to prevent, so adding one takes a deliberate edit.
-ALLOWED_PATHS = frozenset({"examples/tutorial.md"})
+# Empty, and worth keeping as a named seam rather than deleting. The guided walkthrough used to
+# need an entry here: it lived at `examples/tutorial.md`, beside the documents it parses, which no
+# rule below could express. It is `tutorial/README.md` now and passes as an ordinary directory
+# README, so the exception is gone rather than maintained. Anything added back takes a deliberate
+# edit, which is the point.
+ALLOWED_PATHS: frozenset[str] = frozenset()
 
 
 def _tracked(pathspec: str) -> list[str]:

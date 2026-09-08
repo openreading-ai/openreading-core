@@ -131,7 +131,7 @@ tesseract                      oss_library        no          tesseract binary (
 
 ## Your first parse
 
-> **Want the guided version?** [`examples/tutorial.md`](examples/tutorial.md) walks the whole tool
+> **Want the guided version?** [`tutorial/README.md`](tutorial/README.md) walks the whole tool
 > in seventeen steps, from this first parse to a policy, a self-escalating strategy, a folder run
 > and the HTTP server. It uses the documents in [`examples/`](examples/README.md) and needs no key.
 > The sections below are the short tour.
@@ -339,11 +339,11 @@ Its `summary` tells you at a glance whether the sweep went as expected, and the 
 between machines:
 
 ```json
-{ "total": 3, "succeeded": 2, "failed": 1, "duration_ms": 82.0,
-  "pages_processed": 2, "backends": { "pymupdf": 2 } }
+{ "total": 6, "succeeded": 5, "failed": 1, "duration_ms": 511.0,
+  "pages_processed": 10, "backends": { "pymupdf": 5 } }
 ```
 
-The total is three because `examples/README.md` is in that folder too. It comes back as a failed
+The total is six because `examples/README.md` is in that folder too. It comes back as a failed
 item carrying PyMuPDF's own `unsupported_format` reason rather than being dropped in silence, so
 the count you get back always accounts for every file you pointed at. `scripts/batch_demo.sh path/to/docs` runs the same
 sweep with both local backends and compares the two corpora.
@@ -495,7 +495,7 @@ command.
 | You want to know… | Run / open |
 |---|---|
 | **the full documentation, every guide, and how an agent uses it** | [`src/openreading/README.md`](src/openreading/README.md), then `uv run openreading --help` and `uv run openreading <cmd> --help` for every flag |
-| **how to get from a fresh clone to a working strategy, one step at a time** | [`examples/tutorial.md`](examples/tutorial.md), the guided walkthrough over the shipped documents |
+| **how to get from a fresh clone to a working strategy, one step at a time** | [`tutorial/README.md`](tutorial/README.md), the guided walkthrough over the shipped documents |
 | what the shipped example documents contain and where they came from | [`examples/README.md`](examples/README.md) |
 | each backend's variables, runtime location, and env-var precedence rules | [`src/openreading/adapters/README.md`](src/openreading/adapters/README.md), then `uv run python -m pydoc openreading.credentials` |
 | the exact JSON shapes (the contract) | [`src/openreading/schemas/README.md`](src/openreading/schemas/README.md), then the `*.json` files beside it |

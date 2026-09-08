@@ -1,6 +1,6 @@
 """Docs-truth test. Every fenced ```yaml strategy block in the `openreading.strategies` module
 docstrings (the cookbook in `presets.py` above all), the strategies and comparison guides,
-and `examples/tutorial.md`,
+and `tutorial/README.md`,
 must parse and pass `strategy validate` with NO errors — the cookbook is executable truth, not
 prose, so a docstring edit that breaks the grammar fails `make verify`. Documentation lives in
 code (AGENTS.md); this is what keeps the strategy documentation honest now that it lives next to
@@ -50,7 +50,7 @@ _GUIDES = (
     # The tutorial builds an `openreading.yaml` step by step, so a reader pastes every block in
     # it. A block that the grammar rejects would break the walkthrough at the exact point a
     # newcomer has nothing else to fall back on.
-    "examples/tutorial.md",
+    "tutorial/README.md",
 )
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -169,7 +169,7 @@ def test_doc_yaml_passes_strategy_validate(name, i, cfg):
     assert not errors, f"{name}#{i} has validate errors: " + "; ".join(
         f"{e.path}: {e.message}" for e in errors
     )
-    if name == "examples/tutorial.md":
+    if name == "tutorial/README.md":
         # A valid tree can still prune the fallback the walkthrough promises to run.
         unreachable = [x for x in issues if "filtered out by the policy" in x.message]
         assert not unreachable, "; ".join(x.message for x in unreachable)
