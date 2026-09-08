@@ -31,14 +31,21 @@ lines they read differently.
     $ jq -r .status.state out.json
     succeeded
     $ jq -c .summary all.json
-    {"total":3,"succeeded":2,"failed":0,"skipped":1,...}
+    {"total":6,"succeeded":5,"failed":1,"pages_processed":10,...}
 
-`examples/` holds two PDFs and a README, so `total` is 3 and the README is
-skipped with a reason. A skipped file is a decision taken before the document
-is sent, and it does not fail the run.
+`examples/` holds five PDFs and a README, so `total` is 6 and the README is a
+FAILED item carrying PyMuPDF's own `unsupported_format` reason. Every source is
+offered to the backend, so nothing is filtered out before it is tried, and the
+count always accounts for every file you pointed at.
 
 From a clone the command is `uv run openreading`; an installed package puts
 `openreading` on your PATH. Read the topics with `openreading help`.
+
+Want the guided version? `tutorial/README.md`, in a clone or the source
+distribution, walks the whole tool in seventeen steps, from this first parse
+to a policy, a self-escalating strategy, a folder run and the HTTP server. It
+uses the documents in `examples/` and needs no key. The chapters below are the
+reference; that file is the tour.
 
 help [TOPIC]
 ------------

@@ -3,7 +3,7 @@
 You can parse these five documents the moment the clone finishes. Your first run needs no key, no
 vendor account, and no documents of your own. A backend is one document parser. Both of the parsers
 that run locally with no key read these files. PyMuPDF reads the text layer. Tesseract rasterizes
-the page and runs OCR over the pixels. [`tutorial.md`](tutorial.md) walks the whole tool over them
+the page and runs OCR over the pixels. [The tutorial](../tutorial/README.md) walks the whole tool over them
 in seventeen steps, and the root [README](../README.md) gives the short tour. This page says what
 they are and where they came from.
 
@@ -113,7 +113,7 @@ succeeded
 Eight characters across five pages, and every block has `"type": "image"`. The run succeeded,
 because PyMuPDF read the text layer correctly and there is no text layer. That gap between
 `succeeded` and useful is the whole argument for a strategy, and
-[`tutorial.md`](tutorial.md) builds one around this file. Tesseract returns about 19,000
+[The tutorial](../tutorial/README.md) builds one around this file. Tesseract returns about 19,000
 characters from the same document in roughly twenty seconds.
 
 The entered values are synthetic and deliberately impossible. Both social security numbers begin
@@ -142,12 +142,11 @@ Every document as a batch. Pointing `parse` at a directory is what turns on batc
 uv run openreading parse examples/ --backend pymupdf > batch.json
 ```
 
-The run touches seven files, not five. The terminal prints `[3/7] README.md failed
-unsupported_format` and the same line for `tutorial.md`. Inside `batch.json`, `summary` records
-`"total": 7, "succeeded": 5, "failed": 2`. Two markdown files sit in this directory, and PyMuPDF
-does not read `.md`. Every source is offered to the backend, so each one comes back carrying
-PyMuPDF's own reason rather than being filtered out before it was tried, and the batch exits 4 as
-partial.
+The run touches six files, not five. The terminal prints `[3/6] README.md failed
+unsupported_format`. Inside `batch.json`, `summary` records `"total": 6, "succeeded": 5,
+"failed": 1`. This README sits in the directory too, and PyMuPDF does not read `.md`. Every source
+is offered to the backend, so it comes back carrying PyMuPDF's own reason rather than being
+filtered out before it was tried, and the batch exits 4 as partial.
 
 Your own test documents belong in `samples/` at the clone root, which is gitignored for that
 purpose. `scripts/batch_demo.sh` reads that folder by default, and a path argument such as

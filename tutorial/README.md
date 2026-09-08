@@ -1,6 +1,6 @@
 # OpenReading tutorial: from one command to a policy-aware, self-escalating pipeline
 
-<sub>[Root README](../README.md) · [Docs home](../src/openreading/README.md) · [What these documents are](README.md)</sub>
+<sub>[Root README](../README.md) · [Docs home](../src/openreading/README.md) · [What these documents are](../examples/README.md)</sub>
 
 > **What you get.** By the end of this page you will have parsed five example documents, watched two
 > backends disagree on the same page, written an `openreading.yaml` that keeps a document on your
@@ -15,7 +15,7 @@ to a bitmap and runs OCR over the pixels. Every hosted backend is optional, and
 [step 14](#14-bring-your-own-key) shows how to add one when you want it.
 
 The documents are the ones already in this folder. They are three United States tax forms and two
-synthetic bank statements, and [`examples/README.md`](README.md) says where each came from. The
+synthetic bank statements, and [`examples/README.md`](../examples/README.md) says where each came from. The
 tax forms carry invented names and amounts. One of them is a scan with no text at all, and that
 one document is the reason the second half of this page exists.
 
@@ -1088,13 +1088,12 @@ uv run openreading parse examples/ --backend pymupdf > batch.json
 **You should see** one progress line per file on stderr, so `batch.json` stays pure JSON:
 
 ```text
-[1/7] 1040-1988.pdf succeeded
-[2/7] 1040_2024.pdf succeeded
-[3/7] README.md failed unsupported_format: pymupdf cannot read README.md. It reads pdf, xps, epub, mobi, cbz, svg, and this file is not one of them.
-[4/7] john_smith_1000_2026_01.pdf succeeded
-[5/7] john_smith_1000_2026_02.pdf succeeded
-[6/7] schedule_a_2024.pdf succeeded
-[7/7] tutorial.md failed unsupported_format: pymupdf cannot read tutorial.md. It reads pdf, xps, epub, mobi, cbz, svg, and this file is not one of them.
+[1/6] 1040-1988.pdf succeeded
+[2/6] 1040_2024.pdf succeeded
+[3/6] README.md failed unsupported_format: pymupdf cannot read README.md. It reads pdf, xps, epub, mobi, cbz, svg, and this file is not one of them.
+[4/6] john_smith_1000_2026_01.pdf succeeded
+[5/6] john_smith_1000_2026_02.pdf succeeded
+[6/6] schedule_a_2024.pdf succeeded
 ```
 
 A folder comes back as one envelope holding one response per document, plus a summary:
@@ -1103,14 +1102,14 @@ A folder comes back as one envelope holding one response per document, plus a su
 jq '.summary' batch.json
 ```
 ```json
-{ "total": 7, "succeeded": 5, "failed": 2, "duration_ms": 526.0,
+{ "total": 6, "succeeded": 5, "failed": 1, "duration_ms": 511.0,
   "pages_processed": 10, "backends": { "pymupdf": 5 } }
 ```
 
 Your `duration_ms` will differ, because it is wall-clock time on your machine.
 
-The total is seven because this folder holds two markdown files as well as five PDFs. Every source
-is offered to the backend, so each `.md` comes back as a FAILED item carrying PyMuPDF's own reason,
+The total is six because this folder holds a README as well as five PDFs. Every source is offered
+to the backend, so the `.md` comes back as a FAILED item carrying PyMuPDF's own reason,
 `unsupported_format`, rather than being filtered out before it was ever tried. **The count you get
 back always accounts for every file you pointed at.**
 
@@ -1513,7 +1512,7 @@ one guide, and each guide demonstrates rather than restates.
 | You want to… | Read |
 |---|---|
 | see all the documentation, and how an agent uses it | [Docs home](../src/openreading/README.md) |
-| know what the example documents contain | [`examples/README.md`](README.md) |
+| know what the example documents contain | [`examples/README.md`](../examples/README.md) |
 | know the exact JSON shapes | [JSON Schemas](../src/openreading/schemas/README.md) |
 | understand why a field is missing rather than invented | [The channel contract](../src/openreading/derive/README.md) |
 | write a bigger strategy, or calibrate a threshold | [Strategies](../src/openreading/strategies/README.md) |
@@ -1579,4 +1578,4 @@ uv run openreading parse examples/ --strategy scan_aware --jobs 4 > all.json    
 uv run openreading explain all.json                                     # why it did that
 ```
 
-<sub>[Root README](../README.md) · [Docs home](../src/openreading/README.md) · [What these documents are](README.md)</sub>
+<sub>[Root README](../README.md) · [Docs home](../src/openreading/README.md) · [What these documents are](../examples/README.md)</sub>
