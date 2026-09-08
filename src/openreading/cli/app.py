@@ -862,7 +862,7 @@ def _print_strategy_summaries(loaded) -> None:
 
 
 def cmd_strategy_plan(args) -> int:
-    """Print the compiled tree and dynamic candidates for this document, without execution."""
+    """Print the compiled tree and policy candidate chain without executing it."""
     from openreading.strategies import compile_strategy
 
     try:

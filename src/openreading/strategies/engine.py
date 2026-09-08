@@ -43,7 +43,7 @@ Hook point and surfaces (wiring facts)
   the shared `--env-file`) and never consults a strategy. Subcommands (each takes `[--config
   PATH]` except `explain`, which takes only the shared `--env-file` and its positional):
   `strategy validate` performs grammar and world-consistency checks. `strategy plan <file>
-  --strategy <name>` prints the normalized tree and dynamic candidates without execution.
+  --strategy <name>` prints the normalized tree and policy candidate chain without execution.
   `strategy show <name>
   [--longhand]` — the body of a named strategy or built-in preset as written (or normalized);
   `strategy normalize` — shorthand → canonical longhand; `strategy list` — named strategies +

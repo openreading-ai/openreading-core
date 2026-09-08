@@ -32,7 +32,7 @@ flowchart TD
   Y[/"openreading.yaml"/]:::src --> S{{"schema gate"}}:::gate
   S --> P["Plain desugar"]:::work
   P --> N["normalize"]:::work
-  N --> C{{"resolve dynamic backends"}}:::gate
+  N --> C{{"apply caller scope"}}:::gate
   C --> E["engine walk"]:::work
   E --> T(["orchestration trace"]):::hero
   T --> X["explain"]:::out

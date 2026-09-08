@@ -3,7 +3,7 @@
 1. **Resolve the ordered candidate set once.** Run `Router.route` for the chain an unnamed
    request would walk. Strip `routing.fallback` because the strategy owns its own fallback
    structure. No leaf resolves against that set any more (every leaf names its backend), so it is
-   reported rather than dispatched from: `strategy plan` prints it and the ledger header pins it.
+   reported rather than dispatched from. `strategy plan` prints it.
 2. **Normalize** each strategy (extends resolved, shorthand expanded).
 3. **Apply caller scope.** Prune leaves outside the server API-key scope, collapse empty
    composites, and refuse a fully pruned root.
@@ -54,11 +54,12 @@ class CompiledPlan:
     trees: dict[str, dict[str, Any] | None]
     # The chain an unnamed request would walk, after policy and the caller's scope. Reported, not
     # dispatched from: no node resolves against it, since every leaf names its own backend.
-    # `strategy plan` prints it and the ledger header pins it, so a replay can tell that the set
-    # the operator had available changed even when the tree did not.
+    # `strategy plan` prints it. The ledger pins `dispatchable` below, which is the set the tree
+    # can actually reach.
     eligible: list[str]
     dropped: list[DropRecord]
     config_hash: str
+    # Concrete ids the tree can reach. The ledger pins this set for resume and sanitizer safety.
     dispatchable: list[str] = field(default_factory=list)
     overrides_fallback: bool = False
     warnings: list[tuple[str, str]] = field(default_factory=list)  # (code, message)

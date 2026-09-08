@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from openreading.config import ConfigError, LoadedFile, load, parse
-from openreading.strategies.model import RawNode, StrategyConfig
+from openreading.strategies.model import RawNode, StrategyConfig, _auto_node_path
 
 STRATEGY_PREFIX = "strategy:"
 
@@ -123,38 +123,9 @@ def _refuse_auto(raw: dict, source: str) -> None:
             "through it."
         )
 
-    def walk(node: object, path: str) -> None:
-        """Visit `node` in a position where the grammar expects a node, and nowhere else.
-
-        Only node positions are checked, so a gate reading a field that happens to be spelled
-        `auto` (`missing: [auto]`) is left alone. The shorthand string form and the longhand map
-        form are the same position, which is why both are tested here.
-        """
-        if node == "auto":
-            refuse(path)
-        if isinstance(node, list):
-            for i, item in enumerate(node):
-                walk(item, f"{path}[{i}]")
-            return
-        if not isinstance(node, dict):
-            return
-        if node.get("backend") == "auto":
-            refuse(f"{path}.backend")
-        for key in ("steps", "parallel"):
-            walk(node.get(key), f"{path}.{key}")
-        route = node.get("route")
-        if isinstance(route, dict):
-            for i, rule in enumerate(route.get("rules") or []):
-                if isinstance(rule, dict):
-                    walk(rule.get("use"), f"{path}.route.rules[{i}].use")
-            walk(route.get("default"), f"{path}.route.default")
-        decide = node.get("decide")
-        if isinstance(decide, dict):
-            walk(decide.get("among"), f"{path}.decide.among")
-            walk(decide.get("otherwise"), f"{path}.decide.otherwise")
-
     for name, body in (raw.get("strategies") or {}).items():
-        walk(body, f"strategies.{name}")
+        if path := _auto_node_path(body, f"strategies.{name}"):
+            refuse(path)
 
 
 def parse_config(text: str, *, source: str = "<string>") -> StrategyConfig:

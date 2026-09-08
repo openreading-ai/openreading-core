@@ -965,9 +965,9 @@ The four presets are strategies you can run by name without writing a file at al
 | Preset | What it does |
 |---|---|
 | `offline_first` | PyMuPDF, then Tesseract, then Docling when gates fire or attempts fail. Keep the local backends in `policy.backends` to enforce locality |
-| `cost_saver` | PyMuPDF, then Docling, then the router's best remaining pick when gates fire or attempts fail |
+| `cost_saver` | PyMuPDF, then Docling, then AWS Textract when gates fire or attempts fail |
 | `fast` | race the two local parsers, keep the first success |
-| `max_accuracy` | the best eligible backend, then the next best when quality gates fire or the first attempt fails |
+| `max_accuracy` | AWS Textract, then Azure Document Intelligence when quality gates fire or the first attempt fails |
 
 ```bash
 uv run openreading parse examples/1040-1988.pdf --strategy offline_first | jq -r '.backend.id'
@@ -1021,7 +1021,7 @@ equivalent for strategies.
 
 ### Seeing the plan before you run it
 
-`strategy plan` prints the compiled tree and dynamic candidates, and executes nothing:
+`strategy plan` prints the compiled tree and the policy's candidate chain, and executes nothing:
 
 ```bash
 uv run openreading strategy plan examples/1040-1988.pdf --strategy scan_aware

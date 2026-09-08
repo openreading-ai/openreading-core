@@ -135,8 +135,7 @@ _UNRELEASED = {
     # item state and `summary.skipped` all leave:
     "batch-result.v0.2.json",
     # The removal set — compliance, optimize_for and `auto` leave the request; the compliance
-    # profile and the priority hints leave the descriptor; `policy` becomes one key
-    # ():
+    # profile and the priority hints leave the descriptor; `policy` becomes one key:
     "request.v0.3.json",
     "adapter-descriptor.v0.7.json",
     "adapter-descriptor.v0.8.json",

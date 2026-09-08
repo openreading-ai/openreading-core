@@ -103,8 +103,7 @@ The map — what each module documents
   collisions) and the warning set, located by node path (D-v3-8). Run by `strategy validate`
   only. The run path loads the schema and compiles the tree, and it never calls
   `validate_config` (`model` §9).
-- `prune` — the compile pipeline: normalize trees and bind dynamic leaves to the configured
-  default chain; `CompiledPlan`.
+- `prune` — the compile pipeline: normalize trees, apply caller scope, and build `CompiledPlan`.
 - `facts` — pre-parse route facts (`doc_type`, `mime`, page/size probes, `filename_matches`,
   `sample_percent`); an unavailable fact does not match.
 - `signals` — the reference-free quality probe (Tier-1 engine-computed, Tier-2 envelope-reported)

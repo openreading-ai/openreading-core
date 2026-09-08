@@ -39,7 +39,7 @@
       "properties": {
         "backend": {
           "type": "string",
-          "description": "'reducto' | 'auto' | 'strategy:<name>'."
+          "description": "A backend id or 'strategy:<name>'."
         },
         "strategy": {
           "type": [
@@ -222,7 +222,7 @@
             "type": "integer",
             "minimum": 0
           },
-          "description": "Per-item backend tally (matters for `auto` batches with heterogeneous routing)."
+          "description": "Per-item backend tally for unnamed batches with heterogeneous routing."
         }
       }
     },

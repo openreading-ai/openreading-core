@@ -197,8 +197,8 @@ with:                         # optional per-leaf request overrides
   outputs:  { tables: html }
 ```
 
-- `backend` — Registry slug. `auto` is gone from every dialect and is refused at load
-  (`loader._refuse_auto`). It meant "the best remaining backend", ranked from vendor claims this
+- `backend` — Registry slug. `auto` is gone from every dialect. The loader and the public
+  `StrategyConfig` model both refuse it. It meant "the best remaining backend", ranked from vendor claims this
   package could not verify; when the ranking went, the word kept a promise nothing implemented. A
   rung that names no backend also cannot be read off the page, so a file stopped saying what it
   would run. `policy.backends` is where a deployment states its preferred order once, and an
@@ -983,6 +983,43 @@ from openreading.types.policy import Policy, coerce_policy
 RawNode = str | list[Any] | dict[str, Any]
 
 
+def _auto_node_path(node: object, path: str) -> str | None:
+    """Return the first `auto` used as a strategy node, excluding data field names."""
+    if node == "auto":
+        return path
+    if isinstance(node, list):
+        return next(
+            (
+                found
+                for i, item in enumerate(node)
+                if (found := _auto_node_path(item, f"{path}[{i}]"))
+            ),
+            None,
+        )
+    if not isinstance(node, dict):
+        return None
+    if node.get("backend") == "auto":
+        return f"{path}.backend"
+    for key in ("steps", "parallel", "try", "race", "compare", "then"):
+        if (found := _auto_node_path(node.get(key), f"{path}.{key}")) is not None:
+            return found
+    route = node.get("route")
+    if isinstance(route, dict):
+        for i, rule in enumerate(route.get("rules") or []):
+            if isinstance(rule, dict) and (
+                found := _auto_node_path(rule.get("use"), f"{path}.route.rules[{i}].use")
+            ):
+                return found
+        if (found := _auto_node_path(route.get("default"), f"{path}.route.default")) is not None:
+            return found
+    decide = node.get("decide")
+    if isinstance(decide, dict):
+        if (found := _auto_node_path(decide.get("among"), f"{path}.decide.among")) is not None:
+            return found
+        return _auto_node_path(decide.get("otherwise"), f"{path}.decide.otherwise")
+    return None
+
+
 class CircuitBreaker(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1048,6 +1085,18 @@ class StrategyConfig(BaseModel):
     decider: DeciderConfig | None = None
     defaults: Defaults | None = None
     strategies: dict[str, RawNode] = Field(default_factory=dict)
+
+    @field_validator("strategies", mode="before")
+    @classmethod
+    def _refuse_auto_nodes(cls, value: Any) -> Any:
+        """Keep direct model construction inside the same grammar as the file loader."""
+        if isinstance(value, dict):
+            for name, body in value.items():
+                if (path := _auto_node_path(body, f"strategies.{name}")) is not None:
+                    raise ValueError(
+                        f"{path}: 'auto' is not a backend. Name the backend this rung runs."
+                    )
+        return value
 
     def strategy_names(self) -> list[str]:
         return sorted(self.strategies)

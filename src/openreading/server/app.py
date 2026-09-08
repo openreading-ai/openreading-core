@@ -672,10 +672,10 @@ def _out_of_scope_backend(
 
     A strategy walk is knowable only from inside, so it is enforced inside: the allow-list travels
     with the request as `api.run_request(backend_allowlist=...)` and lands in
-    `strategies.prune.compile_strategy`, which prunes every out-of-scope rung and narrows the
-    eligible set a dynamic rung resolves against. This happens before any adapter is built and
-    answering 403 `scope_denied` when it leaves the walk nothing to run. Returning None here is
-    therefore "someone else checks this one", never "this one is unchecked": a `strategy:` id was
+    `strategies.prune.compile_strategy`, which prunes every out-of-scope rung. This happens before
+    any adapter is built, and answers 403 `scope_denied` when it leaves the walk nothing to run.
+    Returning None here is therefore "someone else checks this one", never "this one is
+    unchecked": a `strategy:` id was
     once genuinely exempt, which made any strategy id a way around the allow-list, and the four
     presets need no config file, so every caller of every deployment had one.
     """

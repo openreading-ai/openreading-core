@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 
 from openreading import schemas
 from openreading.strategies import StrategyConfig, load_config, resolve_strategy
@@ -429,12 +430,88 @@ def test_resolve_strategy_unknown_name_errors(tmp_path):
         "    steps: [auto]\n",
         "    try: [pymupdf, auto]\n    escalate_when: looks_bad\n",
         "    parallel:\n      - backend: pymupdf\n      - backend: auto\n    pick: best\n",
+        "    route:\n      rules: [{when: {mime: application/pdf}, use: auto}]\n      default: pymupdf\n",
+        "    route:\n      rules: [{when: {mime: application/pdf}, use: pymupdf}]\n      default: auto\n",
+        "    decide:\n      among: [pymupdf, auto]\n      otherwise: pymupdf\n",
+        "    decide:\n      among: [pymupdf, tesseract]\n      otherwise: auto\n",
     ],
-    ids=["longhand-leaf", "shorthand-string", "plain-try-rung", "parallel-branch"],
+    ids=[
+        "longhand-leaf",
+        "shorthand-string",
+        "plain-try-rung",
+        "parallel-branch",
+        "route-rule",
+        "route-default",
+        "decide-among",
+        "decide-otherwise",
+    ],
 )
 def test_auto_is_refused_in_every_dialect(body):
-    """Longhand, shorthand, Plain and a parallel branch all refuse it, and all say the same thing."""
+    """Every node position refuses it, and every one of them explains the replacement.
+
+    Two wordings reach a reader, and both are pinned here. Plain refuses its own rung first, in
+    the Plain vocabulary; every other dialect lands on the loader's. What they share is the part
+    that matters: the offending path, and the replacement to go and write.
+
+    The assertion is deliberately NOT "the word `auto` appears". A generic schema complaint
+    satisfies that by echoing the offending document back, so an earlier version of this test
+    passed while the migration message it existed to protect had become unreachable. Naming
+    `policy.backends` is what no echo can fake.
+    """
     with pytest.raises(ConfigError) as e:
         parse_config(f"version: 1\nstrategies:\n  s:\n{body}")
 
-    assert "auto" in str(e.value)
+    message = str(e.value)
+    assert "strategies.s" in message, "the refusal must locate the rung"
+    assert "policy.backends" in message, "the refusal must name the replacement"
+
+
+def test_strategy_config_model_refuses_auto_without_the_loader():
+    """The public model must preserve the grammar when callers construct it directly."""
+    with pytest.raises(PydanticValidationError, match="auto"):
+        StrategyConfig.model_validate(
+            {"version": 1, "strategies": {"s": {"steps": [{"backend": "auto"}]}}}
+        )
+
+
+def test_strategy_config_model_leaves_a_field_named_auto_untouched():
+    """Only node positions reserve `auto`; a document field may still have that name."""
+    config = StrategyConfig.model_validate(
+        {
+            "version": 1,
+            "strategies": {
+                "s": {
+                    "steps": [
+                        {
+                            "backend": "pymupdf",
+                            "escalate_if": {"fields_required": ["auto"]},
+                        }
+                    ]
+                }
+            },
+        }
+    )
+
+    assert config.strategies["s"]["steps"][0]["escalate_if"]["fields_required"] == ["auto"]
+
+
+def test_auto_is_reserved_only_as_a_node_and_not_as_a_name():
+    """`auto` is refused where a backend id goes, and nowhere else.
+
+    The refusal walks node positions rather than scanning for a string, so every other place the
+    six letters can legitimately appear still loads: a strategy someone named `auto`, a reference
+    to it, and a `strategy:auto` id. Pinned because the walk is easy to "simplify" into a scan,
+    and a scan breaks all three at once without failing any other test here.
+    """
+    config = parse_config(
+        "version: 1\n"
+        "strategies:\n"
+        "  auto:\n"
+        "    steps: [pymupdf]\n"
+        "  by_reference:\n"
+        "    use: auto\n"
+        "  by_prefix:\n"
+        "    steps: [strategy:auto]\n"
+    )
+
+    assert sorted(config.strategies) == ["auto", "by_prefix", "by_reference"]
