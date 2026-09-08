@@ -2082,7 +2082,7 @@ Then:
 Exits: 0 ok. 3 no config, an unparseable one, a validate error, or an unknown
 name. A warning never fails a validate.
 
-More: openreading help strategy""",
+More: openreading help strategy, openreading help gates""",
     "strategy show": """\
 Examples:
   openreading strategy show fast              # a built-in preset, as written
@@ -2100,7 +2100,7 @@ Then:
 
 Exits: 0 ok. 3 an unknown name, or an openreading.yaml that will not parse.
 
-More: openreading help strategy""",
+More: openreading help strategy, openreading help gates""",
     "strategy list": """\
 Examples:
   openreading strategy list                     # presets, then your own
@@ -2136,7 +2136,7 @@ Then:
 Exits: 0 no errors, warnings included. 3 any error, no openreading.yaml
 found, or one that will not parse.
 
-More: openreading help strategy""",
+More: openreading help strategy, openreading help gates""",
     "strategy normalize": """\
 Examples:
   openreading strategy normalize                  # canonical longhand YAML

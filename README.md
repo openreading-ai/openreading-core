@@ -518,6 +518,7 @@ command.
 | each backend's variables, runtime location, and env-var precedence rules | [`src/openreading/adapters/README.md`](src/openreading/adapters/README.md), then `uv run python -m pydoc openreading.credentials` |
 | the exact JSON shapes (the contract) | [`src/openreading/schemas/README.md`](src/openreading/schemas/README.md), then the `*.json` files beside it |
 | how to cascade backends under quality gates, race them, or compare them from one file | [Strategies](src/openreading/strategies/README.md) |
+| what `looks_bad` and the other escalation checks actually measure | `uv run openreading help gates`, or the [worked gate tutorial](https://openreading.ai/oss-tutorial#writing-escalation-checks) |
 | what differs between two backends' readings of the same document | [Compare](src/openreading/comparison/README.md) |
 | how `policy.backends` chooses the default chain and where each key comes from | [Routing and keys](src/openreading/router/README.md) |
 | how to run a folder of documents and read one result | [Batch runs](src/openreading/batch/README.md) |

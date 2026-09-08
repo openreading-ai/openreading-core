@@ -961,6 +961,9 @@ verb takes `--config PATH` (else the discovery order above). `validate`,
 openreading.yaml found"); `list` and `show` run config-free on the built-in
 presets (an unparseable config is exit 3 for every verb).
 
+For exact escalation rules, examples, and defaults, run `openreading help
+gates`. That chapter also explains how missing measurements affect a gate.
+
     openreading strategy validate
     openreading strategy plan doc.pdf --strategy NAME
     openreading strategy show NAME [--longhand]
@@ -990,6 +993,131 @@ presets (an unparseable config is exit 3 for every verb).
   path).
 - `normalize`: the whole config as canonical longhand YAML (the `docker compose
   config` analog).
+
+Gates: exact checks behind strategy shorthand
+............................................
+You choose when to try another backend by writing `escalate_when` in a
+strategy. A backend is one document-processing implementation, such as
+PyMuPDF. A gate checks its result against your conditions before continuing.
+A signal is a measured value, such as the mean extracted characters per page.
+A predicate compares one signal with a threshold, such as a minimum of 100.
+
+Plain is the short YAML syntax that compiles into the engine's explicit
+checks. These checks run locally in Python, without an LLM or vendor call.
+They do not establish whether extracted text or values are correct.
+
+Start here. Save this as openreading.yaml in your core clone:
+
+    version: 1
+    strategies:
+      scan_aware:
+        try: [pymupdf, tesseract]
+        escalate_when: looks_bad
+
+Inspect the actual rules before parsing, then inspect their observed values:
+
+    openreading strategy validate
+    openreading strategy show scan_aware --longhand
+    openreading parse examples/1040-1988.pdf --strategy scan_aware > run.json
+    openreading explain run.json
+
+The parse requires the Tesseract system binary; inspecting the file does not
+execute a backend. For installation, use `openreading help quickstart`.
+
+Writing the four checks
+
+Only `looks_bad` accepts the scalar spelling shown above. The other checks
+must be keys in a map, and multiple keys mean ANY reason can escalate:
+
+    escalate_when:
+      looks_bad: true
+      low_confidence: 0.7
+
+`looks_bad` expands into three alternative conditions at the defaults:
+
+  1. An input PDF page has no text layer but contains an image, AND mean
+     extracted characters per response page is below 100.
+  2. The garble score is above 0.3, using replacement/control characters,
+     word shapes, and the share of non-ASCII letters in the extracted text.
+  3. More than 20% of response pages contain fewer than 25 characters after
+     trimming whitespace. One empty page in five does not fire; two do.
+
+The scan test uses the input PDF bytes. Its character count is a document
+mean, not a check of each scanned page against that page's extracted text.
+Without input PDF measurements, that scan condition cannot fire. With no
+response pages, text or Markdown length supplies the character count; the
+empty-page fraction is zero for nonblank text and one otherwise.
+
+The garble heuristic assumes Latin-script word shapes and can flag valid
+non-Latin text. Disable that member for such documents when appropriate:
+
+    escalate_when:
+      looks_bad:
+        garbled: false
+        empty_pages: 0.3
+
+Unlisted members keep their defaults. `false` disables a member, `true`
+enables its default, and a numeric value changes a numeric threshold:
+
+  garbled              true   score above 0.3; boolean only in Plain
+  empty_pages          0.2    fraction of pages with fewer than 25 characters
+  no_text_from_images  true   scan detection AND the character-count check
+  min_text_per_page    false  optional standalone mean-character minimum
+
+Setting `min_text_per_page: 80` also changes the scan pair's cutoff to 80.
+It adds a standalone character-count check that can fire without a scan.
+
+`low_confidence: 0.7` checks whether the mean of reported
+`document.pages[].confidence` values is below 0.7. It does not inspect
+block confidence or typed-field confidence. `true` uses the default 0.6.
+Pages reporting 0.5 and 0.8 give 0.65, so the 0.7 check fires. A missing
+page score is omitted from the mean; no page scores means unavailable.
+An equal score does not fire. Backend scores are not calibrated probabilities.
+Tesseract reports block confidence, not page confidence, so its block scores
+cannot drive this shorthand. Inspect the response paths before choosing it.
+
+`missing: [total]` checks `typed_fields.total.value`, not the document text.
+It fires when the field is absent, null, or a blank string. Zero and false
+are present values. For example, {value: 0} satisfies a required total,
+while {value: null} does not. It checks presence, not correctness or type.
+
+`disagree: 0.3` is legal only with `compare` and a `then` destination.
+With `then` but no explicit checks, `compare` uses `disagree` OR `looks_bad`
+at their defaults. An explicit `escalate_when` replaces that default gate.
+It checks the largest pairwise text difference among successful, non-shadow
+branches. A shadow branch is observed but excluded from selection.
+`true` uses the default 0.3. The calculation is one minus shared tokens
+divided by all distinct tokens, using lowercase, whitespace-split text.
+"invoice total 10" and "invoice total 11" share two of four tokens, giving
+0.5, which fires. Word order and repetition are ignored; field values,
+tables, and geometry are not compared by this check. Two empty texts score
+zero; fewer than two successful branches leaves the measurement unavailable.
+
+Unavailable is not a pass
+
+In Plain, an unavailable measurement is recorded as skipped and does not
+fire. A missing confidence score is not treated as zero. Required fields
+are different: `missing` deliberately fires on absence, so inspect whether
+your backend can produce typed fields before relying on that check.
+
+In `try`, these quality gates apply to every nonfinal backend step. A
+referenced strategy runs its own rules, not the outer gate; validation warns
+about that exception. A final backend's successful response is accepted
+without another Plain quality gate. In longhand, a final-step gate can still
+fire. Use `explain` to inspect observations and decisions. Success alone is
+not evidence of content quality.
+
+Follow the implementation
+
+`openreading.strategies.plain._compile_gate` expands the shorthand, while
+`_compile_looks_bad` builds its defaults and overrides. In
+`openreading.strategies.signals`, `probe` measures the response,
+`garble_score` implements the text heuristic, and `evaluate_gate` combines
+predicates. `openreading.strategies.engine._branch_disagreement` measures
+the parallel text difference. These modules can be read in your checkout.
+
+The worked tutorial and source links are maintained in openreading-web:
+https://openreading.ai/oss-tutorial#writing-escalation-checks
 
 explain <response.json | batch-result.json | comparison-report.json>
 ..................................................................

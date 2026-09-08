@@ -90,6 +90,11 @@ TOPICS: tuple[Topic, ...] = (
         ("folder", "folders", "directory", "glob", "many"),
     ),
     Topic("backends-policy", "route <file|url> [--config FILE] [--run]", ("route", "policy")),
+    Topic(
+        "gates",
+        "Gates: exact checks behind strategy shorthand",
+        ("gate", "looks_bad", "low_confidence", "missing", "disagree", "escalate_when"),
+    ),
     Topic("usage", "What a run uses, and how to use less", ("cost", "money", "spend", "billing")),
     Topic("env", "Environment variables this module reads", ("environment", "keys", "credentials")),
     Topic("datasets", "Datasets for calibrate, leaderboard and rules", ("dataset", "labels")),
@@ -122,7 +127,7 @@ TOPICS: tuple[Topic, ...] = (
 # Which heading each group of the index prints under, in index order.
 _GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("START HERE", ("quickstart", "response", "help", "output", "chaining")),
-    ("DO ONE JOB", ("batch", "backends-policy", "usage", "env", "datasets")),
+    ("DO ONE JOB", ("batch", "backends-policy", "gates", "usage", "env", "datasets")),
     ("WHEN SOMETHING STOPS", ("exit-codes", "signals")),
     (
         "ONE COMMAND AT A TIME",
@@ -153,6 +158,7 @@ _BLURBS: dict[str, str] = {
     "chaining": "which verb's output feeds which verb's input",
     "batch": "a folder, a glob, or many files as one run and one JSON",
     "backends-policy": "set the default backend chain, in preference order",
+    "gates": "write escalation checks, inspect defaults, and understand skipped signals",
     "usage": "what a run consumes, in the units each backend meters in",
     "env": "where keys come from, and every variable this CLI reads",
     "datasets": "case.json inputs and expectations for calibration and scoring",

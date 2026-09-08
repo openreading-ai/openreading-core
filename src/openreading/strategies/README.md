@@ -77,10 +77,15 @@ Hold the four facts below in mind, and every command on this page follows from t
    and `replay` reproduces one.
 
 Plain is the short form you write, and it has six keys: `try`, `race`, `compare`, `then`,
-`escalate_when`, `max_time`. `escalate_when` takes one or more of four judgment words: `looks_bad`,
-`low_confidence`, `missing: [field]`, and `disagree`. There are no reserved words: every rung
-names a backend or another strategy. `uv run openreading strategy --help` prints the whole
-language, and each key is shown in use below.
+`escalate_when`, `max_time`. The four escalation checks are deterministic rules, not requests for
+an LLM to judge the document. For example, `low_confidence: 0.7` compares the mean reported page
+confidence with 0.7, rather than inspecting every block or extracted field.
+
+Run `uv run openreading help gates` for exact syntax, defaults, missing measurements, and tuning.
+The [worked gate tutorial](https://openreading.ai/oss-tutorial#writing-escalation-checks) demonstrates each check and links to its implementation.
+For the code itself, [Plain's `_compile_gate`](plain.py#L800) expands the shorthand, while
+[`probe` and `evaluate_gate`](signals.py#L464) measure results and apply the conditions.
+Every rung names a backend or another strategy, and the walkthrough below shows complete files.
 
 ## Walkthrough
 
@@ -157,7 +162,8 @@ WARNING …/openreading.yaml:strategies.fields.steps[0].escalate_if: missing: 'p
     → Runs pymupdf and tesseract at once and keeps the better result; if they disagree or the winner looks bad, sends the document to aws-textract.
   …
   what the words mean:
-    looks bad       openreading's quality probe flags the result: garbled text, over 20% near-empty pages,
+    looks bad       checks unread scans, garbled text, and near-empty pages. For exact defaults and
+                    overrides: openreading help gates
     …
 …/openreading.yaml: 0 error(s), 1 warning(s)
 ```

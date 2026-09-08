@@ -18,6 +18,7 @@ import shlex
 import textwrap
 
 import pytest
+import yaml
 
 import openreading.cli
 from openreading.cli.app import build_parser, main
@@ -123,6 +124,48 @@ def test_a_topic_prints_its_chapter(capsys):
     assert main(["help", "batch"]) == 0
     out = capsys.readouterr().out
     assert out.startswith("Batch: a directory, a glob, or two or more sources")
+
+
+@pytest.mark.parametrize("name", ["gates", "gate", "looks_bad", "escalate_when"])
+def test_gate_help_is_available_without_a_config(name, tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    assert main(["help", name]) == 0
+    out = capsys.readouterr().out
+    assert main(["help", "gates"]) == 0
+    assert capsys.readouterr().out == out
+
+
+def test_gate_help_example_compiles_to_the_explained_checks(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    assert main(["help", "gates"]) == 0
+    chapter = capsys.readouterr().out
+    example = re.search(r"(?m)^    version: 1\n(?:    .*\n)*", chapter)
+    assert example, "gate help needs a complete, runnable configuration"
+    (tmp_path / "openreading.yaml").write_text(textwrap.dedent(example.group()))
+    assert main(["strategy", "validate"]) == 0
+    capsys.readouterr()
+    assert main(["strategy", "show", "scan_aware", "--longhand"]) == 0
+    tree = yaml.safe_load(capsys.readouterr().out)["scan_aware"]
+    assert tree == {
+        "steps": [
+            {
+                "backend": "pymupdf",
+                "escalate_if": {
+                    "any_of": [
+                        {
+                            "all_of": [
+                                {"scanned_pages_detected": True},
+                                {"chars_per_page_below": 100},
+                            ]
+                        },
+                        {"garbled": True},
+                        {"empty_pages_over": 0.2},
+                    ]
+                },
+            },
+            {"backend": "tesseract"},
+        ]
+    }
 
 
 def test_help_has_its_own_chapter(capsys):
