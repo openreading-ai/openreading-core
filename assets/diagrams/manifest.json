@@ -1,0 +1,68 @@
+[
+  {
+    "name": "README-1",
+    "source": "README.md",
+    "title": "What it does",
+    "file": "README-1.svg"
+  },
+  {
+    "name": "src-openreading-1",
+    "source": "src/openreading/README.md",
+    "title": "One document's path",
+    "file": "src-openreading-1.svg"
+  },
+  {
+    "name": "src-openreading-batch-1",
+    "source": "src/openreading/batch/README.md",
+    "title": "Mental model",
+    "file": "src-openreading-batch-1.svg"
+  },
+  {
+    "name": "src-openreading-comparison-1",
+    "source": "src/openreading/comparison/README.md",
+    "title": "Mental model",
+    "file": "src-openreading-comparison-1.svg"
+  },
+  {
+    "name": "src-openreading-derive-1",
+    "source": "src/openreading/derive/README.md",
+    "title": "Mental model",
+    "file": "src-openreading-derive-1.svg"
+  },
+  {
+    "name": "src-openreading-server-1",
+    "source": "src/openreading/server/README.md",
+    "title": "Mental model",
+    "file": "src-openreading-server-1.svg"
+  },
+  {
+    "name": "src-openreading-strategies-1",
+    "source": "src/openreading/strategies/README.md",
+    "title": "Mental model",
+    "file": "src-openreading-strategies-1.svg"
+  },
+  {
+    "name": "src-openreading-strategies-2",
+    "source": "src/openreading/strategies/README.md",
+    "title": "How it decides",
+    "file": "src-openreading-strategies-2.svg"
+  },
+  {
+    "name": "tutorial-1",
+    "source": "tutorial/README.md",
+    "title": "3. Reading the envelope",
+    "file": "tutorial-1.svg"
+  },
+  {
+    "name": "tutorial-2",
+    "source": "tutorial/README.md",
+    "title": "7. The document that defeats one backend",
+    "file": "tutorial-2.svg"
+  },
+  {
+    "name": "tutorial-3",
+    "source": "tutorial/README.md",
+    "title": "10. Reading the trace with `explain`",
+    "file": "tutorial-3.svg"
+  }
+]

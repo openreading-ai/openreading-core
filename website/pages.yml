@@ -1,0 +1,50 @@
+# Copy to .github/workflows/pages.yml in the separate website repository.
+# The core checkout supplies the tutorial and committed SVGs at one selected revision.
+name: Publish field guide
+on:
+  workflow_dispatch:
+    inputs:
+      core_ref:
+        description: Core commit or tag to publish
+        required: true
+        default: main
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: multiversal-ventures/openreading-core
+          ref: ${{ inputs.core_ref }}
+          path: core
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+      - run: npm run build -- --source core
+      - run: npm test
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

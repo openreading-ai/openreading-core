@@ -43,8 +43,14 @@ request. `POST /v1/parse` blocks until the envelope is ready, which is the simpl
 when the submit request names that URL. `DELETE /v1/jobs/{id}` discards a record at once and
 answers 204.
 
+<!-- diagram:src-openreading-server-1 -->
+<p align="center"><img src="../../../assets/diagrams/src-openreading-server-1.svg" alt="Mental model" /></p>
+
+<details>
+<summary>Diagram source (Mermaid)</summary>
+
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif","fontSize":"14px","actorBkg":"#e0f2fe","actorBorder":"#0284c7","actorTextColor":"#082f49","actorLineColor":"#94a3b8","signalColor":"#94a3b8","signalTextColor":"#64748b","labelBoxBkgColor":"#fef3c7","labelBoxBorderColor":"#d97706","labelTextColor":"#451a03","loopTextColor":"#64748b","noteBkgColor":"#f3e8ff","noteBorderColor":"#9333ea","noteTextColor":"#3b0764","sequenceNumberColor":"#f8fafc","altSectionBkgColor":"#f8fafc80","activationBkgColor":"#ccfbf1","activationBorderColor":"#0d9488"}}}%%
+%%{init: {"theme":"base","fontFamily":"Arial","deterministicIds":true,"deterministicIDSeed":"openreading","htmlLabels":false,"themeVariables":{"fontFamily":"Arial","fontSize":"17px","lineColor":"#8194ad","textColor":"#183451","primaryTextColor":"#183451","primaryColor":"#edf3fc","primaryBorderColor":"#9db4d0","edgeLabelBackground":"#ffffff","clusterBkg":"#f5f8fc","clusterBorder":"#d7e1ee","titleColor":"#183451","actorBkg":"#edf3fc","actorBorder":"#9db4d0","actorTextColor":"#183451","actorLineColor":"#9db4d0","signalColor":"#527095","signalTextColor":"#183451","labelBoxBkgColor":"#fff4de","labelBoxBorderColor":"#c6953a","labelTextColor":"#70501b","loopTextColor":"#527095","noteBkgColor":"#edf3fc","noteBorderColor":"#9db4d0","noteTextColor":"#183451","sequenceNumberColor":"#ffffff","activationBkgColor":"#e7f3ee","activationBorderColor":"#679780"},"flowchart":{"curve":"monotoneY","nodeSpacing":32,"rankSpacing":48,"padding":18,"useMaxWidth":true},"sequence":{"useMaxWidth":true,"actorMargin":65,"messageMargin":38,"mirrorActors":false}}}%%
 sequenceDiagram
   autonumber
   participant C as client
@@ -67,6 +73,8 @@ sequenceDiagram
   end
   S-->>C: handle: succeeded or failed
 ```
+
+</details>
 
 ## Walkthrough
 
