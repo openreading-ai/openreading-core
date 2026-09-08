@@ -1,3 +1,5 @@
+<img src="assets/brand/icon.svg" alt="OpenReading" width="64" height="64" />
+
 # OpenReading: an intelligent, policy-aware router for document processing
 
 [![CI](https://github.com/multiversal-ventures/openreading-core/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/multiversal-ventures/openreading-core/actions/workflows/ci.yml)
