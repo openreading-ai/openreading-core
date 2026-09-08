@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="610" viewBox="0 0 1000 610" role="img" aria-labelledby="title desc" data-renderer="authored">
+  <title id="title">Your documents. Your rules. One response shape.</title>
+  <desc id="desc">Files, folders, or globs follow an explicit backend, policy, or strategy. The chosen backend reads each document. One JSON per document and one envelope over the run support reading, comparison, and inspection.</desc>
+  <!-- This overview has a deliberate vector layout. Its logical flow remains in README.md. -->
+  <style>
+    :root{color-scheme:light dark}
+    text{font-family:Arial,Helvetica,sans-serif}
+    .node,.result{fill:#f2f6f9;stroke:#d4dfe7;stroke-width:1.5}
+    .title{fill:#233b50;font-size:25px;font-weight:600}
+    .detail{fill:#577083;font-size:20px}
+    .step{fill:#64869d;font-size:14px;font-weight:600;letter-spacing:2px}
+    .track{fill:none;stroke:#a1b6c6;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .arrow{fill:#7896ac}
+    .contract{fill:#e9f3f8;stroke:#a4c9db;stroke-width:1.5}
+    .contract-title{fill:#173f57;font-size:32px;font-weight:600}
+    .contract-detail{fill:#45677d;font-size:19px}
+    .accent{fill:#3589b0}.pill{fill:#d9eaf3}
+    .code{fill:#31637e;font-family:monospace;font-size:16px}
+    @media(prefers-color-scheme:dark){
+      .node,.result{fill:#18232e;stroke:#324657}
+      .title{fill:#e0eaf2}.detail{fill:#a9bdcc}.step{fill:#7ba5be}
+      .track{stroke:#4b6c83}.arrow{fill:#729bb5}
+      .contract{fill:#173446;stroke:#35627d}
+      .contract-title{fill:#e0f0fa}.contract-detail{fill:#abcbdc}
+      .accent{fill:#79c6e8}.pill{fill:#234a61}.code{fill:#a4d4ed}
+    }
+  </style>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="arrow" d="M0 0 10 5 0 10Z"/></marker></defs>
+  <text class="step" x="40" y="42">01 / INPUT</text>
+  <text class="step" x="380" y="42">02 / SELECTION</text>
+  <text class="step" x="720" y="42">03 / READING</text>
+  <rect class="node" x="40" y="64" width="240" height="158" rx="16"/>
+  <text class="title" x="62" y="108">Your documents</text>
+  <text class="detail" x="62" y="151">File, folder, or glob</text>
+  <text class="detail" x="62" y="180">One input or many</text>
+  <path class="track" d="M280 144H368" marker-end="url(#arrow)"/>
+  <rect class="node" x="380" y="64" width="240" height="158" rx="16"/>
+  <text class="title" x="402" y="108">Your rules</text>
+  <text class="detail" x="402" y="151">Explicit backend,</text>
+  <text class="detail" x="402" y="180">policy, or strategy</text>
+  <path class="track" d="M620 144H708" marker-end="url(#arrow)"/>
+  <rect class="node" x="720" y="64" width="240" height="158" rx="16"/>
+  <text class="title" x="742" y="108">Chosen backend</text>
+  <text class="detail" x="742" y="151">Reads each</text>
+  <text class="detail" x="742" y="180">document</text>
+  <path class="track" d="M840 222V278" marker-end="url(#arrow)"/>
+  <rect class="contract" x="40" y="290" width="920" height="134" rx="18"/>
+  <rect class="accent" x="40" y="316" width="4" height="80" rx="2"/>
+  <text class="contract-title" x="68" y="340">One response shape.</text>
+  <text class="contract-detail" x="68" y="379">One JSON per document. One envelope over the run.</text>
+  <rect class="pill" x="754" y="317" width="178" height="35" rx="17.5"/>
+  <text class="code" x="843" y="340" text-anchor="middle">response.v0.3</text>
+  <path class="track" d="M500 424V452M182 492V464Q182 452 194 452H806Q818 452 818 464V492M500 452V492" />
+  <path class="track" d="M182 485V492M500 485V492M818 485V492" marker-end="url(#arrow)"/>
+  <rect class="result" x="40" y="504" width="284" height="86" rx="14"/>
+  <text class="title" x="62" y="540">Read</text>
+  <text class="detail" x="62" y="569">Text and tables</text>
+  <rect class="result" x="358" y="504" width="284" height="86" rx="14"/>
+  <text class="title" x="380" y="540">Compare</text>
+  <text class="detail" x="380" y="569">Across your corpus</text>
+  <rect class="result" x="676" y="504" width="284" height="86" rx="14"/>
+  <text class="title" x="698" y="540">Inspect</text>
+  <text class="detail" x="698" y="569">Explain or replay</text>
+</svg>

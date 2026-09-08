@@ -32,8 +32,17 @@ contents. Pure means the same inputs always produce a byte-identical report. No 
 a report is computed, so it costs nothing and needs no key. A subject is one response being
 compared. Subjects arrive from three sources, and every source ends in the same pure step.
 
+The [response JSON guide](../schemas/README.md#understanding-the-response-json) explains the content paths inside each input envelope.
+The comparison output is a separate report, so read its findings instead of looking for `document.text`.
+
+<!-- diagram:src-openreading-comparison-1 -->
+<p align="center"><a href="../../../assets/diagrams/src-openreading-comparison-1.svg"><img src="../../../assets/diagrams/src-openreading-comparison-1.svg" alt="Comparison accepts saved envelopes, a document fanned out to named backends, or candidates kept by a strategy. Subjects align by page and block, then compare facts, typed fields, text, and blocks. The report combines a headline verdict and severity-sorted findings in JSON, table, Markdown, diff, or diffs format." /></a></p>
+
+<details>
+<summary>Logical flow (Mermaid)</summary>
+
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif","fontSize":"14px","lineColor":"#94a3b8","textColor":"#334155","primaryTextColor":"#0f172a","edgeLabelBackground":"#eef2f7","clusterBkg":"#f8fafc","clusterBorder":"#cbd5e1","titleColor":"#334155"},"flowchart":{"curve":"basis","nodeSpacing":36,"rankSpacing":44,"padding":8,"useMaxWidth":true}}}%%
+%%{init: {"theme":"base","fontFamily":"Arial","deterministicIds":true,"deterministicIDSeed":"openreading","htmlLabels":false,"themeVariables":{"fontFamily":"Arial","fontSize":"17px","lineColor":"#8194ad","textColor":"#183451","primaryTextColor":"#183451","primaryColor":"#edf3fc","primaryBorderColor":"#9db4d0","edgeLabelBackground":"#ffffff","clusterBkg":"#f5f8fc","clusterBorder":"#d7e1ee","titleColor":"#183451","actorBkg":"#edf3fc","actorBorder":"#9db4d0","actorTextColor":"#183451","actorLineColor":"#9db4d0","signalColor":"#527095","signalTextColor":"#183451","labelBoxBkgColor":"#fff4de","labelBoxBorderColor":"#c6953a","labelTextColor":"#70501b","loopTextColor":"#527095","noteBkgColor":"#edf3fc","noteBorderColor":"#9db4d0","noteTextColor":"#183451","sequenceNumberColor":"#ffffff","activationBkgColor":"#e7f3ee","activationBorderColor":"#679780"},"flowchart":{"curve":"monotoneY","nodeSpacing":32,"rankSpacing":48,"padding":18,"useMaxWidth":true},"sequence":{"useMaxWidth":true,"actorMargin":65,"messageMargin":38,"mirrorActors":false}}}%%
 flowchart TD
   subgraph IN["three sources"]
     direction LR
@@ -50,16 +59,18 @@ flowchart TD
   F --> G["findings, severity sorted"]:::out
   H --> R(["report<br>json, table, md, diff, diffs"]):::hero
   G --> R
-  classDef src fill:#eef2ff,stroke:#6366f1,stroke-width:1.5px,color:#1e1b4b;
-  classDef work fill:#e0f2fe,stroke:#0284c7,stroke-width:1.5px,color:#082f49;
-  classDef gate fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#451a03;
-  classDef good fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#052e16;
-  classDef bad fill:#fee2e2,stroke:#dc2626,stroke-width:1.5px,color:#450a0a;
-  classDef store fill:#ccfbf1,stroke:#0d9488,stroke-width:1.5px,color:#042f2e;
-  classDef out fill:#f3e8ff,stroke:#9333ea,stroke-width:1.5px,color:#3b0764;
-  classDef hero fill:#1e293b,stroke:#94a3b8,stroke-width:2px,color:#f8fafc;
-  linkStyle default stroke-width:1.6px;
+  classDef src fill:#f5f8fc,stroke:#a7b9d0,stroke-width:1px,color:#29445f;
+  classDef work fill:#edf3fc,stroke:#9db4d0,stroke-width:1px,color:#183451;
+  classDef gate fill:#fff4de,stroke:#c6953a,stroke-width:1px,color:#70501b;
+  classDef good fill:#e7f3ee,stroke:#679780,stroke-width:1px,color:#245740;
+  classDef bad fill:#fbeeee,stroke:#c78686,stroke-width:1px,color:#803d3d;
+  classDef store fill:#e7f3ee,stroke:#679780,stroke-width:1px,color:#245740;
+  classDef out fill:#edf3fc,stroke:#9db4d0,stroke-width:1px,color:#183451;
+  classDef hero fill:#164bc5,stroke:#164bc5,stroke-width:1px,color:#ffffff;
+  linkStyle default stroke-width:1.4px;
 ```
+
+</details>
 
 Fan-out, written `compare doc.pdf --backends a,b`, runs each backend once in turn, and it alone
 spends money. Each subject carries a `source`: `file` for a saved envelope, `fanout` for a backend

@@ -28,6 +28,9 @@ The batch layer wraps the single-document path and never changes what that path 
 first step, and it expands your sources into one sorted list of files. Each item then runs exactly
 as `parse one.pdf` would, with its own routing and error isolation.
 
+Read each available `items[].response` with the [response JSON guide](../schemas/README.md#understanding-the-response-json).
+The outer batch object identifies the input and records item failures separately from document content.
+
 A policy is the default backend chain, written once in the `policy.backends` block of your
 `openreading.yaml`. Each null-backend item resolves that list independently. A batch that names a
 backend runs that backend directly, while a named strategy follows its own explicit nodes. From
@@ -35,10 +38,16 @@ Python, `openreading.run_batch(paths, config="openreading.yaml")` reads the same
 `config={"version": 1, "policy": {…}}` passes the same shape inline. [Routing and
 keys](../router/README.md#recipes) runs both.
 
+<!-- diagram:src-openreading-batch-1 -->
+<p align="center"><a href="../../../assets/diagrams/src-openreading-batch-1.svg"><img src="../../../assets/diagrams/src-openreading-batch-1.svg" alt="Intake expands and sorts files, folders, globs, and URLs. Every document runs the single-document pipeline independently, including its failure handling. Results gather into one batch-result. Compare that envelope with a second run of the same corpus, pairing by relative path, filename, then SHA-256, for per-document verdicts and a rollup." /></a></p>
+
+<details>
+<summary>Logical flow (Mermaid)</summary>
+
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif","fontSize":"14px","lineColor":"#94a3b8","textColor":"#334155","primaryTextColor":"#0f172a","edgeLabelBackground":"#eef2f7","clusterBkg":"#f8fafc","clusterBorder":"#cbd5e1","titleColor":"#334155"},"flowchart":{"curve":"basis","nodeSpacing":36,"rankSpacing":44,"padding":8,"useMaxWidth":true}}}%%
+%%{init: {"theme":"base","fontFamily":"Arial","deterministicIds":true,"deterministicIDSeed":"openreading","htmlLabels":false,"themeVariables":{"fontFamily":"Arial","fontSize":"17px","lineColor":"#8194ad","textColor":"#183451","primaryTextColor":"#183451","primaryColor":"#edf3fc","primaryBorderColor":"#9db4d0","edgeLabelBackground":"#ffffff","clusterBkg":"#f5f8fc","clusterBorder":"#d7e1ee","titleColor":"#183451","actorBkg":"#edf3fc","actorBorder":"#9db4d0","actorTextColor":"#183451","actorLineColor":"#9db4d0","signalColor":"#527095","signalTextColor":"#183451","labelBoxBkgColor":"#fff4de","labelBoxBorderColor":"#c6953a","labelTextColor":"#70501b","loopTextColor":"#527095","noteBkgColor":"#edf3fc","noteBorderColor":"#9db4d0","noteTextColor":"#183451","sequenceNumberColor":"#ffffff","activationBkgColor":"#e7f3ee","activationBorderColor":"#679780"},"flowchart":{"curve":"monotoneY","nodeSpacing":32,"rankSpacing":48,"padding":18,"useMaxWidth":true},"sequence":{"useMaxWidth":true,"actorMargin":65,"messageMargin":38,"mirrorActors":false}}}%%
 flowchart TD
-  S[/"sources<br>dir, glob, files, URLs"/]:::src --> I["intake<br>expand, sort, skip by format"]:::work
+  S[/"sources<br>dir, glob, files, URLs"/]:::src --> I["intake<br>expand, sort, dispatch every item"]:::work
   I --> R1["item 1<br>the single-document pipeline"]:::work
   I --> R2["item N<br>the same pipeline again"]:::work
   R1 --> E(["one batch-result envelope"]):::hero
@@ -46,16 +55,18 @@ flowchart TD
   E --> C["corpus compare<br>pair by relpath, then filename,<br>then sha256"]:::gate
   E2[/"second envelope, same folder"/]:::src --> C
   C --> V["verdict per document<br>plus a rollup"]:::out
-  classDef src fill:#eef2ff,stroke:#6366f1,stroke-width:1.5px,color:#1e1b4b;
-  classDef work fill:#e0f2fe,stroke:#0284c7,stroke-width:1.5px,color:#082f49;
-  classDef gate fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#451a03;
-  classDef good fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#052e16;
-  classDef bad fill:#fee2e2,stroke:#dc2626,stroke-width:1.5px,color:#450a0a;
-  classDef store fill:#ccfbf1,stroke:#0d9488,stroke-width:1.5px,color:#042f2e;
-  classDef out fill:#f3e8ff,stroke:#9333ea,stroke-width:1.5px,color:#3b0764;
-  classDef hero fill:#1e293b,stroke:#94a3b8,stroke-width:2px,color:#f8fafc;
-  linkStyle default stroke-width:1.6px;
+  classDef src fill:#f5f8fc,stroke:#a7b9d0,stroke-width:1px,color:#29445f;
+  classDef work fill:#edf3fc,stroke:#9db4d0,stroke-width:1px,color:#183451;
+  classDef gate fill:#fff4de,stroke:#c6953a,stroke-width:1px,color:#70501b;
+  classDef good fill:#e7f3ee,stroke:#679780,stroke-width:1px,color:#245740;
+  classDef bad fill:#fbeeee,stroke:#c78686,stroke-width:1px,color:#803d3d;
+  classDef store fill:#e7f3ee,stroke:#679780,stroke-width:1px,color:#245740;
+  classDef out fill:#edf3fc,stroke:#9db4d0,stroke-width:1px,color:#183451;
+  classDef hero fill:#164bc5,stroke:#164bc5,stroke-width:1px,color:#ffffff;
+  linkStyle default stroke-width:1.4px;
 ```
+
+</details>
 
 Whether a run is a batch is decided by the form of the input and never by the count. A directory or
 a glob that expands to a single file is still a batch with one item. A single named file always

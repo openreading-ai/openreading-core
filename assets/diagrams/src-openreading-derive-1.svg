@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="676" viewBox="0 0 1000 676" role="img" aria-labelledby="title desc" data-renderer="authored">
+  <title id="title">Native, derived, or absent. Never invented.</title>
+  <desc id="desc">A backend payload can supply a channel natively (N), provide enough information for a faithful derived channel (D), or offer no faithful value (X). Native and derived channels enter the response and channel_provenance. Unavailable channels remain absent from provenance; warnings explain some missing channels.</desc>
+  <!-- Edit this vector layout directly. The README retains its logical Mermaid flow. -->
+  <style>
+    :root{color-scheme:light dark}
+    text{font-family:Arial,Helvetica,sans-serif}
+    .node,.result{fill:#f2f6f9;stroke:#d4dfe7;stroke-width:1.5}
+    .title{fill:#233b50;font-size:25px;font-weight:600}
+    .detail{fill:#577083;font-size:20px}
+    .label{fill:#577083;font-size:17px}
+    .step{fill:#64869d;font-size:14px;font-weight:600;letter-spacing:2px}
+    .track{fill:none;stroke:#a1b6c6;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .arrow{fill:#7896ac}.dashed{stroke-dasharray:6 6}
+    .contract{fill:#e9f3f8;stroke:#a4c9db;stroke-width:1.5}
+    .contract-title{fill:#173f57;font-size:28px;font-weight:600}
+    .contract-detail{fill:#45677d;font-size:19px}
+    .accent{fill:#3589b0}.pill{fill:#d9eaf3}
+    .code{fill:#31637e;font-family:monospace;font-size:17px}
+    .panel{fill:#f8fafb;stroke:#d4dfe7;stroke-width:1.5}
+    .warning{fill:#fbf6eb;stroke:#d9c69e;stroke-width:1.5}
+    .warning-text{fill:#80632e;font-size:19px}
+    .good{fill:#edf6f1;stroke:#b2cdbd;stroke-width:1.5}
+    .good-text{fill:#35634b;font-size:25px;font-weight:600}
+    @media(prefers-color-scheme:dark){
+      .node,.result{fill:#18232e;stroke:#324657}
+      .title{fill:#e0eaf2}.detail,.label{fill:#a9bdcc}.step{fill:#7ba5be}
+      .track{stroke:#4b6c83}.arrow{fill:#729bb5}
+      .contract{fill:#173446;stroke:#35627d}
+      .contract-title{fill:#e0f0fa}.contract-detail{fill:#abcbdc}
+      .accent{fill:#79c6e8}.pill{fill:#234a61}.code{fill:#a4d4ed}
+      .panel{fill:#121c25;stroke:#324657}
+      .warning{fill:#2a251d;stroke:#695b3c}.warning-text{fill:#d5bc88}
+      .good{fill:#172d26;stroke:#365e4b}.good-text{fill:#a1d4b7}
+    }
+  </style>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="arrow" d="M0 0 10 5 0 10Z"/></marker></defs>
+  <rect class="node" x="40" y="40" width="920" height="108" rx="16"/><text class="title" x="62" y="80" text-anchor="start">Backend payload</text><text class="detail" x="62" y="115" text-anchor="start">What the backend actually returned</text>
+  <path class="track" d="M500 148V188H182V222" marker-end="url(#arrow)"/>
+  <path class="track" d="M500 188V222" marker-end="url(#arrow)"/>
+  <path class="track dashed" d="M500 188H818V222" marker-end="url(#arrow)"/>
+  <rect class="node" x="40" y="234" width="284" height="236" rx="16"/>
+  <rect class="node" x="358" y="234" width="284" height="236" rx="16"/>
+  <rect class="warning" x="676" y="234" width="284" height="236" rx="16"/>
+  <rect class="pill" x="62" y="256" width="42" height="30" rx="15"/>
+  <text class="code" x="83" y="277" text-anchor="middle">N</text>
+  <rect class="pill" x="380" y="256" width="42" height="30" rx="15"/>
+  <text class="code" x="401" y="277" text-anchor="middle">D</text>
+  <rect class="warning" x="698" y="256" width="42" height="30" rx="15"/>
+  <text class="warning-text" x="719" y="277" text-anchor="middle">X</text>
+  <text class="title" x="62" y="324" text-anchor="start">Native channel</text>
+  <text class="detail" x="62" y="360" text-anchor="start">Emitted by the backend.</text>
+  <text class="detail" x="62" y="386" text-anchor="start">Preserve its meaning.</text>
+  <text class="title" x="380" y="324" text-anchor="start">Derived channel</text>
+  <text class="detail" x="380" y="360" text-anchor="start">Computed faithfully.</text>
+  <text class="code" x="380" y="402" text-anchor="start">md_to_text</text>
+  <text class="code" x="380" y="428" text-anchor="start">cells_to_grid</text>
+  <text class="title" x="698" y="324" text-anchor="start">Unavailable</text>
+  <text class="detail" x="698" y="360" text-anchor="start">No faithful value.</text>
+  <text class="detail" x="698" y="386" text-anchor="start">Leave the channel out.</text>
+  <text class="warning-text" x="698" y="434" text-anchor="start">Never fabricate a value.</text>
+  <path class="track" d="M182 470V506H341V540" marker-end="url(#arrow)"/>
+  <path class="track" d="M500 470V506H341"/>
+  <rect class="contract" x="40" y="552" width="602" height="100" rx="16"/><text class="contract-title" x="62" y="592" text-anchor="start">Response envelope</text><text class="contract-detail" x="62" y="627" text-anchor="start">channel_provenance: native or derived</text>
+  <text class="label" x="676" y="582" text-anchor="start">X is absent from provenance.</text>
+  <text class="label" x="676" y="610" text-anchor="start">Warnings explain some gaps.</text>
+</svg>

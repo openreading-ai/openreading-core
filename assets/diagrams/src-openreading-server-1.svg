@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="852" viewBox="0 0 1000 852" role="img" aria-labelledby="title desc" data-renderer="authored">
+  <title id="title">An async job, from submission to completion</title>
+  <desc id="desc">The client submits POST /v1/jobs to an openreading serve process it operates. The server submits to a hosted backend and returns a running handle. In poll mode, each GET /v1/jobs/{id} advances work. Alternatively, a signed Reducto webhook records a result; a bad signature returns 401 bad_signature. The client reads a succeeded or failed handle.</desc>
+  <!-- Edit this vector layout directly. The README retains its logical Mermaid flow. -->
+  <style>
+    :root{color-scheme:light dark}
+    text{font-family:Arial,Helvetica,sans-serif}
+    .node,.result{fill:#f2f6f9;stroke:#d4dfe7;stroke-width:1.5}
+    .title{fill:#233b50;font-size:25px;font-weight:600}
+    .detail{fill:#577083;font-size:20px}
+    .label{fill:#577083;font-size:17px}
+    .step{fill:#64869d;font-size:14px;font-weight:600;letter-spacing:2px}
+    .track{fill:none;stroke:#a1b6c6;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .arrow{fill:#7896ac}.dashed{stroke-dasharray:6 6}
+    .contract{fill:#e9f3f8;stroke:#a4c9db;stroke-width:1.5}
+    .contract-title{fill:#173f57;font-size:28px;font-weight:600}
+    .contract-detail{fill:#45677d;font-size:19px}
+    .accent{fill:#3589b0}.pill{fill:#d9eaf3}
+    .code{fill:#31637e;font-family:monospace;font-size:17px}
+    .panel{fill:#f8fafb;stroke:#d4dfe7;stroke-width:1.5}
+    .warning{fill:#fbf6eb;stroke:#d9c69e;stroke-width:1.5}
+    .warning-text{fill:#80632e;font-size:19px}
+    .good{fill:#edf6f1;stroke:#b2cdbd;stroke-width:1.5}
+    .good-text{fill:#35634b;font-size:25px;font-weight:600}
+    @media(prefers-color-scheme:dark){
+      .node,.result{fill:#18232e;stroke:#324657}
+      .title{fill:#e0eaf2}.detail,.label{fill:#a9bdcc}.step{fill:#7ba5be}
+      .track{stroke:#4b6c83}.arrow{fill:#729bb5}
+      .contract{fill:#173446;stroke:#35627d}
+      .contract-title{fill:#e0f0fa}.contract-detail{fill:#abcbdc}
+      .accent{fill:#79c6e8}.pill{fill:#234a61}.code{fill:#a4d4ed}
+      .panel{fill:#121c25;stroke:#324657}
+      .warning{fill:#2a251d;stroke:#695b3c}.warning-text{fill:#d5bc88}
+      .good{fill:#172d26;stroke:#365e4b}.good-text{fill:#a1d4b7}
+    }
+  </style>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="arrow" d="M0 0 10 5 0 10Z"/></marker></defs>
+  <rect class="panel" x="40" y="300" width="920" height="202" rx="16"/>
+  <rect class="panel" x="40" y="546" width="920" height="218" rx="16"/>
+  <path class="track dashed" d="M150 118V300M150 344V546M150 590V810"/>
+  <path class="track dashed" d="M500 158V502M500 546V810"/>
+  <path class="track dashed" d="M850 118V810"/>
+  <rect class="node" x="40" y="40" width="220" height="78" rx="16"/><text class="title" x="62" y="80" text-anchor="start">Client</text>
+  <rect class="node" x="390" y="40" width="220" height="78" rx="16"/><text class="title" x="412" y="80" text-anchor="start">Your server</text>
+  <rect class="node" x="740" y="40" width="220" height="78" rx="16"/><text class="title" x="762" y="80" text-anchor="start">Hosted API</text>
+  <text class="code" x="500" y="142" text-anchor="middle">openreading serve</text>
+  <path class="track" d="M150 192H488" marker-end="url(#arrow)"/>
+  <text class="code" x="325" y="178" text-anchor="middle">POST /v1/jobs</text>
+  <path class="track" d="M500 236H838" marker-end="url(#arrow)"/>
+  <text class="label" x="675" y="222" text-anchor="middle">Submit to backend</text>
+  <path class="track dashed" d="M500 280H162" marker-end="url(#arrow)"/>
+  <text class="label" x="325" y="266" text-anchor="middle">Handle: running</text>
+  <text class="step" x="62" y="330" text-anchor="start">POLL MODE</text>
+  <path class="track" d="M150 380H488" marker-end="url(#arrow)"/>
+  <text class="code" x="325" y="366" text-anchor="middle">GET /v1/jobs/{id}</text>
+  <path class="track" d="M500 430H838" marker-end="url(#arrow)"/>
+  <text class="label" x="675" y="416" text-anchor="middle">One slice of work per GET</text>
+  <path class="track dashed" d="M850 480H512" marker-end="url(#arrow)"/>
+  <text class="label" x="675" y="466" text-anchor="middle">Progress, then the result</text>
+  <text class="label" x="500" y="532" text-anchor="middle">or</text>
+  <text class="step" x="62" y="576" text-anchor="start">WEBHOOK MODE</text>
+  <path class="track" d="M850 626H512" marker-end="url(#arrow)"/>
+  <text class="code" x="675" y="612" text-anchor="middle">POST /v1/webhooks/reducto</text>
+  <path class="track" d="M500 654H552V676H512" marker-end="url(#arrow)"/>
+  <text class="label" x="576" y="667" text-anchor="start">Valid signature: record result</text>
+  <path class="track dashed" d="M500 736H838" marker-end="url(#arrow)"/>
+  <text class="code" x="675" y="722" text-anchor="middle">Invalid: 401 bad_signature</text>
+  <path class="track dashed" d="M500 814H162" marker-end="url(#arrow)"/>
+  <text class="label" x="325" y="800" text-anchor="middle">Handle: succeeded or failed</text>
+</svg>

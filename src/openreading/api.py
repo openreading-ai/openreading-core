@@ -22,6 +22,10 @@ An envelope is the schema-valid JSON object returned by a completed operation.
   the CLI and server through the same lower-level seams.
 
 `source` accepts a path, an HTTP URL, or raw bytes. It never accepts a request mapping.
+For the returned dict, `status`, `backend`, and `document` are required response fields.
+Text, pages, tables, confidence, and usage counters depend on what the backend actually produced.
+Use `response.get("warnings", [])` and inspect content availability before consuming optional fields.
+`openreading help response` and the schemas README demonstrate a backend-independent consumer.
 `openreading.derive.mime` resolves an explicit type, then content, then filename. Unknown content
 keeps `mime_type=None`, because inventing `application/pdf` can produce a confident wrong parse.
 A missing path raises `SourceNotFoundError`, which retains ordinary `OSError` attributes.

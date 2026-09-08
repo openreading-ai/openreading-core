@@ -1,7 +1,7 @@
 """Documentation lives in code (AGENTS.md). This test is what makes that rule enforceable.
 
 Tracked markdown is limited to the root project files, the GitHub templates under `.github/`,
-one `README.md` per directory (the guided walkthrough is `tutorial/README.md`), and design
+one `README.md` per directory, and design
 records for work that is **not built yet** under `design/` and `product/specs/`. Everything else — reference docs, research packs, run logs —
 belongs in a module docstring next to the code it describes, or in the private
 `openreading` company repo (which checks this repo out as `core/`). A separate
@@ -47,11 +47,8 @@ ALLOWED_ROOT_MD = frozenset(
 # the code they propose to change, and deleted when that code lands (AGENTS.md).
 DESIGN_DIRS = frozenset({"design", "product"})
 
-# Empty, and worth keeping as a named seam rather than deleting. The guided walkthrough used to
-# need an entry here: it lived at `examples/tutorial.md`, beside the documents it parses, which no
-# rule below could express. It is `tutorial/README.md` now and passes as an ordinary directory
-# README, so the exception is gone rather than maintained. Anything added back takes a deliberate
-# edit, which is the point.
+# Explicit exceptions remain empty so adding a standalone document requires a deliberate edit.
+# Website and tutorial sources belong in openreading-web, which owns their validation.
 ALLOWED_PATHS: frozenset[str] = frozenset()
 
 
@@ -92,6 +89,13 @@ def test_no_docs_directory_is_tracked():
     assert _tracked("docs/*") == [], (
         "docs/ is a gitignored working directory; a durable fact goes in a module docstring, a "
         "design spec or run log goes in internal/"
+    )
+
+
+@pytest.mark.parametrize("pathspec", ["website/*", "tutorial/*"])
+def test_website_and_tutorial_live_in_web_repository(pathspec):
+    assert _tracked(pathspec) == [], (
+        "the marketing site, OSS pages, and tutorial belong in openreading-web: " + pathspec
     )
 
 

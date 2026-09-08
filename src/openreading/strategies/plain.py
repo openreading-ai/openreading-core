@@ -458,10 +458,10 @@ scanned-PDF fixture produces (the attempt line's timing is illustrative):
           disagree or the winner looks bad, sends the document to reducto.
 
       what the words mean:
-        looks bad   openreading's quality probe flags the result: garbled text, over 20%
-                    near-empty pages, or an image-only page it got almost no text from
-        disagree    how far the two results' text differs — 1 minus their shared-word overlap
-                    (Jaccard). Trips past 0.3 by default: they share under 70% of their combined words (tunable).
+        looks bad       checks unread scans, garbled text, and near-empty pages. For exact defaults and
+                        overrides: openreading help gates
+        disagree        worst pairwise text-token difference among successful branches (true: 0.3); not a field
+                        or table comparison
 
 Guardrails you get for free
 ===========================

@@ -41,11 +41,112 @@ count always accounts for every file you pointed at.
 From a clone the command is `uv run openreading`; an installed package puts
 `openreading` on your PATH. Read the topics with `openreading help`.
 
-Want the guided version? `tutorial/README.md`, in a clone or the source
-distribution, walks the whole tool in seventeen steps, from this first parse
-to a policy, a self-escalating strategy, a folder run and the HTTP server. It
-uses the documents in `examples/` and needs no key. The chapters below are the
-reference; that file is the tour.
+Want the guided version? https://openreading.ai/oss-tutorial walks the tool
+in seventeen steps, from this first parse to a policy, an escalating strategy,
+a folder run and the HTTP server. The walkthrough lives in `openreading-web`
+and uses the documents in this clone's `examples/` directory without a key.
+The chapters below are the reference; the hosted tutorial is the tour.
+
+Your next step is `openreading help response`, which explains the JSON you
+saved, the content you can consume, and the fields that may be absent.
+
+Understanding the response JSON
+-------------------------------
+You can switch backends without rewriting the code that reads their results.
+A backend is the parser or extraction engine that reads your document.
+The response envelope is one JSON object containing its content and outcome.
+The field names stay consistent, but available content depends on the backend.
+
+Start with the bundled statement, then inspect the result with `jq`:
+
+    F=examples/john_smith_1000_2026_01.pdf
+    openreading parse "$F" --backend pymupdf > response-mu.json
+    jq -r '.status.state, .backend.id' response-mu.json
+    jq -r '.document.text // empty' response-mu.json
+
+The first query prints `succeeded` and `pymupdf` on separate lines. The second
+prints the statement's text, beginning with `First National Bank`.
+`// empty` prints nothing for an absent field. It does not prove completeness.
+
+Choose the content your application needs:
+
+    document.text              plain text for search and text processing
+    document.markdown          formatted content for display or model input
+    document.pages[].blocks[]   page elements in their reading order
+    blocks[].table             table cells, spans, and a convenient rows grid
+    typed_fields               named extracted values, when produced
+    chunks[]                   chunks linked to source blocks, when produced
+
+`blocks[]` above lives beneath `document.pages[]`, not at the top level.
+For example, this prints page numbers beside each available text block:
+
+    jq -r '.document.pages[]? | .page_number as $p |
+      .blocks[]? | [$p, .type, (.text // "")] | @tsv' response-mu.json
+
+Four top-level keys are required: `schema_version`, `status`, `backend`, and
+`document`. Version `0.3` identifies the JSON contract, not the package.
+At least one of `document.text`, `document.markdown`, `document.pages`, or
+top-level `typed_fields` is present. Presence does not imply nonempty content.
+A field extractor can return `document: {}` with `typed_fields` instead.
+
+Read quality separately from content. `succeeded` says the operation completed,
+not that it read every word correctly. `partial` carries incomplete content.
+Do not treat `failed` or `processing` as a finished reading. Some failures
+raise an error instead of producing a response at all; read `help output`.
+
+A channel is one kind of output, such as text, tables, or block confidence.
+`channel_provenance` records produced channels as `native` or `derived`.
+Native means the backend supplied it. Derived means core computed it from
+that output. This map is experimental; check the content fields themselves.
+Warnings explain some limitations, but no warnings does not mean no gaps.
+
+    jq '.channel_provenance // {}' response-mu.json
+    jq -r '.warnings[]? | [.code, .message] | @tsv' response-mu.json
+
+PyMuPDF produces no measured confidence and omits that field. Tesseract
+produces OCR confidence but no structured table cells. Try the same consumer:
+
+    openreading parse "$F" --backend tesseract > response-te.json
+    jq -r '.backend.id, .document.pages[0].blocks[0].text' \
+      response-mu.json response-te.json
+
+Both runs print `First National Bank` in this captured example. They can still
+disagree elsewhere in the document. OCR values can vary across installations.
+
+Optional does not mean zero, empty, or null. Use `response.get("warnings", [])`
+in Python and `.warnings[]?` in jq. Missing confidence is not confidence zero.
+In Python, use `is not None` when zero is a valid measured value.
+The value of an extracted field can contain false, zero, or nested nulls.
+Covered positions in a table's `rows` grid can also contain null.
+
+Bounding boxes use `x`, `y`, `w`, `h` in [0,1], with a top-left origin.
+`page` is one-based in the source document. Multiply by the page dimensions
+to draw an overlay. Geometry is optional; never invent a box when absent.
+`bbox_native` preserves the original coordinates and their units.
+
+`usage` reports counters such as `pages_processed`, `input_tokens`, and
+`output_tokens`, not a dollar cost. Missing counters are unknown, not free.
+`backend_raw` holds the native payload for vendor-specific inspection. Its
+contents are outside the versioned contract; prefer normalized content first.
+
+Do not confuse the outer shapes:
+
+    one-document parse       this response JSON
+    strategy parse           this response plus orchestration details
+    folder or multi-input    batch-result, with items[].response when available
+                             and per-item errors for failed documents
+    compare                  comparison-report, not another parsed document
+    POST /v1/jobs             async handle; its response appears when available
+
+A strategy can retain a successful parse with `orchestration.outcome` set to
+`degraded`. Inspect that outcome and the warnings before accepting its quality.
+`orchestration` is permissive control-plane data, not a closed schema inside
+the response. `openreading explain run.json` is its human-readable view.
+
+For validation and Python consumers, read the worked response guide:
+`src/openreading/schemas/README.md`. The web tutorial explains the same shape:
+https://openreading.ai/oss-tutorial#3-understanding-the-response-json
+`python -m pydoc openreading.schemas` lists the contract beside its validator.
 
 help [TOPIC]
 ------------
@@ -99,6 +200,7 @@ backend chatter and errors go to stderr, so a successful `> out.json` parses.
 `help`, `backends`, `explain` and strategy inspection print human-readable text
 or YAML. `benchmark run` prints its preflight and publisher report on stdout.
 Use `benchmark report --format json` to obtain JSON from its saved artifacts.
+For the fields inside a parsed document, run `openreading help response`.
 
     openreading parse examples/ --backend pymupdf > all.json   # JSON only
     openreading parse examples/ --backend pymupdf 2> run.log   # the story
@@ -859,6 +961,9 @@ verb takes `--config PATH` (else the discovery order above). `validate`,
 openreading.yaml found"); `list` and `show` run config-free on the built-in
 presets (an unparseable config is exit 3 for every verb).
 
+For exact escalation rules, examples, and defaults, run `openreading help
+gates`. That chapter also explains how missing measurements affect a gate.
+
     openreading strategy validate
     openreading strategy plan doc.pdf --strategy NAME
     openreading strategy show NAME [--longhand]
@@ -888,6 +993,131 @@ presets (an unparseable config is exit 3 for every verb).
   path).
 - `normalize`: the whole config as canonical longhand YAML (the `docker compose
   config` analog).
+
+Gates: exact checks behind strategy shorthand
+............................................
+You choose when to try another backend by writing `escalate_when` in a
+strategy. A backend is one document-processing implementation, such as
+PyMuPDF. A gate checks its result against your conditions before continuing.
+A signal is a measured value, such as the mean extracted characters per page.
+A predicate compares one signal with a threshold, such as a minimum of 100.
+
+Plain is the short YAML syntax that compiles into the engine's explicit
+checks. These checks run locally in Python, without an LLM or vendor call.
+They do not establish whether extracted text or values are correct.
+
+Start here. Save this as openreading.yaml in your core clone:
+
+    version: 1
+    strategies:
+      scan_aware:
+        try: [pymupdf, tesseract]
+        escalate_when: looks_bad
+
+Inspect the actual rules before parsing, then inspect their observed values:
+
+    openreading strategy validate
+    openreading strategy show scan_aware --longhand
+    openreading parse examples/1040-1988.pdf --strategy scan_aware > run.json
+    openreading explain run.json
+
+The parse requires the Tesseract system binary; inspecting the file does not
+execute a backend. For installation, use `openreading help quickstart`.
+
+Writing the four checks
+
+Only `looks_bad` accepts the scalar spelling shown above. The other checks
+must be keys in a map, and multiple keys mean ANY reason can escalate:
+
+    escalate_when:
+      looks_bad: true
+      low_confidence: 0.7
+
+`looks_bad` expands into three alternative conditions at the defaults:
+
+  1. An input PDF page has no text layer but contains an image, AND mean
+     extracted characters per response page is below 100.
+  2. The garble score is above 0.3, using replacement/control characters,
+     word shapes, and the share of non-ASCII letters in the extracted text.
+  3. More than 20% of response pages contain fewer than 25 characters after
+     trimming whitespace. One empty page in five does not fire; two do.
+
+The scan test uses the input PDF bytes. Its character count is a document
+mean, not a check of each scanned page against that page's extracted text.
+Without input PDF measurements, that scan condition cannot fire. With no
+response pages, text or Markdown length supplies the character count; the
+empty-page fraction is zero for nonblank text and one otherwise.
+
+The garble heuristic assumes Latin-script word shapes and can flag valid
+non-Latin text. Disable that member for such documents when appropriate:
+
+    escalate_when:
+      looks_bad:
+        garbled: false
+        empty_pages: 0.3
+
+Unlisted members keep their defaults. `false` disables a member, `true`
+enables its default, and a numeric value changes a numeric threshold:
+
+  garbled              true   score above 0.3; boolean only in Plain
+  empty_pages          0.2    fraction of pages with fewer than 25 characters
+  no_text_from_images  true   scan detection AND the character-count check
+  min_text_per_page    false  optional standalone mean-character minimum
+
+Setting `min_text_per_page: 80` also changes the scan pair's cutoff to 80.
+It adds a standalone character-count check that can fire without a scan.
+
+`low_confidence: 0.7` checks whether the mean of reported
+`document.pages[].confidence` values is below 0.7. It does not inspect
+block confidence or typed-field confidence. `true` uses the default 0.6.
+Pages reporting 0.5 and 0.8 give 0.65, so the 0.7 check fires. A missing
+page score is omitted from the mean; no page scores means unavailable.
+An equal score does not fire. Backend scores are not calibrated probabilities.
+Tesseract reports block confidence, not page confidence, so its block scores
+cannot drive this shorthand. Inspect the response paths before choosing it.
+
+`missing: [total]` checks `typed_fields.total.value`, not the document text.
+It fires when the field is absent, null, or a blank string. Zero and false
+are present values. For example, {value: 0} satisfies a required total,
+while {value: null} does not. It checks presence, not correctness or type.
+
+`disagree: 0.3` is legal only with `compare` and a `then` destination.
+With `then` but no explicit checks, `compare` uses `disagree` OR `looks_bad`
+at their defaults. An explicit `escalate_when` replaces that default gate.
+It checks the largest pairwise text difference among successful, non-shadow
+branches. A shadow branch is observed but excluded from selection.
+`true` uses the default 0.3. The calculation is one minus shared tokens
+divided by all distinct tokens, using lowercase, whitespace-split text.
+"invoice total 10" and "invoice total 11" share two of four tokens, giving
+0.5, which fires. Word order and repetition are ignored; field values,
+tables, and geometry are not compared by this check. Two empty texts score
+zero; fewer than two successful branches leaves the measurement unavailable.
+
+Unavailable is not a pass
+
+In Plain, an unavailable measurement is recorded as skipped and does not
+fire. A missing confidence score is not treated as zero. Required fields
+are different: `missing` deliberately fires on absence, so inspect whether
+your backend can produce typed fields before relying on that check.
+
+In `try`, these quality gates apply to every nonfinal backend step. A
+referenced strategy runs its own rules, not the outer gate; validation warns
+about that exception. A final backend's successful response is accepted
+without another Plain quality gate. In longhand, a final-step gate can still
+fire. Use `explain` to inspect observations and decisions. Success alone is
+not evidence of content quality.
+
+Follow the implementation
+
+`openreading.strategies.plain._compile_gate` expands the shorthand, while
+`_compile_looks_bad` builds its defaults and overrides. In
+`openreading.strategies.signals`, `probe` measures the response,
+`garble_score` implements the text heuristic, and `evaluate_gate` combines
+predicates. `openreading.strategies.engine._branch_disagreement` measures
+the parallel text difference. These modules can be read in your checkout.
+
+The worked tutorial and source links are maintained in openreading-web:
+https://openreading.ai/oss-tutorial#writing-escalation-checks
 
 explain <response.json | batch-result.json | comparison-report.json>
 ..................................................................

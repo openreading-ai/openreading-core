@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="790" viewBox="0 0 1000 790" role="img" aria-labelledby="title desc" data-renderer="authored">
+  <title id="title">From saved outputs to an inspectable comparison</title>
+  <desc id="desc">Comparison accepts saved envelopes, a document fanned out to named backends, or candidates kept by a strategy. Subjects align by page and block, then compare facts, typed fields, text, and blocks. The report combines a headline verdict and severity-sorted findings in JSON, table, Markdown, diff, or diffs format.</desc>
+  <!-- Edit this vector layout directly. The README retains its logical Mermaid flow. -->
+  <style>
+    :root{color-scheme:light dark}
+    text{font-family:Arial,Helvetica,sans-serif}
+    .node,.result{fill:#f2f6f9;stroke:#d4dfe7;stroke-width:1.5}
+    .title{fill:#233b50;font-size:25px;font-weight:600}
+    .detail{fill:#577083;font-size:20px}
+    .label{fill:#577083;font-size:17px}
+    .step{fill:#64869d;font-size:14px;font-weight:600;letter-spacing:2px}
+    .track{fill:none;stroke:#a1b6c6;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .arrow{fill:#7896ac}.dashed{stroke-dasharray:6 6}
+    .contract{fill:#e9f3f8;stroke:#a4c9db;stroke-width:1.5}
+    .contract-title{fill:#173f57;font-size:28px;font-weight:600}
+    .contract-detail{fill:#45677d;font-size:19px}
+    .accent{fill:#3589b0}.pill{fill:#d9eaf3}
+    .code{fill:#31637e;font-family:monospace;font-size:17px}
+    .panel{fill:#f8fafb;stroke:#d4dfe7;stroke-width:1.5}
+    .warning{fill:#fbf6eb;stroke:#d9c69e;stroke-width:1.5}
+    .warning-text{fill:#80632e;font-size:19px}
+    .good{fill:#edf6f1;stroke:#b2cdbd;stroke-width:1.5}
+    .good-text{fill:#35634b;font-size:25px;font-weight:600}
+    @media(prefers-color-scheme:dark){
+      .node,.result{fill:#18232e;stroke:#324657}
+      .title{fill:#e0eaf2}.detail,.label{fill:#a9bdcc}.step{fill:#7ba5be}
+      .track{stroke:#4b6c83}.arrow{fill:#729bb5}
+      .contract{fill:#173446;stroke:#35627d}
+      .contract-title{fill:#e0f0fa}.contract-detail{fill:#abcbdc}
+      .accent{fill:#79c6e8}.pill{fill:#234a61}.code{fill:#a4d4ed}
+      .panel{fill:#121c25;stroke:#324657}
+      .warning{fill:#2a251d;stroke:#695b3c}.warning-text{fill:#d5bc88}
+      .good{fill:#172d26;stroke:#365e4b}.good-text{fill:#a1d4b7}
+    }
+  </style>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="arrow" d="M0 0 10 5 0 10Z"/></marker></defs>
+  <text class="step" x="40" y="38" text-anchor="start">SAVED ENVELOPES</text>
+  <text class="step" x="358" y="38" text-anchor="start">BACKEND FAN-OUT</text>
+  <text class="step" x="676" y="38" text-anchor="start">KEPT CANDIDATES</text>
+  <rect class="node" x="40" y="60" width="284" height="114" rx="16"/><text class="title" x="62" y="100" text-anchor="start">a.json + b.json</text><text class="detail" x="62" y="135" text-anchor="start">Read saved results</text>
+  <rect class="node" x="358" y="60" width="284" height="114" rx="16"/><text class="title" x="380" y="100" text-anchor="start">One document</text><text class="detail" x="380" y="135" text-anchor="start">Run named backends</text>
+  <rect class="node" x="676" y="60" width="284" height="114" rx="16"/><text class="title" x="698" y="100" text-anchor="start">Strategy run</text><text class="detail" x="698" y="135" text-anchor="start">Read kept candidates</text>
+  <path class="track" d="M182 174V218H170V252" marker-end="url(#arrow)"/>
+  <path class="track" d="M500 174V218H182"/>
+  <path class="track" d="M818 174V218H500"/>
+  <rect class="node" x="40" y="264" width="260" height="124" rx="16"/><text class="title" x="62" y="304" text-anchor="start">Subjects</text><text class="detail" x="62" y="339" text-anchor="start">Inputs with source</text><text class="detail" x="62" y="365" text-anchor="start">and backend context</text>
+  <rect class="node" x="370" y="264" width="260" height="124" rx="16"/><text class="title" x="392" y="304" text-anchor="start">Align</text><text class="detail" x="392" y="339" text-anchor="start">Pages, then blocks</text>
+  <rect class="node" x="700" y="264" width="260" height="124" rx="16"/><text class="title" x="722" y="304" text-anchor="start">Four dimensions</text><text class="detail" x="722" y="339" text-anchor="start">Facts, fields,</text><text class="detail" x="722" y="365" text-anchor="start">text, and blocks</text>
+  <path class="track" d="M300 326H358" marker-end="url(#arrow)"/>
+  <path class="track" d="M630 326H688" marker-end="url(#arrow)"/>
+  <path class="track" d="M830 388V422H255V456" marker-end="url(#arrow)"/>
+  <path class="track" d="M745 422V456" marker-end="url(#arrow)"/>
+  <rect class="good" x="40" y="468" width="430" height="124" rx="16"/><text class="good-text" x="62" y="508" text-anchor="start">Headline verdict</text><text class="detail" x="62" y="543" text-anchor="start">Equivalent, divergent, or mixed</text>
+  <rect class="node" x="530" y="468" width="430" height="124" rx="16"/><text class="title" x="552" y="508" text-anchor="start">Findings</text><text class="detail" x="552" y="543" text-anchor="start">Differences, sorted by severity</text>
+  <path class="track" d="M255 592V622H500V654" marker-end="url(#arrow)"/>
+  <path class="track" d="M745 592V622H500"/>
+  <rect class="contract" x="40" y="666" width="920" height="100" rx="16"/><text class="contract-title" x="62" y="706" text-anchor="start">One comparison report</text><text class="contract-detail" x="62" y="741" text-anchor="start">json  /  table  /  md  /  diff  /  diffs</text>
+</svg>

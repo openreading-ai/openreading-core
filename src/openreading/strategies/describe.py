@@ -33,20 +33,22 @@ _CRITERION_CLAUSE = {
 CRITERION_GLOSS: dict[str, tuple[str, str]] = {
     "looks_bad": (
         "looks bad",
-        "openreading's quality probe flags the result: garbled text, over 20% near-empty "
-        "pages, or an image-only page it got almost no text from",
+        "checks unread scans, garbled text, and near-empty pages. "
+        "For exact defaults and overrides: openreading help gates",
     ),
     "disagree": (
         "disagree",
-        "how far the two results' text differs — 1 minus their shared-word overlap (Jaccard). "
-        "Trips past 0.3 by default: they share under 70% of their combined words (tunable).",
+        "worst pairwise text-token difference among successful branches (true: 0.3); "
+        "not a field or table comparison",
     ),
     "low_confidence": (
         "low confidence",
-        "the backend's own confidence score is below your threshold (e.g. 0.8; the default "
-        "quality bundle uses 0.6)",
+        "mean reported page confidence below your threshold (true: 0.6); absent scores are skipped",
     ),
-    "missing": ("missing", "a field you named didn't come back in the result"),
+    "missing": (
+        "missing",
+        "a named typed-field value is absent, null, or blank; zero and false count as present",
+    ),
 }
 
 # Advanced predicates with no Plain word get a literal readable phrase; anything unlisted falls back

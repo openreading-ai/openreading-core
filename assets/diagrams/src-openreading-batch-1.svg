@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="800" viewBox="0 0 1000 800" role="img" aria-labelledby="title desc" data-renderer="authored">
+  <title id="title">A folder in. One result per document.</title>
+  <desc id="desc">Intake expands and sorts files, folders, globs, and URLs. Every document runs the single-document pipeline independently, including its failure handling. Results gather into one batch-result. Compare that envelope with a second run of the same corpus, pairing by relative path, filename, then SHA-256, for per-document verdicts and a rollup.</desc>
+  <!-- Edit this vector layout directly. The README retains its logical Mermaid flow. -->
+  <style>
+    :root{color-scheme:light dark}
+    text{font-family:Arial,Helvetica,sans-serif}
+    .node,.result{fill:#f2f6f9;stroke:#d4dfe7;stroke-width:1.5}
+    .title{fill:#233b50;font-size:25px;font-weight:600}
+    .detail{fill:#577083;font-size:20px}
+    .label{fill:#577083;font-size:17px}
+    .step{fill:#64869d;font-size:14px;font-weight:600;letter-spacing:2px}
+    .track{fill:none;stroke:#a1b6c6;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .arrow{fill:#7896ac}.dashed{stroke-dasharray:6 6}
+    .contract{fill:#e9f3f8;stroke:#a4c9db;stroke-width:1.5}
+    .contract-title{fill:#173f57;font-size:28px;font-weight:600}
+    .contract-detail{fill:#45677d;font-size:19px}
+    .accent{fill:#3589b0}.pill{fill:#d9eaf3}
+    .code{fill:#31637e;font-family:monospace;font-size:17px}
+    .panel{fill:#f8fafb;stroke:#d4dfe7;stroke-width:1.5}
+    .warning{fill:#fbf6eb;stroke:#d9c69e;stroke-width:1.5}
+    .warning-text{fill:#80632e;font-size:19px}
+    .good{fill:#edf6f1;stroke:#b2cdbd;stroke-width:1.5}
+    .good-text{fill:#35634b;font-size:25px;font-weight:600}
+    @media(prefers-color-scheme:dark){
+      .node,.result{fill:#18232e;stroke:#324657}
+      .title{fill:#e0eaf2}.detail,.label{fill:#a9bdcc}.step{fill:#7ba5be}
+      .track{stroke:#4b6c83}.arrow{fill:#729bb5}
+      .contract{fill:#173446;stroke:#35627d}
+      .contract-title{fill:#e0f0fa}.contract-detail{fill:#abcbdc}
+      .accent{fill:#79c6e8}.pill{fill:#234a61}.code{fill:#a4d4ed}
+      .panel{fill:#121c25;stroke:#324657}
+      .warning{fill:#2a251d;stroke:#695b3c}.warning-text{fill:#d5bc88}
+      .good{fill:#172d26;stroke:#365e4b}.good-text{fill:#a1d4b7}
+    }
+  </style>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="arrow" d="M0 0 10 5 0 10Z"/></marker></defs>
+  <text class="step" x="40" y="38" text-anchor="start">01 / YOUR SOURCES</text>
+  <text class="step" x="560" y="38" text-anchor="start">02 / INTAKE</text>
+  <rect class="node" x="40" y="60" width="400" height="120" rx="16"/><text class="title" x="62" y="100" text-anchor="start">Files, folders, globs, URLs</text><text class="detail" x="62" y="135" text-anchor="start">One source list for the run</text>
+  <rect class="node" x="560" y="60" width="400" height="120" rx="16"/><text class="title" x="582" y="100" text-anchor="start">Expand and sort</text><text class="detail" x="582" y="135" text-anchor="start">Each item keeps its own outcome</text>
+  <path class="track" d="M440 120H548" marker-end="url(#arrow)"/>
+  <path class="track" d="M760 180V214H240V242" marker-end="url(#arrow)"/>
+  <path class="track" d="M760 214V242" marker-end="url(#arrow)"/>
+  <rect class="node" x="40" y="254" width="400" height="120" rx="16"/><text class="title" x="62" y="294" text-anchor="start">Document 1</text><text class="detail" x="62" y="329" text-anchor="start">The single-document pipeline</text>
+  <rect class="node" x="560" y="254" width="400" height="120" rx="16"/><text class="title" x="582" y="294" text-anchor="start">Document N</text><text class="detail" x="582" y="329" text-anchor="start">The same pipeline, independently</text>
+  <text class="title" x="500" y="318" text-anchor="middle">…</text>
+  <path class="track" d="M240 374V410H500V438" marker-end="url(#arrow)"/>
+  <path class="track" d="M760 374V410H500"/>
+  <rect class="contract" x="40" y="450" width="920" height="106" rx="16"/><text class="contract-title" x="62" y="490" text-anchor="start">One batch-result envelope</text><text class="contract-detail" x="62" y="525" text-anchor="start">Responses, failed items, summary counts, and warnings</text>
+  <path class="track" d="M500 556V638" marker-end="url(#arrow)"/>
+  <text class="label" x="520" y="607" text-anchor="start">Compare two runs</text>
+  <rect class="node" x="40" y="650" width="250" height="116" rx="16"/><text class="title" x="62" y="690" text-anchor="start">Second run</text><text class="detail" x="62" y="725" text-anchor="start">The same corpus</text>
+  <rect class="node" x="375" y="650" width="250" height="116" rx="16"/><text class="title" x="397" y="690" text-anchor="start">Pair documents</text><text class="detail" x="397" y="725" text-anchor="start">relpath → filename</text><text class="detail" x="397" y="751" text-anchor="start">→ sha256</text>
+  <rect class="node" x="710" y="650" width="250" height="116" rx="16"/><text class="title" x="732" y="690" text-anchor="start">Corpus verdicts</text><text class="detail" x="732" y="725" text-anchor="start">One per document</text><text class="detail" x="732" y="751" text-anchor="start">plus a rollup</text>
+  <path class="track" d="M290 708H363" marker-end="url(#arrow)"/>
+  <path class="track" d="M625 708H698" marker-end="url(#arrow)"/>
+</svg>

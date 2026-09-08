@@ -1963,6 +1963,7 @@ arguments prints one batch-result over all of them. Unsupported formats are
 skipped in a batch. One file with an unsupported extension exits 3.
 
 Then:
+  openreading help response      # understand the JSON and optional fields
   openreading compare mu.json te.json --format table   # where they differ
   openreading explain run.json     # what that --strategy run decided, and why
 
@@ -1970,7 +1971,7 @@ Exits: 0 ok. 2 usage, or a source that does not exist. 3 cannot run (a
 missing key, a refused feature). 4 batch partial. 1 nothing succeeded, an
 empty folder included. 6 interrupted with OPENREADING_LEDGER armed.
 
-More: openreading help parse, openreading help batch""",
+More: openreading help parse, openreading help response, openreading help batch""",
     "resume": """\
 Examples:
   export OPENREADING_LEDGER=./.openreading  # arm the journal before you run
@@ -2081,7 +2082,7 @@ Then:
 Exits: 0 ok. 3 no config, an unparseable one, a validate error, or an unknown
 name. A warning never fails a validate.
 
-More: openreading help strategy""",
+More: openreading help strategy, openreading help gates""",
     "strategy show": """\
 Examples:
   openreading strategy show fast              # a built-in preset, as written
@@ -2099,7 +2100,7 @@ Then:
 
 Exits: 0 ok. 3 an unknown name, or an openreading.yaml that will not parse.
 
-More: openreading help strategy""",
+More: openreading help strategy, openreading help gates""",
     "strategy list": """\
 Examples:
   openreading strategy list                     # presets, then your own
@@ -2135,7 +2136,7 @@ Then:
 Exits: 0 no errors, warnings included. 3 any error, no openreading.yaml
 found, or one that will not parse.
 
-More: openreading help strategy""",
+More: openreading help strategy, openreading help gates""",
     "strategy normalize": """\
 Examples:
   openreading strategy normalize                  # canonical longhand YAML
@@ -2489,6 +2490,7 @@ TOP_EPILOG = """\
 I WANT TO ...                          RUN
   see what works here, with no keys    openreading backends
   read one document                    openreading parse FILE --backend SLUG
+  understand the response JSON         openreading help response
   read a folder, a glob, or a list     openreading parse DIR/ --backend SLUG
   let OpenReading pick the backend     openreading parse FILE --no-strategy
   follow a plan I wrote down           openreading parse FILE --strategy NAME
@@ -2514,7 +2516,7 @@ THINGS CHAIN.
 LEARN MORE
   openreading COMMAND --help   # examples and exit codes for one command
   openreading help             # the manual's topic index
-  openreading help batch       # one chapter of it"""
+  openreading help response    # content paths, examples, and optional fields"""
 
 
 class _HelpFormatter(argparse.HelpFormatter):

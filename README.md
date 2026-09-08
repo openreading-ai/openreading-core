@@ -1,3 +1,5 @@
+<img src="assets/brand/icon.svg" alt="OpenReading" width="64" height="64" />
+
 # OpenReading: an intelligent, policy-aware router for document processing
 
 [![CI](https://github.com/multiversal-ventures/openreading-core/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/multiversal-ventures/openreading-core/actions/workflows/ci.yml)
@@ -32,22 +34,33 @@ verified](#how-this-repo-is-built-and-verified) names each check and the failure
 Whichever backends read your documents, you get one shape that you can read, compare, or use to
 replay the run.
 
+<!-- diagram:README-1 -->
+<p align="center"><a href="assets/diagrams/README-1.svg"><img src="assets/diagrams/README-1.svg" alt="Your documents follow your rules to a chosen backend, then return one response shape for reading, comparison, and replay." /></a></p>
+
+<details>
+<summary>Logical flow (Mermaid)</summary>
+
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif","fontSize":"14px","lineColor":"#94a3b8","textColor":"#334155","primaryTextColor":"#0f172a","edgeLabelBackground":"#eef2f7","clusterBkg":"#f8fafc","clusterBorder":"#cbd5e1","titleColor":"#334155"},"flowchart":{"curve":"basis","nodeSpacing":36,"rankSpacing":44,"padding":8,"useMaxWidth":true}}}%%
+%%{init: {"theme":"base","fontFamily":"Arial","deterministicIds":true,"deterministicIDSeed":"openreading","htmlLabels":false,"themeVariables":{"fontFamily":"Arial","fontSize":"17px","lineColor":"#8194ad","textColor":"#183451","primaryTextColor":"#183451","primaryColor":"#edf3fc","primaryBorderColor":"#9db4d0","edgeLabelBackground":"#ffffff","clusterBkg":"#f5f8fc","clusterBorder":"#d7e1ee","titleColor":"#183451","actorBkg":"#edf3fc","actorBorder":"#9db4d0","actorTextColor":"#183451","actorLineColor":"#9db4d0","signalColor":"#527095","signalTextColor":"#183451","labelBoxBkgColor":"#fff4de","labelBoxBorderColor":"#c6953a","labelTextColor":"#70501b","loopTextColor":"#527095","noteBkgColor":"#edf3fc","noteBorderColor":"#9db4d0","noteTextColor":"#183451","sequenceNumberColor":"#ffffff","activationBkgColor":"#e7f3ee","activationBorderColor":"#679780"},"flowchart":{"curve":"monotoneY","nodeSpacing":32,"rankSpacing":48,"padding":18,"useMaxWidth":true},"sequence":{"useMaxWidth":true,"actorMargin":65,"messageMargin":38,"mirrorActors":false}}}%%
 flowchart TD
-  D[/"your documents<br>a file, a folder, or a glob"/]:::src --> B["your rules choose the backend<br>a name you pass, a policy, or a strategy"]:::gate
-  B --> P["the chosen backend reads each one"]:::work
-  P --> J(["one JSON per document<br>plus one envelope over the run"]):::hero
-  J --> T["read the text<br>and tables"]:::out
-  J --> C["compare backends<br>across your corpus"]:::out
-  J --> E["explain or replay a run"]:::out
-  classDef src fill:#eef2ff,stroke:#6366f1,stroke-width:1.5px,color:#1e1b4b;
-  classDef work fill:#e0f2fe,stroke:#0284c7,stroke-width:1.5px,color:#082f49;
-  classDef gate fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#451a03;
-  classDef out fill:#f3e8ff,stroke:#9333ea,stroke-width:1.5px,color:#3b0764;
-  classDef hero fill:#1e293b,stroke:#94a3b8,stroke-width:2px,color:#f8fafc;
-  linkStyle default stroke-width:1.6px;
+  D[/"Your documents<br>File, folder, or glob"/]:::src --> B["Choose the backend<br>Explicit name, policy, or strategy"]:::gate
+  B --> P["The selected backend reads each document"]:::work
+  P --> J(["One JSON per document<br>One envelope over the run"]):::hero
+  J --> T["Read<br>Text and tables"]:::out
+  J --> C["Compare<br>Across your corpus"]:::out
+  J --> E["Inspect<br>Explain or replay"]:::out
+  classDef src fill:#f5f8fc,stroke:#a7b9d0,stroke-width:1px,color:#29445f;
+  classDef work fill:#edf3fc,stroke:#9db4d0,stroke-width:1px,color:#183451;
+  classDef gate fill:#fff4de,stroke:#c6953a,stroke-width:1px,color:#70501b;
+  classDef good fill:#e7f3ee,stroke:#679780,stroke-width:1px,color:#245740;
+  classDef bad fill:#fbeeee,stroke:#c78686,stroke-width:1px,color:#803d3d;
+  classDef store fill:#e7f3ee,stroke:#679780,stroke-width:1px,color:#245740;
+  classDef out fill:#edf3fc,stroke:#9db4d0,stroke-width:1px,color:#183451;
+  classDef hero fill:#164bc5,stroke:#164bc5,stroke-width:1px,color:#ffffff;
+  linkStyle default stroke-width:1.4px;
 ```
+
+</details>
 
 **The problem.** Every document parser has its own API and its own output shape. Swapping one
 parser for another means rewriting the code that reads its result. Comparing two parsers on your
@@ -131,7 +144,11 @@ tesseract                      oss_library        no          tesseract binary (
 
 ## Your first parse
 
-> **Want the guided version?** [`tutorial/README.md`](tutorial/README.md) walks the whole tool
+The response JSON is the interface your application builds against, not a backend-specific result you must decode yourself.
+Read the [worked response guide](src/openreading/schemas/README.md#understanding-the-response-json) for an annotated example and a reusable Python consumer.
+In a terminal, `uv run openreading help response` explains content, tables, fields, warnings, and provenance.
+
+> **Want the guided version?** [The tutorial](https://openreading.ai/oss-tutorial) walks the whole tool
 > in seventeen steps, from this first parse to a policy, a self-escalating strategy, a folder run
 > and the HTTP server. It uses the documents in [`examples/`](examples/README.md) and needs no key.
 > The sections below are the short tour.
@@ -495,11 +512,13 @@ command.
 | You want to know… | Run / open |
 |---|---|
 | **the full documentation, every guide, and how an agent uses it** | [`src/openreading/README.md`](src/openreading/README.md), then `uv run openreading --help` and `uv run openreading <cmd> --help` for every flag |
-| **how to get from a fresh clone to a working strategy, one step at a time** | [`tutorial/README.md`](tutorial/README.md), the guided walkthrough over the shipped documents |
+| **how to get from a fresh clone to a working strategy, one step at a time** | [The tutorial](https://openreading.ai/oss-tutorial), maintained in `openreading-web`, over the shipped documents |
+| **how to build against the response JSON** | [Annotated response and Python consumer](src/openreading/schemas/README.md#understanding-the-response-json), or `uv run openreading help response` |
 | what the shipped example documents contain and where they came from | [`examples/README.md`](examples/README.md) |
 | each backend's variables, runtime location, and env-var precedence rules | [`src/openreading/adapters/README.md`](src/openreading/adapters/README.md), then `uv run python -m pydoc openreading.credentials` |
 | the exact JSON shapes (the contract) | [`src/openreading/schemas/README.md`](src/openreading/schemas/README.md), then the `*.json` files beside it |
 | how to cascade backends under quality gates, race them, or compare them from one file | [Strategies](src/openreading/strategies/README.md) |
+| what `looks_bad` and the other escalation checks actually measure | `uv run openreading help gates`, or the [worked gate tutorial](https://openreading.ai/oss-tutorial#writing-escalation-checks) |
 | what differs between two backends' readings of the same document | [Compare](src/openreading/comparison/README.md) |
 | how `policy.backends` chooses the default chain and where each key comes from | [Routing and keys](src/openreading/router/README.md) |
 | how to run a folder of documents and read one result | [Batch runs](src/openreading/batch/README.md) |

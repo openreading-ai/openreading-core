@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="670" viewBox="0 0 1000 670" role="img" aria-labelledby="title desc" data-renderer="authored">
+  <title id="title">From a readable plan to a trace you can inspect</title>
+  <desc id="desc">An openreading.yaml plan passes the schema gate, Plain desugaring, and normalization. Caller scope constrains dispatch before the engine walks the plan. Its orchestration trace supports explain, offline decision replay, and comparison of kept candidates.</desc>
+  <!-- Edit this vector layout directly. The README retains its logical Mermaid flow. -->
+  <style>
+    :root{color-scheme:light dark}
+    text{font-family:Arial,Helvetica,sans-serif}
+    .node,.result{fill:#f2f6f9;stroke:#d4dfe7;stroke-width:1.5}
+    .title{fill:#233b50;font-size:25px;font-weight:600}
+    .detail{fill:#577083;font-size:20px}
+    .label{fill:#577083;font-size:17px}
+    .step{fill:#64869d;font-size:14px;font-weight:600;letter-spacing:2px}
+    .track{fill:none;stroke:#a1b6c6;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .arrow{fill:#7896ac}.dashed{stroke-dasharray:6 6}
+    .contract{fill:#e9f3f8;stroke:#a4c9db;stroke-width:1.5}
+    .contract-title{fill:#173f57;font-size:28px;font-weight:600}
+    .contract-detail{fill:#45677d;font-size:19px}
+    .accent{fill:#3589b0}.pill{fill:#d9eaf3}
+    .code{fill:#31637e;font-family:monospace;font-size:17px}
+    .panel{fill:#f8fafb;stroke:#d4dfe7;stroke-width:1.5}
+    .warning{fill:#fbf6eb;stroke:#d9c69e;stroke-width:1.5}
+    .warning-text{fill:#80632e;font-size:19px}
+    .good{fill:#edf6f1;stroke:#b2cdbd;stroke-width:1.5}
+    .good-text{fill:#35634b;font-size:25px;font-weight:600}
+    @media(prefers-color-scheme:dark){
+      .node,.result{fill:#18232e;stroke:#324657}
+      .title{fill:#e0eaf2}.detail,.label{fill:#a9bdcc}.step{fill:#7ba5be}
+      .track{stroke:#4b6c83}.arrow{fill:#729bb5}
+      .contract{fill:#173446;stroke:#35627d}
+      .contract-title{fill:#e0f0fa}.contract-detail{fill:#abcbdc}
+      .accent{fill:#79c6e8}.pill{fill:#234a61}.code{fill:#a4d4ed}
+      .panel{fill:#121c25;stroke:#324657}
+      .warning{fill:#2a251d;stroke:#695b3c}.warning-text{fill:#d5bc88}
+      .good{fill:#172d26;stroke:#365e4b}.good-text{fill:#a1d4b7}
+    }
+  </style>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="arrow" d="M0 0 10 5 0 10Z"/></marker></defs>
+  <text class="step" x="40" y="38" text-anchor="start">01 / CONFIG</text>
+  <text class="step" x="280" y="38" text-anchor="start">02 / VALIDATION</text>
+  <text class="step" x="520" y="38" text-anchor="start">03 / PLAIN</text>
+  <text class="step" x="760" y="38" text-anchor="start">04 / NORMALIZE</text>
+  <rect class="node" x="40" y="60" width="200" height="130" rx="16"/><text class="title" x="62" y="100" text-anchor="start">Your plan</text><text class="detail" x="62" y="135" text-anchor="start">openreading.yaml</text>
+  <rect class="node" x="280" y="60" width="200" height="130" rx="16"/><text class="title" x="302" y="100" text-anchor="start">Schema gate</text><text class="detail" x="302" y="135" text-anchor="start">Check the</text><text class="detail" x="302" y="161" text-anchor="start">config shape</text>
+  <rect class="node" x="520" y="60" width="200" height="130" rx="16"/><text class="title" x="542" y="100" text-anchor="start">Desugar</text><text class="detail" x="542" y="135" text-anchor="start">Plain becomes</text><text class="detail" x="542" y="161" text-anchor="start">explicit nodes</text>
+  <rect class="node" x="760" y="60" width="200" height="130" rx="16"/><text class="title" x="782" y="100" text-anchor="start">Normalize</text><text class="detail" x="782" y="135" text-anchor="start">Prepare the</text><text class="detail" x="782" y="161" text-anchor="start">execution tree</text>
+  <path class="track" d="M240 125H268" marker-end="url(#arrow)"/>
+  <path class="track" d="M480 125H508" marker-end="url(#arrow)"/>
+  <path class="track" d="M720 125H748" marker-end="url(#arrow)"/>
+  <path class="track" d="M860 190V230H175V270" marker-end="url(#arrow)"/>
+  <rect class="node" x="40" y="282" width="270" height="120" rx="16"/><text class="title" x="62" y="322" text-anchor="start">Caller scope</text><text class="detail" x="62" y="357" text-anchor="start">Narrow dispatch</text><text class="detail" x="62" y="383" text-anchor="start">to allowed backends</text>
+  <rect class="node" x="365" y="282" width="270" height="120" rx="16"/><text class="title" x="387" y="322" text-anchor="start">Engine walk</text><text class="detail" x="387" y="357" text-anchor="start">Execute the plan</text><text class="detail" x="387" y="383" text-anchor="start">and record decisions</text>
+  <rect class="contract" x="690" y="282" width="270" height="120" rx="16"/><text class="contract-title" x="712" y="322" text-anchor="start">Orchestration</text><text class="contract-detail" x="712" y="357" text-anchor="start">A trace of the run</text>
+  <path class="track" d="M310 342H353" marker-end="url(#arrow)"/>
+  <path class="track" d="M635 342H678" marker-end="url(#arrow)"/>
+  <path class="track" d="M825 402V454H182V516" marker-end="url(#arrow)"/>
+  <path class="track" d="M500 454V516" marker-end="url(#arrow)"/>
+  <path class="track" d="M818 454V516" marker-end="url(#arrow)"/>
+  <rect class="node" x="40" y="528" width="284" height="110" rx="16"/><text class="title" x="62" y="568" text-anchor="start">Explain</text><text class="detail" x="62" y="603" text-anchor="start">Read what happened</text>
+  <rect class="node" x="358" y="528" width="284" height="110" rx="16"/><text class="title" x="380" y="568" text-anchor="start">Replay</text><text class="detail" x="380" y="603" text-anchor="start">Re-execute decisions</text>
+  <rect class="node" x="676" y="528" width="284" height="110" rx="16"/><text class="title" x="698" y="568" text-anchor="start">Compare</text><text class="detail" x="698" y="603" text-anchor="start">Inspect kept candidates</text>
+</svg>

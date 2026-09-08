@@ -26,8 +26,17 @@ README, and the walkthrough needs no key.
 
 ## Mental model
 
+Your selected reading keeps the [same response JSON](../schemas/README.md#understanding-the-response-json), with `orchestration` explaining how the strategy chose it.
+Check parse status separately from quality outcome, because a successful parse can still fall below your thresholds.
+
+<!-- diagram:src-openreading-strategies-1 -->
+<p align="center"><a href="../../../assets/diagrams/src-openreading-strategies-1.svg"><img src="../../../assets/diagrams/src-openreading-strategies-1.svg" alt="An openreading.yaml plan passes the schema gate, Plain desugaring, and normalization. Caller scope constrains dispatch before the engine walks the plan. Its orchestration trace supports explain, offline decision replay, and comparison of kept candidates." /></a></p>
+
+<details>
+<summary>Logical flow (Mermaid)</summary>
+
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif","fontSize":"14px","lineColor":"#94a3b8","textColor":"#334155","primaryTextColor":"#0f172a","edgeLabelBackground":"#eef2f7","clusterBkg":"#f8fafc","clusterBorder":"#cbd5e1","titleColor":"#334155"},"flowchart":{"curve":"basis","nodeSpacing":36,"rankSpacing":44,"padding":8,"useMaxWidth":true}}}%%
+%%{init: {"theme":"base","fontFamily":"Arial","deterministicIds":true,"deterministicIDSeed":"openreading","htmlLabels":false,"themeVariables":{"fontFamily":"Arial","fontSize":"17px","lineColor":"#8194ad","textColor":"#183451","primaryTextColor":"#183451","primaryColor":"#edf3fc","primaryBorderColor":"#9db4d0","edgeLabelBackground":"#ffffff","clusterBkg":"#f5f8fc","clusterBorder":"#d7e1ee","titleColor":"#183451","actorBkg":"#edf3fc","actorBorder":"#9db4d0","actorTextColor":"#183451","actorLineColor":"#9db4d0","signalColor":"#527095","signalTextColor":"#183451","labelBoxBkgColor":"#fff4de","labelBoxBorderColor":"#c6953a","labelTextColor":"#70501b","loopTextColor":"#527095","noteBkgColor":"#edf3fc","noteBorderColor":"#9db4d0","noteTextColor":"#183451","sequenceNumberColor":"#ffffff","activationBkgColor":"#e7f3ee","activationBorderColor":"#679780"},"flowchart":{"curve":"monotoneY","nodeSpacing":32,"rankSpacing":48,"padding":18,"useMaxWidth":true},"sequence":{"useMaxWidth":true,"actorMargin":65,"messageMargin":38,"mirrorActors":false}}}%%
 flowchart TD
   Y[/"openreading.yaml"/]:::src --> S{{"schema gate"}}:::gate
   S --> P["Plain desugar"]:::work
@@ -38,16 +47,18 @@ flowchart TD
   T --> X["explain"]:::out
   T --> R["replay from the trace"]:::out
   T --> F["compare from candidates"]:::out
-  classDef src fill:#eef2ff,stroke:#6366f1,stroke-width:1.5px,color:#1e1b4b;
-  classDef work fill:#e0f2fe,stroke:#0284c7,stroke-width:1.5px,color:#082f49;
-  classDef gate fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#451a03;
-  classDef good fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#052e16;
-  classDef bad fill:#fee2e2,stroke:#dc2626,stroke-width:1.5px,color:#450a0a;
-  classDef store fill:#ccfbf1,stroke:#0d9488,stroke-width:1.5px,color:#042f2e;
-  classDef out fill:#f3e8ff,stroke:#9333ea,stroke-width:1.5px,color:#3b0764;
-  classDef hero fill:#1e293b,stroke:#94a3b8,stroke-width:2px,color:#f8fafc;
-  linkStyle default stroke-width:1.6px;
+  classDef src fill:#f5f8fc,stroke:#a7b9d0,stroke-width:1px,color:#29445f;
+  classDef work fill:#edf3fc,stroke:#9db4d0,stroke-width:1px,color:#183451;
+  classDef gate fill:#fff4de,stroke:#c6953a,stroke-width:1px,color:#70501b;
+  classDef good fill:#e7f3ee,stroke:#679780,stroke-width:1px,color:#245740;
+  classDef bad fill:#fbeeee,stroke:#c78686,stroke-width:1px,color:#803d3d;
+  classDef store fill:#e7f3ee,stroke:#679780,stroke-width:1px,color:#245740;
+  classDef out fill:#edf3fc,stroke:#9db4d0,stroke-width:1px,color:#183451;
+  classDef hero fill:#164bc5,stroke:#164bc5,stroke-width:1px,color:#ffffff;
+  linkStyle default stroke-width:1.4px;
 ```
+
+</details>
 
 Hold the four facts below in mind, and every command on this page follows from them.
 
@@ -66,10 +77,15 @@ Hold the four facts below in mind, and every command on this page follows from t
    and `replay` reproduces one.
 
 Plain is the short form you write, and it has six keys: `try`, `race`, `compare`, `then`,
-`escalate_when`, `max_time`. `escalate_when` takes one or more of four judgment words: `looks_bad`,
-`low_confidence`, `missing: [field]`, and `disagree`. There are no reserved words: every rung
-names a backend or another strategy. `uv run openreading strategy --help` prints the whole
-language, and each key is shown in use below.
+`escalate_when`, `max_time`. The four escalation checks are deterministic rules, not requests for
+an LLM to judge the document. For example, `low_confidence: 0.7` compares the mean reported page
+confidence with 0.7, rather than inspecting every block or extracted field.
+
+Run `uv run openreading help gates` for exact syntax, defaults, missing measurements, and tuning.
+The [worked gate tutorial](https://openreading.ai/oss-tutorial#writing-escalation-checks) demonstrates each check and links to its implementation.
+For the code itself, [Plain's `_compile_gate`](plain.py#L800) expands the shorthand, while
+[`probe` and `evaluate_gate`](signals.py#L464) measure results and apply the conditions.
+Every rung names a backend or another strategy, and the walkthrough below shows complete files.
 
 ## Walkthrough
 
@@ -146,7 +162,8 @@ WARNING …/openreading.yaml:strategies.fields.steps[0].escalate_if: missing: 'p
     → Runs pymupdf and tesseract at once and keeps the better result; if they disagree or the winner looks bad, sends the document to aws-textract.
   …
   what the words mean:
-    looks bad       openreading's quality probe flags the result: garbled text, over 20% near-empty pages,
+    looks bad       checks unread scans, garbled text, and near-empty pages. For exact defaults and
+                    overrides: openreading help gates
     …
 …/openreading.yaml: 0 error(s), 1 warning(s)
 ```
@@ -673,8 +690,14 @@ that cut. Read the catalog before you change one of these numbers, and before yo
 
 This is the ladder a `try` with `escalate_when` walks for each rung:
 
+<!-- diagram:src-openreading-strategies-2 -->
+<p align="center"><a href="../../../assets/diagrams/src-openreading-strategies-2.svg"><img src="../../../assets/diagrams/src-openreading-strategies-2.svg" alt="Each rung runs a backend. Errors follow on_error: next or fail. A successful result reaches the quality gate. If the gate does not fire, accept and stop. If it fires, retain a best-so-far candidate. Continue with the next rung, or return the best retained result with a warning at the end of the ladder." /></a></p>
+
+<details>
+<summary>Logical flow (Mermaid)</summary>
+
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif","fontSize":"14px","lineColor":"#94a3b8","textColor":"#334155","primaryTextColor":"#0f172a","edgeLabelBackground":"#eef2f7","clusterBkg":"#f8fafc","clusterBorder":"#cbd5e1","titleColor":"#334155"},"flowchart":{"curve":"basis","nodeSpacing":36,"rankSpacing":44,"padding":8,"useMaxWidth":true}}}%%
+%%{init: {"theme":"base","fontFamily":"Arial","deterministicIds":true,"deterministicIDSeed":"openreading","htmlLabels":false,"themeVariables":{"fontFamily":"Arial","fontSize":"17px","lineColor":"#8194ad","textColor":"#183451","primaryTextColor":"#183451","primaryColor":"#edf3fc","primaryBorderColor":"#9db4d0","edgeLabelBackground":"#ffffff","clusterBkg":"#f5f8fc","clusterBorder":"#d7e1ee","titleColor":"#183451","actorBkg":"#edf3fc","actorBorder":"#9db4d0","actorTextColor":"#183451","actorLineColor":"#9db4d0","signalColor":"#527095","signalTextColor":"#183451","labelBoxBkgColor":"#fff4de","labelBoxBorderColor":"#c6953a","labelTextColor":"#70501b","loopTextColor":"#527095","noteBkgColor":"#edf3fc","noteBorderColor":"#9db4d0","noteTextColor":"#183451","sequenceNumberColor":"#ffffff","activationBkgColor":"#e7f3ee","activationBorderColor":"#679780"},"flowchart":{"curve":"monotoneY","nodeSpacing":32,"rankSpacing":48,"padding":18,"useMaxWidth":true},"sequence":{"useMaxWidth":true,"actorMargin":65,"messageMargin":38,"mirrorActors":false}}}%%
 flowchart TD
   R["run rung n"]:::work --> OK{"succeeded?"}:::gate
   OK -- "error" --> NEXT["on_error: next or fail"]:::bad
@@ -684,16 +707,18 @@ flowchart TD
   KEEP --> LAST{"last rung?"}:::gate
   LAST -- "no" --> R
   LAST -- "yes" --> BEST(["return best retained<br>plus a warning"]):::hero
-  classDef src fill:#eef2ff,stroke:#6366f1,stroke-width:1.5px,color:#1e1b4b;
-  classDef work fill:#e0f2fe,stroke:#0284c7,stroke-width:1.5px,color:#082f49;
-  classDef gate fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#451a03;
-  classDef good fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#052e16;
-  classDef bad fill:#fee2e2,stroke:#dc2626,stroke-width:1.5px,color:#450a0a;
-  classDef store fill:#ccfbf1,stroke:#0d9488,stroke-width:1.5px,color:#042f2e;
-  classDef out fill:#f3e8ff,stroke:#9333ea,stroke-width:1.5px,color:#3b0764;
-  classDef hero fill:#1e293b,stroke:#94a3b8,stroke-width:2px,color:#f8fafc;
-  linkStyle default stroke-width:1.6px;
+  classDef src fill:#f5f8fc,stroke:#a7b9d0,stroke-width:1px,color:#29445f;
+  classDef work fill:#edf3fc,stroke:#9db4d0,stroke-width:1px,color:#183451;
+  classDef gate fill:#fff4de,stroke:#c6953a,stroke-width:1px,color:#70501b;
+  classDef good fill:#e7f3ee,stroke:#679780,stroke-width:1px,color:#245740;
+  classDef bad fill:#fbeeee,stroke:#c78686,stroke-width:1px,color:#803d3d;
+  classDef store fill:#e7f3ee,stroke:#679780,stroke-width:1px,color:#245740;
+  classDef out fill:#edf3fc,stroke:#9db4d0,stroke-width:1px,color:#183451;
+  classDef hero fill:#164bc5,stroke:#164bc5,stroke-width:1px,color:#ffffff;
+  linkStyle default stroke-width:1.4px;
 ```
+
+</details>
 
 The category column in `explain` is the closed vocabulary `CATEGORIES` in
 `openreading.strategies.trace`. This page showed `succeeded`, `quality_escalated`,

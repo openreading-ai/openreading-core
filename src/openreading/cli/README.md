@@ -9,6 +9,12 @@ This page is the walkthrough. For a flag or a rule while you work, the CLI answe
 `openreading help` lists the manual's chapters, `openreading help <topic>` prints one, and
 `openreading <cmd> --help` gives one command's examples and exit codes.
 
+For the JSON itself, start with `uv run openreading help response` before composing a consumer.
+The [response guide](../schemas/README.md#understanding-the-response-json) adds an annotated result and runnable Python examples across two backends.
+
+For escalation rules such as `looks_bad`, run `uv run openreading help gates` for their exact checks and defaults.
+The [worked gate tutorial](https://openreading.ai/oss-tutorial#writing-escalation-checks) shows how to tune them and inspect the compiled plan.
+
 ## What this gives you
 
 You want to call the parser from a shell script or a CI job and trust what comes back. The worry is

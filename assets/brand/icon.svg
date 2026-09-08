@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="openreading">
+  <!-- openreading routemark: three provider lines converging into one interface, terminating in
+       one stop. Transit-map geometry — verticals and true 45° diagonals, one terminus dot. -->
+  <rect width="32" height="32" rx="6.5" fill="#0c2c40"/>
+  <g fill="none" stroke="#51b8e5" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M7 4.5V9l9 9"/>
+    <path d="M25 4.5V9l-9 9"/>
+    <path d="M16 4.5V22"/>
+  </g>
+  <circle cx="16" cy="24.4" r="3.4" fill="#51b8e5"/>
+</svg>
