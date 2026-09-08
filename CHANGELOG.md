@@ -602,6 +602,22 @@ and `tests/test_schema_evolution.py` pins every released file byte for byte.
   per-case `compliance` block into `request_body`, which the request schema now rejects outright;
   the `compliance` route fact, which matched on a posture core computed from that same table; and
   the `strategy validate` unreachable-step warning, whose evaluator row 4 deleted underneath it.
+- **A URL-sourced document is no longer written to the ledger, and such a run cannot be resumed.**
+  `document.url` is secret-class: a presigned URL is a live credential, and routinely the only
+  thing standing between a reader of the file and the object. It used to be routed through the
+  blob store, which was defensible while that store was encrypted. Removing the cipher removed the
+  defence, so the URL is not persisted at all: the header records `document_is_url` with no
+  document, and `openreading resume` on that run exits 3 with `payload_missing` instead of
+  replaying against an input it does not hold. Materialize the document before arming the ledger
+  if a URL-sourced run has to be resumable. Runs from `bytes_base64` are unaffected.
+- **A strategy pins every backend it can dispatch, not only the ones its policy chain names.**
+  `policy.backends` is a default chain, so a strategy may name a backend outside it and that
+  backend runs. Everything derived from the chain missed it: the ledger pinned an incomplete
+  `pinned_eligible`, the URL-materialization check consulted the wrong descriptors, `config_hash`
+  folded no digest for it, and — the one that matters — the `Sanitizer` was armed without its
+  credentials, so a failure message carrying that backend's key would have been journaled to a
+  plaintext file unredacted. `CompiledPlan` now carries `dispatchable` beside `eligible`: the
+  concrete ids the tree names, plus the chain when a leaf is `auto`.
 - **A descriptor's vendor claims are documentation, and core never branches on one.** The removal
   set deleted three features that read a per-vendor table and decided with it: the compliance
   filter, the capability gate and the cost scorer. That left the fields themselves, read at zero

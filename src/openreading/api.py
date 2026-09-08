@@ -895,9 +895,17 @@ def _request_from_header(header: RunHeader, blobs: LocalFsBlobStore) -> OpenRead
     `slim_request` + `document` (see `ledger/header.py`'s module docstring for what's deliberately
     NOT recoverable this way — `document.password`/`async.webhook_url`, never persisted).
 
-    `header.document` holds a `bytes_base64` document's bytes. A URL is never persisted because
-    the plaintext blob store cannot safely retain a bearer token embedded in it. Such a header
-    carries `document_is_url=True` and resume reports that its input is unavailable."""
+    `header.document` holds a `bytes_base64` document's bytes. A URL is never persisted, because
+    the plaintext blob store cannot safely retain a bearer token embedded in one, and a presigned
+    URL routinely is one. Such a header carries `document_is_url=True` with no `document`, and
+    resume reports its input as unavailable rather than replaying against something it does not
+    have. Materialize the document before arming the ledger if a URL-sourced run must be
+    resumable.
+
+    The `document_is_url` branch below reads a URL back out of the blob store, and no header this
+    version writes can reach it: the refusal above catches every one. It stays for a header
+    written by a build after encryption was removed and before the URL stopped being stored, whose
+    blob is a readable URL on disk."""
     body: dict[str, Any] = dict(header.slim_request)
     doc = dict(body.get("document") or {})
     if header.document is None and header.document_is_url:

@@ -1014,3 +1014,47 @@ def test_keyboard_interrupt_during_cmd_parse_prints_resumable_message_and_exits_
     err = capsys.readouterr().err
     assert "interrupted" in err and "resumable" in err
     assert "openreading resume" in err
+
+
+def test_a_url_sourced_run_records_no_url_and_refuses_resume(tmp_path, monkeypatch, capsys):
+    """A `document.url` is routinely a presigned URL, which is a live credential.
+
+    It used to be written to the blob store, which was justified while that store was encrypted.
+    Removing the cipher removed the justification, so the URL is not persisted at all now: the
+    header records `document_is_url` and nothing else, and a resume of that run refuses rather
+    than replaying against an input it does not have.
+
+    Guards both halves. A regression that starts persisting it again puts a bearer token in a
+    plaintext file on disk, and one that drops the marker turns an honest refusal into a crash.
+    """
+    monkeypatch.chdir(tmp_path)
+    ledger_root = tmp_path / "ledger"
+    monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
+    # `reducto` declares accepts_url, so the URL is NOT materialized and reaches the header as a
+    # URL. It then fails on its missing key, which is after the ledger arms — which is the state
+    # this test is about.
+    (tmp_path / "openreading.yaml").write_text(
+        "version: 1\nstrategies:\n  s:\n    steps:\n      - backend: reducto\n"
+    )
+    for var in ("REDUCTO_API_KEY", "OPENREADING_REDUCTO_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    secret = "https://bucket.example/doc.pdf?X-Amz-Signature=deadbeefcafe"
+    armed: list[str] = []
+    with pytest.raises(Exception):  # noqa: B017 — it fails on the key; the header is the subject
+        api.run(secret, strategy="s", on_run_armed=armed.append)
+    capsys.readouterr()
+
+    assert armed, "the run armed a ledger before the fetch failed"
+    header = read_header(ledger_root, armed[0])
+    assert header is not None
+    assert header.document is None and header.document_is_url is True
+
+    # The secret must appear nowhere under the ledger root, in any file.
+    for path in ledger_root.rglob("*"):
+        if path.is_file():
+            assert "X-Amz-Signature" not in path.read_text(encoding="utf-8", errors="ignore")
+
+    from openreading.cli.app import main
+
+    assert main(["resume", armed[0]]) == 3
+    assert "payload" in capsys.readouterr().err.lower()
