@@ -235,9 +235,9 @@ milestone label rather than a package version. The shipped package version is ``
 Adapter descriptor (``adapter-descriptor.v0.8.json``)
 -----------------------------------------------------
 A static, machine-readable declaration per adapter — the reason the router NEVER branches on
-backend type: eligibility, ranking, credential resolution and the readiness UI read descriptor
-fields only. Required: ``id``, ``type``, ``provisioning``, ``wait_modes``, ``capabilities``,
-``cost``, ``compliance``, ``runtime``. No ``additionalProperties: false`` (so each additive bump
+backend type: credential resolution, execution, and the readiness UI read descriptor fields.
+Required: ``id``, ``type``, ``provisioning``, ``wait_modes``, ``capabilities``, and ``runtime``.
+No ``additionalProperties: false`` (so each additive bump
 keeps every older descriptor valid) and no in-band version — filename + ``$id`` only.
 
 - Identity: ``id``, ``type``, ``adapter_impl`` (http | in_process | subprocess | container),
@@ -260,8 +260,8 @@ keeps every older descriptor valid) and no in-band version — filename + ``$id`
   (word | line | paragraph | section | element) so consumers and compare can reason about
   packaging differences instead of discovering them empirically.
 - ``runtime``: ``offline_capable``, ``license`` (copyleft flagged here), ``system_deps``,
-  ``version_pin``, hardware/serving profile, ``sandbox``. ``router``: ``normalization_difficulty``,
-  ``integration_priority`` P0-P2, ``priority_reason``. ``sources``: primary-source URLs with
+  ``version_pin``, hardware/serving profile, ``sandbox``. ``router`` carries only
+  ``normalization_difficulty``. ``sources``: primary-source URLs with
   access dates backing every claim above.
 - BYO-credential declaration (v0.2): ``credentials_spec[]`` (``{key, required, secret, env:
   [names in precedence order], description, example}``), ``config_spec[]`` (non-secret config:
@@ -365,10 +365,7 @@ Versioning rules
 - Stability ladder: fields annotate ``x-stability: experimental | stable`` (draft 2020-12
   tolerates unknown keywords). ``experimental_fields()`` generates the registry; the compat
   meta-test in ``tests/test_schema_evolution.py`` asserts registry == annotations and excludes
-  experimental fields from backward guarantees. Designed, not shipped: the spec also asks
-  compliance code to consult the registry so ONLY stable fields drive compliance decisions;
-  ``openreading.router.compliance`` never reads ``experimental_fields()`` or ``x-stability`` —
-  it reads descriptor ``compliance`` facts only (none of which are experimental today).
+  experimental fields from backward guarantees.
 - Deprecation: JSON Schema ``deprecated: true`` + pydantic ``deprecated=``; using a deprecated
   feature appends a ``warnings[]`` entry; never deprecate before the replacement is shipped and
   stable; deprecated for at least one MINOR before removal; removal only at MAJOR.
@@ -596,9 +593,7 @@ def experimental_fields(schema: dict[str, Any] | None = None) -> set[str]:
     Walks a schema (default: the current response schema) and returns the set of field paths
     annotated ``x-stability: experimental``. The compat meta-tests exclude these from backward
     guarantees, and a meta-test asserts this generated set equals the schema annotations, so
-    the two can never silently drift. Designed, not shipped: the spec also has compliance code
-    consult this registry so ONLY stable fields drive compliance decisions;
-    ``openreading.router.compliance`` does not call it.
+    the two can never silently drift.
     """
     schema = response_schema() if schema is None else schema
     found: set[str] = set()

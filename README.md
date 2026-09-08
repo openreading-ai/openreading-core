@@ -497,11 +497,11 @@ command.
 | **the full documentation, every guide, and how an agent uses it** | [`src/openreading/README.md`](src/openreading/README.md), then `uv run openreading --help` and `uv run openreading <cmd> --help` for every flag |
 | **how to get from a fresh clone to a working strategy, one step at a time** | [`examples/tutorial.md`](examples/tutorial.md), the guided walkthrough over the shipped documents |
 | what the shipped example documents contain and where they came from | [`examples/README.md`](examples/README.md) |
-| each backend's variables and compliance posture, and the env-var precedence rules | [`src/openreading/adapters/README.md`](src/openreading/adapters/README.md), then `uv run python -m pydoc openreading.credentials` |
+| each backend's variables, runtime location, and env-var precedence rules | [`src/openreading/adapters/README.md`](src/openreading/adapters/README.md), then `uv run python -m pydoc openreading.credentials` |
 | the exact JSON shapes (the contract) | [`src/openreading/schemas/README.md`](src/openreading/schemas/README.md), then the `*.json` files beside it |
 | how to cascade backends under quality gates, race them, or compare them from one file | [Strategies](src/openreading/strategies/README.md) |
 | what differs between two backends' readings of the same document | [Compare](src/openreading/comparison/README.md) |
-| which backends a compliance policy allows, and where each key comes from | [Routing and keys](src/openreading/router/README.md) |
+| how `policy.backends` chooses the default chain and where each key comes from | [Routing and keys](src/openreading/router/README.md) |
 | how to run a folder of documents and read one result | [Batch runs](src/openreading/batch/README.md) |
 | how to resume an interrupted run, replay one offline, or erase what it recorded | [The run ledger](src/openreading/ledger/README.md) |
 | how to put the same engine behind an HTTP API on your own machine | [The HTTP server](src/openreading/server/README.md) |

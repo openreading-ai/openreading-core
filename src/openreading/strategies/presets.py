@@ -36,9 +36,8 @@ Contract:
     offline_first ≈ try: [pymupdf, tesseract, docling] + the same escalate_when
     fast          ≈ race: [pymupdf, tesseract]
 
-`offline_first` orders local backends only, but *enforcement* of "never leave the machine" is
-`policy: { backends: [...] }` — the allow-list lives outside the tree and a strategy can never
-widen it.
+`offline_first` names only local backends, so every branch stays on the machine. API-key scope can
+further narrow the tree at a server boundary.
 
 Cookbook
 ========
@@ -52,7 +51,7 @@ strategy with `backend.id: "strategy:<name>"`, CLI `--strategy <name>`, or
 `openreading.run(..., strategy="<name>")`. Where a shorter Plain spelling exists
 (`openreading.strategies.plain`) it follows the longhand; it desugars to that longhand.
 Execution laws cited here live in `openreading.strategies.engine`; the grammar in
-`schemas/strategy-config.v0.2.json` and `openreading.strategies.normalize`.
+`schemas/strategy-config.v0.4.json` and `openreading.strategies.normalize`.
 
 1. The headline: free local first, paid rung only when quality demands it
 --------------------------------------------------------------------------

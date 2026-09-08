@@ -20,8 +20,8 @@ executes the §12 work breakdown in order against the §13 test harness.
 (file:line-cited ground truth); three independent full design candidates (rails-first,
 contract-first, agent-seat-first); a three-lens judge panel (optionality & safety, repo-fit &
 executability, agent value & vocabulary) whose scores, grafts, and fatal-flaw list this
-synthesis obeys; the shipped `docs/user-guide.md` §6 triage table; the v0.7 cost-removal
-milestone (the engine reports cost, never estimates or enforces it).
+synthesis obeys; a legacy private user-guide triage table; and the superseded v0.7 cost
+milestone.
 **Revision 2** (2026-08-02, maintainer review): (a) the decider executor is **extracted to its
 own milestone** — v0.9 "Decider", [`decider-executor.md`](decider-executor.md) — quarantining
 the one real-spend path and restoring the repo's one-feature-per-version release grammar; §7

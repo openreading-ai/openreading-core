@@ -324,7 +324,7 @@ START HERE
 
 DO ONE JOB
   batch          a folder, a glob, or many files as one run and one JSON
-  backends-policy name the backends this deployment permits, in preference order
+  backends-policy set the default backend chain, in preference order
   usage          what a run consumes, in the units each backend meters in
   env            where keys come from, and every variable this CLI reads
   datasets       case.json inputs and expectations for calibration and scoring
@@ -553,15 +553,14 @@ So you now have two backends and a real problem.
 | Tesseract | OCR errors, no tables, seconds | recovers text from the scan |
 
 Naming a backend per document by hand does not scale past a folder you can count. The next steps
-build the thing that decides for you: first the rules about which backends may run at all, then the
-plan that picks between the survivors.
+set the default order, then add an explicit plan that chooses from document evidence.
 
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif","fontSize":"14px","lineColor":"#94a3b8","textColor":"#334155","primaryTextColor":"#0f172a","edgeLabelBackground":"#eef2f7","clusterBkg":"#f8fafc","clusterBorder":"#cbd5e1","titleColor":"#334155"},"flowchart":{"curve":"basis","nodeSpacing":34,"rankSpacing":42,"padding":8,"useMaxWidth":true}}}%%
 flowchart TD
   S1["steps 2 to 7<br>you name the backend"]:::src --> Q{"which backend<br>for this document?"}:::gate
-  Q --> S2["step 8: policy<br>which backends MAY run"]:::gate
-  S2 --> S3["steps 9 to 12: strategy<br>which survivor SHOULD run"]:::work
+  Q --> S2["step 8: policy<br>the default backend order"]:::gate
+  S2 --> S3["steps 9 to 12: strategy<br>an explicit document plan"]:::work
   S3 --> S4(["one envelope<br>plus a trace of why"]):::hero
   classDef src fill:#eef2ff,stroke:#6366f1,stroke-width:1.5px,color:#1e1b4b;
   classDef work fill:#e0f2fe,stroke:#0284c7,stroke-width:1.5px,color:#082f49;
@@ -664,8 +663,8 @@ sends nothing, and answers "what would run, in what order".
 
 ## 9. Your first strategy: `try` and `escalate_when`
 
-A policy says who may run. A strategy says who should. It is a named plan in the same file, and
-you invoke it by name.
+A policy supplies the default chain. A strategy is an explicit named plan in the same file, and
+you invoke it by name. Server API-key scope decides which backends a remote caller may reach.
 
 Plain is the short form, and it has six keys in total: `try`, `race`, `compare`, `then`,
 `escalate_when` and `max_time`. Here is the one that solves the problem from step 7. Replace your
@@ -1022,7 +1021,7 @@ equivalent for strategies.
 
 ### Seeing the plan before you run it
 
-`strategy plan` prints the pruned tree for one document under one policy, and executes nothing:
+`strategy plan` prints the compiled tree and dynamic candidates, and executes nothing:
 
 ```bash
 uv run openreading strategy plan examples/1040-1988.pdf --strategy scan_aware
@@ -1202,7 +1201,7 @@ compares the two runs.
 This step is optional. Skip to step 15 to finish the walkthrough without a vendor account.
 
 Everything so far ran on your machine. A hosted backend works as soon as its vendor key is in
-`.env` and your policy permits it. Charges land on your own account with that vendor.
+`.env` and you select it. Charges land on your own account with that vendor.
 Your `.env` file persists on disk, and the credential broker reads it into the process environment.
 
 Try the hosted backend without a key and the command stops before anything is sent:
@@ -1322,7 +1321,7 @@ An `OPENREADING_<SLUG>_<KEY>` form beats the vendor's own variable, so
 your shell already exported.
 
 See [Backend adapters](../src/openreading/adapters/README.md) for the catalog, and
-[Routing and keys](../src/openreading/router/README.md) for where each compliance claim came from.
+[Routing and keys](../src/openreading/router/README.md) for the default chain and key resolution.
 
 ---
 

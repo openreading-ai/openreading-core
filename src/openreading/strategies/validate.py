@@ -129,8 +129,7 @@ def validate_config(
     raw: dict[str, Any] | None = None,
     plain_info: dict[str, PlainInfo] | None = None,
 ) -> list[ValidationIssue]:
-    """Return every world-consistency issue (errors + warnings) for `config`. The compliance
-    context is the file's own `policy:` block, which is the only place a policy is written; `raw`
+    """Return every world-consistency issue (errors + warnings) for `config`. `raw`
     is the pre-model dict, scanned for secret-pattern keys the schema's open sub-trees (`policy`,
     `with.*`) don't lock down.
     `plain_info` (from the loader) tags each strategy's dialect so §8 issues on a Plain body are

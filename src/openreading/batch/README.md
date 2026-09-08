@@ -94,7 +94,7 @@ each item completes. An interrupted run therefore writes none of them, however m
 succeeded, so `--save-dir` is a convenience and not a crash-safety mechanism. [Sizing a large
 run](#sizing-a-large-run) has the shard recipe that does protect a long run.
 
-`batch.json` is a `batch-result.v0.1`. Here it is with the two inner responses cut out:
+`batch.json` is a `batch-result.v0.2`. Here it is with the two inner responses cut out:
 
 ```json
 { "schema_version": "0.2", "status": { "state": "partial" },
@@ -368,7 +368,7 @@ a hang.
   surfaces, and exits.
 - `uv run python -m pydoc openreading.comparison.corpus` covers pairing precedence and verdicts.
 - `uv run openreading parse --help` lists every batch flag.
-- `src/openreading/schemas/batch-result.v0.1.json` and `corpus-report.v0.1.json` are described in
+- `src/openreading/schemas/batch-result.v0.2.json` and `corpus-report.v0.1.json` are described in
   [JSON Schemas](../schemas/README.md). `scripts/batch_demo.sh corpus/` runs `pymupdf` and
   `tesseract` over a folder you name, writes both envelopes under `<folder>/.runs/`, and compares
   them.

@@ -26,7 +26,7 @@ inventing a value. `channel_provenance` lists the channels this run did produce.
 entry names some of those gaps and not others, so read provenance rather than waiting for a warning
 ([The channel contract](derive/README.md#which-signal-to-trust-when-a-channel-is-missing)).
 
-A backend policy is the caller's ordered list of backends permitted to receive documents. The
+A backend policy is the caller's ordered default chain for requests that name no backend. The
 router is the step that picks a backend for each request. It applies that policy before anything
 runs, and no later step, fallback, or setting can bring a dropped backend back.
 
@@ -148,7 +148,7 @@ reading them out of order costs nothing.
 | [`README.md`](../../README.md) | The front door | Install, the four walkthroughs (parse, compare, route, strategy), and what this is not. | 529 |
 | [`src/openreading/README.md`](README.md) | Docs home | This page. The map above, plus how an agent drives the engine. | 434 |
 | [`src/openreading/cli/README.md`](cli/README.md) | The command line | One JSON envelope on stdout, everything else on stderr, and an exit code a script can branch on. | 454 |
-| [`src/openreading/router/README.md`](router/README.md) | Routing and keys | Which backends a policy allows, why each was dropped, and how to write the `policy:` block. | 568 |
+| [`src/openreading/router/README.md`](router/README.md) | Routing and keys | How a policy sets the default chain, why entries may be absent, and how to write `policy:`. | 568 |
 | [`src/openreading/strategies/README.md`](strategies/README.md) | Strategies | Cascades, races and gates in `openreading.yaml`, and the trace each run leaves. | 743 |
 | [`src/openreading/batch/README.md`](batch/README.md) | Batch runs | A folder, a glob or several files as one `batch-result` envelope. | 400 |
 | [`src/openreading/comparison/README.md`](comparison/README.md) | Compare | Where two backends disagree on one document, as a verdict plus findings. | 402 |
@@ -161,8 +161,8 @@ reading them out of order costs nothing.
 | [`examples/README.md`](../../examples/README.md) | Example documents | The two synthetic bank statements the guides parse, and where they came from. | 96 |
 
 Three more files sit at the repository root and are not guides. [`SECURITY.md`](../../SECURITY.md)
-states what a compliance policy does and does not guarantee, and is the page to read before
-approving this for regulated data. [`CHANGELOG.md`](../../CHANGELOG.md) carries every breaking
+states the package's security boundaries and is the page to read before approving it for
+sensitive data. [`CHANGELOG.md`](../../CHANGELOG.md) carries every breaking
 change with the reason for it. [`AGENTS.md`](../../AGENTS.md) is the contributor contract, and
 explains why there is no `docs/` directory: documentation lives in the module docstring beside
 the code, and each directory's `README.md` indexes those places rather than restating them.
@@ -356,8 +356,8 @@ as the `judged_lost` category on the losing attempts. An `offline_first` run pri
 A decision record carries `decision_id`, `node_path`, `label`, `point`, `eligible`, `chosen`,
 `decider`, `config_hash`, `strategy` and `downgraded`. **`eligible` is the audit hook.** It is the
 candidate list the engine enumerated, so a second agent can assert `chosen` is in `eligible` and
-prove the choice was in bounds. The engine builds that list, and a decision cannot override
-compliance.
+prove the choice was in bounds. The engine builds that list, and a decision cannot exceed caller
+scope.
 
 The record below comes from step 7 of the [Strategies
 walkthrough](strategies/README.md#7-declare-a-decision-point-run-it-without-an-llm-replay-it). Save

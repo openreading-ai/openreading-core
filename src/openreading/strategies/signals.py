@@ -254,22 +254,19 @@ The PDF-layer signals are not page-scoped in v0.3 and do not fire per page.
 ------------------------------------------------------------------------------
 Raw thresholds are meaningless to users (RouteLLM's calibration yields numbers like `0.11593`;
 Azure's guidance is "pilot, compare confidence distributions to accuracy, then set thresholds").
-The usable knobs are an escalation rate and a budget. **Principle: users pick rates and budgets;
-tools derive thresholds.**
+The usable knob is an escalation rate. **Principle: users pick rates; tools derive thresholds.**
 
 - **Inputs:** a sample directory of representative documents; the strategy to tune
   (`--strategy <name>`, required; `--config PATH` only points at the openreading.yaml that
-  defines it); a target as `--target-escalation 0.15` (fraction of documents that
-  should escalate past rung 1) and/or `--max-cost-per-doc 0.05`.
+  defines it); an optional target as `--target-escalation 0.15` (fraction of documents that
+  should escalate past rung 1).
 - **Method:** run the strategy's rung-1 backend over the sample; score each result with the
   existing eval scorers (`openreading.evals.scorers` — no parallel scoring path); compute every
   signal per document with this module's `probe`; sweep each calibratable threshold among the
   **top-level keys of rung 1's `escalate_if:` only**
   (`calibratable_predicates(steps[0].escalate_if)` — `review_if` gates, gates on later rungs, and
   a numeric predicate nested under `any_of` / `all_of` inside rung 1's gate are never swept) over
-  its domain and report predicted escalation rate and predicted cost per document (advisory,
-  from the descriptor per-page rates × assumed pages, matching the engine's precheck). Shadow
-  branches and
+  its domain and report predicted escalation rate plus scorer agreement. Shadow branches and
   `sample_percent` audit rules generate the paired cheap-vs-premium outputs that ground the sweep
   — the FrugalGPT structure: the scorer is separate from the chain; same chain + different
   thresholds = a different cost/quality point.
@@ -285,22 +282,18 @@ tools derive thresholds.**
   `evaluate_gate` tests the per-page **minimum** (§4) — so the predicted escalation rate for
   `page_confidence_below` is computed against a different signal than the one the engine fires
   on, and understates it whenever pages vary.
-- **Recommendation:** `--max-cost-per-doc` filters the candidates first — but it is not a hard
-  filter: when **no** point fits the budget every point stays in play (`survivors = affordable or
-  points`), so the recommendation can exceed the budget, and that fallback does not prefer the
-  cheapest point either. Among the survivors the point closest to `--target-escalation` wins
-  (ties → higher scorer agreement → lower threshold); with no target, the point maximizing scorer
-  agreement (ties → lower cost → lower threshold). `scorer_agreement` = fraction of **scored**
+- **Recommendation:** the point closest to `--target-escalation` wins (ties → higher scorer
+  agreement → lower threshold). With no target, the point maximizing scorer agreement wins
+  (ties → lower escalation rate → higher threshold). `scorer_agreement` = fraction of **scored**
   documents where the gate's fire decision matches the scorer's verdict (overall below the quality
   bar, default 0.8), grounding the threshold in measured quality. A document whose `expected`
   names none of the scorer's dimensions has no verdict (`scorer_overall is None`) and is excluded
   from both numerator and denominator — never read as "agrees with every threshold"; with no
   scored document at all `scorer_agreement` is 0.0 (`CalibrationReport.n_scored` says how many
-  were). Unscored documents still count toward escalation rate and cost, which need no label.
-- **Output:** a table of candidate operating points — threshold, predicted escalation rate,
-  predicted cost/doc, scorer agreement — plus the recommended point as a ready-to-paste
-  `escalate_if:` block ("with `confidence_below: 0.72`, 18% of documents escalate, est.
-  $0.011/doc"). **The tool proposes; it never rewrites the config** — the file the user commits is
+  were). Unscored documents still count toward escalation rate, which needs no label.
+- **Output:** a table of candidate operating points with threshold, predicted escalation rate,
+  and scorer agreement. It includes the recommended point as a ready-to-paste `escalate_if:`
+  block. **The tool proposes; it never rewrites the config.** The file the user commits is
   the authority.
 
 §6 Missing-signal semantics

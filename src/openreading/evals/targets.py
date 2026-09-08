@@ -3,7 +3,7 @@
 A target is one backend or strategy evaluated by a public benchmark. Explicit
 ``backend:`` and ``strategy:`` prefixes prevent collisions between identifiers.
 Execution always calls ``openreading.api.run``. It never invokes an adapter
-directly, so credentials, compliance, retries, normalization, and strategy
+directly, so credentials, caller scope, retries, normalization, and strategy
 traces retain their normal behavior.
 
 Projection functions return plain dictionaries because ParseBench and
@@ -106,7 +106,7 @@ def pipeline_name(
     `benchmark run extractbench --target backend:pymupdf` default to the same `--output-dir`, and
     without the id they would write parse results and extract results into one directory and then
     The config is in it because the same backend under a different `openreading.yaml`, and so
-    under a different compliance policy, is a different measurement. Stable ordering keeps a
+    under a different backend policy, is a different measurement. Stable ordering keeps a
     rerun's name identical so the publisher can resume rather than redo.
     """
 

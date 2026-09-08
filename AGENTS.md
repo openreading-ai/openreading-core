@@ -140,8 +140,9 @@ them. A guide demonstrates, never restates.
   (`make verify-live`), which skips cleanly without keys. Never add a network-dependent test to
   `make verify`.
 - **Core holds no fact it cannot verify.** A constraint core cannot check is a constraint core
-  must not appear to enforce. The caller names the backends they permit (`policy.backends`), and
-  core honours that exactly. Being wrong about a capability costs one round trip, because the
+  must not appear to enforce. `policy.backends` supplies the default chain, while an explicitly
+  named backend runs directly. Server API-key scope is the caller authorization boundary. Being
+  wrong about a capability costs one round trip, because the
   backend refuses and the chain moves on; being wrong about a vendor claim cost a silent
   exclusion nothing recovered from.
 - **Schemas are the contract.** Change `src/openreading/schemas/*.json` deliberately. The
@@ -246,8 +247,8 @@ of those is closed, not reviewed.
   shipped code is exactly the authoritative-and-wrong document the rule exists to prevent.
 - Do not commit run scratch (`GOAL*.md`, `PROGRESS.md`, prompts) at the root. That is the
   company repo's `runs/`.
-- Do not let a strategy, route or fallback widen the caller's declared backend list. Every
-  source of an allow-list intersects; none widens.
+- Do not let `routing.fallback` add to the default chain or let dynamic `auto` escape it. Server
+  API-key scope narrows every dispatch, including explicitly named strategy leaves.
 - Do not add a test that needs a key or the network to `make verify`.
 - Do not lower `--cov-fail-under`. Raise it as coverage climbs, and the README badge with it.
 

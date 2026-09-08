@@ -1,4 +1,4 @@
-"""Pydantic mirrors of the Manifest (v0.6) envelope families: batch-result.v0.1 and
+"""Pydantic mirrors of the envelope families: batch-result.v0.2 and
 corpus-report.v0.1. Envelopes (`BatchResult`, `CorpusReport`) are extra="ignore" — forward-tolerant
 of a newer producer's additive top-level fields, dropping them on re-serialization (Canon §8);
 nested payload models keep extra="forbid" so construction typos are caught. `to_schema_dict()`

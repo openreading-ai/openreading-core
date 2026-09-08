@@ -1,5 +1,5 @@
 """The batch layer: one invocation over many documents of any supported format
-produces ONE `batch-result.v0.1` JSON, and that JSON is a first-class `compare` subject.
+produces ONE `batch-result.v0.2` JSON, and that JSON is a first-class `compare` subject.
 
 Two modules: intake resolution (`openreading.batch.sources`, invariants M1-M5) and the platform
 runner (`openreading.batch.runner`, M6-M9). `openreading.api.run_batch` composes them and owns
@@ -12,7 +12,7 @@ platform should own: bounded concurrency, per-item failure isolation, honest ski
 cost roll-up, and a comparable artifact at the end. The batch layer composes the existing
 single-document pipeline without touching it. Three load-bearing choices:
 
-1. The single-document contract is untouched. `request.v0.2` / `response.v0.3` do not change; a
+1. The single-document contract is untouched. `request.v0.3` / `response.v0.3` do not change; a
    batch is a separate envelope whose items CONTAIN ordinary `response.v0.3` envelopes. Failure
    avoided: churning the one contract every consumer, test and adapter depends on. (A
    `documents[]` field on the request was rejected for exactly that reason -- it also forces
@@ -125,7 +125,7 @@ so every adapter batches correctly on day one.
   applies to strategies). `--extract`, `--pages`, `features` are request-level and apply to
   every item. Materialization stays per item inside the existing pipeline.
 
-The envelope: `batch-result.v0.1.json` (`openreading.types.batch`, `schemas.validate_batch_result`)
+The envelope: `batch-result.v0.2.json` (`openreading.types.batch`, `schemas.validate_batch_result`)
 ---------------------------------------------------------------------------------------------------
 Required in-band `schema_version` const `"0.1"`; filename == `$id` == const == pydantic default;
 `extra="ignore"` forward tolerance; golden fixtures and the non-additive-diff gate from birth.

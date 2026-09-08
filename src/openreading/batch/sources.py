@@ -143,7 +143,7 @@ def _expand_arg(arg: str) -> list[_RawRef]:
             # the identical note at the other SourceNotFoundError raise site below.
             # BL-143: `errno.ENOENT`, not `None` — see the identical note at the other raise site.
             raise SourceNotFoundError(errno.ENOENT, "glob matched no files", arg)
-        # `relpath` is the cross-run pairing key (batch-result.v0.1.json) and the `--save-dir`
+        # `relpath` is the cross-run pairing key (batch-result.v0.2.json) and the `--save-dir`
         # layout, so it has to stay unique per document. Measuring it from the pattern's fixed
         # root keeps the directories the wildcard walked; a bare basename would collapse
         # `x/invoice.pdf` and `y/invoice.pdf` into one record and one saved file.

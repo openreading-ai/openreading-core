@@ -15,7 +15,8 @@ What replaces them is the caller's own statement, in three rules:
 Rule 3 is what keeps a fresh clone working with no `.env` and no `openreading.yaml`. It is a named
 default in one line of documentation, not a decision derived from data.
 
-`auto` is gone with the stages. It asked core to infer, and inference is what left.
+The request-level `auto` value is gone with the stages. Longhand strategies retain an `auto` leaf
+that walks the explicit `policy.backends` order without consulting descriptor claims.
 
 The law this module now keeps, which is the one worth carrying forward: **core holds no fact it
 cannot verify.** A backend that cannot read a document refuses first-hand, and
@@ -71,8 +72,8 @@ class RoutePlan:
         """This plan with every chain member outside `allowlist` removed. None = unscoped, and
         returns self unchanged.
 
-        The whole CHAIN, not just `chosen`. A plan is chosen plus every fallback the compliance
-        router computed, and `executor.execute_plan` walks all of it, so a caller ceiling applied
+        The whole CHAIN, not just `chosen`. A plan is chosen plus every declared fallback, and
+        `executor.execute_plan` walks all of it, so a caller ceiling applied
         to `chosen` alone bounds the first backend and none of the rest: the moment the first one
         fails on a document, the request walks the remaining eligible registry and delivers the
         document to backends the same caller is refused by name.

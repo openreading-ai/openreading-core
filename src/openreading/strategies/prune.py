@@ -1,15 +1,12 @@
-"""The compile pipeline (integration.md §2): request + config -> a pruned tree the engine walks.
+"""The compile pipeline: request + config becomes the tree the engine walks.
 
-1. **Route once, up front.** Run `Router.route` for the resolved set + drop reasons. When a
-   strategy engages, `routing.fallback` is stripped first so the resolved set is the caller's
-   own list in its own written order (integration.md §2a).
+1. **Resolve dynamic candidates once.** Run `Router.route` for the ordered set used by longhand
+   `auto`. Strip `routing.fallback` because the strategy owns its own fallback structure.
 2. **Normalize** each strategy (extends resolved, shorthand expanded).
-3. **Prune** every leaf whose backend is outside that set, carrying the `DropReason`; collapse a
-   composite whose children all vanish; a fully-pruned root is a terminal refusal — never a
-   silent downgrade.
+3. **Apply caller scope.** Prune concrete leaves outside the server API-key scope and narrow the
+   dynamic candidate list. Collapse empty composites and refuse a fully pruned root.
 
-The executor consumes only pruned trees — the current executor invariant ("consumes ONLY the
-RoutePlan, can never widen the resolved set") lifted to trees.
+Named leaves may sit outside `policy.backends`, because naming one is an explicit selection.
 """
 
 from __future__ import annotations
@@ -238,13 +235,9 @@ def _compute_config_hash(
     NOT changed here — that per-decision fallback is documented behavior, out of this item's
     scope; this closes the WHOLE-TRACE mismatch at load time instead, in `cli/app.py`).
 
-    `file_policy` is the `policy:` block AS WRITTEN, and it is folded in beside the effect it had
-    (law PF3). The effect alone is not enough for a resume. The ledger stores the request after
-    the block was folded into it, so REMOVING a restriction from the file left the stored request
-    still carrying it, the recomputed effect identical, and the digest unchanged: the resume ran
-    under a policy the file no longer asked for and reported no mismatch. Adding a restriction was
-    always caught, because it changes the effect. Hashing the source catches both directions. It is the parsed block rather than the file's bytes, so reindenting or reordering
-    keys is not a different run.
+    `file_policy` is the `policy:` block as written. The parsed block belongs in the identity so a
+    changed default chain cannot replay under an earlier configuration. Formatting and key order
+    do not change the hash.
 
     Folds `root`, `router_config`, the file policy, and a descriptor
     digest per backend the router actually classified (`eligible` + `dropped` — together every registered backend, since

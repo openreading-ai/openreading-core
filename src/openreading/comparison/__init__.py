@@ -67,8 +67,8 @@ c. From a strategy run (the one integration point): ``parse --keep-candidates`` 
    non-winner branch's full normalized envelope under ``orchestration.candidates[]`` as
    ``{backend, node, category, response}``; ``openreading compare --from resp.json`` then takes
    winner + candidates as subjects (``source`` = ``candidate``). Default off (payload bloat); a
-   direct, non-strategy run is byte-identical with or without the flag. Compliance: candidates
-   only ever hold output from backends the run was already allowed to execute -- retention
+   direct, non-strategy run is byte-identical with or without the flag. Candidates only ever hold
+   output from backends the run was already allowed to execute, so retention
    widens nothing. Attempts that errored before normalization have nothing to retain.
 
 Subjects may repeat a backend id (same backend, two runs -- the drift check). Labels

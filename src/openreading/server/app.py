@@ -496,8 +496,7 @@ class ApiKeyConfig:
     """Parsed OPENREADING_API_KEYS / OPENREADING_API_KEY_SCOPES (BL-159). `keys` empty means
     caller auth is OFF: every endpoint behaves exactly as it does with zero configuration (AC-1).
     `scopes` maps a configured key to the backend ids it may reach; a key absent from `scopes` is
-    unscoped — it reaches every backend the deployment's own `policy.backends` already allows
-    (AC-4)."""
+    unscoped. It may reach any backend explicitly named by the request or strategy (AC-4)."""
 
     keys: frozenset[str] = frozenset()
     scopes: dict[str, frozenset[str]] = field(default_factory=dict)
@@ -784,7 +783,7 @@ def _validation_message(e: Exception) -> str:
 
 # M2: every endpoint does `await request.json()` with no transport-level ceiling, so an
 # unauthenticated caller could hand the ASGI server an arbitrarily large body and have it fully
-# buffered into memory before any handler (let alone compliance/schema validation) ever runs.
+# buffered into memory before any handler or schema validation ever runs.
 # 150 MB: the 100 MB document cap (`doc_too_large`, TerminalError) base64-inflates a binary
 # document by ~4/3, plus headroom for the surrounding JSON envelope.
 _MAX_BODY_BYTES = int(os.environ.get("OPENREADING_MAX_BODY_BYTES", str(150 * 1024 * 1024)))
@@ -1129,7 +1128,7 @@ def create_app(*, cors_origins: list[str] | None = None):
             # `runtime.endpoint` or an unapproved `credentials_ref` alias is refused here rather
             # than at execution. Both are documented 502s, and only a caught one is a 502.
             plan = Router(build_registry(), router_config).route(req)
-        except _ADAPTER_ERRORS as e:  # a body/file compliance conflict — 403, never a 500
+        except _ADAPTER_ERRORS as e:  # a caller-scope refusal is a 403, never a 500
             return _error_response(e)
         return {
             "chosen": plan.chosen.descriptor.id if plan.chosen else None,
@@ -1436,7 +1435,7 @@ def create_app(*, cors_origins: list[str] | None = None):
             return _bad_request(_validation_message(e))
         try:
             req, router_config = config.apply(req, app.state.policy, app.state.router_config)
-        except _ADAPTER_ERRORS as e:  # a body/file compliance conflict — 403, never a 500
+        except _ADAPTER_ERRORS as e:  # a caller-scope refusal is a 403, never a 500
             return _error_response(e)
         backend = req.backend.id
         if backend is None:

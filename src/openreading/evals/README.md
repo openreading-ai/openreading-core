@@ -202,8 +202,8 @@ It is not legal advice. A research-only profile requires `--allow-research-only`
 profile requires the separate `--allow-unverified-terms` flag after you review every source.
 Cataloged profiles do not download or run yet, even after acknowledgement.
 
-No public accuracy corpus proves compliance filtering, retry taxonomy, interruption recovery, or
-batch isolation. Those are engine invariants. The offline suite tests them with controlled faults.
+No public accuracy corpus proves caller-scope enforcement, retry taxonomy, interruption recovery,
+or batch isolation. Those are engine invariants. The offline suite tests them with controlled faults.
 Use the private-dataset workflow below to test whether public quality results transfer to your own
 documents.
 

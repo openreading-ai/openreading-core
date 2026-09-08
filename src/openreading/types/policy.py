@@ -1,8 +1,9 @@
 """The `policy:` block as a typed object, mirroring `strategy-config.v0.4.json`.
 
-One key: `backends`, a flat list of backend ids in preference order. It is both halves of what a
-policy used to say, which backends may run and which runs first, and it is a statement core can
-honour exactly because the caller made it.
+One key: `backends`, a flat list of backend ids in preference order. It supplies the chain for an
+unnamed request and the candidates for a longhand `auto` leaf. A backend named directly by a
+request or strategy runs independently of this list. Server API-key scope is the authorization
+boundary when the operator and caller differ.
 
 The nine keys before it asked core to enforce a compliance posture from a per-vendor table this
 package keeps in its own source: whether each vendor signs a BAA, trains on customer data, or
@@ -11,12 +12,11 @@ not fail loudly, it routed a document to a backend the operator believed was exc
 succeeded. Core holds no fact it cannot verify, and a constraint core cannot check is one it must
 not appear to enforce.
 
-An operator who cares about compliance already knows their own posture and which vendors they
-hold agreements with. `backends: [aws-textract, pymupdf]` is that conclusion, written by the one
-party who can reach it.
+An operator chooses `backends: [aws-textract, pymupdf]` after applying their own vendor and data
+handling requirements. Core preserves that order without claiming why it was chosen.
 
-Order matters and an empty list permits nothing, which is the fail-closed direction compliance
-had. An absent list is not an empty one: absent means no restriction from this source.
+Order matters. An empty list leaves an unnamed request with no backend, while an absent list uses
+the built-in `pymupdf` default.
 
 Both a schema and a model, because the two doors differ. A file is bytes, so only a schema can
 speak about it. A Python object skips the schema, and skipping it used to buy permission rather

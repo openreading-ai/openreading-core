@@ -22,10 +22,9 @@ booleans, arrays, or nested objects.
 
 Pricing is deliberately ``unknown``: usage preserves the API's reported input/output token counts,
 but this integration does not freeze a model-price table whose identifiers and rates can change.
-No dollar value is invented. Compliance also fails closed. Google documents materially different
-data-use posture between free and paid service tiers, while the adapter cannot observe the tier;
-``trains_on_customer_data`` is therefore ``unverified`` and unsupported public compliance claims
-remain false. This implementation claims neither vendor cancellation nor idempotency, native
+No dollar value is invented. Google documents materially different data-use terms between free
+and paid service tiers, while the adapter cannot observe the tier. The caller decides whether the
+configured account is suitable. This implementation claims neither vendor cancellation nor idempotency, native
 batching, liveness probing, geometry, or confidence. Capability grades remain ``claimed`` until a
 maintainer runs the keyed live test; no live account was available while this module was authored.
 

@@ -161,8 +161,8 @@ Route through the configured default chain. This returns a plan without executio
     plan.chosen, plan.fallbacks, plan.dropped     # dropped = {backend_id: DropReason, ...}
     # CLI: openreading route doc.pdf --run        # print the plan, then run it
 
-`policy.backends` is the whole of it: the backends this deployment permits, in the order you want
-them tried, and `routing.fallback` reorders within it and never adds to it. An EMPTY list permits
+`policy.backends` is the whole of it: the default backends this deployment tries, in your chosen
+order. `routing.fallback` reorders within it and never adds to it. An EMPTY list permits
 nothing, so a request that names no backend refuses. Naming a backend runs it, list or no list:
 that is an explicit act, and on one machine the operator and the caller are the same person. The
 enforcement boundary, where they are not, is the server's API-key scope.
@@ -237,7 +237,7 @@ prefer `document.text`, else `document.markdown`, else join `pages[].blocks[].te
 `reading_order`. `warnings[].code` is an OPEN set. Switch on the codes you know, tolerate the
 rest.
 
-The request (`request.v0.2`)
+The request (`request.v0.3`)
 ============================
 Required: `document` + `backend`. `document` is EXACTLY ONE of `bytes_base64` | `url` | `path` |
 `file_id` (+ optional `mime_type`, `filename`). Other top-level fields: `outputs` (markdown /
@@ -292,7 +292,7 @@ read the error, which does name the variable.
 
 Batch & corpus shapes
 =====================
-`batch-result.v0.1`: `{schema_version, status{state: succeeded|partial|failed}, items[],
+`batch-result.v0.2`: `{schema_version, status{state: succeeded|partial|failed}, items[],
 summary, warnings?}`. `items[i]` = `{source{relpath, filename, format, sha256, ..}, state:
 succeeded|failed|skipped, response? (a full response.v0.3), error?{code, message},
 transport: platform|native|null. That is null
@@ -514,10 +514,10 @@ strategy `orchestration`, the batch summary and an armed ledger, with no common 
 (design record: `design/run-stats-analytics.md`).
 
 Recently removed, and worth knowing if you read older material about this package: the compliance
-filter and its per-vendor table, the capability gate, the stage-3 scorer, `optimize_for`, `auto`,
-ledger retention and encryption at rest, and every dollar figure. Each was a fact core could not
-verify deciding what core did. `CHANGELOG.md` under Unreleased carries the account, and the law
-that replaced them is in this file: core holds no fact it cannot verify.
+filter and its per-vendor table, the capability gate, the stage-3 scorer, `optimize_for`, and
+request and Plain `auto`. Ledger retention, encryption at rest, and every dollar figure also left.
+Each let an unverifiable fact decide what core did. `CHANGELOG.md` under Unreleased records the
+removals. The replacement law is in this file: core holds no fact it cannot verify.
 
 Extending it (agent-executable)
 ===============================

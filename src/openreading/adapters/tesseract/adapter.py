@@ -1,5 +1,5 @@
-"""Tesseract adapter — the first SubprocessAdapter. Local OCR with zero data egress (offline
-compliance floor for scanned docs). pytesseract shells out to the system `tesseract` binary.
+"""Tesseract adapter, the first SubprocessAdapter. Local OCR with zero data egress for scanned
+documents. pytesseract shells out to the system `tesseract` binary.
 
 Tesseract is the LOCAL EXCEPTION that genuinely has confidence: image_to_data returns per-word
 conf 0-100, so block_confidence is NATIVE (not the "deterministic parser has no confidence" case).

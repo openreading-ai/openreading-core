@@ -42,14 +42,14 @@ Hook point and surfaces (wiring facts)
   (`strategy:none`) and `--config PATH`; `route` takes only `file [--config PATH] [--run]` (plus
   the shared `--env-file`) and never consults a strategy. Subcommands (each takes `[--config
   PATH]` except `explain`, which takes only the shared `--env-file` and its positional):
-  `strategy validate` — grammar + world-consistency of every strategy, flagging steps unreachable
-  under the file's own `policy:` block; `strategy plan <file> --strategy <name>` —
-  the normalized, PRUNED tree for this document / policy, no execution; `strategy show <name>
+  `strategy validate` performs grammar and world-consistency checks. `strategy plan <file>
+  --strategy <name>` prints the normalized tree and dynamic candidates without execution.
+  `strategy show <name>
   [--longhand]` — the body of a named strategy or built-in preset as written (or normalized);
   `strategy normalize` — shorthand → canonical longhand; `strategy list` — named strategies +
   presets in scope; `explain <response.json>` — the orchestration block as a narrative; `replay
   <file> --trace <trace.json> [--strategy]` — re-execute taking each logged choice;
-  `calibrate <dataset> --strategy <name> [--target-escalation F] [--max-cost-per-doc $]` —
+  `calibrate <dataset> --strategy <name> [--target-escalation F]` performs
   threshold tuning from a target escalation rate (proposes, never rewrites). Python:
   `openreading.run(source, strategy=..., config=...)`.
 - Server: config comes ONLY from `OPENREADING_CONFIG` (never cwd sniffing, same posture as the
@@ -457,7 +457,7 @@ Decisions (internal/decisions/DECISIONS.md)
 - D-v3-20: page granularity is its own evaluator; range support is the `page_range_selection`
   capability.
 - D-v3-23: audit close-out — deadline-bounded drain, webhook drop marker,
-  `/v1/jobs` synthetic job, no eager strategy import, compliance-never-widened property test.
+  `/v1/jobs` synthetic job, no eager strategy import, and caller-scope property tests.
 - D-v3-24: `otherwise_pruned` downgrade reason.
 - D-v4-14: `keep_candidates` retains parallel branches only; threaded as a Python param, never a
   request-schema field (the vendored schema is `additionalProperties: false`).
@@ -518,8 +518,7 @@ from openreading.types.job import Job
 from openreading.types.request import OpenReadingRequest
 from openreading.types.response import NormalizedResponse
 
-# Default on_error action per class (spec §5.1). `missing_credentials` is skip (handled before
-# on_error); `compliance` is uncatchable (pruned).
+# Default on_error action per class (spec §5.1). `missing_credentials` is handled before this map.
 _DEFAULT_ACTION = {
     "timeout": "next",
     "rate_limited": "next",
@@ -956,8 +955,8 @@ async def _resolve_decision_point(
     """Build one DecisionPoint, resolve it (replay → the logged choice; else engine default unless
     an enabled+eligible LLM executor overrides), meter any decider_call, append the one-shape
     decision record, and return `(chosen action, the decision record dict, by reference)`.
-    Compliance never enters the DecisionPoint (decider.md §3.3 rail 4); masked typed_fields never
-    enter it either (§5).
+    Caller scope never enters the DecisionPoint (decider.md §3.3 rail 4). Masked typed fields do
+    not enter it either (§5).
 
     Returns the record by reference (Ledger T2 §7.3/§4.2) rather than making a caller re-find it
     via `ctx.trace.decisions[-1]` — defensive hardening, not a fix for a proven live bug: asyncio's
@@ -1054,8 +1053,7 @@ def _replay_decision(
 
 
 def _budget_snapshot(ctx: _WalkCtx) -> dict[str, Any]:
-    """The remaining time budget the decider is allowed to see (decider.md §6) — no compliance
-    surface, no cost pool (removed)."""
+    """The remaining time budget the decider may see, with no scope or cost surface."""
     snap: dict[str, Any] = {}
     if ctx.deadline_ms is not None:
         snap["duration_ms"] = max(0, round(ctx.deadline_ms - ctx.clock.now_ms()))
@@ -1940,7 +1938,7 @@ async def _eval_reference(
             backend_code="strategy_reference_cycle",
         )
     tree = ctx.trees.get(name)
-    if tree is None:  # referenced strategy pruned to nothing under this request's compliance
+    if tree is None:  # referenced strategy pruned to nothing under this caller's scope
         return Outcome.err("exhausted")
     return await _eval_node(tree, f"{path}->{name}", ctx, visited | {name})
 
@@ -2475,7 +2473,7 @@ def _apply_gates(
 
 def _gate_signals(records: list[GateRecord]) -> dict[str, Any]:
     """The observed-vs-threshold signals a gate-band decider is shown (decider.md §3.1, §5) — only
-    the predicates that actually reported (available), never a compliance surface."""
+    the predicates that actually reported, with unavailable values omitted."""
     return {
         r.predicate: {"observed": r.observed, "threshold": r.threshold}
         for r in records

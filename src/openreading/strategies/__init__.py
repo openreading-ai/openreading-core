@@ -242,10 +242,9 @@ FAQ
 ---
 
 - **Is the config file required?** No. No file ⇒ no change.
-- **What happens to my existing `routing.fallback`?** Without a strategy engaged, it behaves as
-  always: listed ids move to the front of the eligible chain and the remaining eligible backends
-  still follow (formally it desugars to `{steps: [your ids, then the rest of the eligible set in
-  score order], escalate_if: off}`). If a strategy IS engaged, the strategy wins and the list is
+- **What happens to my existing `routing.fallback`?** Without a strategy engaged, listed ids move
+  to the front of the declared default chain and the remaining ids keep their written order. If a
+  strategy IS engaged, the strategy wins and the list is
   ignored with a `strategy_overrides_fallback` warning.
 - **Does an LLM have to be involved?** No. Every construct has mandatory engine semantics —
   `review_default` for gray bands, `otherwise:` for decide nodes, a deterministic composite score

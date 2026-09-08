@@ -37,7 +37,7 @@ Environment this module reads itself
 Every other knob is read where it is used, not here: `OPENREADING_CONFIG` and `./openreading.yaml`
 discovery in `openreading.strategies.loader` (behind `--config`), `OPENREADING_LLM_DECIDER` in
 `openreading.strategies.decider`, backend credentials in `openreading.credentials`, and the
-server-only auth / compliance-posture variables in `openreading.server.app` -- setting one of those
+server-only authentication variables in `openreading.server.app` -- setting one of those
 in a shell and running the CLI does nothing.
 """
 
@@ -543,7 +543,7 @@ def cmd_route(args) -> int:
         "terminal_reason": plan.terminal_reason,
     }
     if args.run and plan.chosen:
-        # execute the WHOLE chain chosen→fallbacks (compliance already enforced; never widened).
+        # Execute the whole caller-declared chain from chosen backend through its fallbacks.
         # Backend stdout advisories (e.g. PyMuPDF find_tables) → stderr so stdout is only the JSON.
         try:
             with contextlib.redirect_stdout(sys.stderr):
@@ -862,7 +862,7 @@ def _print_strategy_summaries(loaded) -> None:
 
 
 def cmd_strategy_plan(args) -> int:
-    """Terraform-style speculative plan: the pruned tree for THIS document + policy, no execution."""
+    """Print the compiled tree and dynamic candidates for this document, without execution."""
     from openreading.strategies import compile_strategy
 
     try:
@@ -2492,7 +2492,7 @@ I WANT TO ...                          RUN
   read a folder, a glob, or a list     openreading parse DIR/ --backend SLUG
   let OpenReading pick the backend     openreading parse FILE --no-strategy
   follow a plan I wrote down           openreading parse FILE --strategy NAME
-  know which backends a policy allows  openreading route FILE
+  inspect the default backend chain     openreading route FILE
   see where two backends disagree      openreading compare A.json B.json
   know why a run chose what it chose   openreading explain RUN.json
   rank backends on my labeled dataset  openreading leaderboard DIR --all-ready

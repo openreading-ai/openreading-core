@@ -514,11 +514,11 @@ exit code before extracting it for `compare` or other response consumers.
 chain a `parse` in that directory runs. A different list is a different file:
 `openreading route loan.pdf --config airgapped.yaml`.
 
-`policy:` has one key, `backends`: the backend ids this deployment permits, in
-preference order. It says both which backends may run and which runs first. Any
-other key is refused by name (with a `did you mean` for a near miss), and a
-value of the wrong type is refused too, so a malformed block is exit 3 before a
-backend is contacted.
+`policy:` has one key, `backends`: the default backend ids for an unnamed
+request, in preference order. A request or strategy may name another backend
+explicitly. Any other policy key is refused by name (with a `did you mean` for
+a near miss), and a value of the wrong type is refused too. A malformed block
+is exit 3 before a backend is contacted.
 
 Nine keys used to live here, asking the engine to enforce a compliance posture
 from a per-vendor table it kept in its own source: whether each vendor signs a

@@ -206,12 +206,8 @@ def calibrate_strategy(
     sweep every gated numeric predicate on rung 1. Fully offline for local backends. Never mutates
     `config`.
 
-    Compliance (BL-112): the strategy file's own `policy:` block is folded into effective
-    compliance and RouterConfig exactly the way `compile_strategy` does for every other
-    strategy-engaged surface (`config.apply`/`merge_router_config`, reused not
-    reimplemented), and the rung-1 backend is gated PER CASE, before `adapter.submit()`, via
-    `Router.check_eligible` — never gated once for the whole sample, since each case is loaded
-    from its own independent file and can carry its own `compliance` block."""
+    The strategy file's `policy.backends` list supplies a default chain. Calibration names its
+    rung-1 backend explicitly, so that list does not exclude it."""
     import base64
 
     from openreading.config import apply as apply_policy
@@ -256,11 +252,7 @@ def calibrate_strategy(
     a1 = registry.get(rung1_backend)
     if a1 is None:
         raise ValueError(f"rung-1 backend {rung1_backend!r} is not registered")
-    # (BL-112) fold the strategy file's own `policy:` block into the RouterConfig once — it is a
-    # deployment-wide setting that does not vary per case, the same fold compile_strategy performs
-    # before every route(). The compliance side is folded PER CASE below (not here), because
-    # load_dataset can yield a distinct `compliance` block per case once evals/dataset.py's
-    # load_case forwards case.json's own `compliance` key.
+    # Fold file policy through the shared configuration path. A named rung remains explicit.
     config_policy = getattr(config, "policy", None)
     merged_router_config = merge_router_config(router_config or RouterConfig(), config_policy)
     router = Router(registry, merged_router_config)
@@ -269,10 +261,7 @@ def calibrate_strategy(
     cases = load_dataset(dataset_dir, backend_id=rung1_backend)
     for i, case in enumerate(cases):
         req = OpenReadingRequest.model_validate(case.request_body)
-        # The shared fold, not a local rebuild of it. Assembling the compliance half by hand here
-        # meant the file's own policy reached every other surface and not this one, and any
-        # key added later would have reached this one last. `merged_router_config` above already
-        # carries the attestations, so this call is idempotent over them.
+        # Use the shared fold so future request-level policy behavior reaches calibration too.
         req, _ = apply_policy(req, config_policy, merged_router_config)
         clock = RealClock()
         # Per-case isolation (BL-107): this block used to have no fault handling at all — a
@@ -289,12 +278,8 @@ def calibrate_strategy(
         # ScopeRefused) keeps its own type — cmd_calibrate maps each to a clean, coded exit —
         # gaining only the case context submit()/normalize() themselves can't know about.
         try:
-            # Gate BEFORE submit() — matching compile_strategy's own behavior for the identical
-            # policy + backend pair (AGENTS.md: compliance is never relaxed by fallback). Raises
-            # ScopeRefused, which cmd_calibrate already knows how to turn into a clean exit.
-            # check_eligible's only other possible exception (KeyError, unregistered backend) is
-            # already unreachable here — rung1_backend was already resolved via registry.get()
-            # above, before the loop.
+            # Resolve again at the dispatch boundary. The earlier registry lookup makes a missing
+            # backend unreachable here, while keeping the call shape aligned with other paths.
             router.check_eligible(req, rung1_backend)
             rc = build_run_context(req, a1.descriptor)
             with auth_hinted(a1.descriptor, rc.credentials):

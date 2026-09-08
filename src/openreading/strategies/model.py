@@ -62,7 +62,7 @@ with `yaml.safe_load` only (D-v3-1: a config file may never construct arbitrary 
 ```yaml
 version: 1                    # required — config format version (additive evolution)
 
-policy:                       # optional — the backends this deployment permits, in order
+policy:                       # optional: the default backend chain, in order
   backends: [pymupdf, tesseract]
 
 limits:                       # optional — operator ceilings on every strategy-engaged run (§6.4)
@@ -206,7 +206,7 @@ with:                         # optional per-leaf request overrides
 - `with` — Designed to shallow-merge over the request for this leaf only. Closed allow-list:
   exactly `features`, `outputs`, `pages`, `extraction_schema`; any other key is a load-time
   error — in particular `compliance`, `document`, and `backend` can never appear (a strategy may
-  tune what a rung produces, never what is parsed or the compliance posture). **Designed, not
+  tune what a rung produces, never what is parsed or which backend runs). **Designed, not
   shipped:** the grammar accepts it and `normalize` carries it into the longhand, but the engine
   never reads it — `_run_leaf` submits `ctx.req` unchanged.
 - `timeout` — Designed as a per-attempt deadline for this leaf, clamped to the remaining node

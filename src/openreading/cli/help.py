@@ -150,7 +150,7 @@ _BLURBS: dict[str, str] = {
     "output": "what goes to stdout, what goes to stderr, what the code says",
     "chaining": "which verb's output feeds which verb's input",
     "batch": "a folder, a glob, or many files as one run and one JSON",
-    "backends-policy": "name the backends this deployment permits, in preference order",
+    "backends-policy": "set the default backend chain, in preference order",
     "usage": "what a run consumes, in the units each backend meters in",
     "env": "where keys come from, and every variable this CLI reads",
     "datasets": "case.json inputs and expectations for calibration and scoring",

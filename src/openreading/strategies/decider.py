@@ -221,7 +221,7 @@ resolves the decision point to its engine default with the reason traced as
   `unavailable`.
 - `trace_missing` — replay mode only: a decision point has no logged choice in the trace, or the
   logged choice is no longer a valid candidate for this run (§5).
-- `otherwise_pruned` — a `decide:` node's own `otherwise:` was pruned by compliance while at least
+- `otherwise_pruned`: a `decide:` node's own `otherwise:` was pruned by caller scope while at least
   one `among:` survivor remained; `openreading.strategies.prune` substituted the first-listed
   survivor as the new default (D-v3-24).
 
@@ -266,13 +266,13 @@ port (D-v3-17): `JudgePort.compare` judges ONE ordered pair and returns a positi
   intact (never-fabricate). Combining outputs is `pick: merge`'s job (D-v3-19).
 - What the judge reads: a capped excerpt (`judge.excerpt_chars`, default 4000) of each candidate's
   text plus its typed_fields (JSON-safe `{value, confidence}` view, masked per §5), and the
-  `judge.intent` criteria prose. Never the raw request, never a backend id, never compliance
+  `judge.intent` criteria prose. Never the raw request, never a backend id, never policy
   context; the operator's trace still names the chosen/eligible backends.
 - More than two candidates: single-elimination against the current best, in listed order — n−1
   pairs, 2·(n−1) calls, bounded cost. More than three candidates is a `validate` warning.
 - Judge calls are recorded attempts, category `judge_call`.
-- Downgrade: a judge that is ungated (`env_disabled`), compliance-ineligible (`compliance`,
-  §3.5), portless (`unavailable`), or absent from a replay trace (`trace_missing`) yields the
+- Downgrade: a judge that is ungated (`env_disabled`), outside caller scope (`scope_denied`),
+  portless (`unavailable`), or absent from a replay trace (`trace_missing`) yields the
   engine's deterministic composite score, traced `decider_downgraded`; the LLM path and every
   status-level downgrade write exactly ONE `judge` decision record (`eligible` = the successful
   candidates' backend ids, `chosen` = the winner's backend id). No `judge:` block, or ≤1
@@ -329,7 +329,7 @@ Replay (`openreading replay --trace t.json`, `run_strategy(replay=<decisions>)`)
 - Engine runs replay exactly: same config hash + same inputs ⇒ same decision records. The CLI
   checks this at the WHOLE-TRACE level, once, at load time, before any decision point is
   consulted: a trace carrying a `config_hash` that differs from the freshly-compiled one is refused
-  outright, naming `config_hash` — a trace recorded under one configuration or compliance posture
+  outright, naming `config_hash`. A trace recorded under one configuration or policy
   must not silently replay into a run compiled under another. A trace with no `config_hash` (older
   or hand-built) has nothing to compare and falls through to per-decision `trace_missing`.
 - Replay is a decision MODE, not a live port (D-v3-18): the engine indexes `decision_id → record`
@@ -340,8 +340,8 @@ Replay (`openreading replay --trace t.json`, `run_strategy(replay=<decisions>)`)
   `trace_missing`. A judge point replays by its logged WINNER BACKEND, not by re-running the
   pairwise comparisons — the source-blind port cannot be replayed by identity; the outcome is the
   same.
-- Replay bypasses the two-key env gate and the compliance filter — it sends nothing to an LLM, so
-  both are moot; this keeps replay fully offline and deployment-independent.
+- Replay bypasses the two-key env gate and caller-scope check. It sends nothing to an LLM, which
+  keeps replay fully offline and deployment-independent.
 - `replay=[]` is a valid EMPTY trace (mode on, `trace_missing` everywhere), distinct from
   `replay=None` (mode off) — the distinction is by identity, not truthiness, so an empty trace can
   never silently disable replay.
@@ -366,14 +366,14 @@ today, because the code narrows the spec in three places and the gap must stay v
   action names (§3.1).
 
 Never sees: raw secrets or credentials (they never appear in any strategy artifact, so there is
-nothing to leak); compliance constraints, drop reasons, or dropped backends (§3.3); document
+nothing to leak); scope constraints, drop reasons, or dropped backends (§3.3); document
 content — the spec lets `decider.llm.send_document_content: true` opt in, but today the flag is
 declared (`DeciderLLM`, schema default false) and never read, and `DecisionPoint` has no excerpt
 field, so the decider reasons over signals ABOUT the document, not the document, unconditionally.
 
 The law that governs all of it: prose guides choices under the rails; it never moves a rail.
 `intent:` text is the decider's semantic payload and the UI's display text; budgets, thresholds,
-eligibility, and compliance bind both executors identically, and no rationale, however persuasive,
+eligibility, and caller scope bind both executors identically, and no rationale, however persuasive,
 changes what the engine will dispatch.
 """
 
@@ -431,7 +431,7 @@ class DeciderStatus:
 @dataclass
 class DecisionPoint:
     """The complete, and only, input a decider receives at a decision point (decider.md §3.1). Built
-    post-pruning (compliance). Carries no compliance surface (rail 4)."""
+    after caller-scope pruning. Carries no scope surface (rail 4)."""
 
     decision_id: str
     point: str  # a POINTS member
@@ -603,9 +603,8 @@ def resolve_decider_status(
         return DeciderStatus("engine", "env_disabled", backend)
 
     if backend_allowlist is not None and backend not in backend_allowlist:
-        # Ahead of the compliance gate below so the reported reason is the one the caller can act
-        # on, and because scope is the narrower, later subtraction (strategies.prune uses the same
-        # precedence). Downgrades to engine mode rather than raising: a decision point resolving
+        # Checked before registry lookup so the reported reason is the one the caller can act on.
+        # Downgrades to engine mode rather than raising: a decision point resolving
         # to its engine default is this taxonomy's answer to every decider failure, and refusing
         # the whole walk over an out-of-scope JUDGE would be a bigger hammer than the caller's
         # scope asks for — the backends that actually process the document are bounded elsewhere.

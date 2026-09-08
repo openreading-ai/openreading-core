@@ -26,9 +26,8 @@ Cost is ESTIMATED, never claimed as the caller's billed amount: ``usage_info.pag
 multiplied by the public list prices accessed below ($4/1000 OCR pages, $5/1000 Document AI pages
 when annotations are requested). There is no documented request idempotency or vendor cancellation
 mechanism on this synchronous endpoint, so both declarations are false. No native batch or
-liveness probe is declared. Hosted compliance claims are deliberately fail-closed here:
-HIPAA/SOC2/GDPR are not credited and training posture is unverified until a vendor-owned public
-source establishes the exact API-account contract.
+liveness probe is declared. Core makes no claim about the configured account's legal or data-use
+terms.
 
 Capability grades are ``claimed`` because this implementation has not been run against a real
 Mistral account as of 2026-09-02. The offline fixture is documentation-shaped evidence only. A

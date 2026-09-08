@@ -248,7 +248,7 @@ def _credentials_ref_aliases(env: MutableMapping[str, str]) -> frozenset[str]:
     credential key as `<anything>_<KEY>`, so an unauthenticated request could name any prefix and
     read whatever environment variable happened to end in `_<KEY>` for that backend (e.g.
     `env:ANTHROPIC_API` against a field keyed `key` reads `ANTHROPIC_API_KEY`). Unset/empty means
-    no alias is accepted — fails closed, matching this codebase's compliance posture generally."""
+    no alias is accepted. This fails closed when configuration is ambiguous."""
     return frozenset(
         s.strip()
         for s in env.get("OPENREADING_CREDENTIALS_REF_ALIASES", "").split(",")

@@ -331,10 +331,10 @@ is missing. The gate fires, and the document climbs to `tesseract`. `jq -c '[.wa
 fields.json` prints `["quality_escalated"]`. An escalation is a warning on the envelope, never an
 error.
 
-### 6. Say which backends this deployment permits
+### 6. Set the default backend chain
 
-The `policy:` block names the backends this deployment permits, in the order you want them tried,
-and it sits outside the strategy tree. Save this as `local.yaml`:
+The `policy:` block supplies the ordered candidates for unnamed requests and longhand `auto`.
+Named strategy leaves remain explicit. Save this as `local.yaml`:
 
 ```yaml
 version: 1
@@ -627,8 +627,8 @@ shape, with an integer `chosen` and no `eligible`.
 
 ## How it decides
 
-These rules keep a strategy within its explicit plan, expose failures, and record each attempt. They
-not record. Each rule names the failure it avoids and where it is enforced.
+These rules keep a strategy within its explicit plan, expose failures, and record each attempt.
+Each rule names the failure it avoids and where it is enforced.
 
 - Without a config file, nothing changes. The strategy package is not even imported, so an upgrade
   cannot alter a request that named its backend. The rule lives in `openreading.strategies`
@@ -713,7 +713,7 @@ The category column in `explain` is the closed vocabulary `CATEGORIES` in
 - Also under `openreading.strategies` are `presets` (the cookbook) and `engine` (Outcomes and
   laws, including the score behind `pick: best`). The other two are `decider` (decision points,
   downgrades) and `calibrate` (the sweep report and `quality_bar`).
-- The schema is `src/openreading/schemas/strategy-config.v0.2.json`. The trace rides on
+- The schema is `src/openreading/schemas/strategy-config.v0.4.json`. The trace rides on
   `response.v0.3.json`.
 - `uv run openreading strategy --help`, `explain --help`, `replay --help`, and `calibrate --help`
   document the flags. The exit codes are in `uv run python -m pydoc openreading.cli`, section

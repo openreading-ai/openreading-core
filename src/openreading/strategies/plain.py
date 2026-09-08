@@ -3,8 +3,8 @@
 A strategy says which backends run, in what order or together, and when to move on. Plain lets
 you write that in eleven words you can hold in your head. It is a dialect, not a second engine:
 the loader (`openreading.strategies.loader.parse_config_raw`) calls `desugar_config` after the
-JSON-Schema gate (`schemas/strategy-config.v0.2.json`) and before `StrategyConfig.model_validate`,
-so the engine, traces, replay, keep-best, compliance pruning, and `strategy validate` see only
+JSON-Schema gate (`schemas/strategy-config.v0.4.json`) and before `StrategyConfig.model_validate`,
+so the engine, traces, replay, keep-best, caller-scope pruning, and `strategy validate` see only
 the canonical five-node longhand the engine already runs. `openreading strategy show <name>` prints
 a user strategy's body AS WRITTEN — a Plain body prints Plain, a preset prints its vendored
 longhand (`openreading.cli.app._strategy_body_as_written` re-reads the source file, because the
@@ -472,8 +472,8 @@ Guardrails you get for free
   and losers alike, so you can count the calls a run made. It carries no price: the totals it used
   to publish as `usage.cost_usd` were built from per-vendor rates core could not verify. `usage`
   reports what a backend consumed in its own unit.
-* The backend list is untouchable. The file's `policy.backends` allow-list is the whole
-  candidate set; no strategy can reach outside it.
+* Every backend is visible in the Plain body. Server API-key scope can prune that written list,
+  while `policy.backends` only supplies defaults outside Plain.
 * Never silent. If everything gates, you get the best result kept so far with honest
   `warnings[]`, never a fabricated answer.
 
@@ -493,7 +493,7 @@ Design decisions, and the failure each avoids
 * Every Plain construct desugars to existing longhand — one engine, one validator, one trace,
   one replay path. The only engine changes Plain brought were the step gate on parallel steps
   and the `disagreement_over` signal, both available to advanced files too.
-* The grammar lives in `strategy-config.v0.2.json`, a new file rather than an edit of v0.1. A
+* The grammar lives in `strategy-config.v0.4.json`. A
   released schema is byte-frozen, so it is changed by cutting a new version. The change is
   additive, the config `version` const stays 1, and v0.2 validates every v0.1 config.
 * Presets stay vendored in longhand; they carry `intent:`, which Plain cannot spell. The docs
@@ -508,7 +508,7 @@ Design decisions, and the failure each avoids
 
 Non-goals: no route/decide/judge/review/on_error/granularity/extends/with/shadow/hedge in Plain
 (all advanced, unchanged); no renaming of advanced constructs; no dotted-path or alias forms in
-`missing:`; no changes to invocation, discovery, precedence, compliance, or budget laws.
+`missing:`; no changes to invocation, discovery, precedence, caller scope, or budget laws.
 """
 
 from __future__ import annotations

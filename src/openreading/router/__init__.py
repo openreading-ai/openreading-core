@@ -1,16 +1,16 @@
-"""Choose which backends may run a request, in what order, and drive the winner to a result.
+"""Resolve a request's default backend order and drive the winner to a result.
 
 `Router.route(request)` returns a `RoutePlan`: a chosen backend, an ordered fallback list, and a
-`DropReason` for every backend the CALLER's own allow-list excluded. `executor.execute_plan(plan,
-request)` walks that plan until a backend succeeds and returns one `NormalizedResponse`. Nothing
-here branches on a backend's type.
+`DropReason` for every backend a later caller-scope restriction excludes.
+`executor.execute_plan(plan, request)` walks that plan until a backend succeeds and returns one
+`NormalizedResponse`. Nothing here branches on a backend's type.
 
 Selection is a lookup with no inference in it. Three rules, in order, in
 `openreading.router.router`:
 
 1. **The backend the caller named.** A chain of one.
-2. **Else `policy.backends`, in written order.** That list is the chain. An EMPTY list permits
-   nothing and refuses with `scope_denied`; an absent list is not an empty one.
+2. **Else `policy.backends`, in written order.** That list is the chain. An EMPTY list leaves no
+   default backend and refuses with `scope_denied`; an absent list is not an empty one.
 3. **Else `pymupdf`.** It needs no key and no config, so a fresh clone reads a document with no
    setup.
 
@@ -37,8 +37,8 @@ Sibling modules: `driver` runs the one poll-and-backoff loop every wait mode sha
 turns an adapter's `CostReport` into `response.usage` by filling only the slots the adapter
 left unset, `cache` derives the document identity and the idempotency key, `clock` keeps
 monotonic time apart from wall time, and `registry` maps a descriptor id to its adapter.
-`openreading.strategies` calls `Router.route` once when it compiles a strategy tree and prunes
-that tree to the resolved set, and it never widens it.
+`openreading.strategies` calls `Router.route` once for dynamic `auto` candidates. Explicit leaves
+run as written, while server API-key scope prunes every dispatch.
 """
 
 from __future__ import annotations
