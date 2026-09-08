@@ -33,10 +33,10 @@ a report is computed, so it costs nothing and needs no key. A subject is one res
 compared. Subjects arrive from three sources, and every source ends in the same pure step.
 
 <!-- diagram:src-openreading-comparison-1 -->
-<p align="center"><img src="../../../assets/diagrams/src-openreading-comparison-1.svg" alt="Mental model" /></p>
+<p align="center"><a href="../../../assets/diagrams/src-openreading-comparison-1.svg"><img src="../../../assets/diagrams/src-openreading-comparison-1.svg" alt="Comparison accepts saved envelopes, a document fanned out to named backends, or candidates kept by a strategy. Subjects align by page and block, then compare facts, typed fields, text, and blocks. The report combines a headline verdict and severity-sorted findings in JSON, table, Markdown, diff, or diffs format." /></a></p>
 
 <details>
-<summary>Diagram source (Mermaid)</summary>
+<summary>Logical flow (Mermaid)</summary>
 
 ```mermaid
 %%{init: {"theme":"base","fontFamily":"Arial","deterministicIds":true,"deterministicIDSeed":"openreading","htmlLabels":false,"themeVariables":{"fontFamily":"Arial","fontSize":"17px","lineColor":"#8194ad","textColor":"#183451","primaryTextColor":"#183451","primaryColor":"#edf3fc","primaryBorderColor":"#9db4d0","edgeLabelBackground":"#ffffff","clusterBkg":"#f5f8fc","clusterBorder":"#d7e1ee","titleColor":"#183451","actorBkg":"#edf3fc","actorBorder":"#9db4d0","actorTextColor":"#183451","actorLineColor":"#9db4d0","signalColor":"#527095","signalTextColor":"#183451","labelBoxBkgColor":"#fff4de","labelBoxBorderColor":"#c6953a","labelTextColor":"#70501b","loopTextColor":"#527095","noteBkgColor":"#edf3fc","noteBorderColor":"#9db4d0","noteTextColor":"#183451","sequenceNumberColor":"#ffffff","activationBkgColor":"#e7f3ee","activationBorderColor":"#679780"},"flowchart":{"curve":"monotoneY","nodeSpacing":32,"rankSpacing":48,"padding":18,"useMaxWidth":true},"sequence":{"useMaxWidth":true,"actorMargin":65,"messageMargin":38,"mirrorActors":false}}}%%

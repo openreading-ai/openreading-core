@@ -32,10 +32,10 @@ computes it from what the backend emits. Grade `X` (impossible) means there is n
 produce it, so it is never filled in.
 
 <!-- diagram:src-openreading-derive-1 -->
-<p align="center"><img src="../../../assets/diagrams/src-openreading-derive-1.svg" alt="Mental model" /></p>
+<p align="center"><a href="../../../assets/diagrams/src-openreading-derive-1.svg"><img src="../../../assets/diagrams/src-openreading-derive-1.svg" alt="A backend payload can supply a channel natively (N), provide enough information for a faithful derived channel (D), or offer no faithful value (X). Native and derived channels enter the response and channel_provenance. Unavailable channels remain absent from provenance; warnings explain some missing channels." /></a></p>
 
 <details>
-<summary>Diagram source (Mermaid)</summary>
+<summary>Logical flow (Mermaid)</summary>
 
 ```mermaid
 %%{init: {"theme":"base","fontFamily":"Arial","deterministicIds":true,"deterministicIDSeed":"openreading","htmlLabels":false,"themeVariables":{"fontFamily":"Arial","fontSize":"17px","lineColor":"#8194ad","textColor":"#183451","primaryTextColor":"#183451","primaryColor":"#edf3fc","primaryBorderColor":"#9db4d0","edgeLabelBackground":"#ffffff","clusterBkg":"#f5f8fc","clusterBorder":"#d7e1ee","titleColor":"#183451","actorBkg":"#edf3fc","actorBorder":"#9db4d0","actorTextColor":"#183451","actorLineColor":"#9db4d0","signalColor":"#527095","signalTextColor":"#183451","labelBoxBkgColor":"#fff4de","labelBoxBorderColor":"#c6953a","labelTextColor":"#70501b","loopTextColor":"#527095","noteBkgColor":"#edf3fc","noteBorderColor":"#9db4d0","noteTextColor":"#183451","sequenceNumberColor":"#ffffff","activationBkgColor":"#e7f3ee","activationBorderColor":"#679780"},"flowchart":{"curve":"monotoneY","nodeSpacing":32,"rankSpacing":48,"padding":18,"useMaxWidth":true},"sequence":{"useMaxWidth":true,"actorMargin":65,"messageMargin":38,"mirrorActors":false}}}%%
@@ -43,7 +43,7 @@ flowchart TD
   P[/"backend payload"/]:::src --> N["native channel<br>grade N"]:::good
   P --> D["openreading.derive<br>md_to_text, cells_to_grid, ..."]:::work
   D --> DC["derived channel<br>grade D"]:::out
-  P -. "no faithful way" .-> X["omitted, grade X<br>plus a warning"]:::bad
+  P -. "no faithful way" .-> X["omitted, grade X<br>warnings explain some gaps"]:::bad
   N --> E(["response envelope"]):::hero
   DC --> E
   X --> E

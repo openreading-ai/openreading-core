@@ -1,8 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="610" viewBox="0 0 1000 610" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="610" viewBox="0 0 1000 610" role="img" aria-labelledby="title desc" data-renderer="authored">
   <title id="title">Your documents. Your rules. One response shape.</title>
   <desc id="desc">Files, folders, or globs follow an explicit backend, policy, or strategy. The chosen backend reads each document. One JSON per document and one envelope over the run support reading, comparison, and inspection.</desc>
   <!-- This overview has a deliberate vector layout. Its logical flow remains in README.md. -->
   <style>
+    :root{color-scheme:light dark}
     text{font-family:Arial,Helvetica,sans-serif}
     .node,.result{fill:#f2f6f9;stroke:#d4dfe7;stroke-width:1.5}
     .title{fill:#233b50;font-size:25px;font-weight:600}

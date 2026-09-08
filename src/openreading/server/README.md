@@ -44,10 +44,10 @@ when the submit request names that URL. `DELETE /v1/jobs/{id}` discards a record
 answers 204.
 
 <!-- diagram:src-openreading-server-1 -->
-<p align="center"><img src="../../../assets/diagrams/src-openreading-server-1.svg" alt="Mental model" /></p>
+<p align="center"><a href="../../../assets/diagrams/src-openreading-server-1.svg"><img src="../../../assets/diagrams/src-openreading-server-1.svg" alt="The client submits POST /v1/jobs to an openreading serve process it operates. The server submits to a hosted backend and returns a running handle. In poll mode, each GET /v1/jobs/{id} advances work. Alternatively, a signed Reducto webhook records a result; a bad signature returns 401 bad_signature. The client reads a succeeded or failed handle." /></a></p>
 
 <details>
-<summary>Diagram source (Mermaid)</summary>
+<summary>Logical flow (Mermaid)</summary>
 
 ```mermaid
 %%{init: {"theme":"base","fontFamily":"Arial","deterministicIds":true,"deterministicIDSeed":"openreading","htmlLabels":false,"themeVariables":{"fontFamily":"Arial","fontSize":"17px","lineColor":"#8194ad","textColor":"#183451","primaryTextColor":"#183451","primaryColor":"#edf3fc","primaryBorderColor":"#9db4d0","edgeLabelBackground":"#ffffff","clusterBkg":"#f5f8fc","clusterBorder":"#d7e1ee","titleColor":"#183451","actorBkg":"#edf3fc","actorBorder":"#9db4d0","actorTextColor":"#183451","actorLineColor":"#9db4d0","signalColor":"#527095","signalTextColor":"#183451","labelBoxBkgColor":"#fff4de","labelBoxBorderColor":"#c6953a","labelTextColor":"#70501b","loopTextColor":"#527095","noteBkgColor":"#edf3fc","noteBorderColor":"#9db4d0","noteTextColor":"#183451","sequenceNumberColor":"#ffffff","activationBkgColor":"#e7f3ee","activationBorderColor":"#679780"},"flowchart":{"curve":"monotoneY","nodeSpacing":32,"rankSpacing":48,"padding":18,"useMaxWidth":true},"sequence":{"useMaxWidth":true,"actorMargin":65,"messageMargin":38,"mirrorActors":false}}}%%

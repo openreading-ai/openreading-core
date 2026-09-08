@@ -36,15 +36,15 @@ Python, `openreading.run_batch(paths, config="openreading.yaml")` reads the same
 keys](../router/README.md#recipes) runs both.
 
 <!-- diagram:src-openreading-batch-1 -->
-<p align="center"><img src="../../../assets/diagrams/src-openreading-batch-1.svg" alt="Mental model" /></p>
+<p align="center"><a href="../../../assets/diagrams/src-openreading-batch-1.svg"><img src="../../../assets/diagrams/src-openreading-batch-1.svg" alt="Intake expands and sorts files, folders, globs, and URLs. Every document runs the single-document pipeline independently, including its failure handling. Results gather into one batch-result. Compare that envelope with a second run of the same corpus, pairing by relative path, filename, then SHA-256, for per-document verdicts and a rollup." /></a></p>
 
 <details>
-<summary>Diagram source (Mermaid)</summary>
+<summary>Logical flow (Mermaid)</summary>
 
 ```mermaid
 %%{init: {"theme":"base","fontFamily":"Arial","deterministicIds":true,"deterministicIDSeed":"openreading","htmlLabels":false,"themeVariables":{"fontFamily":"Arial","fontSize":"17px","lineColor":"#8194ad","textColor":"#183451","primaryTextColor":"#183451","primaryColor":"#edf3fc","primaryBorderColor":"#9db4d0","edgeLabelBackground":"#ffffff","clusterBkg":"#f5f8fc","clusterBorder":"#d7e1ee","titleColor":"#183451","actorBkg":"#edf3fc","actorBorder":"#9db4d0","actorTextColor":"#183451","actorLineColor":"#9db4d0","signalColor":"#527095","signalTextColor":"#183451","labelBoxBkgColor":"#fff4de","labelBoxBorderColor":"#c6953a","labelTextColor":"#70501b","loopTextColor":"#527095","noteBkgColor":"#edf3fc","noteBorderColor":"#9db4d0","noteTextColor":"#183451","sequenceNumberColor":"#ffffff","activationBkgColor":"#e7f3ee","activationBorderColor":"#679780"},"flowchart":{"curve":"monotoneY","nodeSpacing":32,"rankSpacing":48,"padding":18,"useMaxWidth":true},"sequence":{"useMaxWidth":true,"actorMargin":65,"messageMargin":38,"mirrorActors":false}}}%%
 flowchart TD
-  S[/"sources<br>dir, glob, files, URLs"/]:::src --> I["intake<br>expand, sort, skip by format"]:::work
+  S[/"sources<br>dir, glob, files, URLs"/]:::src --> I["intake<br>expand, sort, dispatch every item"]:::work
   I --> R1["item 1<br>the single-document pipeline"]:::work
   I --> R2["item N<br>the same pipeline again"]:::work
   R1 --> E(["one batch-result envelope"]):::hero

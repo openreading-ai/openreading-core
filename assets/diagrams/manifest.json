@@ -8,43 +8,43 @@
   {
     "name": "src-openreading-1",
     "source": "src/openreading/README.md",
-    "title": "One document's path",
+    "title": "One document, from request to response",
     "file": "src-openreading-1.svg"
   },
   {
     "name": "src-openreading-batch-1",
     "source": "src/openreading/batch/README.md",
-    "title": "Mental model",
+    "title": "A folder in. One result per document.",
     "file": "src-openreading-batch-1.svg"
   },
   {
     "name": "src-openreading-comparison-1",
     "source": "src/openreading/comparison/README.md",
-    "title": "Mental model",
+    "title": "From saved outputs to an inspectable comparison",
     "file": "src-openreading-comparison-1.svg"
   },
   {
     "name": "src-openreading-derive-1",
     "source": "src/openreading/derive/README.md",
-    "title": "Mental model",
+    "title": "Native, derived, or absent. Never invented.",
     "file": "src-openreading-derive-1.svg"
   },
   {
     "name": "src-openreading-server-1",
     "source": "src/openreading/server/README.md",
-    "title": "Mental model",
+    "title": "An async job, from submission to completion",
     "file": "src-openreading-server-1.svg"
   },
   {
     "name": "src-openreading-strategies-1",
     "source": "src/openreading/strategies/README.md",
-    "title": "Mental model",
+    "title": "From a readable plan to a trace you can inspect",
     "file": "src-openreading-strategies-1.svg"
   },
   {
     "name": "src-openreading-strategies-2",
     "source": "src/openreading/strategies/README.md",
-    "title": "How it decides",
+    "title": "Accept a result, or move to the next rung",
     "file": "src-openreading-strategies-2.svg"
   }
 ]

@@ -27,10 +27,10 @@ README, and the walkthrough needs no key.
 ## Mental model
 
 <!-- diagram:src-openreading-strategies-1 -->
-<p align="center"><img src="../../../assets/diagrams/src-openreading-strategies-1.svg" alt="Mental model" /></p>
+<p align="center"><a href="../../../assets/diagrams/src-openreading-strategies-1.svg"><img src="../../../assets/diagrams/src-openreading-strategies-1.svg" alt="An openreading.yaml plan passes the schema gate, Plain desugaring, and normalization. Caller scope constrains dispatch before the engine walks the plan. Its orchestration trace supports explain, offline decision replay, and comparison of kept candidates." /></a></p>
 
 <details>
-<summary>Diagram source (Mermaid)</summary>
+<summary>Logical flow (Mermaid)</summary>
 
 ```mermaid
 %%{init: {"theme":"base","fontFamily":"Arial","deterministicIds":true,"deterministicIDSeed":"openreading","htmlLabels":false,"themeVariables":{"fontFamily":"Arial","fontSize":"17px","lineColor":"#8194ad","textColor":"#183451","primaryTextColor":"#183451","primaryColor":"#edf3fc","primaryBorderColor":"#9db4d0","edgeLabelBackground":"#ffffff","clusterBkg":"#f5f8fc","clusterBorder":"#d7e1ee","titleColor":"#183451","actorBkg":"#edf3fc","actorBorder":"#9db4d0","actorTextColor":"#183451","actorLineColor":"#9db4d0","signalColor":"#527095","signalTextColor":"#183451","labelBoxBkgColor":"#fff4de","labelBoxBorderColor":"#c6953a","labelTextColor":"#70501b","loopTextColor":"#527095","noteBkgColor":"#edf3fc","noteBorderColor":"#9db4d0","noteTextColor":"#183451","sequenceNumberColor":"#ffffff","activationBkgColor":"#e7f3ee","activationBorderColor":"#679780"},"flowchart":{"curve":"monotoneY","nodeSpacing":32,"rankSpacing":48,"padding":18,"useMaxWidth":true},"sequence":{"useMaxWidth":true,"actorMargin":65,"messageMargin":38,"mirrorActors":false}}}%%
@@ -682,10 +682,10 @@ that cut. Read the catalog before you change one of these numbers, and before yo
 This is the ladder a `try` with `escalate_when` walks for each rung:
 
 <!-- diagram:src-openreading-strategies-2 -->
-<p align="center"><img src="../../../assets/diagrams/src-openreading-strategies-2.svg" alt="How it decides" /></p>
+<p align="center"><a href="../../../assets/diagrams/src-openreading-strategies-2.svg"><img src="../../../assets/diagrams/src-openreading-strategies-2.svg" alt="Each rung runs a backend. Errors follow on_error: next or fail. A successful result reaches the quality gate. If the gate does not fire, accept and stop. If it fires, retain a best-so-far candidate. Continue with the next rung, or return the best retained result with a warning at the end of the ladder." /></a></p>
 
 <details>
-<summary>Diagram source (Mermaid)</summary>
+<summary>Logical flow (Mermaid)</summary>
 
 ```mermaid
 %%{init: {"theme":"base","fontFamily":"Arial","deterministicIds":true,"deterministicIDSeed":"openreading","htmlLabels":false,"themeVariables":{"fontFamily":"Arial","fontSize":"17px","lineColor":"#8194ad","textColor":"#183451","primaryTextColor":"#183451","primaryColor":"#edf3fc","primaryBorderColor":"#9db4d0","edgeLabelBackground":"#ffffff","clusterBkg":"#f5f8fc","clusterBorder":"#d7e1ee","titleColor":"#183451","actorBkg":"#edf3fc","actorBorder":"#9db4d0","actorTextColor":"#183451","actorLineColor":"#9db4d0","signalColor":"#527095","signalTextColor":"#183451","labelBoxBkgColor":"#fff4de","labelBoxBorderColor":"#c6953a","labelTextColor":"#70501b","loopTextColor":"#527095","noteBkgColor":"#edf3fc","noteBorderColor":"#9db4d0","noteTextColor":"#183451","sequenceNumberColor":"#ffffff","activationBkgColor":"#e7f3ee","activationBorderColor":"#679780"},"flowchart":{"curve":"monotoneY","nodeSpacing":32,"rankSpacing":48,"padding":18,"useMaxWidth":true},"sequence":{"useMaxWidth":true,"actorMargin":65,"messageMargin":38,"mirrorActors":false}}}%%
