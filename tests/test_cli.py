@@ -281,25 +281,14 @@ def test_auth_rejected_message_names_env_and_never_echoes_key():
 
 # ---- ScopeRefused is exit 3 on every command that catches it -------------------------------
 #
-# Exit 4 belongs to `route`'s "no compliant backend for the policy" verdict (and a partial batch);
+# Exit 4 belongs to `route`'s empty policy plan verdict (and a partial batch);
 # a refusal reported by any other command is a can't-run, i.e. 3. Three of the six catch sites
 # (batch parse, calibrate, compare fan-out) cannot reach a real refusal today — nothing plumbs a
 # policy that far — so those inject the exception at the seam the command actually calls.
 
-_HOSTED_ONLY = "strategies:\n  hosted_only:\n    steps:\n      - backend: reducto\n"
-
-
-@pytest.fixture
-def refusing_config(tmp_path):
-    """A strategy whose only backend is hosted, under a policy block that requires a local one:
-    the step is pruned and the run is refused outright."""
-    cfg = tmp_path / "openreading.yaml"
-    cfg.write_text("version: 1\npolicy: {require_local: true}\n" + _HOSTED_ONLY)
-    return str(cfg)
-
 
 def _raise_refused(*args, **kwargs):
-    raise ScopeRefused("nothing is compliant here", constraint="no_compliant_backend")
+    raise ScopeRefused("nothing is permitted here", constraint="no_backend_in_policy")
 
 
 # ---- BL-122: RetryableError reaching a directly-named backend is a clean exit 3, never the -----

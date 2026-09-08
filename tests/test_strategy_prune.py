@@ -165,3 +165,50 @@ def test_a_longhand_auto_leaf_survives_pruning_under_a_scoped_token():
     )
 
     assert compiled.root == {"steps": [{"backend": "auto"}]}
+    assert compiled.dispatchable == ["pymupdf"]
+
+
+def test_a_longhand_auto_leaf_refuses_when_scope_leaves_no_candidate():
+    """An `auto` leaf cannot survive compilation when its dynamic candidate set is empty."""
+    registry = build_registry()
+    config = StrategyConfig.model_validate(
+        {"version": 1, "strategies": {"s": {"steps": [{"backend": "auto"}]}}}
+    )
+
+    with pytest.raises(ScopeRefused) as exc:
+        compile_strategy(
+            _req(),
+            "s",
+            config,
+            registry,
+            RouterConfig(backends=("pymupdf",)),
+            backend_allowlist=frozenset({"tesseract"}),
+        )
+
+    assert exc.value.backend_code == "pymupdf"
+
+
+def test_a_longhand_auto_leaf_refuses_an_empty_policy_chain():
+    """An empty written candidate chain is reported as a policy refusal before execution."""
+    registry = build_registry()
+    config = StrategyConfig.model_validate(
+        {"version": 1, "strategies": {"s": {"steps": [{"backend": "auto"}]}}}
+    )
+
+    with pytest.raises(ScopeRefused) as exc:
+        compile_strategy(_req(), "s", config, registry, RouterConfig(backends=()))
+
+    assert exc.value.constraint == "no_backend_in_policy"
+
+
+def test_dispatchable_includes_named_leaves_outside_the_dynamic_chain():
+    """Named leaves run directly, while `eligible` remains the candidate set for `auto`."""
+    registry = build_registry()
+    config = StrategyConfig.model_validate(
+        {"version": 1, "strategies": {"s": {"steps": [{"backend": "tesseract"}]}}}
+    )
+
+    compiled = compile_strategy(_req(), "s", config, registry, RouterConfig(backends=("pymupdf",)))
+
+    assert compiled.eligible == ["pymupdf"]
+    assert compiled.dispatchable == ["tesseract"]

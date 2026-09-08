@@ -334,7 +334,7 @@ Rules a caller must not get wrong
   was found but the provider said no, with a `check <VAR>` hint naming the env var and never the
   provider's response body; unsupported feature, ScopeRefused, plan exhausted, a named
   backend's RetryableError, which has no next rung) · 4 partial batch (some items failed); `route`
-  with no compliant backend · 5 compare inputs not schema-valid · 6 interrupted while
+  with no backend permitted by policy · 5 compare inputs not schema-valid · 6 interrupted while
   `OPENREADING_LEDGER` was armed (resumable; a single document names its run id, a batch names
   none) · 143 terminated by SIGTERM with no ledger armed, so nothing was resumable. An unarmed
   Ctrl-C is an ordinary KeyboardInterrupt and exits 130.

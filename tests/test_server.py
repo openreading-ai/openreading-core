@@ -3376,10 +3376,8 @@ def test_a_scoped_runs_allowlist_survives_into_resume_via_the_headers_pinned_set
     assert resumed["backend"]["id"] == "pymupdf"
 
 
-def test_an_unscoped_run_of_the_same_strategy_pins_the_whole_resolved_set(tmp_path, monkeypatch):
-    """The contrast the test above rests on: without a scope, the same strategy under the same
-    `policy.backends` pins every backend that list resolves to, so the single-entry pinned set
-    there is the allow-list's doing and not a property of the strategy."""
+def test_an_unscoped_named_strategy_pins_only_what_it_can_dispatch(tmp_path, monkeypatch):
+    """An explicit strategy does not pin unrelated members of the default backend chain."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OPENREADING_LEDGER", str(tmp_path / "ledger"))
     (tmp_path / "openreading.yaml").write_text(
@@ -3392,4 +3390,4 @@ def test_an_unscoped_run_of_the_same_strategy_pins_the_whole_resolved_set(tmp_pa
 
     assert r.status_code == 200
     header = json.loads(sorted((tmp_path / "ledger").glob("*.header.json"))[0].read_text())
-    assert len(header["pinned_eligible"]) > 1
+    assert sorted(header["pinned_eligible"]) == ["pymupdf"]

@@ -74,8 +74,8 @@ Invariants shared by every subcommand
   `strategy show` prints YAML. Read that chapter before building a pipeline.
 - A `<file>` starting with `http(s)://` is a URL: backends that ingest URLs
   natively get it as-is, the rest download to bytes first.
-- No fallback widens the set of backends allowed by the policy (D7, D7a).
-  A policy that leaves nothing compliant prevents dispatch. `route`, including
+- No fallback widens the policy's default backend chain (D7, D7a).
+  A policy with no registered backend prevents dispatch. `route`, including
   `route --run`, prints the empty plan and exits 4. Other commands report the
   refusal through their own exit codes or per-case results.
 - The CLI passes no result cache (DECISIONS D-v3-3): silent memoization inside
@@ -1031,8 +1031,8 @@ Exit codes
      `openreading.router.driver.MAX_CONSECUTIVE_FAULTS` -- a named backend has
      no next rung to fall back to); `help` under `python -OO`, which discarded
      the manual's docstrings.
-  4  `route`: no compliant backend for the policy (the empty plan is printed as
-     JSON); batch `parse`: partial -- some items failed.
+  4  `route`: no registered backend permitted by policy (the empty plan is
+     printed as JSON); batch `parse`: partial -- some items failed.
   5  `compare`: inputs are not schema-valid responses, or `--from` on a run
      that kept no candidates.
   6  interrupted, resumable: `parse` was interrupted while `OPENREADING_LEDGER`

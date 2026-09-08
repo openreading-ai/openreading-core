@@ -185,3 +185,37 @@ def test_config_hash_is_computable_when_a_policy_names_backends():
 
     assert forward.config_hash.startswith("sha256:")
     assert forward.config_hash != reverse.config_hash
+
+
+def test_named_strategy_leaf_controls_url_materialization_outside_default_chain(
+    sample_pdf, monkeypatch
+):
+    """A named leaf that needs bytes controls transport even when the default chain accepts URLs."""
+    import httpx
+
+    from openreading.router.compliance import RouterConfig
+    from openreading.strategies import StrategyConfig
+    from openreading.types.request import OpenReadingRequest
+
+    req = OpenReadingRequest.model_validate(
+        {
+            "document": {"url": "https://example.test/document.pdf"},
+            "backend": {"id": "strategy:s"},
+        }
+    )
+    cfg = StrategyConfig.model_validate(
+        {"version": 1, "strategies": {"s": {"steps": [{"backend": "pymupdf"}]}}}
+    )
+    transport = httpx.MockTransport(
+        lambda _request: httpx.Response(200, content=sample_pdf.read_bytes())
+    )
+    monkeypatch.setenv("OPENREADING_ALLOW_PRIVATE_URLS", "1")
+
+    result = api.run_request(
+        req,
+        strategy_config=cfg,
+        config=RouterConfig(backends=("docling",)),
+        transport=transport,
+    )
+
+    assert result["backend"]["id"] == "pymupdf"

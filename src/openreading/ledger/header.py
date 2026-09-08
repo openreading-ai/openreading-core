@@ -4,9 +4,9 @@ Each run writes one JSON header beside its JSONL journal. The header records the
 projection, plan hashes, journal version, and pinned adapter descriptor digests. Resume refuses
 when a hard identity field differs, while the executor checks pinned descriptors per step.
 
-Document bytes and source URLs live in the content-addressed blob store. The plaintext header
-omits those values, document passwords, and webhook URLs. ``document_is_url`` distinguishes a URL
-blob from document bytes without trusting the caller-controlled media type.
+Document bytes live in the content-addressed blob store. Source URLs, document passwords, and
+webhook URLs are omitted because they can carry secrets. A URL-backed run is not resumable unless
+another layer materialized it to bytes before the ledger was armed.
 """
 
 from __future__ import annotations
@@ -29,14 +29,6 @@ JOURNAL_VERSION = 1
 # The subset of RunHeader fields whose mismatch refuses a resume outright (AC-4) — see the module
 # docstring for why `registry_fingerprint`/`pinned_eligible` are deliberately excluded.
 _HARD_FIELDS = ("config_hash", "plan_hash", "journal_version")
-
-# A human-readable label for a URL-sourced document's header blob. NOT the bytes/URL
-# discriminator: reading `BlobRef.media_type` back to tell the two apart could collide with a
-# caller-supplied `document.mime_type`, an unvalidated string on the bytes side.
-# `RunHeader.document_is_url` is the real discriminator, a field this module alone ever sets.
-# This constant is kept only as the blob's own `media_type` value, for a human inspecting one
-# directly.
-DOCUMENT_URL_MEDIA_TYPE = "application/x-openreading-document-url"
 
 
 class HeaderMismatch(Exception):
@@ -61,9 +53,8 @@ class RunHeader:
     pinned_eligible: dict[str, str] = field(default_factory=dict)
     strategy_name: str = ""
     document: BlobRef | None = None
-    # The bytes-vs-URL discriminator for `document`, set only by `_arm_ledger`'s own write side.
-    # It is never derived from `document.media_type`, which for the bytes case is
-    # `req.document.mime_type`, an unvalidated string a caller controls.
+    # True records why `document` is absent. The plaintext blob store must not retain a URL that
+    # can contain a bearer token, so resume turns this marker into a typed missing-input refusal.
     document_is_url: bool = False
     slim_request: dict[str, Any] = field(default_factory=dict)
 

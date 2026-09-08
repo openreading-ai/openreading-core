@@ -707,6 +707,52 @@ def test_pinned_eligible_is_armed_on_resume_and_the_gate_refuses_a_changed_descr
         )
 
 
+@pytest.mark.parametrize(
+    ("leaf", "scope", "expected"),
+    [
+        ("pymupdf", None, "pymupdf"),
+        ("auto", frozenset({"tesseract"}), "tesseract"),
+    ],
+)
+def test_resume_preserves_named_and_scoped_dynamic_strategy_backends(
+    tmp_path, monkeypatch, leaf, scope, expected
+):
+    """Resume uses every originally dispatchable backend and the original dynamic candidate set."""
+    ledger_root = tmp_path / "ledger"
+    monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "openreading.yaml").write_text(
+        "version: 1\n"
+        "policy:\n"
+        "  backends: [pymupdf, tesseract]\n"
+        "strategies:\n"
+        "  s:\n"
+        "    steps:\n"
+        f"      - backend: {leaf}\n"
+    )
+    pdf = tmp_path / "sample.pdf"
+    pdf.write_bytes(build_sample_pdf())
+    req = OpenReadingRequest.model_validate(
+        {"document": {"path": str(pdf)}, "backend": {"id": "strategy:s"}}
+    )
+    cfg = StrategyConfig.model_validate(
+        {
+            "version": 1,
+            "policy": {"backends": ["pymupdf", "tesseract"]},
+            "strategies": {"s": {"steps": [{"backend": leaf}]}},
+        }
+    )
+    armed: list[str] = []
+
+    first = api.run_request(
+        req, strategy_config=cfg, backend_allowlist=scope, on_run_armed=armed.append
+    )
+    resumed = api.resume_run(armed[0])
+
+    assert first["backend"]["id"] == expected
+    assert resumed["backend"]["id"] == expected
+
+
 # ---- missing-credentials journaled and terminal on resume (AC-15) -------------------------------
 
 

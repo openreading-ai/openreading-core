@@ -28,7 +28,6 @@ from openreading.strategies.model import DeciderLLM, StrategyConfig
 from openreading.strategies.normalize import normalize_strategy
 from openreading.strategies.presets import PRESET_NAMES
 from openreading.strategies.trace import DropRecord
-from openreading.types.descriptor import AdapterDescriptor
 from openreading.types.errors import ScopeRefused
 from openreading.types.request import OpenReadingRequest
 
@@ -48,7 +47,7 @@ _SCOPE_DROP = DropReason(
 @dataclass
 class CompiledPlan:
     """The output of compilation: the pruned root tree, the pruned tree of every strategy (for
-    `use:` reference resolution), the eligible-backend order, drop records, and provenance."""
+    `use:` reference resolution), dynamic candidates, dispatchable ids, drops, and provenance."""
 
     name: str
     root: dict[str, Any]
@@ -56,9 +55,9 @@ class CompiledPlan:
     eligible: list[str]
     dropped: list[DropRecord]
     config_hash: str
+    dispatchable: list[str] = field(default_factory=list)
     overrides_fallback: bool = False
     warnings: list[tuple[str, str]] = field(default_factory=list)  # (code, message)
-    # the post-union effective compliance (request ∪ file policy:) — feeds route facts
     # `limits:` operator time ceiling wrapping every strategy-engaged run (spec §6.4)
     max_duration_ms: int | None = None
     # the root strategy was authored in the Plain dialect (internal/design/simple-strategies.md §9) —
@@ -92,7 +91,7 @@ def compile_strategy(
     `backend_allowlist` is the CALLER's ceiling on which backends this walk may reach at all —
     the server's `OPENREADING_API_KEY_SCOPES` allow-list for the presented token; None means
     unscoped and nothing here changes. It is enforced HERE, in the same pass that already prunes
-    for compliance, for three reasons:
+    for caller scope, for three reasons:
 
     - It is the only place that bounds an `auto` leaf. `auto` names no backend, so a reachable set
       computed by reading the config cannot bound it: `max_accuracy` is `steps: [auto, auto]` and
@@ -132,19 +131,22 @@ def compile_strategy(
 
     plan = Router(registry, router_config, broker=broker).route(route_req)
     eligible = plan.eligible_ids  # chosen + fallbacks, in the caller's own written order
-    drop_reasons = plan.dropped  # id -> DropReason
+    drop_reasons = dict(plan.dropped)  # id -> DropReason
 
     # (1b) subtract the caller's allow-list. Order matters: this runs AFTER the router, over the
     # set the router already approved, so it can only ever shorten `eligible` — the one thing an
     # allow-list must never be able to do is put a backend back. Narrowing `eligible` is also what
     # bounds every `auto` leaf in the tree, since `auto` is resolved against nothing else.
     if backend_allowlist is not None:
+        for slug in eligible:
+            if slug not in backend_allowlist:
+                drop_reasons[slug] = _SCOPE_DROP
         eligible = [s for s in eligible if s in backend_allowlist]
 
     # (2)+(3) normalize + prune every strategy (so `use:` refs resolve against pruned trees).
     # BL-168: iterate in a fixed order — `set()` iteration order is hash-seed-dependent, and it
     # reached `trace.dropped`, `orchestration["dropped"]`, and the ScopeRefused message below,
-    # so the explanation shown for *why a compliant run was refused* was not reproducible.
+    # so the explanation shown for why a scoped run was refused was not reproducible.
     all_names = sorted(set(config.strategies) | PRESET_NAMES | {name})
     trees: dict[str, dict[str, Any] | None] = {}
     dropped_records: dict[str, DropRecord] = {}
@@ -166,9 +168,7 @@ def compile_strategy(
         dropped_list = ", ".join(f"{d.backend}:{d.code}" for d in sorted_dropped)
         # Which refusal the caller gets decides which file they go and edit, so the two causes
         # stay apart: an allow-list that removed the last runnable backend is the token's problem
-        # and answers `scope_denied`; anything else is the policy's and answers the compliance
-        # refusal this has always raised. A tree emptied by BOTH reports scope, because scope is
-        # the narrower and later subtraction — relaxing the policy alone would not make it run.
+        # and answers `scope_denied`. An already-empty dynamic chain names the written policy.
         scope_drops = sorted(d.backend for d in root_records.values() if d.code == _SCOPE_CODE)
         if scope_drops:
             raise ScopeRefused(
@@ -177,11 +177,15 @@ def compile_strategy(
                 backend_code=scope_drops[0],
             )
         raise ScopeRefused(
-            f"strategy {name!r} has no compliant backend for this request (dropped: {dropped_list})",
-            constraint="no_compliant_backend",
+            f"strategy {name!r} has no backend available from the declared policy "
+            f"(dropped: {dropped_list})",
+            constraint="no_backend_in_policy",
         )
 
-    config_hash = _compute_config_hash(root, router_config, registry, plan, config.policy)
+    concrete, uses_auto = _concrete_backend_ids(root, trees)
+    dispatchable: list[str] = list(eligible if uses_auto else [])
+    dispatchable.extend(slug for slug in concrete if slug not in dispatchable)
+    config_hash = _compute_config_hash(root, router_config, registry, plan, config.policy, concrete)
 
     warnings: list[tuple[str, str]] = []
     if overrides_fallback:
@@ -204,6 +208,7 @@ def compile_strategy(
         root=root,
         trees=trees,
         eligible=eligible,
+        dispatchable=dispatchable,
         dropped=sorted(dropped_records.values(), key=lambda d: d.backend),
         config_hash=config_hash,
         overrides_fallback=overrides_fallback,
@@ -222,6 +227,7 @@ def _compute_config_hash(
     registry: Registry,
     plan: RoutePlan,
     file_policy=None,
+    concrete_ids: list[str] | None = None,
 ) -> str:
     """BL-163: `config_hash` must change whenever the POLICY changes which backends can run, not
     only when the pruned tree's shape happens to change. Hashing `root` alone let two different
@@ -260,10 +266,11 @@ def _compute_config_hash(
     input here is either the pruned tree, router settings, written policy, or public adapter
     descriptors."""
     router_config_canonical = _canonical_router_config(router_config)
-    participating_ids = set(plan.eligible_ids) | set(plan.dropped)
+    participating_ids = set(plan.eligible_ids) | set(plan.dropped) | set(concrete_ids or [])
     descriptor_digests = sorted(
-        f"{bid}:{_hash_json(_descriptor_for(registry, bid).to_schema_dict())}"
+        f"{bid}:{_hash_json(adapter.descriptor.to_schema_dict())}"
         for bid in participating_ids
+        if (adapter := registry.get(bid)) is not None
     )
     written = file_policy.model_dump(exclude_none=True) if file_policy is not None else None
     payload = [root, router_config_canonical, descriptor_digests, written]
@@ -302,15 +309,6 @@ def _canonical_router_config(router_config: RouterConfig) -> dict[str, Any]:
     return canonical
 
 
-def _descriptor_for(registry: Registry, backend_id: str) -> AdapterDescriptor:
-    # BL-163 review: every id here comes from plan.eligible_ids/plan.dropped, both
-    # populated by Router.route iterating this SAME registry (router.py) — so a miss is a
-    # programming error in the caller, not a runtime possibility this function should degrade for.
-    adapter = registry.get(backend_id)
-    assert adapter is not None, f"{backend_id!r} was classified by the router but isn't registered"
-    return adapter.descriptor
-
-
 def _hash_json(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
 
@@ -341,7 +339,12 @@ def _prune_node(
             # bounding the RESOLVED id by the caller's allow-list there. Deleting this branch as
             # dead code made a scoped token's `auto` rung refuse with `denied: auto`, the literal
             # string, instead of running whatever that token does permit.
-            return node
+            if eligible:
+                return node
+            for candidate, reason in drop_reasons.items():
+                if reason.code == _SCOPE_CODE:
+                    _record_drop(candidate, reason, dropped_records)
+            return None
         if backend_allowlist is not None and slug not in backend_allowlist:
             # Checked against the allow-list DIRECTLY, not against `eligible`: an id the router
             # never ranked (an unknown slug, or one dropped for an unrelated reason) must still
@@ -419,6 +422,48 @@ def _prune_node(
         return {**node, "decide": new_decide}
 
     return node
+
+
+def _concrete_backend_ids(
+    root: dict[str, Any], trees: dict[str, dict[str, Any] | None]
+) -> tuple[list[str], bool]:
+    """Return concrete backend ids and whether reachable nodes use dynamic `auto`."""
+    found: list[str] = []
+    seen_ids: set[str] = set()
+    seen_refs: set[str] = set()
+    uses_auto = False
+
+    def add(slug: str) -> None:
+        if slug != "auto" and slug not in seen_ids:
+            seen_ids.add(slug)
+            found.append(slug)
+
+    def walk(value: Any) -> None:
+        nonlocal uses_auto
+        if isinstance(value, list):
+            for item in value:
+                walk(item)
+            return
+        if not isinstance(value, dict):
+            return
+        backend = value.get("backend")
+        if isinstance(backend, str):
+            if backend == "auto":
+                uses_auto = True
+            else:
+                add(backend)
+        reference = value.get("use")
+        if isinstance(reference, str) and reference not in seen_refs:
+            seen_refs.add(reference)
+            target = trees.get(reference)
+            if target is not None:
+                walk(target)
+        for key, child in value.items():
+            if key != "use" or not isinstance(child, str):
+                walk(child)
+
+    walk(root)
+    return found, uses_auto
 
 
 def _record_drop(slug: str, reason: Any, dropped_records: dict[str, DropRecord]) -> None:

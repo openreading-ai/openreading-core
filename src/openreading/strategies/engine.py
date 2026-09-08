@@ -5,15 +5,14 @@
 one place a strategy file's semantics turn into backend calls: cascades (`steps:`), `route:`,
 `parallel:` with race / best / merge + hedge / shadow / drain, `decide:` nodes and gate bands
 through the decision layer (`openreading.strategies.decider`), `use:` references, single-leaf
-strategies, and `granularity: page` cascades. It consumes ONLY pruned trees: resolution happened
-once in compile, a backend outside the caller's own list does not exist in the tree it sees, so
-execution is structurally incapable of widening the set. "The eligible set" below is that resolved
-set for this request, computed once, up front. Pruning collapses upward
+strategies, and `granularity: page` cascades. It consumes trees pruned to the API key's scope.
+Named leaves remain independent of `policy.backends`, while dynamic `auto` resolves from that
+ordered candidate set. Pruning collapses upward
 (`prune._prune_node` returns `None`): a composite whose children all vanish — a cascade with no
 rungs, a parallel with no branches, a route rule whose target is gone, a decide whose `among:`
 empties — disappears and its parent re-evaluates; a route whose `default:` target is fully
 pruned collapses whole (matched or not, so `_eval_route` may assume `r["default"]` exists);
-the root collapsing is the terminal `no_compliant_backend` refusal before any attempt.
+the root collapsing is a terminal scope or empty-policy refusal before any attempt.
 `strategy validate` flags each leaf unreachable under the file's policy — a `default:` target
 included — per leaf, not as a route-specific warning.
 
@@ -412,9 +411,8 @@ Edge-case catalog
    bundle degrades by design. Bindability checks skip `auto` leaves (no fixed descriptor).
 3. Outer 3 s remaining, inner `max_duration` 10 s — the inner clamps to 3 s; a hedge past it is
    `deadline_pruned`; a deadline ending a walk with nothing retained is `budget_exhausted`.
-4. Escalation target outside the resolved set — the cascade simply has one fewer rung (the drop is in
-   `orchestration.dropped[]`); every rung pruned → terminal `no_compliant_backend` before any
-   attempt, never a silent downgrade.
+4. API scope excludes an escalation target — the cascade has one fewer rung, recorded in
+   `orchestration.dropped[]`. A fully pruned tree refuses before any attempt.
 5. WEBHOOK backend in a race — one Job state machine; a cancelled loser's late delivery is
    acknowledged and dropped; interior branches degrade to polling where no webhook bus exists.
 6. Decider returns out-of-set / goes rogue — closed strict-tool action space, so out-of-set is

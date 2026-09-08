@@ -732,6 +732,45 @@ def test_planted_canary_in_document_url_never_reaches_disk(tmp_path, monkeypatch
     on_disk = b"".join(p.read_bytes() for p in ledger_root.rglob("*") if p.is_file())
     assert url_canary.encode() not in on_disk
 
+    from openreading.api import _request_from_header
+    from openreading.ledger.header import read_header
+    from openreading.ledger.localfs import LocalFsBlobStore
+    from openreading.types.errors import TerminalError
+
+    header_path = next(ledger_root.glob("*.header.json"))
+    header = read_header(ledger_root, header_path.name.removesuffix(".header.json"))
+    assert header is not None
+    with pytest.raises(TerminalError) as exc:
+        _request_from_header(header, LocalFsBlobStore(ledger_root / "blobs"))
+    assert exc.value.backend_code == "payload_missing"
+
+
+def test_named_strategy_backend_outside_default_chain_is_pinned(tmp_path, monkeypatch, pdf_path):
+    """The ledger pins every backend the strategy can dispatch, including a named leaf."""
+    from openreading.ledger.header import read_header
+    from openreading.strategies.model import StrategyConfig
+    from openreading.types.request import OpenReadingRequest
+
+    ledger_root = tmp_path / "ledger"
+    monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
+    req = OpenReadingRequest.model_validate(
+        {"document": {"path": pdf_path}, "backend": {"id": "strategy:s"}}
+    )
+    cfg = StrategyConfig.model_validate(
+        {
+            "version": 1,
+            "policy": {"backends": ["tesseract"]},
+            "strategies": {"s": {"steps": [{"backend": "pymupdf"}]}},
+        }
+    )
+    armed: list[str] = []
+
+    api.run_request(req, strategy_config=cfg, on_run_armed=armed.append)
+
+    header = read_header(ledger_root, armed[0])
+    assert header is not None
+    assert sorted(header.pinned_eligible) == ["pymupdf"]
+
 
 # ---- Ledger T4b §4.2/§6: normalize's slim_req exclusion --------------------------------------
 #

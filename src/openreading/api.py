@@ -118,7 +118,6 @@ from openreading.credentials import (
 )
 from openreading.derive.mime import resolve_mime_type
 from openreading.ledger.header import (
-    DOCUMENT_URL_MEDIA_TYPE,
     JOURNAL_VERSION,
     HeaderMismatch,
     RunHeader,
@@ -486,14 +485,11 @@ def _arm_ledger_unguarded(
                 run_id, digest, raw, req.document.mime_type or "application/octet-stream"
             )
         elif req.document.url is not None:
-            # `document.url` is a secret-class field (§9.3, "routinely a presigned URL, forwarded
-            # verbatim," unconditionally, not by size) that must never land in the plaintext
-            # `slim_request` sidecar (`slim_request_dict` already strips it). Routed through the
-            # SAME blob store a `bytes_base64` document uses. This keeps the secret URL out of the
-            # plaintext header while preserving the document needed for resume.
-            raw = req.document.url.encode("utf-8")
-            digest = "sha256:" + hashlib.sha256(raw).hexdigest()
-            document_ref = blobs.put(run_id, digest, raw, DOCUMENT_URL_MEDIA_TYPE)
+            # A URL routinely contains a bearer token. The blob store is plaintext after removal
+            # of ledger encryption, so retaining the URL would persist that token verbatim. Leave
+            # the document absent from the header. The fresh run still has its in-memory request,
+            # while resume reports the missing input through `_request_from_header`.
+            document_ref = None
             document_is_url = True
         write_header(
             ledger_root,
@@ -566,7 +562,8 @@ def _run_strategy_request(
     )
     # Materialize when any backend in the resolved strategy cannot ingest URLs.
     if any(
-        not (a := registry.get(bid)) or not a.descriptor.accepts_url for bid in compiled.eligible
+        not (a := registry.get(bid)) or not a.descriptor.accepts_url
+        for bid in compiled.dispatchable
     ):
         req = materialize_document(req, transport=transport)
     run_id = str(uuid.uuid4())
@@ -577,7 +574,7 @@ def _run_strategy_request(
         registry,
         broker,
         clock,
-        compiled.eligible,
+        compiled.dispatchable,
         config_hash=compiled.config_hash,
         plan_tree=compiled.root,
         strategy_name=name,
@@ -898,13 +895,16 @@ def _request_from_header(header: RunHeader, blobs: LocalFsBlobStore) -> OpenRead
     `slim_request` + `document` (see `ledger/header.py`'s module docstring for what's deliberately
     NOT recoverable this way — `document.password`/`async.webhook_url`, never persisted).
 
-    `header.document` holds either a `bytes_base64` document's bytes or a URL-sourced
-    document's `document.url` string. Both are routed through the content-addressed blob store
-    rather than the `slim_request` echo. `header.document_is_url` tells the two apart, rather than
-    `media_type`, which for the bytes case is a caller-supplied, unvalidated `mime_type` that could
-    collide with a sentinel value)."""
+    `header.document` holds a `bytes_base64` document's bytes. A URL is never persisted because
+    the plaintext blob store cannot safely retain a bearer token embedded in it. Such a header
+    carries `document_is_url=True` and resume reports that its input is unavailable."""
     body: dict[str, Any] = dict(header.slim_request)
     doc = dict(body.get("document") or {})
+    if header.document is None and header.document_is_url:
+        raise TerminalError(
+            "recorded input payload is unavailable: source URL was not retained",
+            backend_code="payload_missing",
+        )
     if header.document is not None:
         try:
             raw = blobs.get(header.document)
@@ -969,6 +969,9 @@ def resume_run(run_id: str) -> dict[str, Any]:
     # §10: "no other flags" — a resume takes every option from the ledger and the live file.
     req, config = apply_config(req, loaded.policy if loaded else None, RouterConfig())
     compiled = compile_strategy(req, header.strategy_name, strategy_config, registry, config)
+    original_dispatchable = frozenset(header.pinned_eligible)
+    compiled.eligible = [bid for bid in compiled.eligible if bid in original_dispatchable]
+    compiled.backend_allowlist = original_dispatchable
     clock = RealClock()
     executor = _arm_ledger(
         run_id,
@@ -976,7 +979,7 @@ def resume_run(run_id: str) -> dict[str, Any]:
         registry,
         broker,
         clock,
-        compiled.eligible,
+        compiled.dispatchable,
         config_hash=compiled.config_hash,
         plan_tree=compiled.root,
         strategy_name=header.strategy_name,

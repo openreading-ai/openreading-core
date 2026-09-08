@@ -301,48 +301,37 @@ backend answers the second and is exactly wrong for the first. `budget_exhausted
 error class: nothing retained and the deadline ended the walk → `Err(budget_exhausted)`; nothing
 retained otherwise → `Err(exhausted)`; both raise `PlanExhaustedError`.
 
-8. Compliance-constrained cascade with a guaranteed local floor
----------------------------------------------------------------
+8. Explicit sensitive-document cascade
+--------------------------------------
 
-PHI: only BAA-covered or fully-local backends may see the document, and nothing may train on
-it. Compliance lives in `policy:`, outside the tree.
+Core cannot verify vendor agreements or data-use terms. Name only backends your organization has
+approved, and use API-key scope when a caller must be prevented from reaching the others.
 
 ```yaml
 version: 1
-
-policy:
-  backends: [pymupdf, tesseract, aws-textract]
 
 strategies:
   phi_pipeline:
     steps:
       - pymupdf                      # local: the document never leaves this machine
       - aws-textract                 # hosted rung with a BAA path
-      - reducto                      # pruned in deployments where its claims aren't verified
+      - reducto                      # include only after your own vendor review
       - docling                      # local floor
     escalate_if: default
 ```
 
-Plain spelling — `policy:` is shared with Plain, so only the cascade changes:
+Plain spelling:
 
 ```yaml
 version: 1
-policy:
-  backends: [pymupdf, tesseract, aws-textract]
 strategies:
   phi_pipeline:
     try: [pymupdf, aws-textract, reducto, docling]
     escalate_when: looks_bad
 ```
 
-What happens: the file's `policy:` unions into every request's compliance block
-(most-restrictive-wins, DECISIONS D-v3-12), and the 3-stage router prunes the tree *before*
-execution. A hosted rung whose
-BAA/no-train posture is not verified is dropped up front: the cascade simply has one fewer rung,
-recorded in `orchestration.dropped[]` with the router's `DropReason`; nothing can re-admit it,
-and naming compliance in `on_error` is a load-time error. `strategy validate` warns statically
-about steps unreachable under the file's own `policy:`. If *every* rung were pruned: terminal
-`no_compliant_backend` — never a silent downgrade.
+What happens: each named rung runs in the written order when earlier quality gates fire. The
+strategy makes no vendor claim. Server API-key scope prunes any rung that token cannot reach.
 
 9. Audit sampling: shadow a premium backend on 5% of traffic
 ------------------------------------------------------------
@@ -438,7 +427,7 @@ rung (`validate` warns).
 12. The maximal composition — everything at once
 ------------------------------------------------
 
-One file exercising the whole grammar: an operator ceiling, a compliance-fact route, a cascade
+One file exercising the whole grammar: an operator ceiling, a fact route, a cascade
 nesting a hedged judged parallel, an `auto` leaf, an error map, shadow sampling, a deployment
 default.
 
@@ -509,8 +498,8 @@ What happens: a request with no named backend routes through `front_door`. An in
 `tables_heavy`, a second cascade with a
 bigger duration budget. Inside `base_cascade`: pymupdf, then the hedged judged duel inside the
 cascade's 4m budget inside the operator's 10m ceiling (children clamp, never extend; `limits:`
-binds strategy-engaged runs only, never a direct-named request), then an `auto` rung that can
-only pick a backend the walk has not touched — the attempted set spans rungs, branches, shadows,
+binds strategy-engaged runs only, never a direct-named request), then aws-textract. The attempted
+set spans rungs, branches, shadows,
 
 Reading the trace
 =================
@@ -568,7 +557,7 @@ PRESETS: dict[str, RawNode] = {
         "on_win": "cancel",
     },
     "offline_first": {
-        "intent": "Never leave the machine. Enforcement belongs to policy: { backends: [pymupdf, tesseract] }.",
+        "intent": "Local parsers only. Every rung is explicitly named.",
         "steps": ["pymupdf", "tesseract", "docling"],
         "escalate_if": "default",
     },
