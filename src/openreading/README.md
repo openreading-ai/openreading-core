@@ -125,6 +125,7 @@ The table below tells you which guide answers which need and how long each takes
 | You want to… | Guide | Read time |
 |---|---|---|
 | know what this is, where to go next, and how an agent uses it | this page | 10 min |
+| understand and consume the response JSON across backends | [Response guide](schemas/README.md#understanding-the-response-json), or `uv run openreading help response` | 10 min |
 | script it from a shell or CI: stdout, exit codes, `.env` | [The command line](cli/README.md) | 10 min |
 | look up one CLI chapter without leaving the terminal | `uv run openreading help` lists the topics; `uv run openreading help batch` prints one | look up as needed |
 | pick a backend under a policy, see why one was dropped, bring a key | [Routing and keys](router/README.md) | 10 min |
@@ -318,7 +319,7 @@ enforce for you.
 | `decisions[].downgraded` | closed in code, 9 values | `openreading.strategies.decider.DOWNGRADE_REASONS` |
 | `decisions[].point` | **open** | four values ship (`decide`, `gate_band`, `judge`, `route`). A code comment names only the first three |
 | `warnings[].code` | **open** | known codes listed in the `openreading.schemas` docstring (`warnings[]`) |
-| `status.error.code` | **open**, and never populated on a single-document response | `response.v0.3.json` types it as a bare string |
+| `status.error.code` | **open**, populated by some adapters, not an exhaustive vocabulary | `response.v0.3.json` types it as a bare string |
 | batch `items[].error.code` | **open** | the adapter's `backend_code`, else the Python exception class name |
 | HTTP `error.category` | closed in code | the status ladder in the `openreading.server` docstring |
 
@@ -456,8 +457,6 @@ Nothing below exists in the package today. Each line names where the gap is reco
   validation of the `orchestration` block's inner shape either, which is why the register above
   marks its closed sets as code-level guarantees. Both gaps are recorded in the `openreading`
   package docstring (Known gaps).
-- `status.error` is never populated on a single-document response, so a single parse has no error
-  code to read. The batch surface does populate `items[].error.code`.
 - There is no run-stats projection: no single block says which backends were eligible, attempted
   and actually dispatched, why each switch happened, and what it cost. Read the pieces that do
   exist, which are `warnings[]`, strategy `orchestration`, the batch summary and an armed ledger.

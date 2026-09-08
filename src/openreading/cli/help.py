@@ -79,6 +79,7 @@ class Topic:
 TOPICS: tuple[Topic, ...] = (
     # start here
     Topic("quickstart", "Quickstart", ("start", "tutorial")),
+    Topic("response", "Understanding the response JSON", ("envelope", "json")),
     Topic("help", "help [TOPIC]", ("manual",)),
     Topic("output", "What lands on stdout, on stderr, and in the exit code", ("stdout", "stderr")),
     Topic("chaining", "Chaining one verb into the next", ("chain", "pipeline", "compose")),
@@ -120,7 +121,7 @@ TOPICS: tuple[Topic, ...] = (
 
 # Which heading each group of the index prints under, in index order.
 _GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("START HERE", ("quickstart", "help", "output", "chaining")),
+    ("START HERE", ("quickstart", "response", "help", "output", "chaining")),
     ("DO ONE JOB", ("batch", "backends-policy", "usage", "env", "datasets")),
     ("WHEN SOMETHING STOPS", ("exit-codes", "signals")),
     (
@@ -146,6 +147,7 @@ _GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
 # One line per topic for the index. Written in the reader's terms, not the module's.
 _BLURBS: dict[str, str] = {
     "quickstart": "four commands, from a clone to parsed JSON, with no key",
+    "response": "read the JSON: content, tables, fields, warnings, and provenance",
     "help": "find a chapter, its aliases, or one command's flags",
     "output": "what goes to stdout, what goes to stderr, what the code says",
     "chaining": "which verb's output feeds which verb's input",

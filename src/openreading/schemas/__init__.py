@@ -116,7 +116,15 @@ Response (``response.v0.3.json``)
 Required: ``schema_version`` (const ``"0.3"``), ``status``, ``backend``, ``document``. The honest
 common denominator is the schema's ``anyOf``: at least one of ``document.markdown``,
 ``document.text``, ``document.pages`` or top-level ``typed_fields`` is always present. What a
-backend cannot produce is ABSENT with a ``warnings[]`` entry — never fabricated.
+backend cannot produce stays absent rather than fabricated. Warnings explain some limitations,
+but they are not an exhaustive inventory of missing channels. Inspect the content fields and
+the experimental ``channel_provenance`` map when deciding whether a result meets your needs.
+Presence does not imply nonempty content: ``document: {}`` with ``typed_fields`` is schema-valid.
+
+Read a response in this order: ``status`` for completion, content for the data you need,
+``warnings`` for limitations, then ``backend`` and ``usage`` for production context.
+The consumer walkthrough is the schemas README. ``openreading help response`` gives terminal
+readers the field paths, optional-value rules, and distinctions between outer response shapes.
 
 - ``status.state``: ``succeeded`` | ``partial`` | ``failed`` | ``processing`` (a CLOSED enum);
   optional ``error`` {``code``, ``message``, ``backend_code`` = the vendor's original code}.
@@ -192,9 +200,8 @@ backend cannot produce is ABSENT with a ``warnings[]`` entry — never fabricate
   - the vendor said so: ``backend_warning`` (the vendor's own warning text, passed through).
 
   ``unsupported_feature`` is NOT a warning code. It is an ``on_error`` map key, an exception
-  category and an HTTP ``error.category``, each documented elsewhere in this file. Grouping the
-  codes this way is what makes the never-fabricate rule practical, because absence is always
-  accounted for.
+  category and an HTTP ``error.category``, each documented elsewhere in this file. Unknown warning
+  codes remain valid, so consumers preserve them instead of rejecting an otherwise usable response.
 - ``backend_raw`` (present by default via ``outputs.include_backend_raw``): the untouched native
   payload — ``payload`` (the raw value: hosted-API JSON verbatim or the serialized native object
   for libraries; a reference handle instead when too large to inline, paired with ``encoding:
@@ -208,8 +215,8 @@ backend cannot produce is ABSENT with a ``warnings[]`` entry — never fabricate
   descriptor grades cannot express mode-dependent adapters such as qwen or azure),
   ``schema_url`` (the ``$id``).
 
-Nothing the backend produced is ever destroyed: normalized view + raw view + per-box native
-geometry give full lineage for every response.
+The normalized view is the portable consumption surface. Raw payloads and native coordinates
+provide additional lineage when present, but raw payload contents are not a stable API.
 
 Channel invariants: what a channel is allowed to hold
 -----------------------------------------------------

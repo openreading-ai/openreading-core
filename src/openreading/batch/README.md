@@ -28,6 +28,9 @@ The batch layer wraps the single-document path and never changes what that path 
 first step, and it expands your sources into one sorted list of files. Each item then runs exactly
 as `parse one.pdf` would, with its own routing and error isolation.
 
+Read each available `items[].response` with the [response JSON guide](../schemas/README.md#understanding-the-response-json).
+The outer batch object identifies the input and records item failures separately from document content.
+
 A policy is the default backend chain, written once in the `policy.backends` block of your
 `openreading.yaml`. Each null-backend item resolves that list independently. A batch that names a
 backend runs that backend directly, while a named strategy follows its own explicit nodes. From

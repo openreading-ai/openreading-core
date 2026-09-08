@@ -47,6 +47,107 @@ a folder run and the HTTP server. The walkthrough lives in `openreading-web`
 and uses the documents in this clone's `examples/` directory without a key.
 The chapters below are the reference; the hosted tutorial is the tour.
 
+Your next step is `openreading help response`, which explains the JSON you
+saved, the content you can consume, and the fields that may be absent.
+
+Understanding the response JSON
+-------------------------------
+You can switch backends without rewriting the code that reads their results.
+A backend is the parser or extraction engine that reads your document.
+The response envelope is one JSON object containing its content and outcome.
+The field names stay consistent, but available content depends on the backend.
+
+Start with the bundled statement, then inspect the result with `jq`:
+
+    F=examples/john_smith_1000_2026_01.pdf
+    openreading parse "$F" --backend pymupdf > response-mu.json
+    jq -r '.status.state, .backend.id' response-mu.json
+    jq -r '.document.text // empty' response-mu.json
+
+The first query prints `succeeded` and `pymupdf` on separate lines. The second
+prints the statement's text, beginning with `First National Bank`.
+`// empty` prints nothing for an absent field. It does not prove completeness.
+
+Choose the content your application needs:
+
+    document.text              plain text for search and text processing
+    document.markdown          formatted content for display or model input
+    document.pages[].blocks[]   page elements in their reading order
+    blocks[].table             table cells, spans, and a convenient rows grid
+    typed_fields               named extracted values, when produced
+    chunks[]                   chunks linked to source blocks, when produced
+
+`blocks[]` above lives beneath `document.pages[]`, not at the top level.
+For example, this prints page numbers beside each available text block:
+
+    jq -r '.document.pages[]? | .page_number as $p |
+      .blocks[]? | [$p, .type, (.text // "")] | @tsv' response-mu.json
+
+Four top-level keys are required: `schema_version`, `status`, `backend`, and
+`document`. Version `0.3` identifies the JSON contract, not the package.
+At least one of `document.text`, `document.markdown`, `document.pages`, or
+top-level `typed_fields` is present. Presence does not imply nonempty content.
+A field extractor can return `document: {}` with `typed_fields` instead.
+
+Read quality separately from content. `succeeded` says the operation completed,
+not that it read every word correctly. `partial` carries incomplete content.
+Do not treat `failed` or `processing` as a finished reading. Some failures
+raise an error instead of producing a response at all; read `help output`.
+
+A channel is one kind of output, such as text, tables, or block confidence.
+`channel_provenance` records produced channels as `native` or `derived`.
+Native means the backend supplied it. Derived means core computed it from
+that output. This map is experimental; check the content fields themselves.
+Warnings explain some limitations, but no warnings does not mean no gaps.
+
+    jq '.channel_provenance // {}' response-mu.json
+    jq -r '.warnings[]? | [.code, .message] | @tsv' response-mu.json
+
+PyMuPDF produces no measured confidence and omits that field. Tesseract
+produces OCR confidence but no structured table cells. Try the same consumer:
+
+    openreading parse "$F" --backend tesseract > response-te.json
+    jq -r '.backend.id, .document.pages[0].blocks[0].text' \
+      response-mu.json response-te.json
+
+Both runs print `First National Bank` in this captured example. They can still
+disagree elsewhere in the document. OCR values can vary across installations.
+
+Optional does not mean zero, empty, or null. Use `response.get("warnings", [])`
+in Python and `.warnings[]?` in jq. Missing confidence is not confidence zero.
+In Python, use `is not None` when zero is a valid measured value.
+The value of an extracted field can contain false, zero, or nested nulls.
+Covered positions in a table's `rows` grid can also contain null.
+
+Bounding boxes use `x`, `y`, `w`, `h` in [0,1], with a top-left origin.
+`page` is one-based in the source document. Multiply by the page dimensions
+to draw an overlay. Geometry is optional; never invent a box when absent.
+`bbox_native` preserves the original coordinates and their units.
+
+`usage` reports counters such as `pages_processed`, `input_tokens`, and
+`output_tokens`, not a dollar cost. Missing counters are unknown, not free.
+`backend_raw` holds the native payload for vendor-specific inspection. Its
+contents are outside the versioned contract; prefer normalized content first.
+
+Do not confuse the outer shapes:
+
+    one-document parse       this response JSON
+    strategy parse           this response plus orchestration details
+    folder or multi-input    batch-result, with items[].response when available
+                             and per-item errors for failed documents
+    compare                  comparison-report, not another parsed document
+    POST /v1/jobs             async handle; its response appears when available
+
+A strategy can retain a successful parse with `orchestration.outcome` set to
+`degraded`. Inspect that outcome and the warnings before accepting its quality.
+`orchestration` is permissive control-plane data, not a closed schema inside
+the response. `openreading explain run.json` is its human-readable view.
+
+For validation and Python consumers, read the worked response guide:
+`src/openreading/schemas/README.md`. The web tutorial explains the same shape:
+https://openreading.ai/oss-tutorial#3-understanding-the-response-json
+`python -m pydoc openreading.schemas` lists the contract beside its validator.
+
 help [TOPIC]
 ------------
 Print one chapter of this manual, or the topic index when you omit TOPIC.
@@ -99,6 +200,7 @@ backend chatter and errors go to stderr, so a successful `> out.json` parses.
 `help`, `backends`, `explain` and strategy inspection print human-readable text
 or YAML. `benchmark run` prints its preflight and publisher report on stdout.
 Use `benchmark report --format json` to obtain JSON from its saved artifacts.
+For the fields inside a parsed document, run `openreading help response`.
 
     openreading parse examples/ --backend pymupdf > all.json   # JSON only
     openreading parse examples/ --backend pymupdf 2> run.log   # the story

@@ -3,6 +3,15 @@
 `to_schema_dict()` produces a dict that validates against the vendored response schema
 (enforced by tests). Enums serialize to their string values; None fields are dropped so
 we never emit `"text": null` against a `type: string` slot.
+
+Application code receives ordinary dictionaries from `openreading.run`, not this model.
+Read required `status`, `backend`, and `document` fields after handling operation-level errors.
+Then test for the content your application needs instead of assuming every backend returns text.
+`document` can be empty when top-level `typed_fields` supplies the schema's required content path.
+Use `dict.get` for optional fields, preserving an absent value separately from an empty string.
+Missing confidence or usage does not mean zero, and a successful parse can still carry warnings.
+Raw payloads remain backend-specific, while `channel_provenance` remains an experimental field.
+`openreading help response` teaches these distinctions with runnable queries and source pointers.
 """
 
 from __future__ import annotations

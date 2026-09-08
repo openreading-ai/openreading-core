@@ -144,6 +144,10 @@ tesseract                      oss_library        no          tesseract binary (
 
 ## Your first parse
 
+The response JSON is the interface your application builds against, not a backend-specific result you must decode yourself.
+Read the [worked response guide](src/openreading/schemas/README.md#understanding-the-response-json) for an annotated example and a reusable Python consumer.
+In a terminal, `uv run openreading help response` explains content, tables, fields, warnings, and provenance.
+
 > **Want the guided version?** [The tutorial](https://openreading.ai/oss-tutorial) walks the whole tool
 > in seventeen steps, from this first parse to a policy, a self-escalating strategy, a folder run
 > and the HTTP server. It uses the documents in [`examples/`](examples/README.md) and needs no key.
@@ -509,6 +513,7 @@ command.
 |---|---|
 | **the full documentation, every guide, and how an agent uses it** | [`src/openreading/README.md`](src/openreading/README.md), then `uv run openreading --help` and `uv run openreading <cmd> --help` for every flag |
 | **how to get from a fresh clone to a working strategy, one step at a time** | [The tutorial](https://openreading.ai/oss-tutorial), maintained in `openreading-web`, over the shipped documents |
+| **how to build against the response JSON** | [Annotated response and Python consumer](src/openreading/schemas/README.md#understanding-the-response-json), or `uv run openreading help response` |
 | what the shipped example documents contain and where they came from | [`examples/README.md`](examples/README.md) |
 | each backend's variables, runtime location, and env-var precedence rules | [`src/openreading/adapters/README.md`](src/openreading/adapters/README.md), then `uv run python -m pydoc openreading.credentials` |
 | the exact JSON shapes (the contract) | [`src/openreading/schemas/README.md`](src/openreading/schemas/README.md), then the `*.json` files beside it |

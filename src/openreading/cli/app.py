@@ -1963,6 +1963,7 @@ arguments prints one batch-result over all of them. Unsupported formats are
 skipped in a batch. One file with an unsupported extension exits 3.
 
 Then:
+  openreading help response      # understand the JSON and optional fields
   openreading compare mu.json te.json --format table   # where they differ
   openreading explain run.json     # what that --strategy run decided, and why
 
@@ -1970,7 +1971,7 @@ Exits: 0 ok. 2 usage, or a source that does not exist. 3 cannot run (a
 missing key, a refused feature). 4 batch partial. 1 nothing succeeded, an
 empty folder included. 6 interrupted with OPENREADING_LEDGER armed.
 
-More: openreading help parse, openreading help batch""",
+More: openreading help parse, openreading help response, openreading help batch""",
     "resume": """\
 Examples:
   export OPENREADING_LEDGER=./.openreading  # arm the journal before you run
@@ -2489,6 +2490,7 @@ TOP_EPILOG = """\
 I WANT TO ...                          RUN
   see what works here, with no keys    openreading backends
   read one document                    openreading parse FILE --backend SLUG
+  understand the response JSON         openreading help response
   read a folder, a glob, or a list     openreading parse DIR/ --backend SLUG
   let OpenReading pick the backend     openreading parse FILE --no-strategy
   follow a plan I wrote down           openreading parse FILE --strategy NAME
@@ -2514,7 +2516,7 @@ THINGS CHAIN.
 LEARN MORE
   openreading COMMAND --help   # examples and exit codes for one command
   openreading help             # the manual's topic index
-  openreading help batch       # one chapter of it"""
+  openreading help response    # content paths, examples, and optional fields"""
 
 
 class _HelpFormatter(argparse.HelpFormatter):

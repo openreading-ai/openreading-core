@@ -32,6 +32,9 @@ contents. Pure means the same inputs always produce a byte-identical report. No 
 a report is computed, so it costs nothing and needs no key. A subject is one response being
 compared. Subjects arrive from three sources, and every source ends in the same pure step.
 
+The [response JSON guide](../schemas/README.md#understanding-the-response-json) explains the content paths inside each input envelope.
+The comparison output is a separate report, so read its findings instead of looking for `document.text`.
+
 <!-- diagram:src-openreading-comparison-1 -->
 <p align="center"><a href="../../../assets/diagrams/src-openreading-comparison-1.svg"><img src="../../../assets/diagrams/src-openreading-comparison-1.svg" alt="Comparison accepts saved envelopes, a document fanned out to named backends, or candidates kept by a strategy. Subjects align by page and block, then compare facts, typed fields, text, and blocks. The report combines a headline verdict and severity-sorted findings in JSON, table, Markdown, diff, or diffs format." /></a></p>
 

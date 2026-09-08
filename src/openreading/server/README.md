@@ -18,6 +18,9 @@ the CLI prints. A backend is one parser, such as a local library or a hosted API
 `POST /v1/parse` with a body naming `sample.pdf` and `pymupdf` returns an envelope with the same
 fields as the CLI prints.
 
+The [response guide](../schemas/README.md#understanding-the-response-json) explains the document body and its optional content with a reusable Python consumer.
+Use it after a successful `POST /v1/parse`, not on an HTTP error body or the outer async job handle.
+
 A few endpoints report readiness and routing plans and never run a backend, among them
 `GET /healthz`, `GET /v1/backends`, and `POST /v1/route`. Keys come from the server's environment
 and never from a request body. You need `sample.pdf` and the install from the root README, which

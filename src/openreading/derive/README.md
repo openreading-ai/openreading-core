@@ -64,8 +64,11 @@ flowchart TD
 PyMuPDF is a deterministic parser with no notion of how sure it is, so confidence is grade `X` for
 it. A strategy gate is a rule that switches to another backend when a value falls below a threshold
 such as 0.8. A fabricated 0.95 would look exactly like a measured 0.95 to that gate. So the channel
-stays `null` and `warnings[]` says why. A missing number is honest, where a made-up one compounds
+stays absent from the JSON and `warnings[]` says why. A missing number is honest, where a made-up one compounds
 downstream.
+
+For a complete reading path, start with [Understanding the response JSON](../schemas/README.md#understanding-the-response-json).
+It shows how to consume content safely before using this guide to investigate missing channels.
 
 ## Walkthrough
 

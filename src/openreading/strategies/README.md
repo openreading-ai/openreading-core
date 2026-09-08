@@ -26,6 +26,9 @@ README, and the walkthrough needs no key.
 
 ## Mental model
 
+Your selected reading keeps the [same response JSON](../schemas/README.md#understanding-the-response-json), with `orchestration` explaining how the strategy chose it.
+Check parse status separately from quality outcome, because a successful parse can still fall below your thresholds.
+
 <!-- diagram:src-openreading-strategies-1 -->
 <p align="center"><a href="../../../assets/diagrams/src-openreading-strategies-1.svg"><img src="../../../assets/diagrams/src-openreading-strategies-1.svg" alt="An openreading.yaml plan passes the schema gate, Plain desugaring, and normalization. Caller scope constrains dispatch before the engine walks the plan. Its orchestration trace supports explain, offline decision replay, and comparison of kept candidates." /></a></p>
 
