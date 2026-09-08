@@ -4,6 +4,10 @@
 **Product intent:** `product/specs/run-stats-analytics.product-spec.md` (revision 2). The spec's
 revision 2 carries the matching amendments to AC-3, AC-4, AC-6, AC-9, AC-10, AC-11 and AC-14,
 listed in §15. Design and spec revisions move together; neither is authoritative alone.
+**Superseded in part by the removal set, 2026-09-07.** It deleted the three-stage router this
+record was written against, along with `optimize_for`, `auto` and every cost figure, so any
+passage that scores candidates or reports spend needs re-scoping before implementation. Check
+`CHANGELOG.md` under Unreleased first.
 **Reviewed against:** this repo at `070992f`, 2026-09-03. Every line reference in §3 was
 re-verified against that tree.
 **Decision requested:** approve the trimmed v0.1 contract, the deferral register in §10, and the

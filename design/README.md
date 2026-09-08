@@ -26,25 +26,26 @@ reader-facing account of every one, including the schema cuts and the two behavi
 outlive the argument (tie-breaks resolve on written order; the benchmark prompt fires on pages and
 on an unbounded call count rather than on a dollar total).
 
-## Nothing is proposed right now
+## Open proposals
 
-The last open item was `unverifiable-claims-sweep.md` section B, which proposed deleting the
-descriptor fields nothing reads. It is resolved differently, and the record is gone with it
-(Akshay, 2026-09-07): **the descriptor keeps its vendor claims as documentation, and core never
-branches on one.** Deleting them would have thrown away something a person choosing a backend
-actually reads. Behaving on them is what core has no business doing, because a claim about a
-company this project does not control goes stale without notice and nothing here can detect it.
-That is the enterprise product's problem, not this one's.
+Four records, none built, roughly 2,400 lines. Each has a product spec beside it in
+`product/specs/`, and AGENTS.md wants the spec written first: a design record is not a substitute
+for one.
 
-The rule is mechanized rather than remembered. `openreading.types.descriptor` states which fields
-are load-bearing (facts about this machine, verified every run) and which are documentation, and
-`tests/test_descriptor_is_documentation.py` asserts every vendor claim is read at zero sites, so a
-change that starts branching on one fails `make verify` and has to argue for it. The refresh
-procedure for keeping the claims current lives in the `openreading.adapters` runbook.
+| Record | Proposes | Product spec |
+|---|---|---|
+| [`agentic.md`](agentic.md) | the agent surface: `openreading mcp` tools and `triage` | `agentic.product-spec.md` |
+| [`decider-executor.md`](decider-executor.md) | the wire executor behind `DeciderPort` — the real LLM call, the caller's key, offline replay | `decider.product-spec.md` |
+| [`intent.md`](intent.md) | the intent schema and its routing mechanics | `intent.product-spec.md` |
+| [`run-stats-analytics.md`](run-stats-analytics.md) | run stats and routing analytics over the journal | `run-stats-analytics.product-spec.md` |
 
-## Older records
+`product/specs/hallucination-detection.product-spec.md` has product intent and no design record
+yet.
 
-[`agentic.md`](agentic.md), [`decider-executor.md`](decider-executor.md),
-[`intent.md`](intent.md), [`run-stats-analytics.md`](run-stats-analytics.md) propose features this
-repository has not built. They predate the removal set and describe a router with stages that no
-longer exist, so read them against the code before implementing from them.
+**All four predate the removal set and none has been re-scoped since.** Every one was written
+against a router with three stages, and there is one lookup now. `intent.md` is the worst
+affected: its central lock reads "intent is read only by stage-3 scoring", and there is no stage
+3 to read it. Each file carries a dated warning at its head saying so. Re-scope before
+implementing, and read `CHANGELOG.md` under Unreleased first.
+
+Nothing else in this directory is a proposal.
