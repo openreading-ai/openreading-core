@@ -247,8 +247,10 @@ of those is closed, not reviewed.
   shipped code is exactly the authoritative-and-wrong document the rule exists to prevent.
 - Do not commit run scratch (`GOAL*.md`, `PROGRESS.md`, prompts) at the root. That is the
   company repo's `runs/`.
-- Do not let `routing.fallback` add to the default chain or let dynamic `auto` escape it. Server
-  API-key scope narrows every dispatch, including explicitly named strategy leaves.
+- Do not let `routing.fallback` add to the default chain. It reorders within the resolved set and
+  never widens it. Do not reintroduce a node that resolves its own backend: every strategy leaf
+  names the backend it runs, which is why a file can be read. Server API-key scope narrows every
+  dispatch, including explicitly named strategy leaves.
 - Do not add a test that needs a key or the network to `make verify`.
 - Do not lower `--cov-fail-under`. Raise it as coverage climbs, and the README badge with it.
 
