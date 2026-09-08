@@ -29,9 +29,8 @@ Environment this module reads itself
   is an ordinary KeyboardInterrupt, byte-for-byte the pre-ledger behavior (an unset-ledger SIGTERM
   is caught one level up, by `_terminate_as_interrupt`, and exits 143 with one line). The
   single-document path does not read the variable: it relies on `api.run`'s `on_run_armed`
-  callback, which fires only when the ledger actually armed for THAT run, so a named-backend /
-  `auto` run (which never
-  journals) cannot print a run id that does not exist. Which runs journal is `api._arm_ledger`'s
+  callback, which fires only when the ledger actually armed for THAT run, so a run through the
+  router (named backend or not), which never journals, cannot print a run id that does not exist. Which runs journal is `api._arm_ledger`'s
   call graph, documented in `openreading.api` and internal/design/ledger.md.
 
 Every other knob is read where it is used, not here: `OPENREADING_CONFIG` and `./openreading.yaml`
@@ -217,8 +216,8 @@ def cmd_parse(args) -> int:
     # BL-169: --deadline is CLI-friendly SECONDS; api.run's own deadline_ms= parameter (and every
     # internal deadline field it feeds) is milliseconds — same seconds-to-ms conversion
     # _cmd_parse_batch already applies for native-batch dispatch. Only affects a directly-named
-    # backend (run()'s own docstring); `auto`/`--strategy` dispatch manages its own time budget and
-    # silently ignores it.
+    # backend (run()'s own docstring); an unnamed or `--strategy` dispatch manages its own time
+    # budget and silently ignores it.
     deadline_ms = int(args.deadline_s * 1000) if args.deadline_s is not None else None
 
     # Ledger T3 (plan §4.4): captured the instant the ledger arms (api.run's own on_run_armed
@@ -240,7 +239,8 @@ def cmd_parse(args) -> int:
         # any process-chosen exit code at all, but Ctrl-C is an ordinary exception Python's default
         # SIGINT handler raises, so catching it here is enough to make "interrupted, resumable" a
         # reachable outcome. Only resumable when the ledger actually armed for this run (a plain
-        # named-backend/`auto` run never touches the ledger at all — nothing to resume); otherwise
+        # router run, named backend or not, never touches the ledger at all — nothing to resume);
+        # otherwise
         # this re-raises unchanged, exactly today's behavior (L1's zero-delta).
         if armed_run_id:
             rid = armed_run_id[0]
@@ -264,7 +264,7 @@ def cmd_parse(args) -> int:
         # router.executor.execute_plan — BL-37). A RetryableError reaching here (rate-limit
         # exhaustion, or router.driver's poll loop past its deadline/MAX_CONSECUTIVE_FAULTS) gets the
         # identical clean exit — a directly-named backend has no next rung to fall back to the way
-        # `auto`'s execute_plan does (BL-122).
+        # a router chain's execute_plan does (BL-122).
         print(f"[{label}] {e}", file=sys.stderr)
         return 3
     except SourceNotFoundError as e:
@@ -351,7 +351,7 @@ def _cmd_parse_batch(args, overrides: dict, label: str) -> int:
 
     def on_preflight(resolved, backend: str) -> None:
         # Both advisories describe what `api.run_batch` is about to do to a DIRECTLY NAMED backend:
-        # `auto` and strategies resolve per item inside the router, so neither the rate nor the
+        # unnamed requests and strategies resolve per item inside the router, so neither the rate nor the
         # concurrency cap below is knowable here — and run_batch skips the cap for them too.
         if backend is None or backend.startswith("strategy:"):
             return
@@ -439,7 +439,7 @@ def _cmd_parse_batch(args, overrides: dict, label: str) -> int:
         # missing_credentials msg names vars + signup; a RetryableError reaching here (a
         # native-batch backend's submit_many rate-limit exhaustion, or router.driver's poll loop
         # past its deadline/MAX_CONSECUTIVE_FAULTS) gets the identical clean exit — a directly-named
-        # backend has no next rung to fall back to the way `auto`'s execute_plan does (BL-128, the
+        # backend has no next rung to fall back to the way a router chain's execute_plan does (BL-128, the
         # batch-dispatch sibling of BL-122's cmd_parse/cmd_compare fix).
         print(f"[{label}] {e}", file=sys.stderr)
         return 3
@@ -2631,7 +2631,7 @@ def build_parser() -> argparse.ArgumentParser:
     choose.add_argument(
         "--no-strategy",
         action="store_true",
-        help="force the router's auto choice, ignoring defaults.strategy",
+        help="route through policy.backends, ignoring defaults.strategy",
     )
     choose.add_argument(
         "--config", default=None, metavar="PATH", help="path to an openreading.yaml"
@@ -2813,8 +2813,8 @@ def build_parser() -> argparse.ArgumentParser:
         '  max_time: "2m"      give up after this long\n'
         "\n"
         "escalate_when takes any of:  looks_bad, low_confidence, missing: [field, ...], disagree\n"
-        "  (disagree is compare-only).  auto = the best remaining backend, usable as a try rung\n"
-        "  or a then: target."
+        "  (disagree is compare-only).  Every rung names a backend; set the order you prefer once\n"
+        "  in policy.backends and an unnamed request walks it."
     )
     strategy = sub.add_parser(
         "strategy",

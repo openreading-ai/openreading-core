@@ -1,8 +1,8 @@
 """The `policy:` block as a typed object, mirroring `strategy-config.v0.4.json`.
 
-One key: `backends`, a flat list of backend ids in preference order. It supplies the chain for an
-unnamed request and the candidates for a longhand `auto` leaf. A backend named directly by a
-request or strategy runs independently of this list. Server API-key scope is the authorization
+One key: `backends`, a flat list of backend ids in preference order. It supplies the chain an
+unnamed request walks. A backend named directly by a request or a strategy leaf runs
+independently of this list, because naming one is an explicit selection. Server API-key scope is the authorization
 boundary when the operator and caller differ.
 
 The nine keys before it asked core to enforce a compliance posture from a per-vendor table this

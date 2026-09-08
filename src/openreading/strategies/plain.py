@@ -36,8 +36,9 @@ The whole language
     disagree           the compared backends produced materially different output
                        (`compare` only; `true` = 0.3)
 
-1 reserved word once existed: `auto`, meaning "openreading's best remaining pick" among
-eligible, not-yet-attempted backends — usable as a `try` rung or a `then:` target.
+0 reserved words. Every rung names a backend or another strategy, so a Plain file says what it
+runs by reading it. (`auto` once meant "openreading's best remaining pick"; it is refused now, and
+`_resolve_item` below says so in the words a reader needs.)
 
 That is the entire surface. No signal catalog, no thresholds with units, no wrappers or
 combinators, no `on_error`, no `route:`/`when:` (per-doc-type behavior in Plain is separate named
@@ -54,10 +55,9 @@ A strategy body is Plain iff it is one of:
 3. a map whose keys are a subset of {try, race, compare, escalate_when, then, max_time}, with
    these value shapes (closed):
 
-* `try`: a list of items, or a single item. An item is a backend id, `auto`, or the name of
-  another strategy or preset in scope.
-* `race` / `compare`: a list of 2 or more items. `auto` is not an item here: two concurrent
-  such picks had no defined distinctness — name the backends you race.
+* `try`: a list of items, or a single item. An item is a backend id, or the name of another
+  strategy or preset in scope.
+* `race` / `compare`: a list of 2 or more items, same item shapes.
 * `escalate_when`: the scalar `looks_bad` (the only legal scalar), or a non-empty flat map with
   keys among {looks_bad, low_confidence, missing, disagree}:
   - `looks_bad: true` — all members at defaults; or a member map (below). Member maps OVERLAY
@@ -66,7 +66,7 @@ A strategy body is Plain iff it is one of:
   - `low_confidence: true | <0..1>` (`true` = 0.6).
   - `missing: [<field-name>, ...]` — a non-empty list of bare strings.
   - `disagree: true | <0..1>` (`true` = 0.3). Legal only in a `compare:` body.
-* `then`: exactly one item (backend id, `auto`, or strategy name). It must not repeat an item of
+* `then`: exactly one item (backend id or strategy name). It must not repeat an item of
   the `compare:` list — the escape hatch must be a different backend; a repeat would replay the
   loser's cached result and be a guaranteed no-op.
 * `max_time`: a unit-suffixed duration string (`"90s"`, `"2m"`). A bare number is a schema
@@ -252,7 +252,6 @@ Desugaring (normative equivalences)
     disagree: true / F                     disagreement_over: 0.3 / F
     looks_bad + low_confidence: true       the `default` bundle, member-for-member, scan-aware
     <strategy or preset name>              {use: <name>}
-    auto                                   {backend: auto}
 
 Emitted trees are canonical (normalize fixed points): list items are `{backend: …}` maps, no
 `escalate_if: off`, and the gate is a flat OR map unless the scan member forces a one-level
@@ -345,11 +344,10 @@ key lookup in the response's `typed_fields` map — the developer's own names fr
 portable across rungs. Missing = key absent OR value null/empty-string. Top-level names only; the
 advanced alias form (`{name, aliases}`) and dotted paths are out of Plain.
 
-Names — a list or `then:` item that is not a registered backend id and not `auto` resolves as a
-strategy or preset name → `{use: <name>}`. A name matching both a backend id and a strategy is an
-error at the reference site (rename instruction). Duplicate concrete ids in one list are an error;
-`auto` is exempt in `try` — it never re-picks an attempted backend, so `try: [auto, auto]` is the
-legitimate second-opinion shape.
+Names — a list or `then:` item that is not a registered backend id resolves as a strategy or
+preset name → `{use: <name>}`. A name matching both a backend id and a strategy is an error at the
+reference site (rename instruction). Duplicate ids in one list are an error, in every key: a rung
+that repeats an earlier one replays a result already in hand.
 
 The boundary
 ============
@@ -405,7 +403,7 @@ bare number.
 Desugar-time (this module, `ConfigError`, Plain vocabulary, Elm doctrine — locate, explain,
 suggest the fix; name resolution is the loader's one dependency on the adapter registry):
 unknown name (with nearest-name suggestion) · name matching both a backend id and a strategy ·
-duplicate concrete id in one list · `auto` inside `race`/`compare` · `disagree` outside a
+duplicate id in one list · a rung naming `auto` · `disagree` outside a
 `compare` body · `escalate_when` on a single-item `try` · `then:` repeating a `compare:` item.
 
 `strategy validate` (world-consistency, `openreading.strategies.validate`): unbindable gate — an
@@ -661,9 +659,7 @@ def _desugar_try(
     provenance: dict[str, dict[str, str]] = {}
     warnings: list[tuple[str, str]] = []
     for idx, item in enumerate(items):
-        node = _resolve_item(
-            name, item, strategy_names, known_names, allow_auto=True, at=f"try[{idx}]"
-        )
+        node = _resolve_item(name, item, strategy_names, known_names, at=f"try[{idx}]")
         is_last = idx == len(items) - 1
         if gate is not None and not is_last:
             if "use" in node:  # a strategy reference runs its own rules; the outer gate can't apply
@@ -690,7 +686,7 @@ def _desugar_race(
     items = body["race"]
     _check_no_dup(name, "race", items)
     branches = [
-        _resolve_item(name, it, strategy_names, known_names, allow_auto=False, at=f"race[{i}]")
+        _resolve_item(name, it, strategy_names, known_names, at=f"race[{i}]")
         for i, it in enumerate(items)
     ]
     out: dict[str, Any] = {"parallel": branches, "pick": "fastest", "on_win": "cancel"}
@@ -704,7 +700,7 @@ def _desugar_compare(
     items = body["compare"]
     _check_no_dup(name, "compare", items)
     branches = [
-        _resolve_item(name, it, strategy_names, known_names, allow_auto=False, at=f"compare[{i}]")
+        _resolve_item(name, it, strategy_names, known_names, at=f"compare[{i}]")
         for i, it in enumerate(items)
     ]
 
@@ -726,7 +722,7 @@ def _desugar_compare(
     gate, predicates = _compile_gate(escalate_when)
 
     parallel_step = {"parallel": branches, "pick": "best", "require": "all", "escalate_if": gate}
-    then_node = _resolve_item(name, then, strategy_names, known_names, allow_auto=True, at="then")
+    then_node = _resolve_item(name, then, strategy_names, known_names, at="then")
     out = {"steps": [parallel_step, then_node]}
     _attach_budget(out, body)
     return out, {"steps[0]": predicates}, []
@@ -741,13 +737,14 @@ def _resolve_item(
     strategy_names: set[str],
     known_names: set[str],
     *,
-    allow_auto: bool,
     at: str,
 ) -> dict:
     if item == "auto":
         # `auto` asked the engine to pick from vendor claims it could not verify, and it is gone.
         # A Plain rung names a backend or a strategy; the deployment's own preference order lives
-        # in `policy.backends`, which is where a caller states it once for every run.
+        # in `policy.backends`, which is where a caller states it once for every run. Kept as its
+        # own branch rather than falling through to "unknown name" because a reader who wrote
+        # `auto` needs to be told what replaces it, not that it does not exist.
         raise ConfigError(
             f"strategies.{name}.{at}: 'auto' is no longer a rung. Name a backend, or set the "
             f"deployment's order once in policy.backends"

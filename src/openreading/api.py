@@ -530,8 +530,8 @@ def _run_strategy_request(
     Raises UnknownStrategyError (→ 400 / exit 2) when the name is absent. `plain_info` (from the
     loader) lets a Plain strategy's gate records carry their source word for `explain` (§9).
     `backend_allowlist` is the caller's ceiling on which backends the walk may reach; it is
-    enforced in compile_strategy (which is what bounds an `auto` rung) and re-checked at every
-    dispatch, and raises ScopeRefused (→ 403 scope_denied) when it leaves the walk nothing to
+    enforced in compile_strategy, which prunes every out-of-scope leaf, and re-checked at every
+    dispatch. It raises ScopeRefused (→ 403 scope_denied) when it leaves the walk nothing to
     run."""
     from openreading.strategies import compile_strategy, run_strategy
     from openreading.strategies.model import StrategyConfig
@@ -945,11 +945,11 @@ def resume_run(run_id: str) -> dict[str, Any]:
 
     - A scope that pruned a named rung changed the compiled tree, so `plan_hash` no longer matches
       and the resume hard-refuses (`plan_hash` is one of the three identity fields, `_HARD_FIELDS`).
-    - A scope that only narrowed the eligible set — the `auto`-rung case, where the tree is
-      identical either way — leaves `plan_hash` matching, and correctly so. The header's
-      `pinned_eligible` carries that narrowed set, and `_arm_ledger(resume=True)` arms the resumed
-      executor's per-step gate from THIS header rather than a freshly recomputed set, so an `auto`
-      rung re-resolves inside the original scope rather than across the whole registry.
+    - A scope that pruned nothing leaves `plan_hash` matching, and correctly so. The header's
+      `pinned_eligible` still carries the set the original run could dispatch, and
+      `_arm_ledger(resume=True)` arms the resumed executor's per-step gate from THIS header rather
+      than a freshly recomputed one, so a policy edit between the two halves of a run cannot let
+      the resume reach a backend the original could not.
 
     Raises `LookupError` when `OPENREADING_LEDGER` is unset or no header exists for `run_id`, or
     `ledger.header.HeaderMismatch` when the live config/plan/journal-version identity no longer
@@ -977,8 +977,11 @@ def resume_run(run_id: str) -> dict[str, Any]:
     # §10: "no other flags" — a resume takes every option from the ledger and the live file.
     req, config = apply_config(req, loaded.policy if loaded else None, RouterConfig())
     compiled = compile_strategy(req, header.strategy_name, strategy_config, registry, config)
+    # The resumed walk may dispatch only what the ORIGINAL run could. `pinned_eligible` records
+    # that set, and re-imposing it as the allow-list is what stops a policy edit between the two
+    # halves of a run from widening it. `compiled.eligible` is left alone: it is the chain an
+    # unnamed request would walk today, reported for the operator, and no node resolves against it.
     original_dispatchable = frozenset(header.pinned_eligible)
-    compiled.eligible = [bid for bid in compiled.eligible if bid in original_dispatchable]
     compiled.backend_allowlist = original_dispatchable
     clock = RealClock()
     executor = _arm_ledger(

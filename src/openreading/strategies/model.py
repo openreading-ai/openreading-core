@@ -8,8 +8,8 @@ same auditable trace. Three laws frame everything below:
 
 1. **No file ⇒ no change.** Absent a strategy file, every request takes exactly the legacy code
    path; the strategy layer is not even imported.
-2. **Backend selection is explicit.** Named leaves run directly. Dynamic `auto` leaves choose
-   from `policy.backends`, which supplies the default chain.
+2. **Backend selection is explicit.** Every leaf names the backend it runs. Nothing in the tree
+   infers one, so what a file will dispatch is what a reader sees in it.
 3. **Deciders choose; they never widen.** Every decision point enumerates its candidates first;
    any decider selects from that list. Budgets and thresholds are the ceiling —
    `intent:` prose guides choices under the ceiling and can never move it.
@@ -127,9 +127,9 @@ so the no-file path never imports this package (the no-change law — package do
   before (formally the desugared cascade of §7 rule 7).
 
 Precedence, highest first: **request wire fields → CLI flags → config `defaults:` → built-ins.**
-`policy.backends` is outside precedence. It supplies the ordered candidates for null-backend and
-dynamic `auto` selection. An explicit backend name runs directly. The server's API-key scope can
-still narrow either form at its caller boundary.
+`policy.backends` is outside precedence. It supplies the ordered chain a null-backend request
+walks. An explicit backend name runs directly. The server's API-key scope can still narrow either
+form at its caller boundary.
 
 The block used to carry nine keys instead, five of them compliance constraints core enforced from
 a per-vendor table it could not verify. `policy.backends` replaced all nine, because an operator
@@ -197,12 +197,12 @@ with:                         # optional per-leaf request overrides
   outputs:  { tables: html }
 ```
 
-- `backend` — Registry slug, or `auto`. The removal set took `auto` off the REQUEST and out of
-  the Plain dialect, where naming it is now a load error, because asking the engine to pick meant
-  asking it to decide from vendor claims it could not verify. Longhand still accepts it at a leaf:
-  `engine._resolve_backend` resolves it at dispatch to the first backend in `ctx.eligible` this
-  walk has not already attempted, bounded there by the caller's allow-list. Naming the backend you
-  want is the clearer spelling, and `policy.backends` is where a deployment states its order once.
+- `backend` — Registry slug. `auto` is gone from every dialect and is refused at load
+  (`loader._refuse_auto`). It meant "the best remaining backend", ranked from vendor claims this
+  package could not verify; when the ranking went, the word kept a promise nothing implemented. A
+  rung that names no backend also cannot be read off the page, so a file stopped saying what it
+  would run. `policy.backends` is where a deployment states its preferred order once, and an
+  unnamed request walks it.
 - `with` — Designed to shallow-merge over the request for this leaf only. Closed allow-list:
   exactly `features`, `outputs`, `pages`, `extraction_schema`; any other key is a load-time
   error — in particular `compliance`, `document`, and `backend` can never appear (a strategy may
@@ -310,8 +310,8 @@ require: all                   # pick best/merge: how many non-shadow branches m
 - `parallel` [list of nodes (≥2); required] — Branches, started concurrently subject to
   `start_after` offsets. Each branch dispatches on the ONE per-request adapter instance
   (`ctx.registry.get(backend)`) — not a fresh instance per branch; the credential-leak invariant
-  holds only because two sibling branches whose subtrees can dispatch the same backend id (`auto`
-  leaves excluded) are a `strategy validate` error — which is also what makes the engine's
+  holds only because two sibling branches whose subtrees can dispatch the same backend id are a
+  `strategy validate` error — which is also what makes the engine's
   cache-key no-collision law hold by construction. The run path never calls `validate_config`
   (§9): an unvalidated file with such siblings loads and runs.
 - `pick` [`fastest`, `best`, `merge`; required] — `fastest` = race: first branch to return a
@@ -338,8 +338,8 @@ require: all                   # pick best/merge: how many non-shadow branches m
   stagger — the branch always launches (barring deadline). The spec asks for a sibling's *failure*
   to shortcut the remaining delay; the engine has no such wake — a parked hedge sleeps its full
   `start_after` even after every earlier sibling has failed (`.engine`, parallel evaluation §2).
-  As shipped, `start_after` takes an explicit duration and rejects `auto`. Engine-observed
-  percentiles are a roadmap extension that waits on latency telemetry.
+  As shipped, `start_after` takes an explicit duration only. Engine-observed percentiles are a
+  roadmap extension that waits on latency telemetry.
 - `shadow: true` (per branch) [bool; default `false`] — The branch runs and is fully recorded but is
   excluded from `pick` and can never win; a shadow is always drained. Combine with a route rule on
   `sample_percent` for deterministic audit sampling.
@@ -468,13 +468,13 @@ The four vendored presets (`openreading.strategies.presets`) — normative; exac
 
 ```yaml
 cost_saver:            # free/cheap first; pay only when the local parse looks bad
-  intent: "Local parse first; escalate to the router's best remaining pick only on bad quality."
-  steps: [pymupdf, docling, auto]
+  intent: "Local parse first; escalate to a hosted backend only on bad quality."
+  steps: [pymupdf, docling, aws-textract]
   escalate_if: default
 
-max_accuracy:          # router's best pick, escalating to its next-best on quality gates
-  intent: "Best eligible backend; second opinion from the next-best when quality gates fire."
-  steps: [auto, auto]          # rung 2's auto excludes rung 1's pick (attempted-set rule)
+max_accuracy:          # a hosted backend first, escalating to a second on quality gates
+  intent: "A hosted backend first; second opinion from another when quality gates fire."
+  steps: [aws-textract, azure-document-intelligence]
   escalate_if: default
 
 fast:                  # race the local parsers; first success wins
@@ -593,8 +593,7 @@ on the winner attempt as telemetry.
   (`dialect: plain` re-phrases it in the Plain vocabulary: "the ... check can never fire on
   'pymupdf' — it reports no confidence; add a criterion that works everywhere, e.g. `looks_bad:
   true`"). Two exemptions: gates sourced from the built-in `default` bundle (designed to
-  degrade — Tier-1 members carry the load), and `backend: auto` leaves (no fixed descriptor;
-  checked at runtime via the trace instead). The honest spelling for a review band on a
+  degrade — Tier-1 members carry the load). The honest spelling for a review band on a
   confidence-less rung is `confidence_below: { value: 0.85, on_missing: escalate }` — escalate
   when the rung cannot report confidence (D-v3-22).
 
@@ -685,8 +684,7 @@ The classes map onto the existing four-exception taxonomy (`openreading.types.er
 - `unsupported_feature` — UnsupportedFeatureError. Default action: `next`
 - `invalid_input` — TerminalError classified as caller-input (corrupt doc, bad password). Default
   action: `fail` — a corrupt document fails on every backend; never burn the cascade
-- `exhausted` — a composite child (parallel/cascade) ran out of children, or an `auto` leaf found no
-  untried eligible backend. Default action: `next`
+- `exhausted` — a composite child (parallel/cascade) ran out of children. Default action: `next`
 - `budget_exhausted` — a node's time deadline (`max_duration`) was reached. Default action: `next`
 - `missing_credentials` — broker cannot resolve required env vars. Default action: always `skip` —
   not configurable, never an error
@@ -821,25 +819,24 @@ contract. Every shorthand round-trips: `normalize(shorthand) = longhand`;
 `normalize(longhand) = longhand`.
 
 1. bare string `pymupdf` → `{backend: pymupdf}`
-2. bare string `auto` → `{backend: auto}`
-3. bare string `strategy:invoices` → `{use: invoices}`
-4. a YAML list `[a, b]` → `{steps: [{backend: a}, {backend: b}]}` with `escalate_if: off` — exactly
+2. bare string `strategy:invoices` → `{use: invoices}`
+3. a YAML list `[a, b]` → `{steps: [{backend: a}, {backend: b}]}` with `escalate_if: off` — exactly
    the legacy serial fallback chain; quality gates are always explicit
-5. cascade-level `escalate_if` → copied onto each non-final step that lacks its own gate, then the
+4. cascade-level `escalate_if` → copied onto each non-final step that lacks its own gate, then the
    cascade-level key is dropped (the canonical cascade carries per-step gates, never a top-level
    `escalate_if`). A nested-cascade step is SKIPPED — its `escalate_if` is that inner cascade's own
    level gate, not a step-position gate, so distributing onto it would be ambiguous and break the
    fixed point (D-v3-7: a second pass would re-distribute to the grandchildren). Leaf, reference,
    and parallel/route/decide steps distribute normally.
-6. `escalate_if: default` → the §4.4 bundle
-7. request `routing.fallback: [a, b]` (no strategy engaged) → `{steps: [a, b, <the rest of the
+5. `escalate_if: default` → the §4.4 bundle
+6. request `routing.fallback: [a, b]` (no strategy engaged) → `{steps: [a, b, <the rest of the
    resolved set, in written order>], escalate_if: off}` — listed ids move to the front *within*
    the resolved set and the rest of the chain follows, exactly the legacy
    `_apply_explicit_fallback` + executor walk. The formal statement that the legacy chain is a point in this design, not a second
    engine
-8. `extends:` → resolved at normalize time into the expanded tree (schema-rejected in a file,
+7. `extends:` → resolved at normalize time into the expanded tree (schema-rejected in a file,
    §2.8); `use:` refs stay by name
-9. preset name → the vendored strategy's longhand
+8. preset name → the vendored strategy's longhand
 
 
 8. `defaults.advanced` — reserved engine knobs (accepted, not yet read)
@@ -958,9 +955,8 @@ compiled tree.
 
 The surface: structure keys `try` (→ cascade), `race` (→ `parallel` + `pick: fastest`),
 `compare` (→ `parallel` + `pick: best`), `then` (→ the final rung of a compare cascade),
-`escalate_when` (→ per-step `escalate_if`), `max_time` (→ `budget:` on the body root); criteria
-`looks_bad`, `low_confidence`, `missing`, `disagree`; and the `auto` leaf. Compiled gate
-equivalences:
+`escalate_when` (→ per-step `escalate_if`), `max_time` (→ `budget:` on the body root); and the
+criteria `looks_bad`, `low_confidence`, `missing`, `disagree`. Compiled gate equivalences:
 
 - `looks_bad` (defaults) → `scanned_pages_detected` + `chars_per_page_below` (an `all_of` pair),
   `garbled`, `empty_pages_over` — under one `any_of`
@@ -982,7 +978,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from openreading.types.policy import Policy, coerce_policy
 
 # A raw strategy node exactly as it appears in the file after schema validation: a bare string
-# (backend id / "auto" / "strategy:<name>"), a list (cascade shorthand), or a map form. The typed
+# (a backend id or "strategy:<name>"), a list (cascade shorthand), or a map form. The typed
 # node models arrive in normalize.py.
 RawNode = str | list[Any] | dict[str, Any]
 

@@ -228,7 +228,7 @@ Surfaces
   single-document run it overrides the generic 120s default for a directly-named backend,
   BL-169; in batch mode it reaches only native dispatch -- `api.run_batch` forwards
   `deadline_ms` to `_run_native` alone, so platform fan-out items keep the single-run default;
-  `auto` / `--strategy` ignore it; a value `<= 0` means fail fast, BL-138),
+  an unnamed backend and `--strategy` ignore it; a value `<= 0` means fail fast, BL-138),
   `--save-dir DIR` writes each succeeded item's inner response to `DIR/<relpath>.json` (falling
   back to `<filename>.json`; mirrors compare's fan-out flag) so per-backend envelopes are
   reusable offline. Stdout is the one envelope; progress/advisories on stderr. Exits: 0 all

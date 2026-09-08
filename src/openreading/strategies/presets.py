@@ -261,10 +261,10 @@ hedge whose delay would land past the node deadline is `deadline_pruned`. If bot
 reducto wins, the textract attempt is still recorded (`raced_lost`) because its call reached
 AWS, and the response never blocks on the loser's cancellation.
 
-7. Budget-capped best-effort cascade ending in `auto`
------------------------------------------------------
+7. Budget-capped best-effort cascade
+------------------------------------
 
-A hard time wall, an escalation ladder, and "let the router pick something untried" last.
+A hard time wall and an escalation ladder, with the strongest backend last.
 
 ```yaml
 strategies:
@@ -288,9 +288,8 @@ strategies:
     max_time: "2m"
 ```
 
-What happens: the cascade-level gate is copied onto pymupdf and docling; the final `auto` rung
-stays ungated and takes the next backend not yet attempted in this walk
-(none left → `Err(exhausted)`, reason `no_untried_backend`). On exhaustion — the ladder ran out
+What happens: the cascade-level gate is copied onto pymupdf and docling; the final rung stays
+ungated, because there is nothing left to escalate to. On exhaustion — the ladder ran out
 or the `max_duration` deadline ended the walk — keep-best returns the best retained `Deficient`
 result — ties keep the EARLIEST-retained rung, the comparison being strict-greater (engine Law
 4; the cookbook's highest-rung-index tiebreak is not implemented) — carrying
@@ -427,8 +426,7 @@ rung (`validate` warns).
 ------------------------------------------------
 
 One file exercising the whole grammar: an operator ceiling, a fact route, a cascade
-nesting a hedged judged parallel, an `auto` leaf, an error map, shadow sampling, a deployment
-default.
+nesting a hedged judged parallel, an error map, shadow sampling, a deployment default.
 
 ```yaml
 version: 1
@@ -538,8 +536,9 @@ from openreading.strategies.model import RawNode
 
 PRESETS: dict[str, RawNode] = {
     "cost_saver": {
-        # The third rung used to be `auto`, which asked the router to pick from vendor claims.
-        # Every rung names a backend now, so a reader can see what a preset will actually run.
+        # The third rung used to be `auto`, which asked the router to rank vendor claims this
+        # package could not verify. Every rung names a backend now, so a reader can see what a
+        # preset will actually run, and `auto` is refused at load in every dialect.
         "intent": "Local parse first; escalate to a hosted backend only on bad quality.",
         "steps": ["pymupdf", "docling", "aws-textract"],
         "escalate_if": "default",

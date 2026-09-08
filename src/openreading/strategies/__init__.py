@@ -59,9 +59,9 @@ it lazily, only for null-backend or `strategy:` requests. A named-backend run im
 `openreading.strategies` is proven in a subprocess test. The reason: an operator who never wrote
 a YAML must be able to upgrade without any behavior change.
 
-**Backend selection stays explicit.** A leaf runs the backend it names. An `auto` leaf chooses
-from `policy.backends` and excludes already attempted backends. Every decision point enumerates
-its candidates before the engine or an LLM selects one.
+**Backend selection stays explicit.** Every leaf runs the backend it names, so a file says what
+it dispatches. `policy.backends` supplies the chain an unnamed request walks, not a rung's target.
+Every decision point enumerates its candidates before the engine or an LLM selects one.
 
 Discovery (first hit wins; sources are never merged)
 ----------------------------------------------------
@@ -79,7 +79,7 @@ cannot load is an error, never a silent fall-through.
 Invocation: `backend.id: "strategy:<name>"` (a documented reserved prefix of the free-string
 `backend.id`, no wire-schema change — D-v3-2), CLI `--strategy <name>` / `--no-strategy`,
 Python `openreading.run(..., strategy="<name>")`; `strategy:none` forces the legacy path even
-when `defaults.strategy` opts `auto` traffic in. Precedence: request wire fields → CLI flags →
+when `defaults.strategy` opts unnamed traffic in. Precedence: request wire fields → CLI flags →
 config `defaults:` → built-ins. `limits:` binds every strategy-engaged run and never a
 direct-named request.
 
@@ -146,7 +146,7 @@ defaults:
   strategy: cost_saver
 ```
 
-Applies only when the request says `auto` and names no strategy; `strategy:none` on any request
+Applies only when the request names no backend and no strategy; `strategy:none` on any request
 forces the legacy path.
 
 2. Named cascade, default gates. The same file in the advanced dialect, with the built-in gate
@@ -222,8 +222,7 @@ A strategy is a node; a node is one of five map forms, discriminated by exactly 
 reference form `use: <name>`). The grammar is closed and deliberately sub-Turing — no loops, no
 variables, no expression language.
 
-- leaf (`backend:`) — Run one backend (or `auto` = router's pick among still-eligible,
-  not-yet-attempted).
+- leaf (`backend:`) — Run the one backend it names.
 - cascade (`steps:`) — Serial escalation: run in order; gates decide accept vs escalate; errors
   advance per `on_error`.
 - parallel (`parallel:`) — Fan-out: run children concurrently; `pick:` selects the result (race /

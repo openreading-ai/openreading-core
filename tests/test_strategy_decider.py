@@ -237,7 +237,6 @@ def test_decide_swallows_a_raising_port_and_returns_the_engine_default():
         clock=FakeClock(),
         trace=Trace("s", "cfg-hash"),
         trees={},
-        eligible=[],
         decider_status=DeciderStatus("llm", None, "pymupdf"),
         decider_llm=port,
     )

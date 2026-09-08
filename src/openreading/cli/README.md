@@ -51,8 +51,8 @@ into `jq`. A strategy is a named plan over one or more backends, and it has
 [its own guide](../strategies/README.md). Four presets ship inside the package: `cost_saver`,
 `fast`, `max_accuracy`, and `offline_first`. Your own strategies load from `openreading.yaml`.
 `parse` requires exactly one of `--backend SLUG`, `--strategy NAME`, or `--no-strategy`, and refuses
-with exit `2` otherwise. `--no-strategy` runs the router's own pick, which this page and
-`parse --help` call `auto`. One file or URL prints a single response, while a directory, a glob, or
+with exit `2` otherwise. `--no-strategy` walks `policy.backends` in written order, the same chain an
+unnamed request takes. One file or URL prints a single response, while a directory, a glob, or
 two or more sources print one batch-result over all of them.
 
 ## Walkthrough
@@ -333,7 +333,7 @@ error, waiting 500 milliseconds and doubling to a 30 second ceiling. A backend t
 count, so a slow vendor spends the budget instead of a fixed number of tries.
 
 `--deadline SECONDS` moves that budget for a directly named `--backend`, and for a backend a batch
-dispatches natively. It has no effect on `auto` and none on `--strategy`, which take their budget
+dispatches natively. It has no effect on `--no-strategy` and none on `--strategy`, which take their budget
 from the strategy's own `budget.max_duration` or `limits.max_duration_per_doc`. Bound a strategy
 run there rather than on the command line.
 

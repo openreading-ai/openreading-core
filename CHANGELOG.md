@@ -256,6 +256,22 @@ tells a win from a tie.
 
 ### Removed
 
+**`auto` leaves every strategy dialect.** It survived the removal set in longhand, where a leaf
+`{backend: auto}` still loaded and `engine._resolve_backend` resolved it at dispatch to the first
+candidate the walk had not tried. That is the same inference the removal set deleted everywhere
+else: `auto` meant "the best remaining backend", and the ranking that made "best" mean anything
+was the compliance filter, the capability gate and the cost scorer, all of which are gone. It also
+meant a strategy file could not be read: a rung naming no backend does not say what it will run.
+`loader._refuse_auto` now refuses it in every dialect at load, naming the replacement, and Plain's
+own earlier refusal stays because a Plain author is reading a different page. What replaces it:
+name the backend the rung runs, or write the deployment's preferred order once in
+`policy.backends` and leave the request unnamed. Two consequences worth knowing. `CompiledPlan.
+dispatchable` is now exactly the ids the tree names, where it used to widen to the whole candidate
+chain whenever any leaf said `auto` — so the `Sanitizer` and `pinned_eligible` are armed for what
+can actually run and nothing more. And the `exhausted` error class no longer has a leaf-level
+cause: only a composite that ran out of children raises it. `POST /v1/jobs` and
+`openreading strategy --help` stop naming `auto` as a value a caller can send.
+
 **`--policy PATH`, the `policy=` keyword, and three server environment variables.** The flag is
 gone from `route`, `strategy validate`, `strategy plan`, `replay`, `calibrate`, `benchmark run`
 and `leaderboard`; passing it is an argparse error and exit 2. `policy=` is gone from
@@ -617,7 +633,8 @@ and `tests/test_schema_evolution.py` pins every released file byte for byte.
   folded no digest for it, and — the one that matters — the `Sanitizer` was armed without its
   credentials, so a failure message carrying that backend's key would have been journaled to a
   plaintext file unredacted. `CompiledPlan` now carries `dispatchable` beside `eligible`: the
-  concrete ids the tree names, plus the chain when a leaf is `auto`.
+  concrete ids the tree names. (It also carried the whole candidate chain when a leaf was `auto`,
+  until `auto` was removed above.)
 - **A descriptor's vendor claims are documentation, and core never branches on one.** The removal
   set deleted three features that read a per-vendor table and decided with it: the compliance
   filter, the capability gate and the cost scorer. That left the fields themselves, read at zero

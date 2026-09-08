@@ -2,7 +2,7 @@
 
 Drives the engine with ScriptedBackends + FakeClock (offline, deterministic). Covers the
 Outcome laws (accept / escalate / keep-best), classify_error, on_error routing, credential skip,
-auto-leaf attempted-set, the compile/prune pipeline, and the orchestration trace.
+the compile/prune pipeline, and the orchestration trace.
 """
 
 from __future__ import annotations
@@ -304,9 +304,6 @@ def test_missing_credentials_skips():
     res = _run({"version": 1, "strategies": {"s": {"steps": ["reducto", "pymupdf"]}}}, "s", reg)
     assert res.response.backend.id == "pymupdf"
     assert _cats(res) == [("reducto", "skipped(missing_credentials)"), ("pymupdf", "succeeded")]
-
-
-# ---- auto leaf + attempted set ----------------------------------------------------------------
 
 
 # ---- compile / prune pipeline -----------------------------------------------------------------

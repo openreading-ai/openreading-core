@@ -214,7 +214,6 @@ PLAIN_VALID_BODIES = [
     "reducto",  # bare string leaf is dialect-plain but not a *map* body; kept as a sanity anchor
     {"try": "reducto"},
     {"try": ["pymupdf", "reducto"]},
-    {"try": ["pymupdf", "auto"]},  # 'auto' is a legal item string
     # escalate_when: scalar looks_bad, member true, member overlay map
     {"try": ["pymupdf", "reducto"], "escalate_when": "looks_bad"},
     {"try": ["pymupdf", "reducto"], "escalate_when": {"looks_bad": True}},
@@ -412,3 +411,30 @@ def test_resolve_strategy_unknown_name_errors(tmp_path):
     with pytest.raises(ConfigError) as ei:
         resolve_strategy(cfg, "ghost")
     assert "cheap" in str(ei.value)  # names the known strategies
+
+
+# --- `auto` is gone from every dialect (Akshay, 2026-09-07) ------------------------------------
+#
+# The removal set took `auto` off the request and out of the Plain dialect and left it live in
+# longhand, where `engine._resolve_backend` still resolved it against the policy chain. That split
+# is what produced every `auto` defect in this branch: one keyword, three surfaces, each answering
+# differently. It is one answer now — name the backend, or state the order once in
+# `policy.backends`.
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "    steps:\n      - backend: auto\n",
+        "    steps: [auto]\n",
+        "    try: [pymupdf, auto]\n    escalate_when: looks_bad\n",
+        "    parallel:\n      - backend: pymupdf\n      - backend: auto\n    pick: best\n",
+    ],
+    ids=["longhand-leaf", "shorthand-string", "plain-try-rung", "parallel-branch"],
+)
+def test_auto_is_refused_in_every_dialect(body):
+    """Longhand, shorthand, Plain and a parallel branch all refuse it, and all say the same thing."""
+    with pytest.raises(ConfigError) as e:
+        parse_config(f"version: 1\nstrategies:\n  s:\n{body}")
+
+    assert "auto" in str(e.value)

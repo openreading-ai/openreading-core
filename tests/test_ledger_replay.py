@@ -711,13 +711,18 @@ def test_pinned_eligible_is_armed_on_resume_and_the_gate_refuses_a_changed_descr
     ("leaf", "scope", "expected"),
     [
         ("pymupdf", None, "pymupdf"),
-        ("auto", frozenset({"tesseract"}), "tesseract"),
+        ("tesseract", frozenset({"tesseract"}), "tesseract"),
     ],
 )
-def test_resume_preserves_named_and_scoped_dynamic_strategy_backends(
+def test_resume_preserves_the_strategy_backend_under_scope(
     tmp_path, monkeypatch, leaf, scope, expected
 ):
-    """Resume uses every originally dispatchable backend and the original dynamic candidate set."""
+    """Resume dispatches the backend the first run did, scoped token or not.
+
+    The second case was an `auto` leaf until `auto` was removed. What it was really guarding is
+    that the API-key scope on the ORIGINAL run is what resume honours, so it now names the backend
+    the scope permits and asserts the same thing.
+    """
     ledger_root = tmp_path / "ledger"
     monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
     monkeypatch.chdir(tmp_path)

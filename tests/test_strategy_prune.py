@@ -114,7 +114,6 @@ def _bare_walk_ctx():
         clock=FakeClock(),
         trace=Trace(strategy="s", config_hash=""),
         trees={},
-        eligible=[],
     )
 
 
@@ -137,72 +136,36 @@ def test_allowlist_that_empties_the_tree_refuses_as_scope_not_compliance():
     assert e.value.backend_code == "pymupdf"
 
 
-def test_a_longhand_auto_leaf_survives_pruning_under_a_scoped_token():
-    """`auto` is refused in the Plain dialect and still resolved by the engine in longhand.
+def test_dispatchable_is_exactly_what_the_tree_names():
+    """`dispatchable` arms the sanitizer and `pinned_eligible`, so it must be tight.
 
-    The removal set took `auto` off the request and out of Plain, and `strategies/plain.py` raises
-    a ConfigError for a Plain rung that names it. Longhand is a separate grammar: a leaf
-    `{"backend": "auto"}` loads, and `engine._resolve_backend` resolves it at dispatch against
-    `ctx.eligible`, bounded there by the caller's allow-list.
-
-    So `auto` must not be treated as a backend ID at prune time. It is not one, and no allow-list
-    ever contains it, which made a scoped token's longhand `auto` rung refuse with
-    `denied: auto` — the literal string — instead of running whatever the token does permit. The
-    prune has to leave the leaf alone and let dispatch bound it.
+    It used to be the union of the tree's named ids and, when any leaf said `auto`, the whole
+    candidate chain — because `auto` could resolve to any of them at dispatch. `auto` is gone, so
+    a compiled tree can only ever dispatch what it names, and widening this beyond that would
+    admit a backend to the sanitizer no node can reach.
     """
     registry = build_registry()
     config = StrategyConfig.model_validate(
-        {"version": 1, "strategies": {"s": {"steps": [{"backend": "auto"}]}}}
+        {
+            "version": 1,
+            "strategies": {
+                "s": {
+                    "parallel": [{"backend": "pymupdf"}, {"backend": "tesseract"}],
+                    "pick": "best",
+                }
+            },
+        }
     )
 
-    compiled = compile_strategy(
-        _req(),
-        "s",
-        config,
-        registry,
-        RouterConfig(backends=("pymupdf", "tesseract")),
-        backend_allowlist=frozenset({"pymupdf"}),
-    )
+    compiled = compile_strategy(_req(), "s", config, registry, RouterConfig(backends=("pymupdf",)))
 
-    assert compiled.root == {"steps": [{"backend": "auto"}]}
-    assert compiled.dispatchable == ["pymupdf"]
-
-
-def test_a_longhand_auto_leaf_refuses_when_scope_leaves_no_candidate():
-    """An `auto` leaf cannot survive compilation when its dynamic candidate set is empty."""
-    registry = build_registry()
-    config = StrategyConfig.model_validate(
-        {"version": 1, "strategies": {"s": {"steps": [{"backend": "auto"}]}}}
-    )
-
-    with pytest.raises(ScopeRefused) as exc:
-        compile_strategy(
-            _req(),
-            "s",
-            config,
-            registry,
-            RouterConfig(backends=("pymupdf",)),
-            backend_allowlist=frozenset({"tesseract"}),
-        )
-
-    assert exc.value.backend_code == "pymupdf"
-
-
-def test_a_longhand_auto_leaf_refuses_an_empty_policy_chain():
-    """An empty written candidate chain is reported as a policy refusal before execution."""
-    registry = build_registry()
-    config = StrategyConfig.model_validate(
-        {"version": 1, "strategies": {"s": {"steps": [{"backend": "auto"}]}}}
-    )
-
-    with pytest.raises(ScopeRefused) as exc:
-        compile_strategy(_req(), "s", config, registry, RouterConfig(backends=()))
-
-    assert exc.value.constraint == "no_backend_in_policy"
+    assert compiled.eligible == ["pymupdf"]
+    assert compiled.dispatchable == ["pymupdf", "tesseract"]
 
 
 def test_dispatchable_includes_named_leaves_outside_the_dynamic_chain():
-    """Named leaves run directly, while `eligible` remains the candidate set for `auto`."""
+    """A named leaf runs directly. `eligible` is what an UNNAMED request would resolve to, and a
+    strategy naming a backend outside it is not a conflict, because naming one is explicit."""
     registry = build_registry()
     config = StrategyConfig.model_validate(
         {"version": 1, "strategies": {"s": {"steps": [{"backend": "tesseract"}]}}}

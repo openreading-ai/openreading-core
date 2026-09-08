@@ -120,7 +120,7 @@ backend's own reason, never a crash; a per-item failure never aborts the batch:
     env = openreading.run_batch(["invoices/"], backend="pymupdf", jobs=4)   # -> batch-result dict
     # CLI: openreading parse invoices/ --backend pymupdf > run.json
     #      openreading parse 'scans/**/*.png' --backend tesseract --jobs 4
-    #      openreading parse invoices/ extra/w2.png --no-strategy      # auto, routed per file
+    #      openreading parse invoices/ extra/w2.png --no-strategy      # routed per file
 
 `jobs` = documents run AT ONCE (pure speed knob; output is identical and input-ordered).
 `max_items` caps expansion (default 200). `--save-dir D` also writes `D/<relpath>.json` per item.
@@ -452,8 +452,8 @@ Strategies in brief
 ===================
 A strategy is a named recipe in `openreading.yaml`: which backends run, in what order or
 together, and when to move on. Start with the Plain dialect. That is six structure keys (`try`
-/ `race` / `compare` / `escalate_when` / `then` / `max_time`), four criteria (`looks_bad` /
-`low_confidence` / `missing` / `disagree`), and `auto`. Built-in presets work with no file:
+/ `race` / `compare` / `escalate_when` / `then` / `max_time`) and four criteria (`looks_bad` /
+`low_confidence` / `missing` / `disagree`). Built-in presets work with no file:
 `cost_saver`, `max_accuracy`, `fast`, `offline_first`. The loop: write -> `strategy validate`
 (badges plain/advanced, flags what cannot work) -> `parse --strategy` -> `explain out.json` ->
 `strategy show <name> --longhand` (the full-grammar tree Plain compiled to). Grammar and run
@@ -515,7 +515,7 @@ strategy `orchestration`, the batch summary and an armed ledger, with no common 
 
 Recently removed, and worth knowing if you read older material about this package: the compliance
 filter and its per-vendor table, the capability gate, the stage-3 scorer, `optimize_for`, and
-request and Plain `auto`. Ledger retention, encryption at rest, and every dollar figure also left.
+`auto` in every dialect. Ledger retention, encryption at rest, and every dollar figure also left.
 Each let an unverifiable fact decide what core did. `CHANGELOG.md` under Unreleased records the
 removals. The replacement law is in this file: core holds no fact it cannot verify.
 

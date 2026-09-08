@@ -15,8 +15,10 @@ What replaces them is the caller's own statement, in three rules:
 Rule 3 is what keeps a fresh clone working with no `.env` and no `openreading.yaml`. It is a named
 default in one line of documentation, not a decision derived from data.
 
-The request-level `auto` value is gone with the stages. Longhand strategies retain an `auto` leaf
-that walks the explicit `policy.backends` order without consulting descriptor claims.
+`auto` is gone with the stages, on the request and in every strategy dialect. It named no
+backend and asked this module to rank the rest, which was the ranking these stages were. What
+replaces it is naming the backend, or writing the order once in `policy.backends` and leaving the
+request unnamed.
 
 The law this module now keeps, which is the one worth carrying forward: **core holds no fact it
 cannot verify.** A backend that cannot read a document refuses first-hand, and

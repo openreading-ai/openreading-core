@@ -27,10 +27,10 @@ each (_bad_signature, _unauthorized_response, _scope_denied_response):
   401 unauthorized (BL-159) — caller auth is configured (OPENREADING_API_KEYS non-empty) and this
     request carries no Authorization header, or a bearer value matching no configured key.
   403 scope_denied (BL-159) — the matched API key's backend allow-list (OPENREADING_API_KEY_SCOPES)
-    does not include the backend this request named directly, or leaves an "auto"/"strategy:none"
-    request (whose whole router chain it bounds, not just the chosen backend) or a strategy walk
-    with nothing left to run. A null-backend request whose top pick is out of scope is rerouted
-    onto the pruned chain, not refused.
+    does not include the backend this request named directly, or leaves an unnamed request (whose
+    whole router chain it bounds, not just the chosen backend) or a strategy walk with nothing left
+    to run. A null-backend request whose top pick is out of scope is rerouted onto the pruned
+    chain, not refused.
 One endpoint deliberately sits OUTSIDE that mapping: POST /v1/backends/{id}/liveness always
 returns 200 with a report, even when the finding is `unreachable` or `unauthorized` — "the backend
 is down" is a SUCCESSFUL diagnostic, not a failure of this API, and a 5xx would conflate the two
@@ -152,7 +152,7 @@ _ADAPTER_ERRORS = (
     PlanExhaustedError,
     # The caller's allow-list left this request nothing to run. Unlike the two cases above it is
     # raised from INSIDE, past the door, because these request shapes pick their own backends: a
-    # strategy walk in strategies.prune, a plain `auto` chain in api.run_request, and either one's
+    # strategy walk in strategies.prune, an unnamed request's router chain in api.run_request, and either one's
     # dispatch-point backstop (strategies.engine._resolve_backend, router.executor.execute_plan).
     # See _out_of_scope_backend for what the door can and cannot decide.
     ScopeRefused,
@@ -623,8 +623,8 @@ def _engages_a_strategy(req: OpenReadingRequest, strategy_config: Any) -> bool:
     """Would api.run_request take a strategy arm for this request?
 
     Two request shapes reach a strategy walk, and the second is easy to miss: an explicit
-    `strategy:<name>` id, and a plain `auto` id when the operator's config carries a
-    `defaults.strategy` — which is a strategy walk wearing an `auto` id. Both must be left to the
+    `strategy:<name>` id, and a NULL backend id when the operator's config carries a
+    `defaults.strategy` — a strategy walk that names nothing on the wire. Both must be left to the
     walk's own allow-list enforcement rather than gated here against a plain-router pick the
     request is never going to use.
     """
@@ -1089,7 +1089,7 @@ def create_app(*, cors_origins: list[str] | None = None):
         # a null-backend request the router would otherwise have resolved.
         scope = getattr(request.state, "api_key_scope", None)
         try:
-            # The scope check routes auto requests, so endpoint and alias refusals can start here.
+            # The scope check reroutes an unnamed request, so endpoint and alias refusals can start here.
             if scope is not None:
                 denied = _out_of_scope_backend(req, scope, app.state.strategy_config, router_config)
                 if denied is not None:
@@ -1444,7 +1444,7 @@ def create_app(*, cors_origins: list[str] | None = None):
             # under it left `backend` typed `str | None` through code that hands it to `Job` and
             # `JobRecord`, both of which require a `str`. This is the same 400, one step earlier,
             # and it is what makes `backend` a plain `str` for the rest of the handler.
-            return _bad_request("async jobs require a named backend, not 'auto' or 'strategy:none'")
+            return _bad_request("async jobs require a named backend or a 'strategy:<name>'")
 
         # `strategy:<name>` — wrap the WHOLE strategy walk as one synthetic job (integration.md
         # §3.4). The walk runs via api.run_request (same as /v1/parse); for local/offline backends
@@ -1488,10 +1488,13 @@ def create_app(*, cors_origins: list[str] | None = None):
             return _job_dict(rec)
 
         if strat == "none":  # strategy:none forces the legacy router path
-            return _bad_request("async jobs require a named backend, not 'auto' or 'strategy:none'")
-        # BL-159 AC-3: `backend` is guaranteed a literal named id by this point (both `auto`-
-        # shaped cases already returned above) — scope-gate it before prepare_named_backend
-        # constructs an adapter or resolves a vendor credential.
+            return _bad_request(
+                "async jobs require a named backend; 'strategy:none' names none and asks the "
+                "router to resolve one, which a job cannot do because its backend is its identity"
+            )
+        # BL-159 AC-3: `backend` is guaranteed a literal named id by this point (both unnamed
+        # cases already returned above) — scope-gate it before prepare_named_backend constructs
+        # an adapter or resolves a vendor credential.
         scope = getattr(request.state, "api_key_scope", None)
         if scope is not None:
             denied = _out_of_scope_backend(req, scope, app.state.strategy_config, router_config)

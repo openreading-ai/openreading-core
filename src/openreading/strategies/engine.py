@@ -6,8 +6,8 @@ one place a strategy file's semantics turn into backend calls: cascades (`steps:
 `parallel:` with race / best / merge + hedge / shadow / drain, `decide:` nodes and gate bands
 through the decision layer (`openreading.strategies.decider`), `use:` references, single-leaf
 strategies, and `granularity: page` cascades. It consumes trees pruned to the API key's scope.
-Named leaves remain independent of `policy.backends`, while dynamic `auto` resolves from that
-ordered candidate set. Pruning collapses upward
+Every leaf names its own backend, so a leaf is independent of `policy.backends`, which supplies
+the chain an unnamed request walks instead. Pruning collapses upward
 (`prune._prune_node` returns `None`): a composite whose children all vanish — a cascade with no
 rungs, a parallel with no branches, a route rule whose target is gone, a decide whose `among:`
 empties — disappears and its parent re-evaluates; a route whose `default:` target is fully
@@ -214,7 +214,7 @@ Route, decide, use, leaf, page granularity
   `openreading.strategies.facts`). Byte-dependent facts (`pages_over` / `pages_under`,
   `size_over_mb` / `size_under_mb`, `sample_percent`) read `document.bytes_base64` only: compile
   (`api._run_strategy_request`) materializes a URL document before fact computation whenever any
-  ELIGIBLE backend's descriptor lacks `accepts_url` (mirroring the `auto` arm); the spec's second
+  ELIGIBLE backend's descriptor lacks `accepts_url`; the spec's second
   trigger — a byte-dependent fact or signal referenced by the tree — is not implemented, so a
   URL document every eligible backend accepts reaches fact computation un-materialized and those
   facts are `unavailable`. Route adds no class of its own.
@@ -322,7 +322,7 @@ Concurrency contract
 - T5 — idempotency cache: the engine consults NONE; a strategy run does the work every time
   (D-v3-3 — the dead seam was removed rather than left threaded-but-unread). The only cache is
   the server's: one `BoundedResultCache` per `create_app` at `app.state.result_cache`, passed by
-  `/v1/parse` into `run_request(cache=…)` → `execute_plan` for the legacy `auto` chain only;
+  `/v1/parse` into `run_request(cache=…)` → `execute_plan` for the legacy router chain only;
   `run()`, the CLI and `/v1/batch` pass none. Whoever builds it (Law 7) must:
   key per backend id (sibling branches cannot share a backend, so no collisions); count a hit as a
   `succeeded` attempt with the `idempotent_replay` warning — an instant success,
@@ -408,7 +408,7 @@ Edge-case catalog
    waits for the drain; a drain past the deadline is recorded with no cost (Law 6).
 2. `confidence_below` on a confidence-less backend — inapplicable: does not fire, recorded
    `signal_unavailable`. Gates that can never bind anywhere are load-time errors; the default
-   bundle degrades by design. Bindability checks skip `auto` leaves (no fixed descriptor).
+   bundle degrades by design.
 3. Outer 3 s remaining, inner `max_duration` 10 s — the inner clamps to 3 s; a hedge past it is
    `deadline_pruned`; a deadline ending a walk with nothing retained is `budget_exhausted`.
 4. API scope excludes an escalation target — the cascade has one fewer rung, recorded in
@@ -628,10 +628,9 @@ class _WalkCtx:
     clock: Clock
     trace: Trace
     trees: dict[str, dict[str, Any] | None]
-    eligible: list[str]
     # The caller's backend allow-list (the server's OPENREADING_API_KEY_SCOPES entry for the
     # presented token), or None when the caller is unscoped. compile_strategy has already pruned
-    # the tree and shortened `eligible` with it; this copy exists so the id the walk is ABOUT to
+    # every out-of-scope leaf out of the tree; this copy exists so the id the walk is ABOUT to
     # dispatch is re-checked against the allow-list itself rather than trusted because an earlier
     # pass was supposed to have handled it (_resolve_backend).
     backend_allowlist: frozenset[str] | None = None
@@ -793,7 +792,6 @@ def run_strategy(
         clock=clock,
         trace=trace,
         trees=compiled.trees,
-        eligible=list(compiled.eligible),
         backend_allowlist=compiled.backend_allowlist,
         facts=compute_facts(req),
         deadline_ms=clock.now_ms()
@@ -1236,8 +1234,6 @@ async def _run_branch(
         )
 
     backend = _resolve_backend(branch["backend"], ctx)
-    if backend is None:
-        return _BranchOutcome(i, "error", error_class="exhausted")
     adapter = ctx.registry.get(backend)
     if adapter is None:
         ctx.attempted.add(backend)
@@ -1971,8 +1967,6 @@ async def _eval_paged_cascade(node: dict[str, Any], path: str, ctx: _WalkCtx) ->
     for si, step in enumerate(steps):
         spath = f"{path}.steps[{si}]"
         backend = _resolve_backend(step["backend"], ctx)
-        if backend is None:
-            break
         ctx.attempted.add(backend)
         adapter = ctx.registry.get(backend)
         if adapter is None:
@@ -2238,11 +2232,6 @@ async def _run_leaf(
     step: dict[str, Any], path: str, ctx: _WalkCtx, deadline_ms: float
 ) -> _RunResult:
     backend = _resolve_backend(step["backend"], ctx)
-    if backend is None:
-        ctx.trace.record(
-            Attempt(step["backend"], "error(exhausted)", path, detail="no_untried_backend")
-        )
-        return _RunResult("exhausted")
     ctx.attempted.add(backend)  # walk-wide (T12)
     adapter = ctx.registry.get(backend)
     if adapter is None:
@@ -2504,32 +2493,27 @@ def _child_ctx(ctx: _WalkCtx, deadline_ms: float) -> _WalkCtx:
     return replace(ctx, deadline_ms=deadline_ms)
 
 
-def _resolve_backend(slug: str, ctx: _WalkCtx) -> str | None:
-    """The concrete backend id this step will dispatch, or None when `auto` has nothing left.
+def _resolve_backend(slug: str, ctx: _WalkCtx) -> str:
+    """The concrete backend id this step will dispatch.
 
-    The last point at which the id is known and nothing has been built yet — every leaf-dispatch
-    site (`_run_leaf`, `_run_branch`, `_eval_paged_cascade`) passes through here before the
-    registry lookup, so it is also the last place the caller's allow-list can be enforced.
+    Every leaf now names its own backend, so this is a pass-through with one gate on it. It stays
+    a function because it is the last point at which the id is known and nothing has been built
+    yet: every leaf-dispatch site (`_run_leaf`, `_run_branch`, `_eval_paged_cascade`) passes
+    through here before the registry lookup, so it is the last place the caller's allow-list can
+    be enforced.
 
     That enforcement is redundant with compile_strategy's prune, and is here anyway. An allow-list
     is a security control, and the cost of the two layers disagreeing is asymmetric: a spurious
     refusal is a support ticket, while a missed one spends someone else's vendor credits and looks
-    exactly like normal traffic. `auto` in particular is bounded only by the CONTENTS of
-    `ctx.eligible`, so anything that ever puts an id into that list by another route — or a node
-    type added later that resolves a backend without going through the prune — silently reopens
-    the hole. Failing closed here means it cannot.
+    exactly like normal traffic. A node type added later that resolves a backend without going
+    through the prune would silently reopen the hole. Failing closed here means it cannot.
     """
-    resolved: str | None = slug
-    if slug == "auto":
-        resolved = next((c for c in ctx.eligible if c not in ctx.attempted), None)
-        if resolved is None:
-            return None
-    if ctx.backend_allowlist is not None and resolved not in ctx.backend_allowlist:
+    if ctx.backend_allowlist is not None and slug not in ctx.backend_allowlist:
         raise ScopeRefused(
-            f"this API key is not scoped to reach backend {resolved!r}",
-            backend_code=resolved,
+            f"this API key is not scoped to reach backend {slug!r}",
+            backend_code=slug,
         )
-    return resolved
+    return slug
 
 
 def _is_composite(node: dict[str, Any]) -> bool:

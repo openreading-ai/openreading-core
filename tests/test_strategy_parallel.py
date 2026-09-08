@@ -562,7 +562,6 @@ def test_child_ctx_carries_every_walk_field_overriding_the_deadline_only():
         clock=FakeClock(),
         trace=Trace(strategy="s", config_hash="h"),
         trees={},
-        eligible=["pymupdf"],
         deadline_ms=9000.0,
         decider_llm=_StubPort(),
         judge_llm=_StubPort(),
@@ -685,11 +684,11 @@ def test_disagreement_telemetry_recorded_on_pick_best_winner():
 # ---- branch resolution faults (execution.md §3.1) ---------------------------------------------
 #
 # Before a branch can race it must resolve its configured name to a live adapter it is allowed to
-# call. Three ways that fails, none of which is exotic — execution.md's own examples mix local and
-# hosted backends in one `parallel:` block: the name resolves to nothing (an `auto` branch with no
-# untried eligible backend left after routing), the name has no adapter in this process, or the
-# adapter is there but its credentials are not. Each must retire its own branch with an honest
-# status and leave the race to resolve among the survivors — never take the node down with it.
+# call. Two ways that fails, neither exotic — execution.md's own examples mix local and hosted
+# backends in one `parallel:` block: the name has no adapter in this process, or the adapter is
+# there but its credentials are not. (A third went away with `auto`, which could resolve to
+# nothing.) Each must retire its own branch with an honest status and leave the race to resolve
+# among the survivors — never take the node down with it.
 
 
 def _branch_outcomes(monkeypatch) -> dict[int, engine._BranchOutcome]:

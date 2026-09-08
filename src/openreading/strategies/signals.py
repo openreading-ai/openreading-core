@@ -339,8 +339,7 @@ The usable knob is an escalation rate. **Principle: users pick rates; tools deri
    check consults grades for `confidence_below` / `page_confidence_below` (`block_confidence`) and
    `field_confidence_below` (`typed_fields`) only — every other predicate, including
    `doc_type_confidence_below`, is treated as always bindable (§4), so only those three keys ever
-   trigger either level. Exemptions: `backend: auto` leaves (no fixed descriptor; checked at
-   runtime via the trace instead), and the built-in `default` bundle, which is designed to degrade
+   trigger either level. One exemption: the built-in `default` bundle, which is designed to degrade
    — its Tier-1 members carry the load and its `confidence_below` is a deliberate Tier-2 bonus, so
    it never earns the dead-weight warning (it was never an error: an OR with binding members
    fires).

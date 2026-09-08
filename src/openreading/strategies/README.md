@@ -59,16 +59,16 @@ Hold the four facts below in mind, and every command on this page follows from t
    openreading's own probe about this backend's output. Is it garbled, near-empty, or a text-layer
    read of a scanned page? A gate that fires keeps the result as best-so-far and moves to the next
    rung. A rung is one step of a cascade, so the next rung is the next backend in order.
-3. Explicit backend nodes run the backend they name. An `auto` node resolves from
-   `policy.backends`, which supplies the caller's default chain.
+3. Every node runs the backend it names. Nothing in a strategy file infers a backend, so what a
+   run will dispatch is what you can read in the file.
 4. Every run leaves the same trace, whoever decided. The engine, a replayed trace, or an enabled LLM
    decider walk the same rails and write the same records. That is why `explain` narrates any run
    and `replay` reproduces one.
 
 Plain is the short form you write, and it has six keys: `try`, `race`, `compare`, `then`,
 `escalate_when`, `max_time`. `escalate_when` takes one or more of four judgment words: `looks_bad`,
-`low_confidence`, `missing: [field]`, and `disagree`. `auto` is the one reserved word, and it stands
-for the router's best remaining pick. `uv run openreading strategy --help` prints the whole
+`low_confidence`, `missing: [field]`, and `disagree`. There are no reserved words: every rung
+names a backend or another strategy. `uv run openreading strategy --help` prints the whole
 language, and each key is shown in use below.
 
 ## Walkthrough
@@ -100,7 +100,7 @@ strategies:                         # the library of named strategies
     race: [pymupdf, tesseract]      # run at once, first success wins
   both:
     compare: [pymupdf, tesseract]   # run at once, keep the one that passes more quality checks
-    then: aws-textract                      # if the winner cannot be trusted, the router's best remaining pick
+    then: aws-textract              # where compare sends the document when it cannot trust the winner
   fields:
     try: [pymupdf, tesseract]
     escalate_when:
@@ -143,7 +143,7 @@ WARNING …/openreading.yaml:strategies.fields.steps[0].escalate_if: missing: 'p
   both: dialect: plain
       compare: [pymupdf, tesseract]
       then: aws-textract
-    → Runs pymupdf and tesseract at once and keeps the better result; if they disagree or the winner looks bad, sends the document to the best available backend.
+    → Runs pymupdf and tesseract at once and keeps the better result; if they disagree or the winner looks bad, sends the document to aws-textract.
   …
   what the words mean:
     looks bad       openreading's quality probe flags the result: garbled text, over 20% near-empty pages,
@@ -209,8 +209,7 @@ uv run openreading strategy show cost_saver
 ```
 ```yaml
 cost_saver:
-  intent: Local parse first; escalate to the router's best remaining pick only on
-    bad quality.
+  intent: Local parse first; escalate to a hosted backend only on bad quality.
   steps:
   - pymupdf
   - docling
@@ -281,7 +280,7 @@ CONTENT: MIXED  (text:agree  table_cells:diverge)
   [ warn] table_shape_mismatch  {pymupdf, tesseract}  — table counts differ: {'pymupdf': 1, 'tesseract': 0}
 ```
 
-**You should see** a `disagree` row of `0.0` and the `then: auto` rung never reached. The two texts
+**You should see** a `disagree` row of `0.0` and the `then:` rung never reached. The two texts
 share every word, so nothing disagrees. The findings below the trace are the subject of
 [Compare](../comparison/README.md).
 
@@ -333,8 +332,8 @@ error.
 
 ### 6. Set the default backend chain
 
-The `policy:` block supplies the ordered candidates for unnamed requests and longhand `auto`.
-Named strategy leaves remain explicit. Save this as `local.yaml`:
+The `policy:` block supplies the ordered chain an unnamed request walks. A strategy leaf names
+its own backend and runs it, list or no list. Save this as `local.yaml`:
 
 ```yaml
 version: 1
@@ -633,8 +632,8 @@ Each rule names the failure it avoids and where it is enforced.
 - Without a config file, nothing changes. The strategy package is not even imported, so an upgrade
   cannot alter a request that named its backend. The rule lives in `openreading.strategies`
   ("Two invariants"), and a subprocess test proves it.
-- Explicit leaves run the backend they name. Dynamic `auto` leaves choose from the configured
-  default chain and exclude backends already attempted by that cascade.
+- Every leaf runs the backend it names, and no leaf resolves one at dispatch. `policy.backends`
+  is the chain an unnamed request walks, never a rung's target.
 - Deciders choose, and they never widen the set. Candidates are enumerated after pruning, and the
   decider's tool schema is that list as an enum (`openreading.strategies.decider` §3). An out-of-set
   choice is impossible, not merely discouraged.

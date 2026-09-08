@@ -307,7 +307,7 @@ def _use_targets(node: RawNode) -> list[str]:
 
 
 def _dispatchable(node: Any, library: dict[str, RawNode], seen: frozenset[str]) -> set[str]:
-    """Concrete backend ids a node's subtree can dispatch (`auto` excluded; use refs resolved)."""
+    """Concrete backend ids a node's subtree can dispatch (use refs resolved)."""
     if isinstance(node, str):
         if node.startswith("strategy:"):
             name = node[len("strategy:") :] if node.startswith("strategy:") else None
@@ -405,7 +405,7 @@ def _check_leaf(node: dict[str, Any], path: str, ctx: _Ctx, eff_deadline_ms: Any
     if desc is None:
         ctx.err(
             f"{path}.backend",
-            f"unknown backend {slug!r}; known: {', '.join(sorted(BUILTIN_ADAPTERS))} (or 'auto')",
+            f"unknown backend {slug!r}; known: {', '.join(sorted(BUILTIN_ADAPTERS))}",
         )
         return
     # leaf timeout larger than the effective deadline (clamped)

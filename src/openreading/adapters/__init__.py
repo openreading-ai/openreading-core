@@ -550,7 +550,7 @@ does:
 - Copy from `anthropic_claude/` (Message Batches API -- `submit_many`/`poll`/`normalize_many`),
   the one adapter implementing this today and this shape's row in the §0 picker.
 - Dispatch rule (`openreading.api._native_adapter`; full contract in the `openreading.batch`
-  module docstring): native iff the backend is directly named (not `auto`, not a strategy),
+  module docstring): native iff the backend is directly named (not unnamed, not a strategy),
   `descriptor.batch.native` is truthy, the adapter implements the Protocol, and the live item
   count is within `batch.max_items`; otherwise platform fan-out. Native dispatch defaults its
   deadline to `DEFAULT_NATIVE_BATCH_DEADLINE_MS` (1h), not the 120s single-document default.

@@ -78,7 +78,7 @@
       "properties": {
         "strategy": {
           "type": "string",
-          "description": "applied only when backend.id == 'auto' and no strategy is named"
+          "description": "applied only when the request names no backend and no strategy"
         },
         "advanced": {
           "type": "object",
@@ -129,7 +129,7 @@
         {
           "type": "string",
           "title": "backend-or-reference shorthand",
-          "description": "A bare backend id, 'auto', or 'strategy:<name>'."
+          "description": "A bare backend id, or 'strategy:<name>'."
         },
         {
           "type": "array",
@@ -171,7 +171,7 @@
     },
     "plain_item": {
       "type": "string",
-      "description": "Plain list/then item: a backend id, 'auto', or a strategy/preset name (resolved at desugar)."
+      "description": "Plain list/then item: a backend id, or a strategy/preset name (resolved at desugar)."
     },
     "plain_looks_bad": {
       "description": "looks_bad: true (all members at defaults) or a member overlay map (keys OR). Members: garbled, empty_pages, no_text_from_images, min_text_per_page. Value true=on at default, false('off' in YAML)=disabled, number=threshold.",
@@ -380,7 +380,7 @@
       "properties": {
         "backend": {
           "type": "string",
-          "description": "registry slug or 'auto'"
+          "description": "registry slug"
         },
         "operation": {
           "type": "string"

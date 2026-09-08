@@ -260,8 +260,8 @@ def _ordered(names: list[str]) -> str:
 
 
 def _rung_names(steps: list[Any]) -> list[str]:
-    """Name each cascade rung. Every rung names a backend or a strategy now: `auto` was the one
-    rung that did not, and it is gone."""
+    """Name each cascade rung. Every rung names a backend or a strategy, so this never has to
+    describe a rung whose target is only known at dispatch."""
     return [_name(step) for step in steps]
 
 

@@ -37,8 +37,9 @@ Sibling modules: `driver` runs the one poll-and-backoff loop every wait mode sha
 turns an adapter's `CostReport` into `response.usage` by filling only the slots the adapter
 left unset, `cache` derives the document identity and the idempotency key, `clock` keeps
 monotonic time apart from wall time, and `registry` maps a descriptor id to its adapter.
-`openreading.strategies` calls `Router.route` once for dynamic `auto` candidates. Explicit leaves
-run as written, while server API-key scope prunes every dispatch.
+`openreading.strategies` calls `Router.route` once per compile, for the chain it reports rather
+than for a chain it dispatches from: every strategy leaf names its own backend. Server API-key
+scope prunes every dispatch.
 """
 
 from __future__ import annotations

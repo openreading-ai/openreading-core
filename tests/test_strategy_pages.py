@@ -3,8 +3,8 @@ stitching with per-page source_backend. Fully offline: ScriptedBackends return m
 with per-page confidence, and the escalation backend honors the request's pages.ranges.
 
 The second half is fault injection on the rung loop: every way a page cascade can stop early
-(unresolvable `auto`, a rung missing from the registry, a rung without page-range support, a
-raising rung) must leave an honest trace, never a silent stop.
+(a rung missing from the registry, a rung without page-range support, a raising rung) must leave
+an honest trace, never a silent stop.
 """
 
 from __future__ import annotations

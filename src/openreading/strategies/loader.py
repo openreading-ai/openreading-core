@@ -98,7 +98,63 @@ def _desugar_and_build(raw: dict, *, source: str) -> tuple[StrategyConfig, dict,
     except ConfigError as exc:  # a desugar-time §8 violation; already located
         raise ConfigError(f"{source}: {exc}") from exc
 
+    _refuse_auto(raw, source)
     return StrategyConfig.model_validate(raw), raw, plain_info
+
+
+def _refuse_auto(raw: dict, source: str) -> None:
+    """Refuse `backend: auto` anywhere in the canonical tree.
+
+    `auto` used to mean "the best backend still untried", resolved at dispatch against the
+    router's ordered candidates. Nothing here could say what "best" was: the ranking read a
+    per-vendor claim table this package could not verify, and when that table went, the word kept
+    a promise the code no longer made. A rung that names no backend also cannot be read off the
+    page, so a strategy file stopped saying what it would run.
+
+    Enforced after desugar so one check covers every dialect. Plain refuses its own `auto` earlier
+    and more specifically (`openreading.strategies.plain`), because a Plain author is reading a
+    different page; longhand, the shorthand string form and a parallel branch all land here.
+    """
+
+    def refuse(path: str) -> None:
+        raise ConfigError(
+            f"{source}: {path}: 'auto' is not a backend. Name the backend this rung runs, or set "
+            "the deployment's order once in policy.backends and let an unnamed request resolve "
+            "through it."
+        )
+
+    def walk(node: object, path: str) -> None:
+        """Visit `node` in a position where the grammar expects a node, and nowhere else.
+
+        Only node positions are checked, so a gate reading a field that happens to be spelled
+        `auto` (`missing: [auto]`) is left alone. The shorthand string form and the longhand map
+        form are the same position, which is why both are tested here.
+        """
+        if node == "auto":
+            refuse(path)
+        if isinstance(node, list):
+            for i, item in enumerate(node):
+                walk(item, f"{path}[{i}]")
+            return
+        if not isinstance(node, dict):
+            return
+        if node.get("backend") == "auto":
+            refuse(f"{path}.backend")
+        for key in ("steps", "parallel"):
+            walk(node.get(key), f"{path}.{key}")
+        route = node.get("route")
+        if isinstance(route, dict):
+            for i, rule in enumerate(route.get("rules") or []):
+                if isinstance(rule, dict):
+                    walk(rule.get("use"), f"{path}.route.rules[{i}].use")
+            walk(route.get("default"), f"{path}.route.default")
+        decide = node.get("decide")
+        if isinstance(decide, dict):
+            walk(decide.get("among"), f"{path}.decide.among")
+            walk(decide.get("otherwise"), f"{path}.decide.otherwise")
+
+    for name, body in (raw.get("strategies") or {}).items():
+        walk(body, f"strategies.{name}")
 
 
 def parse_config(text: str, *, source: str = "<string>") -> StrategyConfig:
