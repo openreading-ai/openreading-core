@@ -294,7 +294,7 @@
       "source": {
         "filename": "schedule_a_2024.pdf",
         "format": "pdf",
-        "path": "<str:94>",
+        "path": "<abs-path>",
         "relpath": "schedule_a_2024.pdf",
         "sha256": "f5c675c3279abd9dcf0e1fec416356553c6fbdd1fc342397c747415a47583eba",
         "size_bytes": 117336
@@ -952,7 +952,7 @@
       "source": {
         "filename": "1040_2024.pdf",
         "format": "pdf",
-        "path": "<str:88>",
+        "path": "<abs-path>",
         "relpath": "1040_2024.pdf",
         "sha256": "a5f34adb22fb328053932e0cd0770942fe420590ca8537ddd21df167d838d0ec",
         "size_bytes": 299329
@@ -965,8 +965,8 @@
     "backend": "pymupdf",
     "jobs": 1,
     "source_args": [
-      "<str:94>",
-      "<str:88>"
+      "<abs-path>",
+      "<abs-path>"
     ]
   },
   "schema_version": "0.2",

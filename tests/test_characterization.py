@@ -85,8 +85,17 @@ def _scrub(value: Any) -> Any:
         if len(value) > _LIST_CAP:
             return {"<list>": len(value), "first": _scrub(value[0])}
         return [_scrub(v) for v in value]
-    if isinstance(value, str) and len(value) > _TEXT_CAP:
-        return f"<str:{len(value)}>"
+    if isinstance(value, str):
+        # An ABSOLUTE path is as volatile as a clock reading: it differs between a working tree, a
+        # fresh clone and a CI runner. The cap below does not save it, because a long string
+        # collapses to `<str:{len}>` and that pinned the LENGTH of one machine's checkout
+        # directory — which is how this file passed locally and failed all four CI legs from the
+        # first push. A RELATIVE path is stable and stays as it is: `dataset.path` names which
+        # corpus produced a ranking, and losing it is losing the pin's whole point.
+        if value.startswith("/"):
+            return "<abs-path>"
+        if len(value) > _TEXT_CAP:
+            return f"<str:{len(value)}>"
     return value
 
 
