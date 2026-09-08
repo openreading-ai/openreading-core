@@ -83,23 +83,14 @@ def run_case(
 ) -> CaseResult:
     """Run one case against `adapter` and score the normalized response.
 
-    The compliance gate runs before `submit()` (BL-121), because nothing else on this path checks
-    `req.compliance` against the adapter's descriptor. Any exception, `ScopeRefused`
-    included, comes back as `CaseResult(error=...)` with `overall=0.0`. A case whose `expected`
+    Any adapter exception comes back as `CaseResult(error=...)` with `overall=0.0`. A case whose `expected`
     names no recognized dimension scores `overall=None`, which means unscored."""
     try:
         req = OpenReadingRequest.model_validate(case.request_body)
-        # The operator's `policy:` block gates a measurement exactly as it gates a run (law PF6).
-        # Passing only the three attestations, as this path used to, applies the keys that WIDEN
-        # the eligible set while dropping the five requirements they qualify — the one combination
-        # that is always wrong. `config.apply` folds both halves together, so a leaderboard cannot
-        # rank a backend the same file would refuse to run.
+        # Preserve the shared request configuration path used by the other execution surfaces.
         req, router_config = apply_policy(req, policy, router_config or RouterConfig())
         run_ctx = ctx or build_run_context(req, adapter.descriptor)
         clock = RealClock()
-        # Scope gate (BL-121), mirroring calibrate_strategy's identical BL-112 fix: run_case
-        # drives adapter.submit() directly, with no Router in front of it, so a backend outside
-        # the caller's own list would otherwise never be refused on this path.
         with auth_hinted(adapter.descriptor, run_ctx.credentials):
             job = adapter.submit(req, run_ctx)
             job = run_to_completion(

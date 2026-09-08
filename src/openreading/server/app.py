@@ -29,7 +29,7 @@ each (_bad_signature, _unauthorized_response, _scope_denied_response):
   403 scope_denied (BL-159) — the matched API key's backend allow-list (OPENREADING_API_KEY_SCOPES)
     does not include the backend this request named directly, or leaves an "auto"/"strategy:none"
     request (whose whole router chain it bounds, not just the chosen backend) or a strategy walk
-    with nothing left to run. An `auto` request whose top pick alone is out of scope is rerouted
+    with nothing left to run. A null-backend request whose top pick is out of scope is rerouted
     onto the pruned chain, not refused.
 One endpoint deliberately sits OUTSIDE that mapping: POST /v1/backends/{id}/liveness always
 returns 200 with a report, even when the finding is `unreachable` or `unauthorized` — "the backend
@@ -42,12 +42,13 @@ OPENREADING_API_KEYS configured behaves byte-for-byte like every prior release. 
 every endpoint except GET /healthz and POST /v1/webhooks/{backend_id} (the two endpoints intended
 to stay reachable unauthenticated — a health check and a vendor callback carry no bearer) requires
 a valid `Authorization: Bearer <token>`; a key's optional backend allow-list is enforced upstream
-of, and independent from, the deployment's own `policy.backends` — a scope-denied request never
+of, and independent from, the deployment's own `policy.backends`. A scope-denied request never
 reaches make_adapter/build_run_context, so no vendor credential is ever resolved for a backend the
 caller isn't scoped to. Every source of an allow-list intersects and none widens.
 Configured key values are read ONCE at process startup, from the environment ONLY — the same
 deploy-knob pattern OPENREADING_CONFIG follows, never a request body or a CLI flag, so a token
-never appears in `ps`, shell history, or a request the schema/compliance layer touches. Bind 127.0.0.1 by default; CORS off unless --cors-origin is passed (and, when both are
+never appears in `ps`, shell history, or a request schema field. Bind 127.0.0.1 by default. CORS
+is off unless --cors-origin is passed. When both are
 configured, CORS is registered OUTERMOST — see create_app — so a browser's unauthenticated preflight
 OPTIONS still gets a CORS answer instead of a 401). RouterConfig comes from the `policy:` block of
 the openreading.yaml at OPENREADING_CONFIG, read once at startup, never the request body. Fresh adapter instances per request
@@ -59,19 +60,17 @@ Environment variables this module reads. Server-only (the CLI and Python API ign
 OPENREADING_API_KEYS, OPENREADING_API_KEY_SCOPES, OPENREADING_SERVER_PATH_ROOT,
 OPENREADING_JOB_TTL_S, OPENREADING_MAX_ASYNC_JOBS, OPENREADING_MAX_JOBS_PER_PRINCIPAL,
 OPENREADING_MAX_BODY_BYTES, OPENREADING_MAX_COMPARE_BYTES,
-OPENREADING_ALLOW_UNSIGNED_WEBHOOKS and the three
-compliance attestation knobs. OPENREADING_CONFIG and the backend credential vars are shared with
+OPENREADING_ALLOW_UNSIGNED_WEBHOOKS. OPENREADING_CONFIG and backend credential variables are shared with
 the CLI / Python API, which read them through the same strategy loader and EnvCredentialBroker.
   OPENREADING_API_KEYS — comma-separated bearer tokens (_load_api_key_config, once at startup).
     Unset/empty ⇒ caller auth OFF, every endpoint open. An empty ENTRY (stray/trailing comma)
     raises ServerConfigError at startup rather than being dropped: a key is security-bearing and
     a quietly discarded token would leave an operator believing one is configured.
   OPENREADING_API_KEY_SCOPES — comma-separated `token=backend1|backend2` entries narrowing one
-    listed token to a backend allow-list. Unset ⇒ every token unscoped (reaches whatever
-    compliance/routing already allow). Malformed (empty entry, missing '=', empty key or list,
-    a token OPENREADING_API_KEYS never listed, two scopes for one token, or set while
-    OPENREADING_API_KEYS is empty) ⇒ ServerConfigError at startup, naming the setting and the
-    entry position, never the value.
+    listed token to a backend allow-list. Unset means every token is unscoped. Malformed entries
+    include an empty entry, missing `=`, an empty key or list, an unlisted token, duplicate token
+    scopes, or scopes configured without API keys. Each raises ServerConfigError at startup and
+    names the entry position, never the value.
   OPENREADING_SERVER_PATH_ROOT — a directory `document.path` may resolve beneath, checked per
     request by `_gate_document_path`. Unset (the default) refuses every `document.path` at
     every caller-body ingress (/v1/parse, /v1/route, /v1/jobs, /v1/batch, /v1/compare): HTTP
@@ -654,7 +653,7 @@ def _out_of_scope_backend(
     before any adapter is constructed or credential resolved (AC-3):
 
     - A directly-named backend: the id IS the request, so scope is a membership test.
-    - An `auto` (or `strategy:none`) request: the plain router's plan is computed here, and the
+    - A null-backend (or `strategy:none`) request: the plain router's plan is computed here, and the
       allow-list is applied to the whole CHAIN — chosen plus every fallback — via the same
       `RoutePlan.restrict_to` that `api.run_request` applies before executing. Reading `chosen`
       alone was the bug: the executor walks the chain, so a token scoped to the local parser was
@@ -662,20 +661,20 @@ def _out_of_scope_backend(
       in-scope pick failed on it. Sharing `restrict_to` is what keeps the door and the execution
       path from ever disagreeing about which backends this request can reach.
 
-    An `auto` request whose first pick is out of scope is NOT refused while an in-scope fallback
-    survives. `auto` asks the router to choose, so a scope bounds what it may choose from rather
+    A null-backend request whose first pick is out of scope is not refused while an in-scope
+    fallback survives. The router chooses from the scoped chain rather
     than vetoing the request over a pick the caller never made — the same prune-then-run outcome a
     `strategy:` walk already gets, and it costs nothing: only in-scope backends run either way.
     The refusal is reserved for the chain emptying, which fails closed.
 
     None is also returned when the plain router's own plan is already empty. That is
     ScopeRefused's call to make, not scope's (BL-159 AC-4: an allow-list only ever subtracts
-    from what compliance and routing already allow, and there it subtracted nothing).
+    from the router plan, and there it subtracted nothing).
 
     A strategy walk is knowable only from inside, so it is enforced inside: the allow-list travels
     with the request as `api.run_request(backend_allowlist=...)` and lands in
     `strategies.prune.compile_strategy`, which prunes every out-of-scope rung and narrows the
-    eligible set an `auto` rung resolves against — still before any adapter is built, and still
+    eligible set a dynamic rung resolves against. This happens before any adapter is built and
     answering 403 `scope_denied` when it leaves the walk nothing to run. Returning None here is
     therefore "someone else checks this one", never "this one is unchecked": a `strategy:` id was
     once genuinely exempt, which made any strategy id a way around the allow-list, and the four
@@ -688,7 +687,7 @@ def _out_of_scope_backend(
     if backend_id is None or strat == "none":
         plan = Router(build_registry(), router_config or RouterConfig()).route(req)
         if plan.chosen is None:
-            return None  # compliance's refusal, not scope's
+            return None  # the router already has no executable chain
         if plan.restrict_to(scope).chosen is not None:
             return None  # something the caller may reach survived; the pruned chain runs
         # Nothing survived. Name the backend the request would have used, which is the one the
@@ -730,19 +729,12 @@ def _error_envelope(exc: Exception) -> tuple[int, dict[str, Any]]:
         # Same 403 and the same `scope_denied` category the door check returns for a directly
         # named backend, so a caller sees one answer for one cause however the request was
         # spelled — and deliberately NOT `compliance_refused`, which would send the operator to
-        # edit a policy when the thing to edit is the token's allow-list.
+        # edit unrelated routing settings when the token's allow-list is the cause.
         status = 403
         env = {
             "category": "scope_denied",
             "message": str(exc),
             "backend_code": exc.backend_code,
-        }
-    elif isinstance(exc, ScopeRefused):
-        status = 403
-        env = {
-            "category": "compliance_refused",
-            "message": str(exc),
-            "backend_code": exc.constraint,
         }
     elif isinstance(exc, UnsupportedFeatureError):
         status = 422
@@ -862,14 +854,14 @@ def create_app(*, cors_origins: list[str] | None = None):
     once, from the process environment. A malformed value raises `ServerConfigError` before the
     app binds a socket, so a broken setting fails at startup rather than on a later request.
     Pass `cors_origins` to allow those browser origins, or leave it None to keep CORS off. The
-    returned app owns the in-memory job store and the `auto` result cache for as long as it
+    returned app owns the in-memory job store and the resolved-chain result cache for as long as it
     lives. The full endpoint contract is the `openreading.server` package
     docstring, and this module's docstring above lists the settings.
     """
     app = FastAPI(title="OpenReading", version=__version__)
     jobs: dict[str, JobRecord] = {}
     app.state.jobs = jobs  # exposed for tests to seed async/webhook jobs offline
-    # Idempotency cache for the /v1/parse `auto` chain: one per app, so it lives as long as the
+    # Idempotency cache for the /v1/parse resolved chain: one per app, so it lives as long as the
     # server process and never crosses into another app instance (D-v3-3).
     app.state.result_cache = BoundedResultCache()
 
@@ -882,9 +874,8 @@ def create_app(*, cors_origins: list[str] | None = None):
     _loaded = config.load(None, allow_cwd=False)
     _strategy = _build_strategy_config(_loaded)
     app.state.strategy_config = _strategy.config if _strategy else None
-    # The deployment's compliance posture, read once. Every handler folds it into the request it
-    # is about to route (`config.apply`), which is what gives a request naming a backend by name
-    # the same constraints a strategy run has always had.
+    # Read deployment defaults once. Explicit backend ids bypass `policy.backends`, while a null
+    # backend uses that list as its default chain.
     app.state.policy = _loaded.policy if _loaded else None
     app.state.router_config = config.router_config(app.state.policy)
 
@@ -912,7 +903,7 @@ def create_app(*, cors_origins: list[str] | None = None):
         if matched_key is None:
             return _unauthorized_response()
         # Stashed for the handler's own scope check (AC-3/AC-4) — None means unscoped (reaches
-        # everything compliance/routing already allow), matching a disabled-auth request's own
+        # every backend), matching a disabled-auth request's own
         # `getattr(request.state, "api_key_scope", None)` default exactly.
         request.state.api_key_scope = api_key_config.scopes.get(matched_key)
         # M4: the per-principal job allowance needs an identity to meter, and this is the only
@@ -1089,19 +1080,14 @@ def create_app(*, cors_origins: list[str] | None = None):
         refusal, req = _gate_document_path(req)
         if refusal is not None:
             return _bad_request(refusal)
-        # The operator's `policy:` block unions into the request before anything routes it, so a
-        # request naming a backend is gated by the same constraints a strategy run is (law P4).
-        # The fold can REFUSE, not only return: a body naming a region the file forbids has no
-        # intersection with it. That is a compliance outcome and takes the 403 every other
-        # compliance refusal takes, so it is caught here rather than escaping the handler's own
-        # try/except below as a bare 500 with no body.
+        # Apply deployment routing defaults before resolving a null backend or strategy.
         try:
             req, router_config = config.apply(req, app.state.policy, app.state.router_config)
         except _ADAPTER_ERRORS as e:
             return _error_response(e)
         # BL-159 AC-3: scope-gate BEFORE run_request ever constructs an adapter or resolves a
         # vendor credential — for both a directly-named backend outside the key's allow-list and
-        # an "auto" request the router would otherwise have picked one for.
+        # a null-backend request the router would otherwise have resolved.
         scope = getattr(request.state, "api_key_scope", None)
         try:
             # The scope check routes auto requests, so endpoint and alias refusals can start here.
@@ -1264,11 +1250,11 @@ def create_app(*, cors_origins: list[str] | None = None):
         # shared-field list) is also forward-safe: a future OpenReadingRequest field only becomes
         # an implicit batch-wide override if it's deliberately added here, never merely because
         # pydantic
-        # recognizes the name. None of the five allowed fields have a JSON alias distinct from
+        # recognizes the name. None of the four allowed fields have a JSON alias distinct from
         # their attribute name (only `async_`/`async` does, and `async_` is deliberately excluded
         # from this batch-shared set), so an allowlist of attribute names is exact here — no alias
         # table needed.
-        batch_shared_fields = {"outputs", "extraction_schema", "features", "pages", "compliance"}
+        batch_shared_fields = {"outputs", "extraction_schema", "features", "pages"}
         shared = {k: v for k, v in body.items() if k in batch_shared_fields}
         # BL-102: validate once, here, before a single item is attempted — unlike /v1/parse, which
         # validates its whole body against the vendored JSON Schema (additionalProperties: false)
@@ -1513,10 +1499,7 @@ def create_app(*, cors_origins: list[str] | None = None):
             if denied is not None:
                 return _scope_denied_response(denied)
         try:
-            # Same helper /v1/parse's run_request uses for its named-backend branch (BL-91): a
-            # directly-named backend is compliance-gated (ScopeRefused → 403) before
-            # credential-gated (MissingCredentialsError → 424, signup_url hint included) — this
-            # branch must not be able to hand-copy its own, independently-drifting version again.
+            # Use the same named-backend request and credential setup as /v1/parse.
             # deadline_ms=None (BL-153): no request-schema field originates a real per-request
             # deadline for this path yet — see api.prepare_named_backend's own docstring.
             adapter, req, ctx = api.prepare_named_backend(

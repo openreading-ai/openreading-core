@@ -56,7 +56,7 @@ top level only, so a misspelled nested field such as ``document.mim_type`` passe
 validation and failed only later, at the pydantic layer (``openreading.types.request``, already
 ``extra="forbid"`` throughout) — the vendored schema stopped being the source of truth exactly
 where nesting began. Optional blocks: ``schema_version`` (const ``"0.3"``), ``outputs``,
-``features``, ``pages``, ``extraction_schema``, ``routing``, ``compliance``, ``async``,
+``features``, ``pages``, ``extraction_schema``, ``routing``, ``async``,
 ``idempotency_key``.
 
 - ``document``: exactly ONE of ``bytes_base64`` (the router may spool/upload where a backend needs
@@ -163,7 +163,7 @@ backend cannot produce is ABSENT with a ``warnings[]`` entry — never fabricate
   (``report_cost()`` projects the counters out of ``job.raw``) and the router accounts: after
   ``normalize()`` it fills only the ``usage`` fields the adapter left unset, and never reshapes
   one unit into another. ``cost_usd`` and ``cost_basis`` were removed with the per-vendor price
-  tables that filled them (``): a derived price sat on ``usage`` beside
+  tables that filled them. A derived price sat on ``usage`` beside
   counters that were measured, and nothing downstream could tell the two apart.
 - ``job``: the async handle (``id``, timestamps, ``poll_url``, provider console URL).
 - ``warnings[]``: ``{code, message, field}`` for anything requested but unavailable, degraded or
@@ -498,8 +498,7 @@ DESCRIPTOR_SCHEMA_FILE = "adapter-descriptor.v0.8.json"
 # v0.2 (Plain, v0.7): the simple dialect's body grammar (plain_try/race/compare_body) + the
 # disagreement_over gate predicate — additive over v0.1 (config `version` const stays 1). Cut as
 # a new file because v0.1 is byte-frozen (schema-evolution §8); v0.1 remains the frozen artifact.
-# v0.3 (One file): `policy` becomes a CLOSED, typed object — the nine keys, the five compliance
-# ones carrying `request.compliance`'s own descriptions verbatim. It was `additionalProperties:
+# v0.3 (One file): `policy` becomes a closed, typed object. It was `additionalProperties:
 # true` while a hand-written JSON policy file was the primary spelling and the block its superset.
 # With the file the only spelling, a typo and a quoted boolean are refused here rather than by a
 # validator standing in for the schema. No file that was valid and meaningful becomes invalid: a

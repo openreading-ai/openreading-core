@@ -475,7 +475,7 @@ strategies:
                                                        #   hedge needs pick: fastest — spec §2.3)
         pick: best
         judge:                                         # presence makes the comparison LLM-judged
-          backend: anthropic-claude                    # must pass the request's compliance filter
+          backend: anthropic-claude                    # explicit judge backend
           intent: Prefer complete tables with arithmetically consistent totals.
         on_win: cancel                                 # losers cancelled; billed cost still recorded
       - aws-textract                                   # a named rung

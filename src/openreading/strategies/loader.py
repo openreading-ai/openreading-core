@@ -14,7 +14,7 @@ longhand, so everything downstream sees one tree. Errors locate by node path
 marks, and a mark-preserving loader was judged not worth it (D-v3-8).
 
 `LoadedConfig` carries provenance: `path` (`None` for a dict passed to `config.load`),
-`source_hash` (sha256 of the file TEXT — distinct from the compliance-aware normalized-tree
+`source_hash` (sha256 of the file text, distinct from the normalized-tree
 `config_hash` the engine stamps on `orchestration.config_hash`), the schema-valid `raw` dict
 (validate scans it for secrets), and `plain_info` (per-strategy Plain classification for
 `explain`).

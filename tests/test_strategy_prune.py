@@ -135,3 +135,33 @@ def test_allowlist_that_empties_the_tree_refuses_as_scope_not_compliance():
         )
 
     assert e.value.backend_code == "pymupdf"
+
+
+def test_a_longhand_auto_leaf_survives_pruning_under_a_scoped_token():
+    """`auto` is refused in the Plain dialect and still resolved by the engine in longhand.
+
+    The removal set took `auto` off the request and out of Plain, and `strategies/plain.py` raises
+    a ConfigError for a Plain rung that names it. Longhand is a separate grammar: a leaf
+    `{"backend": "auto"}` loads, and `engine._resolve_backend` resolves it at dispatch against
+    `ctx.eligible`, bounded there by the caller's allow-list.
+
+    So `auto` must not be treated as a backend ID at prune time. It is not one, and no allow-list
+    ever contains it, which made a scoped token's longhand `auto` rung refuse with
+    `denied: auto` — the literal string — instead of running whatever the token does permit. The
+    prune has to leave the leaf alone and let dispatch bound it.
+    """
+    registry = build_registry()
+    config = StrategyConfig.model_validate(
+        {"version": 1, "strategies": {"s": {"steps": [{"backend": "auto"}]}}}
+    )
+
+    compiled = compile_strategy(
+        _req(),
+        "s",
+        config,
+        registry,
+        RouterConfig(backends=("pymupdf", "tesseract")),
+        backend_allowlist=frozenset({"pymupdf"}),
+    )
+
+    assert compiled.root == {"steps": [{"backend": "auto"}]}

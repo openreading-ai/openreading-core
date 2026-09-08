@@ -287,15 +287,37 @@ def test_blobstore_path_refuses_malformed_digest(tmp_path):
 
 
 def test_blobstore_put_and_get_round_trip_the_bytes(tmp_path):
-    store = LocalFsBlobStore(tmp_path / "blobs")
-    digest = "sha256:" + "a" * 64
+    import hashlib
 
-    ref = store.put("run1", digest, b"the document, in the clear", "text/plain")
+    store = LocalFsBlobStore(tmp_path / "blobs")
+    body = b"the document, in the clear"
+    digest = "sha256:" + hashlib.sha256(body).hexdigest()
+
+    ref = store.put("run1", digest, body, "text/plain")
 
     # Readable with `open()`, which is the plainest statement of what the ledger stores. The key
     # that used to protect this sat one directory away from it.
     assert store._path("run1", digest).read_bytes() == b"the document, in the clear"
     assert store.get(ref) == b"the document, in the clear"
+
+
+def test_blobstore_get_refuses_bytes_that_do_not_match_the_recorded_digest(tmp_path):
+    """A changed plaintext blob must not replay as the response the journal recorded.
+
+    Encryption previously authenticated every current-format blob, and the legacy reader checked
+    this digest explicitly. Plaintext storage still needs the content-addressed store to reject a
+    file whose bytes no longer match its `BlobRef`.
+    """
+    import hashlib
+
+    store = LocalFsBlobStore(tmp_path / "blobs")
+    original = b'{"document": {"text": "approved"}}'
+    digest = "sha256:" + hashlib.sha256(original).hexdigest()
+    ref = store.put("run1", digest, original, "application/json")
+    store._path("run1", digest).write_bytes(b'{"document": {"text": "altered"}}')
+
+    with pytest.raises(OSError, match="digest mismatch"):
+        store.get(ref)
 
 
 def test_header_path_refuses_traversal_run_id(tmp_path):

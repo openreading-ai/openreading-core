@@ -30,7 +30,7 @@ import pytest
 from openreading import api
 from openreading.api import _arm_ledger
 from openreading.credentials import EnvCredentialBroker
-from openreading.ledger.header import HeaderMismatch
+from openreading.ledger.header import HeaderMismatch, read_header
 from openreading.ledger.inline import InlineExecutor
 from openreading.ledger.jsonl import JsonlJournal
 from openreading.ledger.localfs import LocalFsBlobStore
@@ -229,6 +229,36 @@ def test_resume_replays_a_cancelled_step_with_zero_network_calls(tmp_path):
     assert result.status == "cancelled"
     assert result.replayed is True
     assert result.journal_seq == recs[-1].journal_seq
+
+
+def test_resume_replays_a_successful_none_payload(tmp_path):
+    """Removing the ZDR storage branch makes `None` an ordinary recorded payload again."""
+    ledger_root = tmp_path / "ledger"
+    journal = JsonlJournal(ledger_root / "run1.jsonl")
+    blobs = LocalFsBlobStore(ledger_root / "blobs")
+    req = StepRequest(
+        step_id="s1",
+        run_id="run1",
+        kind="submit",
+        step_path="root",
+        step_seq=0,
+        attempt=1,
+        backend_id="fake",
+    )
+    first = InlineExecutor(journal=journal, blobs=blobs, registry=None, clock=RealClock())
+    assert asyncio.run(first.exec(req, run=lambda: None)).payload is None
+
+    replay = InlineExecutor(
+        journal=JsonlJournal(ledger_root / "run1.jsonl"),
+        blobs=blobs,
+        registry=None,
+        clock=RealClock(),
+    )
+    result = asyncio.run(
+        replay.exec(req, run=lambda: (_ for _ in ()).throw(AssertionError("must not dispatch")))
+    )
+    assert result.payload is None
+    assert result.replayed is True
 
 
 def test_a_replayed_cancelled_cascade_rung_keeps_its_own_attempt_category(tmp_path, monkeypatch):
@@ -548,6 +578,31 @@ def test_an_unusable_ledger_root_fails_with_a_named_config_error_not_a_bare_oser
     assert "OPENREADING_LEDGER" in cap.err  # names the knob, not just an errno and a path
     assert str(not_a_dir) in cap.err
     assert "Traceback" not in cap.err
+
+
+def test_cmd_resume_reports_a_modified_input_blob_as_replay_refusal(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    ledger_root = tmp_path / "ledger"
+    monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
+    pdf_path = tmp_path / "doc.pdf"
+    pdf_path.write_bytes(build_sample_pdf())
+    (tmp_path / "openreading.yaml").write_text(
+        "version: 1\nstrategies:\n  s:\n    steps:\n      - backend: pymupdf\n"
+    )
+    armed: list[str] = []
+    api.run(str(pdf_path), strategy="s", on_run_armed=armed.append)
+    capsys.readouterr()
+    header = read_header(ledger_root, armed[0])
+    assert header is not None and header.document is not None
+    digest = header.document.digest.split(":", 1)[1]
+    (ledger_root / "blobs" / armed[0] / f"{digest}.bin").write_bytes(b"modified")
+
+    from openreading.cli.app import main
+
+    assert main(["resume", armed[0]]) == 3
+    cap = capsys.readouterr()
+    assert cap.out == ""
+    assert "recorded input payload is unavailable" in cap.err
 
 
 def test_cmd_resume_keeps_backend_chatter_off_stdout(tmp_path, monkeypatch, capsys):

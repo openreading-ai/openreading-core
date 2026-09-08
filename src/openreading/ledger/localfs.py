@@ -20,6 +20,7 @@ that keeps a crafted id from escaping the store.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 
@@ -30,11 +31,14 @@ VALID_RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 
 
 class LocalFsBlobStore:
-    """Blobs under `root/<run_id>/<digest>.bin`."""
+    """Content-addressed plaintext blobs under `root/<run_id>/<digest>.bin`.
+
+    `get` verifies the SHA-256 digest before returning bytes. Plaintext storage removes the
+    authenticated cipher, but a modified response must still never replay as recorded output.
+    """
 
     def __init__(self, root: Path, keys: object | None = None) -> None:
-        # `keys` is accepted and ignored, so a caller constructing this with a key store keeps
-        # working across the commit that removed encryption. It goes when they stop passing one.
+        # Keep the deprecated argument so external BlobStore setup does not fail during migration.
         self._root = root
         self._root.mkdir(parents=True, exist_ok=True)
 
@@ -59,4 +63,11 @@ class LocalFsBlobStore:
         )
 
     def get(self, ref: BlobRef) -> bytes:
-        return self._path(ref.run_id, ref.digest).read_bytes()
+        body = self._path(ref.run_id, ref.digest).read_bytes()
+        algorithm, separator, expected = ref.digest.partition(":")
+        if separator != ":" or algorithm != "sha256":
+            raise OSError(f"unsupported blob digest {ref.digest!r}")
+        actual = hashlib.sha256(body).hexdigest()
+        if actual != expected.lower():
+            raise OSError(f"blob digest mismatch for {ref.digest}")
+        return body

@@ -1,7 +1,6 @@
-"""The one reader of `openreading.yaml`: discovery, reading, schema validation, and the
-intersection of a request's own allow-list with the file's `policy:` block.
+"""Read and validate the one `openreading.yaml` configuration file.
 
-A policy is the list of backends this deployment permits, in the order you want them tried. A
+A policy is the default backend list, in the order you want them tried. A
 backend is one parser, either a local library or a hosted API. `openreading.yaml` is the only file
 you write, and its `policy:` block is the only place a policy is spelled. One key makes up the
 whole grammar: `backends`. A malformed block is refused before a backend is contacted, and the CLI
@@ -18,8 +17,8 @@ Discovery order (first hit wins; sources are NEVER merged):
   3. `./openreading.yaml` (or `./openreading.yml`) in the working directory — CLI and Python only.
 
 `discover()` takes `allow_cwd`. The server (`openreading serve`) passes `False` and never sniffs
-its working directory, because a stray file next to a long-running process must not change which
-backends it may reach. `load()` returns `None` when nothing is found anywhere, which is the "no
+its working directory, because a stray file must not change a long-running process's default
+chain. `load()` returns `None` when nothing is found anywhere, which is the "no
 file, no policy" path. A found-but-broken file raises `ConfigError`: a config you asked for and
 that cannot load is an error, never a silent fall-through.
 
@@ -49,14 +48,9 @@ P4 to P6 by this one.
   and the descriptor met it or did not. Every one of those requirements was a claim about a vendor
   core could not check, so being wrong excluded a backend the operator believed was included and
   the run succeeded anyway. A list of ids is a statement core can honour exactly, forever, with no
-  table to rot. A strategy names backends and runs inside that list.
-- **P4. The intersection never widens.** A request's own allow-list and the file's combine in
-  `apply()`, once per request, on every path, and what survives is what both permit. An EMPTY list
-  permits nothing; an absent list is not an empty one. Failure prevented: a path that forgot to
-  intersect. The server's non-strategy path was that path, so a request naming a backend by name
-  reached it carrying none of the operator's restrictions. A precedence rule where the request
-  simply won was the same failure wearing a reasonable face: the deployment's list would be
-  whatever the caller last said.
+  table to rot. A strategy may still name another backend explicitly.
+- **P4. Defaults compose deterministically.** `apply()` validates and combines default chains
+  before routing. A named backend bypasses the default. Server API-key scope remains independent.
 - **PF2. A public call is safe on its own.** `apply()`, `router_config()` and
   `strategies.compile_strategy` enforce the policy they are handed without relying on an earlier
   loader call, and validate a mapping into `openreading.types.policy.Policy` before reading a
@@ -78,7 +72,7 @@ P4 to P6 by this one.
 
 Relatives: `openreading.strategies.loader` builds the `StrategyConfig` from the mapping this
 module returns and owns everything about strategies. `openreading.router.compliance` owns
-`RouterConfig` and what each compliance key means against a descriptor. `openreading.api` calls
+`RouterConfig` and default-chain semantics. `openreading.api` calls
 `load()` and then `apply()` before it dispatches anything.
 """
 
@@ -101,12 +95,7 @@ _ENV_VAR = "OPENREADING_CONFIG"
 _DEFAULT_FILENAME = "openreading.yaml"
 _ALT_FILENAME = "openreading.yml"
 
-# The `policy:` keys that become `request.compliance`. The three booleans OR; the two strings
-# each have their own rule, because neither is a boolean and they do not share a domain.
-# A deliberate SUBSET of Routing. `fallback` is a request field (chain order), not a constraint,
-# so a policy can never reorder someone's chain by naming backends (law P3). `doc_type_hint` left
-# the policy grammar with `strategy-config` v0.3: no routing stage reads it, and a key that does
-# nothing in a file that gates compliance is one a reader will try to rely on.
+# The `policy:` block supplies a default backend chain for callers that name no backend.
 
 
 class ConfigError(ValueError):
@@ -122,7 +111,7 @@ class LoadedFile:
     strategy loader and this module see the same bytes. `policy` is the `policy:` sub-dict, or
     `None` when the file carries no block. `path` is `None` for a dict passed to `load()`, which
     has no file behind it. `source_hash` is the sha256 of the file text, distinct from the
-    compliance-aware `config_hash` the strategy engine stamps on a response.
+    canonical `config_hash` the strategy engine stamps on a response.
     """
 
     raw: dict

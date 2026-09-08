@@ -92,8 +92,8 @@ after. Hosted backends are tested offline with `respx`, a library that intercept
 returns canned responses, plus injected faults. A test that needs a key or the network carries
 the `live` marker, and `make verify` never runs it.
 
-**Compliance is never relaxed.** Nothing you add to a strategy, route, or fallback may widen the
-set of backends a compliance policy admits. Unverified compliance fails closed.
+**Core holds no fact it cannot verify.** Caller-provided backend lists are honored in their stated
+order. Do not infer vendor policy or contractual posture from source-maintained claims.
 
 **Comment the why, not the what.** Keep the rationale comments you find, and update one when
 your change makes it wrong.

@@ -3,7 +3,7 @@
 This module is the normative contract for the optional LLM decider and LLM-as-judge: where they may
 act, exactly what they see, exactly what they may return, and how every failure mode degrades to
 the deterministic engine. The file grammar that declares decision points is
-`openreading.strategies.model` (+ `schemas/strategy-config.v0.2.json`); the walk that consults them
+`openreading.strategies.model` (+ `schemas/strategy-config.v0.4.json`); the walk that consults them
 is `openreading.strategies.engine` (`_resolve_decision_point`, `_decide`, `_select_best`,
 `_pairwise_judge`, `_replay_decision`). Nothing here adds a node type, a signal, or an action the
 engine does not already have. The `decider.md §n` citations in this module's and the engine's
@@ -12,7 +12,7 @@ Decisions: internal/decisions/DECISIONS.md D-v3-15, D-v3-17, D-v3-18, D-v3-24.
 
 Status
 ------
-Plumbing (two-key gate, per-request compliance gate, engine defaults, downgrade taxonomy, one-shape
+Plumbing (two-key gate, API-key scope, engine defaults, downgrade taxonomy, one-shape
 decision record), the executor contract (strict single-tool schema `build_decider_tool`, engine
 re-validation `revalidate_action`, the `DeciderPort`/`JudgePort` seams and verdict types,
 `decider_call`/`judge_call` metering, the pairwise judge), `mask_fields`, `openreading replay
@@ -182,8 +182,7 @@ belt and suspenders): `None` → `refusal`, out-of-set → `malformed`; a port t
 `malformed`. The `rationale` is bounded prose for the trace, never an instruction to the engine.
 
 §3.3 The hard rails, enforced by construction, not by prompt:
-1. Candidates are built post-pruning. Compliance-dropped backends were removed from the tree
-   before execution, so they never appear in `candidates`; the decider cannot choose what it
+1. Candidates are built after API-key scope pruning. The decider cannot choose a candidate it
    cannot see.
 2. Decider calls are recorded, not enforced. Each call that RETURNS lands as a `decider_call`
    attempt (judge calls as `judge_call`) in the trail, so a reader can count them. A
@@ -192,12 +191,10 @@ belt and suspenders): `None` → `refusal`, out-of-set → `malformed`; a port t
    port used to report a `cost_usd` per call and the engine summed it into `usage.cost_usd`. Both
    are gone with the rest of core's money: the caller's own provider
    bill is where a decider's spend is visible.
-3. Compliance is never visible (cited as "rail 4" in engine comments). Pruning happens upstream;
-   no compliance constraint, `DropReason`, or dropped backend appears in any `DecisionPoint`. The
-   decider decides quality/latency trade-offs; it has no compliance surface to reason about,
-   correctly or otherwise.
+3. API-key scope is never visible to the decider. Pruning happens upstream, so a `DecisionPoint`
+   carries only the candidates it may choose.
 4. The engine owns metering and re-validation; the port is thin and untrusted (D-v3-17). This
-   keeps trace, budget and compliance out of the port entirely. Ports are plain synchronous
+   keeps trace and budget out of the port entirely. Ports are plain synchronous
    Protocol methods run via `asyncio.to_thread` so a slow or hanging implementation cannot stall
    sibling coroutines (parallel branches, the coordinated clock); a per-call deadline is not yet
    applied by the engine (deferred to the wire adapter), so `timeout` is reserved, not yet fired.
@@ -633,17 +630,16 @@ def resolve_judge_status(
     backend_allowlist: frozenset[str] | None = None,
     broker: EnvCredentialBroker | None = None,
 ) -> DeciderStatus:
-    """The judge's enablement + compliance gate for one `pick: best` node. Unlike the decider, the
+    """The judge's enablement and scope gate for one `pick: best` node. Unlike the decider, the
     judge needs no top-level `decider:` block (its backend is on the `judge:` block, decider.md
-    §1), but the SAME two-key env gate + compliance filter apply. `env` may carry a backend-id
+    §1), but the same two-key environment gate and API-key scope apply. `env` may carry a backend-id
     override, which also retargets the judge backend."""
     enabled, backend = _env_decider_backend(env, judge_backend)
     if not enabled:
         return DeciderStatus("engine", "env_disabled", backend)
     if backend_allowlist is not None and backend not in backend_allowlist:
-        # Ahead of the compliance gate below so the reported reason is the one the caller can act
-        # on, and because scope is the narrower, later subtraction (strategies.prune uses the same
-        # precedence). Downgrades to engine mode rather than raising: a decision point resolving
+        # Report the API-key scope reason the caller can act on. Downgrade to engine mode because
+        # a decision point resolving
         # to its engine default is this taxonomy's answer to every decider failure, and refusing
         # the whole walk over an out-of-scope JUDGE would be a bigger hammer than the caller's
         # scope asks for — the backends that actually process the document are bounded elsewhere.

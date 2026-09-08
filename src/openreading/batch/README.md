@@ -26,12 +26,11 @@ backends.
 
 The batch layer wraps the single-document path and never changes what that path does. Intake is the
 first step, and it expands your sources into one sorted list of files. Each item then runs exactly
-as `parse one.pdf` would, with its own routing and its own compliance check.
+as `parse one.pdf` would, with its own routing and error isolation.
 
-A policy is a short list of rules about which backends may see a document, written once in the
-`policy:` block of your `openreading.yaml`. The per-item compliance check enforces it on every
-item. The command above ran with no filter because that directory holds no such file; write one
-and the same command gates the whole corpus, whether it names a backend or runs a strategy. From
+A policy is the default backend chain, written once in the `policy.backends` block of your
+`openreading.yaml`. Each null-backend item resolves that list independently. A batch that names a
+backend runs that backend directly, while a named strategy follows its own explicit nodes. From
 Python, `openreading.run_batch(paths, config="openreading.yaml")` reads the same file, and
 `config={"version": 1, "policy": {…}}` passes the same shape inline. [Routing and
 keys](../router/README.md#recipes) runs both.
@@ -167,7 +166,7 @@ uv run openreading parse corpus/ --backend tesseract --jobs 8 | jq -c .request
 value the run used, never the one you asked for. Every backend's ceiling is in the [limits
 table](../adapters/README.md#the-ceilings-on-one-request), and the
 useful ceiling sits far below the `--max-jobs` limit of 32. The notice stays silent under the
-router's own choice (`--no-strategy` on the command line, `backend="auto"` in Python) and under
+router's own choice (`--no-strategy` on the command line, `backend=None` in Python) and under
 `--strategy`. Both resolve a backend per item, so no single ceiling is knowable up front.
 
 `--max-items` (default 200) refuses before any file is read. It guards against a mistyped path and
@@ -343,7 +342,7 @@ shards.
 ## How it decides
 
 These rules are why a batch never surprises you with a different envelope shape, a crash, or a
-widened compliance set. Each rule names the failure it avoids. The full set is M1–M10 in the
+widened backend set. Each rule names the failure it avoids. The full set is M1–M10 in the
 package docstring.
 
 Source: `src/openreading/batch/__init__.py` (the M1–M10 invariants). Live truth: `uv run python -m
@@ -356,7 +355,7 @@ pydoc openreading.batch`. If this table and that text disagree, the text is righ
 | `M3` unsupported format is a skip with a reason | A file the chosen backend cannot read crashing the run, or vanishing silently | `batch.sources.resolve_intake` |
 | `M4` item and jobs ceilings refuse before reading | A home directory, an accidental hosted spend, or a corpus whose responses exhaust memory | `batch.sources`, `batch.runner.bound_jobs` |
 | `M6` per-item isolation | One bad file taking the corpus down | `batch.runner` |
-| `M7` per-item routing and compliance, no batch-level cache | A cached decision widening the compliant set | `batch.runner`, `openreading.api` |
+| `M7` per-item routing, no batch-level cache | A cached decision widening the caller's list | `batch.runner`, `openreading.api` |
 
 The batch status has three values. `succeeded` means at least one item succeeded and none failed
 (exit 0). `partial` means some of each (exit 4). `failed` means nothing succeeded (exit 1). An

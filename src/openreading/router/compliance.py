@@ -1,6 +1,6 @@
 """`RouterConfig`: the deployment-level settings the router reads.
 
-One setting today: `backends`, the allow-list of backend ids in preference order.
+One setting today: `backends`, the default backend ids in preference order.
 
 This module used to be the compliance filter, stage 1 of a three-stage router. It read a
 twelve-field `ComplianceProfile` off every descriptor, 180 vendor claims across fifteen adapters,
@@ -15,19 +15,17 @@ succeeded.
 
 The replacement is the caller's own conclusion. An operator who cares about compliance knows which
 vendors they hold agreements with, which regions their contracts cover, and what their auditors
-accepted. `backends: [aws-textract, pymupdf]` states that, and core honours it exactly, forever,
-with no table to rot. carries the full argument.
+accepted. `backends: [aws-textract, pymupdf]` states that default, and core honors its order.
 
 The rule that replaces "compliance is never relaxed by fallback", and that a reader two years from
 now needs more than the diff: **core holds no fact it cannot verify. A constraint core cannot
 check is a constraint core must not appear to enforce.**
 
-Allow-list semantics
---------------------
-Every source intersects and none widens: the file's `policy.backends`, the caller's argument, and
-the server's API-key scope. An EMPTY list permits nothing and refuses with `scope_denied`, which
-is the fail-closed direction the compliance keys used to hold. An absent list is not an empty one,
-and means no restriction from that source.
+Default-chain semantics
+-----------------------
+`policy.backends` supplies the chain only when a request names no backend. An empty list resolves
+to no backend, while an absent list falls back to `pymupdf`. A named backend runs directly. The
+server's API-key scope is a separate caller boundary that can narrow either form.
 """
 
 from __future__ import annotations
@@ -39,8 +37,8 @@ from dataclasses import dataclass, field
 class RouterConfig:
     """Deployment settings for one run.
 
-    `backends` is `None` for "no restriction from this source" and a tuple, possibly empty, for a
-    stated allow-list. The distinction matters: an empty tuple permits nothing.
+    `backends` is `None` when no default chain was supplied. A tuple preserves the configured
+    order, and an empty tuple resolves to no backend.
     """
 
     backends: tuple[str, ...] | None = None

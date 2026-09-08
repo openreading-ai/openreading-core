@@ -74,17 +74,17 @@ intake (only computed if the item is materialized).
 
 Execution (`runner.run_batch`, platform fan-out -- the default for every backend)
 ----------------------------------------------------------------------------------
-Each non-skipped item runs the EXISTING single-document path through a `run_one(source,
+Each item runs the existing single-document path through a `run_one(source,
 idempotency_key) -> response.v0.3 dict` seam (production wires it to `api.run`: route ->
 materialize -> submit -> run_to_completion -> normalize -> validate). No new adapter surface,
 so every adapter batches correctly on day one.
 
-- M6 per-item isolation: a terminal error, timeout or compliance refusal records
+- M6 per-item isolation: a terminal error or timeout records
   `state: "failed"` + `error {code, message}` on that item and the batch continues;
   `_run_item` never raises. The stderr progress line is the only place a failed item's message
   is read.
-- M7 per-item compliance and routing: each item is routed exactly as a single run would be,
-  including per-item backend choice under `auto` (a PNG may legitimately route to a different
+- M7 per-item routing: each item is routed exactly as a single run would be,
+  including per-item backend choice when no backend is named (two documents may route to different
   backend than a PDF in the same batch; each inner response carries `backend.id`). No batch-level
   cache of routing decisions that could widen the resolved backend set.
 - M8 honest aggregation: `summary` carries `total / succeeded / failed`, `duration_ms`,
@@ -160,9 +160,9 @@ runtime-checkable Protocol, NOT in the required eight:
 most backends have no multi-document call, and a required stub that says "unsupported" teaches
 nothing (the precedent `LivenessProbeAdapter` later copied, DECISIONS D-v7-1).
 
-Dispatch rule (`api._native_adapter`): native iff the backend is directly named (not `auto`, not
+Dispatch rule (`api._native_adapter`): native iff the backend is directly named (not null, not
 a strategy), `descriptor.batch.native` is truthy, the adapter implements the Protocol, >=1 item
-is non-skipped, and the live count is within `batch.max_items`; otherwise platform fan-out.
+exists, and the item count is within `batch.max_items`; otherwise platform fan-out.
 - M10 observational equivalence: both paths build the envelope through the same
   `runner.assemble_result`; the result differs only in timing/cost and `transport` provenance.
   Per-item failures inside a native batch -- vendor-reported or raised by the adapter's own
@@ -177,12 +177,7 @@ is non-skipped, and the live count is within `batch.max_items`; otherwise platfo
   `credentials.DEFAULT_NATIVE_BATCH_DEADLINE_MS` (1h); override via `run_batch(deadline_ms=)`
   or `--deadline SECONDS`. The HTTP surface has no override because `POST /v1/batch` never
   reaches native dispatch -- it always drives the platform pipeline.
-- Compliance on the native path: `policy` is applied per item via `build_request` (the same
-  spelling the platform path's `run()` uses), and the resulting `req.compliance` is enforced
-  with the same `Router.check_eligible` call the named-backend single run uses, before
-  `submit_many` sees a document. Because every item in a batch shares identical policy and
-  overrides, `req.compliance` is identical across `reqs`, so the eligibility check runs ONCE on
-  the first request as a stand-in for the whole batch (`api._run_native`).
+- The native path applies the same shared request options to every item before `submit_many`.
 - Reference implementation: anthropic-claude via the Message Batches API (submit, poll
   `processing_status`, fetch `results_url` JSONL; per-item succeeded/errored maps 1:1 onto M6),
   built against respx fixtures and verified only in the keyed live lane. Grade ladder:
@@ -241,7 +236,7 @@ Surfaces
   `--max-items` or `--max-jobs`; 3 cannot run at all (credentials, policy, `ScopeRefused`,
   or a native `submit_many` `RetryableError`/deadline); 6 interrupted with `OPENREADING_LEDGER` set (batch keys on the var, not on an armed run)
   (batch-level resume is not supported, so no run id is named).
-- Python: `openreading.run_batch(sources, backend="auto", *, strategy, jobs=1, max_jobs=32,
+- Python: `openreading.run_batch(sources, backend=None, *, strategy, jobs=1, max_jobs=32,
   max_items=200, deadline_ms=None, env_file, idempotency_key, on_progress, on_preflight,
   **request_overrides) -> batch-result dict`; `run()`'s signature is untouched.
 - Server: `POST /v1/batch` with `{"documents": [<request.document>...], <shared request

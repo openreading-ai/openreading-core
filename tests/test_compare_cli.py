@@ -10,7 +10,6 @@ import pytest
 
 from openreading.cli import app, main
 from openreading.readiness import BackendReadiness
-from openreading.types.errors import ScopeRefused
 from tests.fakes import make_envelope
 
 
@@ -152,14 +151,6 @@ def test_fanout_save_dir_roundtrips(tmp_path, capsys, fake_run) -> None:
     # mode (b) reduces to mode (a): the saved envelopes re-compare
     capsys.readouterr()
     assert main(["compare", str(out / "pymupdf.json"), str(out / "tesseract.json")]) == 0
-
-
-@pytest.fixture
-def fake_run_compliance_refused(monkeypatch):
-    def _run(source, *, backend, **kw):
-        raise ScopeRefused("no compliant backend for this request")
-
-    monkeypatch.setattr(app.api, "run", _run)
 
 
 @pytest.fixture

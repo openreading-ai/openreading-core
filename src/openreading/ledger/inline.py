@@ -118,18 +118,8 @@ class InlineExecutor:
     diverge from its own plan mid-run — there is no second worker to disagree with the pinned set)
     but the mechanism and its test exist, per AC-14's T1 row.
 
-    ZDR:
-    `internal/design/ledger.md` §9.4 requires zero retained CONTENT for a ZDR-flagged backend's own
-    step — `exec` still writes the ordinary `attempted`/terminal journal records (topology, digests,
-    costs — audit metadata, not content) but never calls `blobs.put(...)` for that step. Originally
-    a single whole-run boolean (`zdr=`, precomputed from the run's registry-wide eligible set at arm
-    time) suppressed the blob write for EVERY step of the run — so an unrelated, never-dispatched
-    ZDR-capable backend merely being eligible for the request's document type silently suppressed a
-    completely unrelated backend's own successful payload too. `_is_zdr_backend` (below) replaces
-    that with a per-step lookup, straight off the backend `req.backend_id` actually names — a step's
-    payload is suppressed iff the backend that ACTUALLY produced it is ZDR-flagged, never because
-    some other, merely-eligible backend elsewhere in the registry happens to be. `ledger_root`
-    (also new this round) lets a live "ok" dispatch tighten the run's own stamped retention ceiling
+    Armed execution stores successful payloads in the configured blob store. Replay verifies each
+    content digest before returning recorded output. Missing or modified payloads refuse replay.
     """
 
     def __init__(
@@ -225,15 +215,9 @@ class InlineExecutor:
         object reconstructs it from this JSON itself, exactly as it would from any other
         `ctx.exec` payload).
 
-        `BlobStore.get` raises `OSError` when the blob is not on disk, which now means only that
-        someone pruned the ledger root. It is turned into a TerminalError carrying
-        `payload_missing`, so a resume reports it rather than crashing."""
-        if result.status == "ok" and result.payload is None:
-            raise TerminalError(
-                "zdr_payload_not_retained: a ZDR-flagged backend's response body is never "
-                "retained (§9.4); replay cannot reconstruct it",
-                backend_code="zdr_payload_not_retained",
-            )
+        `BlobStore.get` raises `OSError` when the blob is absent or fails its digest check. It is
+        turned into a TerminalError carrying `payload_missing`, so resume reports the unusable
+        record rather than trusting changed bytes or crashing."""
         if isinstance(result.payload, BlobRef):
             assert self._blobs is not None, "a recorded BlobRef payload needs an armed blob store"
             try:

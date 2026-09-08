@@ -1,4 +1,4 @@
-"""OpenReadingRequest: the pydantic mirror of request.v0.2.json.
+"""OpenReadingRequest: the pydantic mirror of request.v0.3.json.
 
 `async` is a Python keyword, so the field is `async_` with alias `"async"`; build requests
 with `OpenReadingRequest(..., **{"async": {...}})` or set `.async_`. `to_schema_dict()`

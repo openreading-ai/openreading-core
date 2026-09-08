@@ -21,12 +21,12 @@ Hook point and surfaces (wiring facts)
 --------------------------------------
 - The strategy layer engages in exactly one place: inside `openreading.api.run_request`, after
   validation and before any backend is dispatched, and only when a strategy actually engages
-  (`backend.id: "strategy:<name>"`, or `defaults.strategy` on an `auto` request). The legacy
-  paths are the literal old code — the `auto` arm still calls `router.executor.execute_plan`,
+  (`backend.id: "strategy:<name>"`, or `defaults.strategy` on a null-backend request). The legacy
+  paths are the literal old code. The null-backend arm still calls `router.executor.execute_plan`,
   the named arm still calls the driver directly, and a named-backend run imports nothing from
   `openreading.strategies` (pinned by a subprocess test). "No file ⇒ no change" is a
   byte-identical-output test obligation, never an assumption that this engine "reduces to" the
-  old behaviour through shared code. `execute_plan` stays the executor for the no-strategy `auto`
+  old behaviour through shared code. `execute_plan` stays the executor for the no-strategy chain
   path and for `openreading route --run`, which builds a `RoutePlan` and never reads the config.
 - `strategy:` is a documented reserved prefix of the free-string `backend.id` (no request-schema
   bump); `strategy:none` forces the legacy path. Both `make_adapter` call sites in
@@ -237,26 +237,24 @@ Route, decide, use, leaf, page granularity
   `document.text` stays rung 0's. No keep-best across rungs, and no forward escalation of a
   failed rung either: a rung that raises (or returns non-ok) `break`s the walk and the pages
   stitched so far from earlier rungs are returned as they stand — only gate-failing PAGES move
-  forward to the next rung. Every rung's cost is summed (BL-120).
+  forward to the next rung. The trace records every rung that ran.
 
 Decision layer, judge, masking, replay
 --------------------------------------
 - Enablement is two keys, resolved ONCE per walk so every decision point binds identically: a
   file `decider:` block AND `OPENREADING_LLM_DECIDER`. No request field can enable it. Downgrade
   reasons, in priority: no block → pure engine (no annotation); block but env off →
-  `env_disabled`; env on but the decider the decider backend outside the resolved set (checked via
-  `Router.check_eligible` against request ∪ policy compliance) → `compliance`; enabled + eligible
+  `env_disabled`; env on but the decider backend outside API-key scope → `scope_denied`; enabled
   but no `DeciderPort` wired → `unavailable`; at call time `malformed` (port raised, or an
   out-of-set action) or `refusal` (`None`). `timeout` is a member of the decider's
   `DOWNGRADE_REASONS` but has no producer: the port call runs via `to_thread` with no per-call
   deadline (deferred work), so a hanging port is bounded only by the enclosing walk deadline.
   Every downgrade resolves to the deterministic engine default — an LLM outage can never fail a
   parse. The action space is a closed candidate
-  list; the engine re-validates whatever the port returns and meters each call as a
-  `decider_call` attempt at its backend-reported cost. The port sees signals, candidates, intent
-  and remaining time budget only — never compliance (rail 4).
-- Judge (`pick: best` + `judge:`): per-node enablement with the SAME env gate and compliance
-  filter, keyed on the judge block's own backend; the port compares ONE positional pair with
+  list; the engine re-validates whatever the port returns and records each call as a
+  `decider_call` attempt. The port sees signals, candidates, intent, and remaining time.
+- Judge (`pick: best` + `judge:`): per-node enablement with the same environment and scope gates,
+  keyed on the judge block's own backend; the port compares one positional pair with
   sources hidden (labels A/B, capped excerpt, masked `typed_fields`); the engine runs both
   orderings (position-bias guard), calls an inconsistent verdict a tie broken like the engine
   comparator, and runs single elimination in listed order (n−1 pairs), metering `judge_call`s.
@@ -268,7 +266,7 @@ Decision layer, judge, masking, replay
   `json.dumps(orchestration)`.
 - Replay (`run_strategy(replay=<decisions>)`, `openreading replay --trace`) is a decision MODE,
   not a live port: every decision point takes its logged choice by `decision_id`
-  (`decider: "trace"`), no LLM is called, and the env / compliance gates are bypassed. A point
+  (`decider: "trace"`), no LLM is called, and environment gates are bypassed. A point
   absent from the trace, or whose logged choice is no longer a candidate, takes the engine
   default traced `trace_missing`. The judge replays by logged winner backend. `replay=[]` is a
   valid empty trace (mode ON — everything `trace_missing`), distinguished from `None` by
@@ -354,16 +352,15 @@ Concurrency contract
 
 The orchestration block
 -----------------------
-`trace.orchestration()` yields: `strategy`, `config_hash` (compliance-aware — it folds in the
-effective compliance block, the `RouterConfig`, and a per-backend eligible/dropped digest, so two
-runs with identical pruned trees compiled under different postures hash differently),
+`trace.orchestration()` yields: `strategy`, `config_hash` (the compiled tree, router configuration,
+and participating descriptor digests),
 `chosen_backend`, `fallback_depth` (rungs advanced past before the returned result —
 implemented as the count of non-`succeeded` attempts, `openreading.strategies.trace`), `outcome`
 (`ok` | `degraded`), `attempts[]` (the full trail), `decisions[]` (decision points — gate
 bands, decide nodes, judges — plus one `point: "route"` rule-evaluation record per route node;
 never plain attempts), and when non-empty `dropped[]`
-(compliance/capability prunes — NOT attempts — carrying the
-router's `DropReason {backend, stage, code, detail}` verbatim), `pages[]`, `merge[]`,
+(scope prunes, which are not attempts, carrying the router's
+`DropReason {backend, stage, code, detail}`), `pages[]`, `merge[]`,
 `webhook_dropped[]`; plus `candidates[]` when `keep_candidates=True` (every completed non-winner
 parallel branch's full envelope, for `compare --from`; default off for payload size; cascade
 rungs are not retained — D-v4-14). Each attempt carries backend, category, node path / label,
@@ -765,8 +762,8 @@ def run_strategy(
     `os.environ`) — the second of the two enablement keys (decider.md §1).
 
     `run_id`/`executor` (Ledger T1, internal/design/ledger.md §5): `api.py`'s `run()`/`run_request()`
-    mint a `run_id` and construct an armed `InlineExecutor` (real `JsonlJournal`/`LocalFsBlobStore`/
-    `LocalFsKeyStore`) when `OPENREADING_LEDGER` is set, and pass both through. Every other caller
+    mint a `run_id` and construct an armed `InlineExecutor` (real `JsonlJournal` and
+    `LocalFsBlobStore`) when `OPENREADING_LEDGER` is set, and pass both through. Every other caller
     — every existing test included — omits them and gets `_WalkCtx.__post_init__`'s L1-preserving
     default: a fresh `run_id` and an unarmed `InlineExecutor(journal=NullJournal(), blobs=None)`.
 

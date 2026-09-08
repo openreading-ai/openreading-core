@@ -216,9 +216,7 @@ to your traffic. It costs labeling work, which is why it comes second.
 ### Mental model
 
 A dataset is a directory of case directories, and each case directory holds a `case.json` with the
-input plus `expected`. A policy is a short list of requirements a backend must meet, and the
-compliance gate drops every backend that fails one. The runner sends each case to one backend
-through the same compliance gate a normal run uses. The runner then scores only the dimensions
+input plus `expected`. The runner sends each case to the explicitly selected backend, then scores only the dimensions
 `expected` names, so a case with no expected tables is never scored on tables. The leaderboard
 repeats that for every backend and ranks them by mean score. `calibrate` and `compare --truth` reuse
 the same three scorers rather than carrying their own. Nothing feeds back into routing, and the
@@ -632,9 +630,8 @@ print(run_dataset(make_adapter("tesseract"), "mydata").summary())   # backend=te
 - There is one scoring path. `leaderboard` and `calibrate` call the same `run_case` and `score` a
   plain dataset run uses, so two harnesses can never disagree about one document. See
   `openreading.evals.leaderboard`.
-- The compliance gate runs before every case, and a refusal is that backend's scored error. Without
-  this rule a benchmark could send protected health information to a backend the policy forbids.
-  See `openreading.evals.runner.run_case`.
+- Each leaderboard backend is explicit. The harness records adapter failures as scored errors and
+  continues through the remaining cases. See `openreading.evals.runner.run_case`.
 - Unscored is not zero. A case naming no recognized dimension scores `None` and leaves the mean, so
   a precise-looking number never reports a measurement that did not happen. See `scorers.score`
   and `DatasetReport.mean_overall`.
@@ -676,11 +673,11 @@ print(run_dataset(make_adapter("tesseract"), "mydata").summary())   # backend=te
 - `uv run python -m pydoc openreading.evals.scorers` describes the three scorers and the five
   dimensions.
 - `uv run python -m pydoc openreading.evals.leaderboard` states what the leaderboard never does.
-- `uv run openreading benchmark run --help` for every flag that changes what a public run
-  touches or costs, and `uv run openreading leaderboard --help` and
+- `uv run openreading benchmark run --help` for every flag that changes a public run, and
+  `uv run openreading leaderboard --help` and
   `uv run openreading calibrate --help` for the labeled-dataset path.
 - `uv run python -m pydoc openreading.evals.subset` for how a corpus is cut down,
-  `uv run python -m pydoc openreading.evals.preflight` for how the run is priced, and
+  `uv run python -m pydoc openreading.evals.preflight` for call-count estimates, and
   `uv run python -m pydoc openreading.evals.report` for how a finished run is read back.
 - `src/openreading/schemas/leaderboard-report.v0.1.json` is described in
   [JSON Schemas](../schemas/README.md), and `scripts/leaderboard_smoke.py` is the `make verify`

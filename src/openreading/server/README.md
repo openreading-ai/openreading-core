@@ -341,9 +341,7 @@ sample through `/v1/parse` and `/v1/batch`, asserts schema-valid responses, and 
   on the resolved path, so a symlink pointing outside that directory cannot escape it. The file is
   read at the gate, so no backend re-opens a path that could have been swapped meanwhile.
   `openreading.server.app._gate_document_path` enforces it.
-- Tokens, keys and compliance attestations come from the environment only, never a body or a flag.
-  A compliance attestation is a declaration by the operator, meaning whoever starts the process. It
-  states that a backend meets a requirement such as a signed business associate agreement (BAA).
+- Tokens and backend credentials come from the environment only, never a body or a flag.
   Nothing lands in `ps` or shell history, and no caller can attest on the operator's behalf.
 - A scope only narrows what the deployment's own `policy.backends` already resolves to. A directly
   named backend is checked at the door, before any adapter is built. An out-of-scope name therefore

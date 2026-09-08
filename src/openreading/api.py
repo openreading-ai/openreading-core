@@ -1,220 +1,93 @@
-"""Public one-call API — the Python surface contract. The submit→drive→normalize pipeline is
-exposed as `openreading.run()` / `run_batch()` / `route()` / `resume()` and is the single path
-the CLI (`cmd_parse`, `cmd_resume`) and the server (`/v1/parse`, `/v1/batch`, `/v1/jobs`)
-collapse onto, so the three surfaces cannot drift.
+"""Public one-call API for document execution, routing, batching, and resume.
+
+The CLI and HTTP server call this module, so every surface shares one execution path.
 
     import openreading
-    doc = openreading.run("loan.pdf", backend="reducto")          # named backend
-    doc = openreading.run("loan.pdf", backend="auto")             # route + execute the chain
-    doc = openreading.run("loan.pdf", strategy="main")            # == backend="strategy:main"
-    plan = openreading.route("loan.pdf")                          # plan only, no execution
+    doc = openreading.run("loan.pdf", backend="reducto")
+    doc = openreading.run("loan.pdf")
+    doc = openreading.run("loan.pdf", strategy="main")
+    plan = openreading.route("loan.pdf")
     env = openreading.run_batch(["invoices/"], backend="pymupdf", jobs=4)
-    doc = openreading.resume("7dbf6b71-adb5-4e90-9188-a184fdba9d05")   # a run id is a UUIDv4
-
-A bare `spec §N`, `plan §N`, `Open Questions §N` or `§N` below names a section of a design record
-in the private company repository, under `internal/design/`. See AGENTS.md, "The company repo".
-The shipped behaviour is what this module states, and the citation is maintainer provenance only.
+    doc = openreading.resume("7dbf6b71-adb5-4e90-9188-a184fdba9d05")
 
 Exports and return shapes
 -------------------------
-An envelope is the one JSON object a call returns. It carries the parsed `document` alongside the
-run's own record of it: `status`, `backend`, `usage`, `warnings`, and the `schema_version` that
-names the schema it validates against.
+An envelope is the schema-valid JSON object returned by a completed operation.
 
-- `run(source, backend="auto", *, strategy, config, operation, env_file, mime_type,
-  broker, transport, keep_candidates, deadline_ms, on_run_armed, **request_overrides) -> dict`
-  — a `response.v0.3` envelope. `**request_overrides` are top-level request fields
-  (`outputs`, `extraction_schema`, `features`, `pages`, `idempotency_key`, ...); `document`
-  and `backend` are refused there (`ValueError`, BL-105) because a stray forwarded kwarg once
-  silently ran a request against the wrong document.
-- `run_batch(sources, backend="auto", *, strategy, config, jobs=1, max_jobs=32, max_items=200,
-  deadline_ms, env_file, broker, transport, idempotency_key, keep_candidates,
-  on_progress, on_preflight, **request_overrides) -> dict` — a `batch-result.v0.1` envelope.
-- `route(source, *, config, operation, mime_type) -> RoutePlan` — `chosen`, `fallbacks`,
-  `dropped` ({backend_id: DropReason}), `terminal_reason`, `chain`, `eligible_ids`.
-- `resume_run(run_id) -> dict` (exported as `openreading.resume`).
-- Lower seams shared with the CLI/server, public by name: `build_request`, `run_request`,
-  `prepare_named_backend`, `materialize_document`. `openreading.config` carries `load`, `apply`
-  and `router_config`.
+- `run(source, backend=None, **options)` returns a `response.v0.3` envelope.
+- `run_batch(sources, backend=None, **options)` returns a `batch-result.v0.2` envelope.
+- `route(source, **options)` returns a `RoutePlan` without executing a backend.
+- `resume_run(run_id)` returns a response and is exported as `openreading.resume`.
+- `build_request`, `run_request`, `prepare_named_backend`, and `materialize_document` support
+  the CLI and server through the same lower-level seams.
 
-`config=` is a path to an `openreading.yaml`, a dict of that file's shape, or None to run the
-discovery order. `openreading.config` owns the grammar, the discovery order and the union rule;
-this module calls `load()` once per call and `apply()` once per request, before dispatch.
-
-`source` is a path, an http(s):// URL, or raw bytes — never a request dict. A path's MIME type is
-inferred from its extension (pdf/png/jpg/jpeg/tif/tiff/docx/xlsx/pptx), default
-`application/pdf`; an unidentified input resolves to no mime_type at all rather than to PDF
-(`openreading.derive.mime`, superseding D-v2-9's bytes default). A missing
-path raises `SourceNotFoundError` (an `OSError` with errno ENOENT, so callers format it like a
-real `FileNotFoundError`). URL inputs pass through untouched to backends that ingest URLs
-natively (`descriptor.accepts_url`) and are downloaded to bytes for the rest
-(`materialize_document`, D-v2-13: httpx, 60 s timeout, 100 MB cap, HTTP errors through the
-shared status mapping); offline tests inject an httpx `transport`, and no default path performs
-network I/O.
+`source` accepts a path, an HTTP URL, or raw bytes. It never accepts a request mapping.
+`openreading.derive.mime` resolves an explicit type, then content, then filename. Unknown content
+keeps `mime_type=None`, because inventing `application/pdf` can produce a confident wrong parse.
+A missing path raises `SourceNotFoundError`, which retains ordinary `OSError` attributes.
 
 Backend resolution
 ------------------
-`backend` is a registry slug, `None`, or `"strategy:<name>"` — a reserved prefix on the free-
-string `backend.id`, not a wire-schema change (D-v3-2); `strategy=` is sugar for it and
-`"strategy:none"` is the escape hatch to the plain router. `None` resolves through the three
-selection rules (`policy.backends` in written order, else `pymupdf`) and executes the resulting
-chain (`router.executor.execute_plan`); an empty plan raises
-`ScopeRefused` (the router eliminated every backend — a refusal, not a runtime failure;
-`PlanExhaustedError` is reserved for a non-empty plan whose backends all failed). An
-`openreading.yaml` is discovered on EVERY request (explicit `config=` -> `OPENREADING_CONFIG` ->
-`./openreading.yaml`, first hit wins), because its `policy:` block gates a named backend exactly
-as it gates a strategy. Only the STRATEGY half of that file is built lazily, for an `auto` or
-`strategy:` request, so a plain named-backend run never imports the strategy package at all
-(guardrail T10) and `auto` + `defaults.strategy` in that file engages the strategy. No file and
-no strategy means byte-identical legacy behavior. The four presets (`cost_saver`, `max_accuracy`,
-`fast`, `offline_first`) work with no file.
+`backend` accepts a registry slug, `None`, or the reserved `strategy:<name>` prefix.
+`strategy=<name>` is sugar for that prefix. `strategy:none` forces the ordinary resolved chain.
+When no backend is named, `policy.backends` supplies the chain in written order.
+When that list is absent, the chain contains only `pymupdf` as the configuration-free default.
+An empty or unknown-only list raises `ScopeRefused` before any backend runs.
 
-A directly-named backend is still compliance-gated against the request (`Router.check_eligible`
--> `ScopeRefused`), then credential-gated (`MissingCredentialsError` naming the exact vars
-plus the descriptor's signup URL) — naming a backend never bypasses the request's own
-constraints, on the single, native-batch, or server path alike.
+`policy.backends` is a default for automation, not an enforcement boundary for a named backend.
+The server's `OPENREADING_API_KEY_SCOPES` setting supplies that boundary for separate callers.
+Every active scope intersects with the resolved chain, and an empty intersection returns 403.
 
-The `policy:` block of that file is where a deployment's backend list is written, and it is the
-only place. One key: `backends`, a flat list of ids in preference order, which becomes the
-deployment-level `RouterConfig`. A caller who builds a policy in memory passes the file's own
-shape, `config={"version": 1, "policy": {"backends": [...]}}`, and gets the identical validation
-a file gets.
+An `openreading.yaml` comes from explicit `config`, `OPENREADING_CONFIG`, or the working directory.
+The server disables working-directory discovery. A malformed file raises `ConfigError` before
+dispatch, including an unknown policy key or a value with the wrong type.
 
-`openreading.config` carries the discovery order and the intersection rule, and the
-`strategy-config` v0.4 schema carries the grammar: the block is a closed, typed object, so an
-unknown key or a value of the wrong type is refused before a single key is read. A block that
-fails raises `ConfigError` from `openreading.config.load`, exit 3, naming the file and the key.
-This is validation of SHAPE only, and it matters because the alternative is silent: the split
-used to happen before anything validated the dict, so a misspelled key was dropped without a word
-and the restriction the operator wrote did not exist. `backend: [pymupdf]` for `backends:` would
-mean every backend rather than one, with `dropped` empty and exit 0.
+Execution and errors
+--------------------
+A named backend is credential-checked and executed once. A resolved chain tries its entries in
+order and records each failure before continuing. Strategies execute their compiled orchestration
+tree and preserve the same caller scope at every dispatch.
 
-Exceptions
-----------
-Every class named here is importable from the top level (`from openreading import
-ScopeRefused`), which is where a caller branching on the type will look for it. The homes are
-unchanged: `openreading.types.errors` defines all of them, and `ConfigError` lives in
-`openreading.config`, which owns the file it names.
+`KeyError` means the named backend is unknown. `UnknownStrategyError` means a strategy is absent.
+`ScopeRefused` means the caller permitted no runnable backend. `MissingCredentialsError` names
+the missing variables. `PlanExhaustedError` carries the trail from a non-empty failed chain.
+Adapter failures retain their typed `TerminalError`, `RetryableError`, or feature error taxonomy.
 
-`KeyError` unknown backend slug · `ValueError` reserved override · `ConfigError` (an
-`openreading.yaml` that will not load, a malformed `policy:` block included; CLI exit 3, server
-startup failure) · `SourceNotFoundError` ·
-`UnknownStrategyError` (server 400 / CLI exit 2) · `ScopeRefused` (403 / exit 3) ·
-`MissingCredentialsError` (424 / exit 3) · `PlanExhaustedError` (`auto` only: every rung failed;
-carries the attempt trail) · `TerminalError` (any adapter failure, INCLUDING an unexpected
-exception out of `submit()`/`poll()`/`normalize()`, wrapped after `auth_hinted` redaction so a
-plain KeyError never escapes as an undocumented crash — BL-99/BL-106) · `RetryableError` (a
-directly-named backend's rate-limit exhaustion or a poll loop past its deadline — it has no next
-rung, so it surfaces under its own type; the `auto` path folds the same condition into
-`PlanExhaustedError` via D-v2-7.2) · `batch.runner.JobsLimitError` (`jobs > max_jobs`) ·
-`LookupError` / `ledger.header.HeaderMismatch` (resume, below).
+`deadline_ms` applies to a directly named backend. Strategies manage their own node budgets.
+`run_batch(deadline_ms=)` overrides the native batch deadline. An explicit zero remains zero.
+Library and CLI calls do not use the server's bounded idempotency result cache.
 
-Time budgets
-------------
-`deadline_ms` on `run()` applies to a DIRECTLY-NAMED backend only (default
-`credentials.DEFAULT_DEADLINE_MS`, 2 minutes — too short for some hosted async flows such as
-Textract's; the CLI's `parse --deadline` is the same knob). `auto` and strategy dispatch manage
-their own per-node budgets. `run_batch(deadline_ms=)` overrides the native-batch budget only
-(default `DEFAULT_NATIVE_BATCH_DEADLINE_MS`, 1 hour — the one dispatch shape that submits one job
-and polls a vendor-side batch documented as "most <1h"). An explicit `0` is honoured as
-"fail fast": resolved values are compared with `is not None`, never `or`, because truthiness once
-silently turned `0` back into the default (BL-138).
-
-No idempotency cache in library calls (D-v3-3): `run()` / the CLI pass `cache=None` so a library
-call always does the work; the server owns the only `BoundedResultCache` and passes it to
-`run_request` for the `auto` chain. Silent 15-minute memoization inside a library call is a
-footgun, and a replayed response would carry the original run's `usage` counters into a batch
-total describing work nobody did.
-
-Batch semantics (`run_batch`)
------------------------------
-Intake is by FORM: files, directories, globs and URLs are resolved (`batch.sources`) against the
-effective format set — a named backend's own `input_formats`, or the union across every READY
-backend for `auto` / `strategy:` — and an unsupported file becomes a `skipped` item with a
-reason, never a crash. `jobs` is bounded BEFORE intake: `<= 0` clamps to 1 (echoed as the
-corrected value), `> max_jobs` raises `JobsLimitError` rather than reaching an unbounded thread
-pool; a named backend may cap it further via `descriptor.batch.max_concurrency` (CPU-bound
-tesseract), and only the capped value reaches `request.jobs` — the CLI surfaces the reduction on
-stderr, so a Python caller who needs the same signal compares its own `jobs` against that field.
-`max_items` caps expansion. Dispatch is native iff the whole batch resolved to one
-named backend whose descriptor declares `batch.native`, which implements `NativeBatchAdapter`,
-with >= 1 live item and no more than `batch.max_items`; otherwise platform fan-out composes
-`run()` per item. The envelope is observationally equivalent either way (M10), with
-`items[].transport` saying which. On the platform path a per-item failure is isolated into that
-item's `error` and never raised (M6); on the native path a batch-level failure out of
-`submit_many` / `run_to_completion` / `normalize_many` propagates like a single `run()` error,
-because a named backend has no next rung. `policy` is enforced on the native path too (BL-98):
-every item shares identical compliance, so checking the first stands for the batch.
+Batch semantics
+---------------
+Batch intake expands visible files, directories, globs, and URLs without filtering by format.
+Every source is dispatched. A backend refusal becomes a failed item with its original reason.
+`jobs` is bounded before intake, and `max_items` caps the expansion count.
+Native batch dispatch requires a named backend implementing `NativeBatchAdapter` within its limit.
+All other batches fan out through `run`, isolating failures in their individual items.
 
 Environment variables read by this module
 -----------------------------------------
-- `OPENREADING_LEDGER` — a DIRECTORY path. Set: arms the Ledger execution plane
-  (`_arm_ledger` builds an `InlineExecutor` over `<dir>/<run_id>.jsonl` + `blobs/` + `keys/`),
-  which is what makes `resume` possible. Unset: `_arm_ledger` returns `None` and the run takes
-  the zero-delta path (`NullJournal`, no blob store) — byte-identical stdout/stderr/exit code to
-  a build from before the Ledger existed, asserted by test. Deliberately no CLI flag: arming is
-  env and config only (`internal/design/ledger.md` §10). Coverage — `_arm_ledger` has exactly
-  two call sites, `_run_strategy_request` and `resume_run`, so ONLY strategy dispatch journals:
-  `--strategy X`, `auto` + `defaults.strategy`, `/v1/parse` resolving to a strategy, and a
-  `--strategy` batch (one run per item via `run()`). A named backend, `auto` without
-  `defaults.strategy`, `strategy:none`, the `/v1/jobs` store and a NATIVE batch journal nothing
-  while appearing armed — know which row you are on before relying on a run being resumable.
-  Back up `*.jsonl` and `blobs/`, never `keys/` alongside them: erasure works by destroying the
-  per-run key, and holds only to the degree no other copy survives.
-- `OPENREADING_ALLOW_PRIVATE_URLS` — read by `_download` (`materialize_document`'s own URL
-  fetch). Unset (default): before any request leaves this process, `_assert_public_http_url`
-  refuses a non-http(s) scheme and a host that resolves to a loopback/private/link-local/reserved
-  address (cloud metadata endpoints included) — `unsupported_input` / `url_not_public`
-  respectively. Set to ANY non-empty value, `0` and `false` included, it skips that whole check,
-  scheme included, for a deployment whose document store is deliberately intranet-only. Comment
-  the variable out or unset it to keep the check. No value of the variable turns the skip off. The
-  operator is trusted to have already constrained which URLs can reach `run()`/`route()` in that
-  case. The connection is then PINNED to the address that check vetted (original host carried in
-  `Host` and SNI), so a DNS answer that changes between the check and the connect — rebinding —
-  cannot redirect it, and a redirect is refused rather than followed for the same reason.
-- `env_file=` -> `credentials.load_dotenv`: loads `KEY=VALUE` lines WITHOUT overriding an
-  already-set process variable (an exported shell var always beats the file); a missing file is
-  a no-op. Loaded ONLY when the argument is given (`if env_file:` in `run()` / `run_batch()`):
-  with `env_file=None` — the default — this module reads no file at all, and only the exported
-  environment applies. The `./.env` default belongs to the CLI (`--env-file`), which calls
-  `load_dotenv` itself. A library call never picks up a cwd file implicitly, so importing
-  openreading from an unrelated project cannot silently adopt that project's keys. There is no key
-  argument anywhere — credentials never travel on the command line or in a call.
-- Read indirectly: backend credentials via `EnvCredentialBroker` (`OPENREADING_<SLUG>_<KEY>`
-  beats the service-native name; `OPENREADING_CREDENTIALS_REF_ALIASES` allow-lists
-  `credentials_ref: "env:<alias>"`, unset = no alias accepted — see `openreading.credentials`);
-  `OPENREADING_CONFIG` via `strategies.loader`; `OPENREADING_LLM_DECIDER` via
-  `strategies.decider` (the second key of the decider's two-key gate).
+`OPENREADING_LEDGER` names a directory that stores every strategy document and full response in
+plaintext. It creates the journal, header, and `blobs/` entries required by resume.
+Nothing here encrypts, expires, or deletes that data. The operator owns its storage policy.
 
-Resume contract (`resume_run`)
-------------------------------
-Takes ONLY the run id — every other option comes from the recorded run, never the call
-(`internal/design/ledger.md` §10). Re-derives the run's identity from the LIVE
-`openreading.yaml` + registry, compares it with the header written at first arm
-(`ledger.header.compare_header`), and on any hard-field mismatch raises `HeaderMismatch` BEFORE
-touching the journal — refusing by name rather than silently re-driving under a fresher config.
-On a match, the same compiled strategy re-runs against the existing journal: every step already
-terminal replays byte-identical with zero network; anything unreached executes for real. The
-request is rebuilt from the header's encrypted `document` blob + plaintext `slim_request`
-(`document.url` is treated as a secret — routinely a presigned URL — and lives in the blob store,
-never the sidecar; `document.password` / `async.webhook_url` are never persisted). `LookupError`
-when `OPENREADING_LEDGER` is unset or no header exists (CLI exit 3 for both)
-propagates once the run's key is shredded.
+`OPENREADING_ALLOW_PRIVATE_URLS` disables public-address validation when set to any non-empty value.
+Without it, URL materialization refuses private destinations, redirects, and oversized responses.
+The connection is pinned to the vetted address to prevent DNS rebinding between validation and use.
 
-Decisions recorded for this module (durable, one line each)
-------------------------------------------------------------
-- D-v2-9: `run()` takes a path/bytes/URL and returns a schema dict; the CLI collapses onto it
-  with zero flag changes — one execution path, so surfaces cannot disagree.
-- D-v2-13: one shared `materialize_document` helper; URL passthrough only where the descriptor
-  declares `accepts_url` — avoids every adapter re-implementing (and mis-implementing) download.
-- D-v3-2: `strategy:` is a reserved `backend.id` prefix, recognized before any registry lookup —
-  no request-schema bump, and `make_adapter("strategy:x")` can never be attempted.
-- D-v3-3: no idempotency cache outside the server (footgun + phantom batch cost, above).
-- D-v2-7.2: a `RetryableError` reaching the executor means "backend exhausted" -> next rung;
-  retry policy lives in one place (`router.driver`), not duplicated per caller.
-- D7: `policy.backends` is router config, not a request field. Every source of an allow-list
-  intersects and none widens, so the resolved set only ever narrows.
-- Guardrail T10: no strategy import on the named-backend path (verified in a subprocess test).
+`env_file` loads key-value lines without overriding existing process variables. A library call
+with no `env_file` never discovers `.env` from the working directory.
+Backend credentials and aliases are read indirectly through `openreading.credentials`.
+`OPENREADING_CONFIG` is read through `openreading.config` during configuration discovery.
+
+Resume contract
+---------------
+Only strategy runs arm the ledger. Named backend runs and native batches do not journal.
+Resume rebuilds the request from the header and content-addressed plaintext blob store.
+Stored bytes are verified against each `BlobRef` digest before they are trusted.
+The live configuration and plan must match the recorded header, or `HeaderMismatch` refuses.
+Recorded terminal steps replay without network access. Previously unreached steps execute normally.
+Passwords and webhook URLs are excluded from the header and cannot be recovered on resume.
 """
 
 from __future__ import annotations
@@ -481,7 +354,7 @@ def _download(url: str, *, transport=None) -> bytes:
 def materialize_document(req: OpenReadingRequest, descriptor=None, *, transport=None):
     """If the document is a URL and the target backend can't ingest URLs natively (accepts_url),
     download it to bytes so the backend can run. Backends that accept URLs get the URL untouched.
-    `descriptor=None` forces materialization (used for the auto path when any chain member needs
+    `descriptor=None` forces materialization when any resolved chain member needs
     bytes). Offline tests inject an httpx transport; no default path performs network I/O."""
     d = req.document
     if not d.url:
@@ -519,8 +392,8 @@ def _arm_ledger(*args, **kwargs) -> Executor | None:
     """`_arm_ledger_unguarded` with one guarantee added: every OSError it raises is reported as the
     ledger's, by name.
 
-    Arming is entirely filesystem work under `$OPENREADING_LEDGER` — creating the key and blob
-    stores, the header, the document blob — and it happens
+    Arming is entirely filesystem work under `$OPENREADING_LEDGER`, including the journal,
+    header, and document blob. It happens
     before any backend runs, so nothing else in this call can raise an OSError to be confused with
     it. Left bare, an unwritable or non-directory ledger root surfaced as `[strategy:s] error:
     PermissionError: [Errno 13] ...` at exit 1, the "unexpected error" rung, naming a path and an
@@ -616,9 +489,8 @@ def _arm_ledger_unguarded(
             # `document.url` is a secret-class field (§9.3, "routinely a presigned URL, forwarded
             # verbatim," unconditionally, not by size) that must never land in the plaintext
             # `slim_request` sidecar (`slim_request_dict` already strips it). Routed through the
-            # SAME per-run encrypted blob store a `bytes_base64` document's own bytes already use,
-            # so it earns the identical shred/erasure guarantee instead of persisting forever in a
-            # file `reap()` never touches.
+            # SAME blob store a `bytes_base64` document uses. This keeps the secret URL out of the
+            # plaintext header while preserving the document needed for resume.
             raw = req.document.url.encode("utf-8")
             digest = "sha256:" + hashlib.sha256(raw).hexdigest()
             document_ref = blobs.put(run_id, digest, raw, DOCUMENT_URL_MEDIA_TYPE)
@@ -679,7 +551,7 @@ def _run_strategy_request(
         # No openreading.yaml anywhere — the presets alone are the library (spec §2.8: presets
         # are normative and available configless, exactly as the Strategies page and
         # `strategy list` already treat them). An empty v1 config carries no policy/limits/
-        # defaults, so compilation sees only the request's own compliance.
+        # defaults, so compilation sees only the requested strategy.
         strategy_config = StrategyConfig(version=1)
     registry = build_registry()
     compiled = compile_strategy(
@@ -692,7 +564,7 @@ def _run_strategy_request(
         backend_allowlist=backend_allowlist,
         broker=broker,
     )
-    # materialize a URL to bytes if any eligible backend can't ingest URLs (mirrors the auto arm)
+    # Materialize when any backend in the resolved strategy cannot ingest URLs.
     if any(
         not (a := registry.get(bid)) or not a.descriptor.accepts_url for bid in compiled.eligible
     ):
@@ -739,14 +611,13 @@ def prepare_named_backend(
     transport=None,
     deadline_ms: int | None = None,
 ):
-    """Resolve a directly-named backend (not `auto`, not `strategy:<name>`) for execution:
-    construct its adapter, compliance-gate it against the request exactly as the `auto` router
-    would (a named backend does not get to skip the request's own compliance constraints —
-    GAP-1), materialize the document, build the RunContext, and credential-gate it. Shared by
+    """Resolve a directly-named backend for execution.
+
+    Construct its adapter, materialize the document, build the RunContext, and credential-check
+    it. This helper is shared by
     `run_request`'s named-backend branch (below) and the server's `submit_job` handler so the two
     call sites can't drift out of parity by hand-copying again (BL-91) — every caller gets the
-    identical compliance verdict and the identical `signup_url`-bearing credentials message for
-    the identical failure.
+    identical `signup_url`-bearing credentials message for the identical failure.
 
     `deadline_ms` (BL-153): forwarded to `build_run_context` so a caller holding its own real,
     already-resolved time budget can have it reach `ctx.deadline_ms` here too — the field an
@@ -765,8 +636,6 @@ def prepare_named_backend(
     broker = broker or EnvCredentialBroker()
     config = config or RouterConfig()
     adapter = make_adapter(backend)  # KeyError → caller maps to 404
-    # A directly-named backend is still subject to the request's compliance constraints — raise
-    # ScopeRefused (→ 403) rather than silently ignoring them.
     req = materialize_document(req, adapter.descriptor, transport=transport)
     ctx = build_run_context(req, adapter.descriptor, broker=broker, deadline_ms=deadline_ms)
     missing = missing_required(adapter.descriptor, ctx)
@@ -796,25 +665,23 @@ def run_request(
     on_run_armed: Callable[[str], None] | None = None,
     backend_allowlist: frozenset[str] | None = None,
 ) -> dict[str, Any]:
-    """Execute a fully-built request (backend.id names a backend, 'auto', or 'strategy:<name>').
+    """Execute a request whose backend id is a slug, `None`, or `strategy:<name>`.
     The server calls this with the RouterConfig + strategy config from its env; `run()` calls it
     with the config from a policy + a discovered openreading.yaml. `plain_info` (from the loader)
-    carries Plain-dialect gate provenance for `explain` (§9); absent, gates render flat. `cache` is
-    the caller's idempotency cache for the `auto` chain; the server owns one per app, the CLI and
+    carries Plain-dialect gate provenance for `explain`; absent, gates render flat. `cache` is
+    the caller's idempotency cache for the resolved chain; the server owns one per app, the CLI and
     `run()` pass none so a library call always does the work (D-v3-3). `deadline_ms` (BL-153,
     wired to a real caller in BL-169) is forwarded to `prepare_named_backend` for the named-backend
     branch only — `run()`'s own `deadline_ms` parameter and the CLI's `--deadline` flag on `parse`
-    now originate a real one; `auto`/strategy dispatch is untouched, it manages its own per-node
+    now originate a real one. Strategy dispatch manages its own per-node
     time budget instead.
 
     `backend_allowlist` is the CALLER's ceiling on which backends this request may reach (the
     server's per-token `OPENREADING_API_KEY_SCOPES` entry); None means unscoped. Every arm that
     picks its own backends reads it, which is all of them but the directly-named one:
 
-    - Both strategy arms — including the one an `auto` request takes when `defaults.strategy` is
-      configured, which is a strategy walk wearing an `auto` id and would otherwise be gated as
-      though the plain router had chosen.
-    - The plain `auto` arm, which prunes the router's CHAIN to the allow-list before executing it.
+    - Every strategy arm prunes its compiled choices before execution.
+    - The resolved-chain arm prunes the router's full chain before execution.
       A caller gating this one at the door can only ever check the router's first pick; the plan
       is chosen plus every fallback, and `execute_plan` walks all of it, so the backends behind
       the first pick were reachable by a request that named any of them and got 403.
@@ -823,17 +690,16 @@ def run_request(
     caller can gate it before the call.
 
     Raises KeyError (unknown backend), UnknownStrategyError, PlanExhaustedError, ScopeRefused,
-    ScopeRefused (the caller's allow-list leaves the walk, or the pruned `auto` chain, nothing to
+    ScopeRefused (the caller's allow-list leaves the walk or resolved chain nothing to
     run), TerminalError, or RetryableError (a directly-named backend's rate-limit exhaustion, or
-    router.driver's poll loop past its deadline/MAX_CONSECUTIVE_FAULTS — the `auto` path folds this
+    router.driver's poll loop past its deadline/MAX_CONSECUTIVE_FAULTS. The chain path folds this
     into PlanExhaustedError via execute_plan/D-v2-7.2 instead, since it can fall back to the next
     backend; a named backend has no next rung, so it surfaces here under its own type)."""
     broker = broker or EnvCredentialBroker()
     config = config or RouterConfig()
     backend = req.backend.id
 
-    # `strategy:<name>` — run the strategy; `strategy:none` forces the legacy path (ignore any
-    # defaults.strategy); otherwise `auto` + defaults.strategy engages that strategy (spec §1.3).
+    # `strategy:<name>` runs that strategy. `strategy:none` ignores any configured default.
     strat = (
         backend[len(_STRATEGY_PREFIX) :]
         if backend and backend.startswith(_STRATEGY_PREFIX)
@@ -888,7 +754,7 @@ def run_request(
             # The caller's ceiling, applied to the whole CHAIN — chosen plus every fallback — and
             # applied HERE, between routing and execution, because this is the last moment the set
             # of backends this request can reach is known and the first adapter has yet to be
-            # built. `auto` names no backend, so a check at the door can only ever speak for the
+            # built. A null id names no backend, so a check at the door can only speak for the
             # router's first pick; the twelve behind it were reachable, and a document that pymupdf
             # fails on walked straight into them.
             denied = sorted(i for i in plan.eligible_ids if i not in backend_allowlist)
@@ -896,9 +762,8 @@ def run_request(
             plan = plan.restrict_to(backend_allowlist)
             if plan.chosen is None:
                 # Fail closed. Nothing this caller may reach survived, so this is scope's refusal
-                # to make and not compliance's: the fix is the token's allow-list, and answering
-                # `compliance_refused` would send the operator to edit a policy that is not the
-                # problem. Never a 502 either — no backend was allowed to try, so nothing failed.
+                # to make. The fix is the token's allow-list. Never return 502 because no backend
+                # was allowed to try, so nothing failed.
                 raise ScopeRefused(
                     "this API key is not scoped to reach any backend eligible for this request "
                     f"(denied: {', '.join(denied)})",
@@ -987,10 +852,10 @@ def run(
     plumbing). Omitted (the default), a named backend resolves to `credentials.DEFAULT_DEADLINE_MS`
     (2 minutes), which is too short for some hosted async backends' ordinary workload. The CLI
     spelling of the same knob is `parse --deadline`, documented in `openreading.cli`. It has no
-    effect on `backend="auto"` or `strategy="..."` dispatch, which manage their own per-node budget.
+    effect on resolved-chain or strategy dispatch, which manage their own node budgets.
 
-    `on_run_armed` (Ledger T3, plan §4.4) is invoked once, with the run id, immediately after the
-    ledger arms. Only a strategy-dispatch path arms one, so a plain named-backend or `auto` run
+    `on_run_armed` is invoked once with the run id immediately after the ledger arms.
+    Only a strategy-dispatch path arms one, so a named-backend or resolved-chain run
     never fires it. It mirrors the optional-hook shape of `run_batch`'s own `on_progress` and
     `on_preflight`.
     """
@@ -999,11 +864,9 @@ def run(
         load_dotenv(env_file)
     if strategy is not None:
         backend = f"strategy:{strategy}"
-    # The openreading.yaml is read on EVERY path, because its `policy:` block gates a named
-    # backend exactly as it gates a strategy. The STRATEGY half of the file is built only when a
-    # strategy could engage — an `auto` request (defaults.strategy) or a `strategy:` id — so a
-    # plain named-backend run still never imports the strategy package (law P6, guardrail T10).
-    loaded = load_config_file(config)  # CLI/Python discover cwd; None → legacy path
+    # The file is read on every path so a null backend can resolve its configured chain. The
+    # strategy half is built only when a strategy could engage through null or `strategy:`.
+    loaded = load_config_file(config)  # CLI/Python discover cwd; None uses built-in defaults.
     strategy_file = None
     if backend is None or backend.startswith(_STRATEGY_PREFIX):
         from openreading.strategies.loader import build_config
@@ -1035,15 +898,21 @@ def _request_from_header(header: RunHeader, blobs: LocalFsBlobStore) -> OpenRead
     `slim_request` + `document` (see `ledger/header.py`'s module docstring for what's deliberately
     NOT recoverable this way — `document.password`/`async.webhook_url`, never persisted).
 
-    `header.document` holds EITHER a `bytes_base64` document's own bytes OR a URL-sourced
-    document's `document.url` string. Both are routed through the same encrypted blob store rather
-    than the plaintext `slim_request` echo. `header.document_is_url` tells the two apart (NOT
+    `header.document` holds either a `bytes_base64` document's bytes or a URL-sourced
+    document's `document.url` string. Both are routed through the content-addressed blob store
+    rather than the `slim_request` echo. `header.document_is_url` tells the two apart, rather than
     `media_type`, which for the bytes case is a caller-supplied, unvalidated `mime_type` that could
     collide with a sentinel value)."""
     body: dict[str, Any] = dict(header.slim_request)
     doc = dict(body.get("document") or {})
     if header.document is not None:
-        raw = blobs.get(header.document)
+        try:
+            raw = blobs.get(header.document)
+        except OSError as exc:
+            raise TerminalError(
+                f"recorded input payload is unavailable: {exc}",
+                backend_code="payload_missing",
+            ) from exc
         if header.document_is_url:
             doc["url"] = raw.decode("utf-8")
         else:
@@ -1266,7 +1135,7 @@ def _native_adapter(backend: str | None, resolved: list, broker: EnvCredentialBr
     """§7 dispatch rule → the adapter to use for a native batch, or None for platform fan-out.
     Native iff: a directly named backend (not a strategy, and not absent), its descriptor declares
     `batch.native`
-    truthy, it implements the NativeBatchAdapter protocol, there is >=1 non-skipped item, and the
+    truthy, it implements the NativeBatchAdapter protocol, there is at least one item, and the
     count is within `batch.max_items`."""
     from openreading.adapters.base import NativeBatchAdapter
 
@@ -1301,25 +1170,14 @@ def _run_native(
     deadline_ms: int | None = None,
     **request_overrides: Any,
 ) -> dict[str, Any]:
-    """Execute a whole batch through an adapter's native submit_many/normalize_many (§7). Per-item
-    results (NormalizedResponse | BatchItemError) map to succeeded/failed items with
-    transport="native"; skipped items are merged back in input order. A batch-level failure (e.g.
-    submit_many raising) propagates like any run() error. Envelope-equivalent to platform (M10).
+    """Execute a whole batch through an adapter's native submit and normalize methods.
 
-    A directly-named backend does not get to skip the request's own compliance constraints on this
-    path either (BL-98): `policy` is applied per item via `build_request` exactly like the platform
-    path's `run()` already does — closing a structural no-op, since `policy` is `run_batch`'s own
-    named parameter and previously could never reach here at all — and the resulting
-    `req.compliance` (from either the file's `policy:` block or the raw `compliance=` override
-    spelling) is
-    enforced with the same `Router.check_eligible` call `run_request`'s named-backend branch uses,
-    before `adapter.submit_many` ever sees a document. Every item in a batch shares identical
-    policy/overrides, so `req.compliance` is identical across `reqs` — checking the first stands in
-    for the whole batch.
+    Per-item results map to succeeded or failed items with `transport="native"`. A batch-level
+    failure propagates like any `run()` error. Every item shares the same policy and overrides.
 
     `deadline_ms` (BL-135): `run_batch`'s own override, forwarded here. None (the default) means
     `build_run_context` falls back to `DEFAULT_NATIVE_BATCH_DEADLINE_MS` rather than the generic,
-    two-minute `DEFAULT_DEADLINE_MS` every other, synchronous-feeling path uses — this is the ONE
+    two-minute `DEFAULT_DEADLINE_MS` every other synchronous path uses. This is the one
     dispatch shape in the whole codebase where a caller submits one job and then polls a
     vendor-side batch that the adapter's own descriptor documents as routinely taking up to an
     hour, so it gets its own, larger, still-overridable default rather than inheriting the generic

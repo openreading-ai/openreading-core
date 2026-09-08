@@ -3,8 +3,7 @@ demonstrable. `execute_plan` walks a RoutePlan chosen→fallbacks and returns th
 NormalizedResponse.
 
 Invariants:
-- It consumes ONLY the RoutePlan. It can never widen eligibility — the router already enforced
-  compliance (never-relaxed, fail-closed), so every backend here is already eligible.
+- It consumes only the `RoutePlan`, so the executor cannot invent another backend.
 - A plan carrying a caller allow-list (`RoutePlan.backend_allowlist`, set by `restrict_to`) has
   already had the chain pruned to it. Every chain member is re-checked against it here anyway,
   before the run context that resolves the vendor credential is built, and an out-of-scope member
@@ -16,8 +15,7 @@ Invariants:
   reaching here means the driver already exhausted same-backend backoff.)
 - The successful response is metered: `report_cost()` fills the `usage` counters the adapter left
   unset. A meter that raises degrades to a warning, never a failed run.
-- The successful response records the attempt trail in warnings[] (`fallback_used`), plus any
-  operator confirmation the responding backend's compliance eligibility rests on.
+- The successful response records the attempt trail in `warnings[]` (`fallback_used`).
 - Chain exhausted → PlanExhaustedError carrying the full trail.
 - Idempotency cache (bounded LRU + TTL) is consulted before submit and populated after success; a
   cache hit adds an `idempotent_replay` warning. Keyed by CONTENT, never by secrets and never by a

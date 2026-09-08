@@ -33,8 +33,8 @@ one of the seven shapes the picker table below groups the templates into
 (`hosted_api`, `hosted_sync_async`, `hosted_webhook`, `hosted_aggregator`,
 `self_hosted_endpoint`, `cloud_sdk`, `in_process`; e.g. `--template chunkr --type hosted_api`);
 a template/type pair outside that set is declined, never improvised -- fall back to the manual
-walkthrough starting at §1. Every honesty-graded field the generator writes (capabilities,
-channels, cost basis, compliance) takes its SAFEST value regardless of the template's own
+walkthrough starting at §1. Every honesty-graded capability and channel field takes its safest
+value regardless of the template's own
 researched descriptor, because a scaffold has verified nothing; every remaining gap carries a
 grep-able scaffold marker (the literal is `MARKER` in `tests/test_scaffold_sentinel.py`, not
 repeated here on purpose: that test scans this whole package and fails `make verify` on any line
@@ -121,9 +121,8 @@ Files to EDIT -- each guarded by a test that fails if you forget it:
     openreading.credentials         one line in the module docstring's "Per-backend reference"
                                     (a hand-written list; the generator prints a HAND reminder
                                     and does not edit it). Guard: reviewer eyes.
-    src/openreading/adapters/README.md  one row in each of the five Catalog tables (input
-                                    formats, install extra and env, compliance, cost and
-                                    limits, response channels), every value copied from the
+    src/openreading/adapters/README.md  one row in each Catalog table (install extra and env,
+                                    request limits, response channels), every value copied from the
                                     descriptor, plus the pasted `openreading backends` table
                                     re-run. Guard: reviewer eyes.
     tests/test_descriptor_specs.py  `EXPECTED_CRED_KEYS["<slug>"]`,
@@ -139,8 +138,8 @@ Files to EDIT -- each guarded by a test that fails if you forget it:
 Module docstring (mandatory, dense) -- the design record; a future agent must be able to
 re-derive every descriptor value from it. Record: what the backend is + which ops; the exact
 flow (endpoints, poll target, status vocabulary); channel posture (what is emitted, what is X
-and why); pricing/usage mapping; credential/env conventions; deliberate non-choices ("the API's
-X mode is NOT used because ..."); compliance fail-closed notes; and
+and why); usage mapping; credential/env conventions; deliberate non-choices ("the API's
+X mode is NOT used because ..."); and
 `Sources: <urls> (accessed YYYY-MM-DD)`.
 
 Client: a `Protocol` + a real httpx class.
@@ -636,14 +635,13 @@ coverage dip (add fault tests, never lower the floor), a descriptor schema viola
       not assumed from the shape of the code
 - [ ] every file in the §2 checklist created/edited
 - [ ] descriptor values traceable to the module docstring's primary sources (with dates)
-- [ ] compliance encoded fail-closed for anything unverified
 - [ ] no fabricated channel anywhere; X-channels warn when requested
 - [ ] live test skips cleanly without the key; runs against the real API with it
 - [ ] liveness: either a real probe (free, non-billing, declared + tested offline and live) or
       NO `liveness` block at all -- never a billed call, and never a guessed endpoint URL
 - [ ] `src/openreading/adapters/README.md` catalog rows added and the pasted `backends` table
       re-run
-- [ ] commit message records flow, channel posture, cost basis, and deliberate non-choices
+- [ ] commit message records flow, channel posture, and deliberate non-choices
 
 Known-honest caveat to state in the PR/commit: the `_Httpx*` real-network client is excluded
 from offline coverage by design; the first `make verify-live` run with real keys validates it

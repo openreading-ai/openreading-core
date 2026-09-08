@@ -34,8 +34,7 @@ from openreading.types.request import OpenReadingRequest
 
 _DURATION_UNITS = {"ms": 1, "s": 1000, "m": 60_000, "h": 3_600_000}
 
-# The caller allow-list drop. Stage 0, not 1 or 2: it is neither the compliance filter nor the
-# capability filter but a ceiling on the CALLER, applied to whatever those two already allowed.
+# The caller allow-list drop. Stage 0 marks API-key scope before any backend dispatch.
 # The code is the wire word the server answers with (403 `scope_denied`), so a trace and an
 # error body name the same thing.
 _SCOPE_CODE = "scope_denied"
@@ -103,13 +102,12 @@ def compile_strategy(
     - It runs before any adapter is constructed and before any credential is resolved, which is
       the property the allow-list is FOR: an out-of-scope backend must never get as far as having
       its vendor key read, let alone spent.
-    - It keeps the allow-list the same KIND of thing the compliance filter is — a subtraction from
-      the eligible set. A `strategy:<name>` id was previously exempt from the check entirely,
+    - It subtracts from the eligible set. A `strategy:<name>` id was previously exempt entirely,
       which made any strategy id (including the four presets, which need no config file and so are
       available to every caller of every deployment) a universal bypass of the allow-list.
 
     Never a widening: `backend_allowlist` only ever removes, so no scope can readmit a backend
-    compliance already dropped.
+    another filter removed.
     """
     router_config = router_config or RouterConfig()
     info = plain_info.get(name) if plain_info else None
@@ -259,9 +257,8 @@ def _compute_config_hash(
     than a reason to widen the identity.
 
     Never include `credentials_ref`, resolved credentials, or anything secret-bearing — every
-    input here is either the pruned tree (backend ids/config, no secrets), the compliance posture,
-    deployment-level compliance confirmations (backend ids only), or a backend's own descriptor
-    (public capability/compliance metadata)."""
+    input here is either the pruned tree, router settings, written policy, or public adapter
+    descriptors."""
     router_config_canonical = _canonical_router_config(router_config)
     participating_ids = set(plan.eligible_ids) | set(plan.dropped)
     descriptor_digests = sorted(
@@ -337,6 +334,14 @@ def _prune_node(
     """Return the node with dropped-backend leaves removed, or None if it collapses entirely."""
     if "backend" in node:
         slug = node["backend"]
+        if slug == "auto":
+            # NOT a backend id, so it is not an allow-list membership question. The removal set
+            # took `auto` off the request and out of the Plain dialect, but longhand still accepts
+            # it and `engine._resolve_backend` resolves it at dispatch against `ctx.eligible`,
+            # bounding the RESOLVED id by the caller's allow-list there. Deleting this branch as
+            # dead code made a scoped token's `auto` rung refuse with `denied: auto`, the literal
+            # string, instead of running whatever that token does permit.
+            return node
         if backend_allowlist is not None and slug not in backend_allowlist:
             # Checked against the allow-list DIRECTLY, not against `eligible`: an id the router
             # never ranked (an unknown slug, or one dropped for an unrelated reason) must still

@@ -86,16 +86,14 @@ Per-backend reference
             self-hostable (AGPL)
   pulse     [pulse]     auth: PULSE_API_KEY   config: none   ops: extract
             limits: dual response shape (>5MB / 70pp returns a 1-hour result URL); NO per-element
-            confidence; no-train UNVERIFIED -> fails closed
+            confidence
   nuextract [nuextract] auth: NUEXTRACT_API_KEY (or NUMIND_API_KEY)
             config: NUEXTRACT_BASE_URL (on-prem platform)   ops: extract, parse
             limits: typed-template extraction (template != JSON Schema, passed verbatim) +
-            NuMarkdown parse (markdown only, NO blocks/bboxes); bytes intake only; no-train
-            UNVERIFIED -> fails closed
+            NuMarkdown parse (markdown only, NO blocks/bboxes); bytes intake only
   open-ocr  [open-ocr]  auth: OPENOCR_API_KEY   config: OPENOCR_ENGINE (default openocr/tesseract)
             ops: parse   limits: OCR aggregator (~20 engines behind one API); plain text only (NO
-            blocks/bboxes); per-page USD debit on every response (cost basis BILLED); 10MB body
-            cap; no-train UNVERIFIED -> fails closed
+            blocks/bboxes); 10MB body cap
   anthropic-claude [anthropic-claude]   auth: ANTHROPIC_API_KEY   config: ANTHROPIC_MODEL (opt)
             ops: parse, extract   limits: native-PDF ~100 pages / 32MB ceiling -> `doc_too_large`
   aws-textract [textract]   auth: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN (opt,
@@ -116,11 +114,11 @@ Per-backend reference
   google-gemini [google-gemini]   auth: GEMINI_API_KEY   config: GEMINI_MODEL (opt,
             default gemini-3.6-flash)   ops: parse, extract
             limits: INLINE stateless Interactions; PDF bytes or Gemini Files URI; <=50MB/1000pp;
-            whole-document Markdown has no native page attribution; dollar cost UNKNOWN
+            whole-document Markdown has no native page attribution
   mistral-ocr [mistral-ocr]   auth: MISTRAL_API_KEY   config: MISTRAL_OCR_MODEL (opt,
             default mistral-ocr-latest)   ops: parse, extract
             limits: INLINE OCR/Document AI; public URL or base64 bytes; native Markdown, blocks,
-            bounds and confidence; cost ESTIMATED per processed page
+            bounds and confidence
 textract and google-document-ai use IAM keypairs / ADC, not API keys — their descriptors say
 `byo_mode: cloud_credential` (D-v2-6.1b); the per-key truth is always `credentials_spec`.
 
@@ -139,7 +137,7 @@ Actionable failures
     credentials). The provider's own response body is DROPPED, not appended: providers have been
     seen echoing the rejected key back inside it. Never retried, never a silent fall-through.
   * `doc_too_large` — the document exceeds the provider's size/page limit (HTTP 413 or an adapter
-    ceiling); the message carries the limit and the `auto` chain falls back to a backend with a
+    ceiling); the message carries the limit and the resolved chain falls back to a backend with a
     higher ceiling.
   * Every other failure message is redacted (`secret_values` + `redact`, `***`, longest-first so
     overlapping secrets leave no fragments) before it reaches any surface — CLI, HTTP, batch trail
@@ -155,20 +153,12 @@ Time budget: `ctx.deadline_ms` is a BUDGET, not an absolute deadline (DEFAULT_DE
 DEFAULT_NATIVE_BATCH_DEADLINE_MS for native batch); callers convert it via
 `clock.now_ms() + budget`.
 
-Ledger per-run keys: with `OPENREADING_LEDGER` armed, the ledger root holds `<run_id>.jsonl` (the
-journal: one line per StepResult, append-only), `blobs/` (payloads, encrypted under a per-run key)
-and `keys/` (dir 0700, one 0600 key file per run). Exclude `keys/` from every backup, replica or
-snapshot of the ledger root: the run's blobs are the run's content, and deleting that directory
-is how an operator erases it
-and backup at once — the reason erasure is key destruction rather than blob deletion — and the
-guarantee holds only to the degree no other copy of the key survives. A shredded run is
-permanently non-replayable by design (`openreading resume RUN_ID` / `openreading.resume(...)`
-report `payload_expired`); the journal still answers "what happened", just not "with what
-content". Back up `*.jsonl` and `blobs/` as needed, never `keys/` alongside them
-(`openreading.ledger`, internal/design/ledger.md §9.4).
+Ledger storage: with `OPENREADING_LEDGER` armed, the ledger root holds headers, JSONL journals,
+and plaintext content-addressed blobs. The package never encrypts or expires them. Operators
+protect the directory and apply their own deletion schedule (`openreading.ledger`).
 
 Operator knobs that are not credentials (`OPENREADING_LEDGER*`, `OPENREADING_CONFIG`,
-`OPENREADING_LLM_DECIDER`, `OPENREADING_API_KEYS*`, the compliance attestations) are documented one
+`OPENREADING_LLM_DECIDER`, and `OPENREADING_API_KEYS*`) are documented one
 line each in `.env.example` and in the module that reads them (`openreading.api`,
 `openreading.strategies.loader` / `.decider`, `openreading.server.app`). The server's HTTP posture
 (no caller auth by default) lives in `openreading.server.app`.
@@ -374,9 +364,8 @@ def build_run_context(
     deadline_ms: int | None = None,
 ) -> RunContext:
     """The one factory every execution surface uses to turn a request + descriptor into a
-    RunContext. Fills resolved credentials, runtime config, the already-checked compliance block,
-    the idempotency key, and the time budget. Bare RunContext() construction outside tests is a
-    defect.
+    RunContext. Fills resolved credentials, runtime config, the idempotency key, and the time
+    budget. Bare RunContext() construction outside tests is a defect.
 
     `deadline_ms` (BL-146): every pre-existing caller keeps getting DEFAULT_DEADLINE_MS unchanged
     (this param defaults to None, which means "use the generic default") — but a caller that has

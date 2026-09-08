@@ -14,7 +14,7 @@ every response guarantees, and the commands that print the live truth from the i
 You need the package installed as the root README describes. You also need `sample.pdf` from the
 root README for every command here that parses a document, and `jq` for the commands that filter
 JSON. OpenReading accepts any document some backend can read. A descriptor is the static record in
-which a backend declares its formats, its environment variables and its compliance posture. Each
+which a backend declares its formats, environment variables, and response channels. Each
 backend's descriptor lists the formats it reads. The [Backend adapters](../adapters/README.md)
 page carries that list.
 
@@ -282,8 +282,8 @@ run happened, so stamp your own time at the moment you ingest a row. The `durati
 measure an interval and never name an instant, so they cannot stand in for one.
 
 A journal record does carry the time. Its `started_epoch_ms` and `ended_epoch_ms` are absolute UTC
-epoch milliseconds, and so is the retention stamp's `expires_epoch_ms`, so a loader can read them
-as timestamps directly. Those values name a moment because they cross a process boundary. The
+epoch milliseconds, so a loader can read them as timestamps directly. Those values name a moment
+because they cross a process boundary. The
 engine measures its own durations against a monotonic clock that no clock adjustment can move.
 [The run ledger](../ledger/README.md) is where a journal comes from.
 
@@ -380,8 +380,8 @@ entry naming it, so the warning reaches you before the removal does.
 - [Docs home](../README.md)
 - `uv run python -m pydoc openreading.types` prints the pydantic mirror of these files.
 - `uv run python -m pydoc openreading.server` prints the HTTP status code for each error.
-- [Backend adapters](../adapters/README.md) lists every backend with its formats, its env vars and
-  its compliance posture.
+- [Backend adapters](../adapters/README.md) lists every backend with its environment variables and
+  output channels.
 - [`tests/test_schema_evolution.py`](../../../tests/test_schema_evolution.py) holds the byte pins
   on older files.
 

@@ -26,7 +26,7 @@ inventing a value. `channel_provenance` lists the channels this run did produce.
 entry names some of those gaps and not others, so read provenance rather than waiting for a warning
 ([The channel contract](derive/README.md#which-signal-to-trust-when-a-channel-is-missing)).
 
-A compliance policy is a short list of rules about which backends may see your documents. The
+A backend policy is the caller's ordered list of backends permitted to receive documents. The
 router is the step that picks a backend for each request. It applies that policy before anything
 runs, and no later step, fallback, or setting can bring a dropped backend back.
 
@@ -84,7 +84,7 @@ Every document follows the path below, whichever backend answers.
 ```mermaid
 %%{init: {"theme":"base","themeVariables":{"fontFamily":"ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif","fontSize":"14px","lineColor":"#94a3b8","textColor":"#334155","primaryTextColor":"#0f172a","edgeLabelBackground":"#eef2f7","clusterBkg":"#f8fafc","clusterBorder":"#cbd5e1","titleColor":"#334155"},"flowchart":{"curve":"basis","nodeSpacing":36,"rankSpacing":44,"padding":8,"useMaxWidth":true}}}%%
 flowchart TD
-  Q[/"request plus policy"/]:::src --> R1{{"router stage 1<br>compliance filter"}}:::gate
+  Q[/"request plus policy"/]:::src --> R1{{"configured backend chain"}}:::gate
   R1 -- "pass" --> R2["router stages 2 and 3<br>capability, score"]:::work
   R2 --> AD["adapter<br>submit, poll, normalize"]:::work
   AD --> DV["derive<br>text, tables, geometry"]:::work
@@ -130,7 +130,7 @@ The table below tells you which guide answers which need and how long each takes
 | run a public benchmark, then rank backends on your labeled documents | [Evals](evals/README.md) | 10 min |
 | decide whether to approve this for regulated data | [What this software protects, and what it does not](../../SECURITY.md#what-this-software-protects-and-what-it-does-not) | 10 min |
 | look up the exact JSON shapes and enums | [JSON Schemas](schemas/README.md) | look up as needed |
-| look up a backend's variables, license, and compliance posture | [Backend adapters](adapters/README.md) | look up as needed |
+| look up a backend's variables, license, and runtime requirements | [Backend adapters](adapters/README.md) | look up as needed |
 | call it from Python: `run()`, `route()`, `compare()`, `run_batch()`, and one exception type per condition | reference only: `uv run python -m pydoc openreading.api` | look up as needed |
 | look up the pydantic models that mirror the schemas | reference only: `uv run python -m pydoc openreading.types` | look up as needed |
 | look up how `openreading.yaml` is found, and the nine keys its `policy:` block takes | reference only: `uv run python -m pydoc openreading.config` | look up as needed |
@@ -153,9 +153,9 @@ reading them out of order costs nothing.
 | [`src/openreading/batch/README.md`](batch/README.md) | Batch runs | A folder, a glob or several files as one `batch-result` envelope. | 400 |
 | [`src/openreading/comparison/README.md`](comparison/README.md) | Compare | Where two backends disagree on one document, as a verdict plus findings. | 402 |
 | [`src/openreading/evals/README.md`](evals/README.md) | Evals | Public benchmarks, and ranking backends on documents you labeled. | 713 |
-| [`src/openreading/ledger/README.md`](ledger/README.md) | The run ledger | Resume after an interruption, replay offline, and crypto-shred what a run recorded. | 410 |
+| [`src/openreading/ledger/README.md`](ledger/README.md) | The run ledger | Resume after an interruption and replay completed work offline. | 410 |
 | [`src/openreading/server/README.md`](server/README.md) | The HTTP server | `openreading serve`: the same engine behind a local JSON API, with bearer auth. | 509 |
-| [`src/openreading/adapters/README.md`](adapters/README.md) | Backend adapters | The catalog: each backend's formats, variables, price and compliance posture. | 378 |
+| [`src/openreading/adapters/README.md`](adapters/README.md) | Backend adapters | The catalog: each backend's formats, variables, and runtime requirements. | 378 |
 | [`src/openreading/schemas/README.md`](schemas/README.md) | JSON Schemas | The contract every surface speaks, and how a version is cut. | 401 |
 | [`src/openreading/derive/README.md`](derive/README.md) | The channel contract | Why a field is absent rather than wrong, and who computed it. | 280 |
 | [`examples/README.md`](../../examples/README.md) | Example documents | The two synthetic bank statements the guides parse, and where they came from. | 96 |
@@ -254,7 +254,7 @@ decide is which surface you call. Python raises a distinct exception type per co
 only surface that separates all of them. HTTP returns a machine-readable `error.category`. The CLI
 gives you an exit code. Exit `3` covers the six conditions in the `3` rows below, and their correct
 actions disagree. [The command line](cli/README.md) lists every cause of exit `3`, not only these
-six. An agent that must tell a compliance refusal from a rate limit cannot do it from the CLI.
+six. An agent that must distinguish configuration refusal from a rate limit cannot use the CLI.
 
 Source: `src/openreading/__init__.py` ("Let your agents decide", the triage playbook),
 `openreading.api` (Exceptions) and `openreading.server` (HTTP status codes). Live truth: `uv run

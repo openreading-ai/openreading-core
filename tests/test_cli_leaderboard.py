@@ -104,9 +104,9 @@ def _raise(exc: Exception):
         RetryableError("simulated rate-limit exhaustion"),
         TerminalError("simulated can't-run-at-all failure"),
         UnsupportedFeatureError("simulated unsupported feature", feature="ocr"),
-        ScopeRefused("nothing is compliant here", constraint="no_compliant_backend"),
+        ScopeRefused("no backend this token may reach", constraint="no_backend_in_scope"),
     ],
-    ids=["retryable", "terminal", "unsupported_feature", "compliance_refused"],
+    ids=["retryable", "terminal", "unsupported_feature", "scope_refused"],
 )
 def test_leaderboard_cli_taxonomy_member_exits_3_clean(exc, capsys, monkeypatch):
     import openreading.evals.leaderboard as leaderboard_mod

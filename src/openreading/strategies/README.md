@@ -20,7 +20,7 @@ far. A gate is one test on one result, for example whether the text is near-empt
 threshold. The response is the envelope, the one JSON document every backend returns. The engine
 writes an `orchestration` block, the trace, onto that envelope. The trace records every attempt and
 every gate with its observed value and threshold. It also records every backend dropped by
-compliance and every decision point an LLM was allowed to take. A decision point is a place in the
+backend selection and every decision point an LLM was allowed to take. A decision point is a place in the
 strategy where an LLM may choose, and step 7 builds one. You need `sample.pdf` from the root
 README, and the walkthrough needs no key.
 
@@ -32,7 +32,7 @@ flowchart TD
   Y[/"openreading.yaml"/]:::src --> S{{"schema gate"}}:::gate
   S --> P["Plain desugar"]:::work
   P --> N["normalize"]:::work
-  N --> C{{"compliance prune"}}:::gate
+  N --> C{{"resolve dynamic backends"}}:::gate
   C --> E["engine walk"]:::work
   E --> T(["orchestration trace"]):::hero
   T --> X["explain"]:::out
@@ -59,9 +59,8 @@ Hold the four facts below in mind, and every command on this page follows from t
    openreading's own probe about this backend's output. Is it garbled, near-empty, or a text-layer
    read of a scanned page? A gate that fires keeps the result as best-so-far and moves to the next
    rung. A rung is one step of a cascade, so the next rung is the next backend in order.
-3. Compliance prunes the tree before anything runs. The request's constraints and the file's
-   own `policy:` block are combined, and the most restrictive wins. A dropped backend lands in
-   `orchestration.dropped[]`. Nothing in the file can bring it back.
+3. Explicit backend nodes run the backend they name. An `auto` node resolves from
+   `policy.backends`, which supplies the caller's default chain.
 4. Every run leaves the same trace, whoever decided. The engine, a replayed trace, or an enabled LLM
    decider walk the same rails and write the same records. That is why `explain` narrates any run
    and `replay` reproduces one.
@@ -547,9 +546,9 @@ the leaderboard on.
 
 ## Recipes
 
-**Opt `auto` traffic into a preset.** Put `defaults: {strategy: offline_first}` above `strategies:`.
-A request with `backend.id: "auto"`, or `openreading.run("sample.pdf", backend="auto",
-config="defaults.yaml")`, then runs `offline_first`. `backend.id: "strategy:none"` or
+**Apply a preset when no backend is named.** Put `defaults: {strategy: offline_first}` above
+`strategies:`. A request with `backend.id: null`, or `openreading.run("sample.pdf",
+backend=None, config="defaults.yaml")`, then runs `offline_first`. `backend.id: "strategy:none"` or
 `--no-strategy` forces the plain router. The CLI needs exactly one of `--backend`, `--strategy`,
 `--no-strategy`. Use it to change a fleet's default without touching callers.
 
@@ -628,15 +627,14 @@ shape, with an integer `chosen` and no `eligible`.
 
 ## How it decides
 
-These rules keep a strategy from widening compliance, hiding a failure, or spending money it did
+These rules keep a strategy within its explicit plan, expose failures, and record each attempt. They
 not record. Each rule names the failure it avoids and where it is enforced.
 
 - Without a config file, nothing changes. The strategy package is not even imported, so an upgrade
   cannot alter a request that named its backend. The rule lives in `openreading.strategies`
   ("Two invariants"), and a subprocess test proves it.
-- Compliance is outside the tree. Pruning happens in `openreading.strategies.prune` before the walk,
-  and naming `compliance` in `on_error` is a load error. A file authored far from its deployment
-  cannot leak a document to a backend the policy dropped.
+- Explicit leaves run the backend they name. Dynamic `auto` leaves choose from the configured
+  default chain and exclude backends already attempted by that cascade.
 - Deciders choose, and they never widen the set. Candidates are enumerated after pruning, and the
   decider's tool schema is that list as an enum (`openreading.strategies.decider` §3). An out-of-set
   choice is impossible, not merely discouraged.
@@ -742,8 +740,7 @@ The category column in `explain` is the closed vocabulary `CATEGORIES` in
 ## See also
 
 - [Docs home](../README.md)
-- [Routing and keys](../router/README.md): drop codes, the `policy:` block, attesting a BAA,
-  bringing a key.
+- [Routing and keys](../router/README.md): the `policy.backends` default chain and credentials.
 - [Compare](../comparison/README.md): the verdicts behind `compare --from`.
 - [Evals](../evals/README.md): building the dataset `calibrate` needs.
 - [The run ledger](../ledger/README.md): resuming and replaying whole runs.

@@ -22,7 +22,7 @@ response shape every backend returns. `> out.json` is therefore safe on `parse`,
 their output is for you rather than for a parser. `backends`, `explain`, `strategy show`,
 `leaderboard`, and any `--format table` print a human table on stdout. The recipes below pipe those
 into `grep` and `head`. The exit code tells your script what happened without reading the output.
-For example, `3` means a missing key or a compliance refusal.
+For example, `3` means a missing key, invalid configuration, or replay refusal.
 
 You need the install from the root README, and the first command below builds `sample.pdf` for you.
 `uv run openreading --help` lists every verb, and this page is about scripting around them.
@@ -92,7 +92,7 @@ If the table and that chapter disagree, the chapter is right. Fix the table.
 | `0` | envelope printed | nobody's | nothing to retry | `uv run openreading parse sample.pdf --backend pymupdf` |
 | `1` | an unexpected error, or a batch where nothing succeeded | yours | no, fix the cause | `mkdir -p bad && printf 'not a pdf' > bad/bad.pdf && uv run openreading parse bad/ --backend pymupdf` |
 | `2` | usage: bad selector, unknown backend or strategy, a source path that resolves to no document, over `--max-items` or `--max-jobs`, compare misuse, `leaderboard` misuse, `replay` with no strategy name | yours | no, fix the command | `uv run openreading parse sample.pdf` (no selector) |
-| `3` | cannot run: missing key, `auth_rejected`, `unsupported_feature`, compliance refusal, unreadable policy or config, a document the backend cannot open, an armed ledger on an unwritable path, `serve` on a port already bound, a `RetryableError` on a directly named backend | read stderr, both happen | only the `RetryableError` and ledger lines | `uv run openreading parse sample.pdf --backend reducto` |
+| `3` | cannot run: missing key, `auth_rejected`, `unsupported_feature`, unreadable config, a document the backend cannot open, an armed ledger on an unwritable path, `serve` on a port already bound, a `RetryableError` on a directly named backend | read stderr, both happen | only the `RetryableError` and ledger lines | `uv run openreading parse sample.pdf --backend reducto` |
 | `4` | batch partial (some items failed), or `route` with no compliant backend | per item, read `.items[]` | per failed item | `mkdir -p corpus && cp sample.pdf corpus/ && printf 'not a pdf' > corpus/bad.pdf && uv run openreading parse corpus/ --backend pymupdf > run.json` |
 | `5` | `compare` inputs are not schema-valid responses | yours | no, fix the inputs | `echo '{"hello": 1}' > not-an-envelope.json && uv run openreading compare not-an-envelope.json out.json` |
 | `6` | interrupted while `OPENREADING_LEDGER` was set. The run is resumable | whoever stopped it | yes, with `resume` | Ctrl-C or SIGTERM during a `parse` with the ledger armed ([Operations](#operations)) |
@@ -123,7 +123,7 @@ Without the ledger, `resume` exits 3 and prints this line on stderr:
 [resume] OPENREADING_LEDGER is not set, so there is no run to resume from
 ```
 
-Exit 3 is the one code a script cannot act on by itself. It covers a compliance refusal, which no
+Exit 3 is the one code a script cannot act on by itself. It covers configuration refusal, which no
 amount of retrying will change, and it covers a rate limit that the next hour clears. Nothing
 machine-readable separates the two, because a failed single-document run writes zero bytes to
 stdout by design. Read the tag and the message on stderr, or move that call to [the HTTP

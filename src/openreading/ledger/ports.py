@@ -1,4 +1,4 @@
-"""The four ports (internal/design/ledger.md §5.2): `Executor`, `Journal`, `BlobStore`, `KeyStore`,
+"""The three ledger ports: `Executor`, `Journal`, and `BlobStore`,
 each a `typing.Protocol`. Core reaches an executor only through the `Executor` Protocol on
 `_WalkCtx` — no module under `router`/`strategies`/`batch` may name a concrete implementation or
 `isinstance`-check one (§5.2's own pin; `strategies/engine.py`'s `_WalkCtx.executor` field is typed
@@ -87,24 +87,13 @@ class Journal(Protocol):
 
 
 class BlobStore(Protocol):
-    """Content-addressed payload store keyed by `(run_id, digest)`. `get` raises `FileNotFoundError`
-    once the run's key is gone."""
+    """Content-addressed payload store keyed by `(run_id, digest)`.
+
+    `get` raises `OSError` when the payload is absent or fails its recorded digest check.
+    """
 
     def put(self, run_id: str, digest: str, data: bytes, media_type: str) -> BlobRef: ...
 
     def get(self, ref: BlobRef) -> bytes:
-        """Raises `FileNotFoundError` when no blob was stored for this ref."""
+        """Return verified bytes, or raise `OSError` when the ref cannot be trusted."""
         ...
-
-
-class KeyStore(Protocol):
-    """One encryption key per run. `destroy` is the erasure primitive the retention sweep
-    calls."""
-
-    def get_or_create(self, run_id: str) -> bytes: ...
-
-    def get(self, run_id: str) -> bytes:
-        """Raises `KeyError` (or a subclass) once the run's key is destroyed."""
-        ...
-
-    def destroy(self, run_id: str) -> None: ...

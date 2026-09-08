@@ -348,9 +348,8 @@ item carrying PyMuPDF's own `unsupported_format` reason rather than being droppe
 the count you get back always accounts for every file you pointed at. `scripts/batch_demo.sh path/to/docs` runs the same
 sweep with both local backends and compares the two corpora.
 
-The command above ran with no compliance filter in force, because that directory holds no
-`openreading.yaml`. Write one with a `policy:` block and the same command gates every document in
-the folder, whether it names a backend or runs a strategy.
+The command above names its backend explicitly. A `policy.backends` list supplies the default
+chain only when a request names no backend.
 [Routing and keys](src/openreading/router/README.md#recipes) runs it both ways.
 
 ## Bring your own key
@@ -392,7 +391,7 @@ doc = "examples/john_smith_1000_2026_01.pdf"
 resp = openreading.run(doc, backend="pymupdf")                    # dict
 print(resp["status"]["state"], resp["backend"]["id"])            # succeeded pymupdf
 plan = openreading.route(doc)                                    # ./openreading.yaml
-print(plan.eligible_ids[0], plan.dropped["reducto"].code)        # pymupdf no_baa
+print(plan.eligible_ids)                                         # ['pymupdf', 'tesseract']
 delta = openreading.compare([resp, openreading.run(doc, backend="tesseract")])
 print(delta["headline"]["verdict"])                              # equivalent
 ```

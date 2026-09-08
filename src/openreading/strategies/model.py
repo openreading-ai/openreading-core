@@ -1,4 +1,4 @@
-"""Pydantic mirror of `strategy-config.v0.2.json`, and the reference for what `openreading.yaml`
+"""Pydantic mirror of `strategy-config.v0.4.json`, and the reference for what `openreading.yaml`
 may contain — every node kind, every key, every gate predicate, and every validation rule.
 
 A **strategy** is a named recipe for which backends run — in what order or in parallel — and
@@ -8,11 +8,10 @@ same auditable trace. Three laws frame everything below:
 
 1. **No file ⇒ no change.** Absent a strategy file, every request takes exactly the legacy code
    path; the strategy layer is not even imported.
-2. **Compliance is outside the tree.** The 3-stage router's compliance/capability filter prunes
-   the tree BEFORE execution. No strategy, rule, prose, or LLM can re-admit a dropped backend.
-   Compliance is never a catchable error class.
+2. **Backend selection is explicit.** Named leaves run directly. Dynamic `auto` leaves choose
+   from `policy.backends`, which supplies the default chain.
 3. **Deciders choose; they never widen.** Every decision point enumerates its candidates first;
-   any decider selects from that list. Budgets, thresholds, and compliance are the ceiling —
+   any decider selects from that list. Budgets and thresholds are the ceiling —
    `intent:` prose guides choices under the ceiling and can never move it.
 
 The DSL is deliberately sub-Turing: no `Next:` pointers, no loops, no variables, no expression
@@ -112,15 +111,14 @@ no request-schema bump. `loader.strip_strategy_prefix` is the recognizer the ser
 `openreading.api` deliberately inlines its own `_STRATEGY_PREFIX` / `startswith` check instead,
 so the no-file path never imports this package (the no-change law — package docstring).
 
-- `backend.id: "reducto"` (any concrete id) → Strategy layer bypassed entirely — the direct path,
-  including the compliance check and `ScopeRefused`. `limits:` does not apply (§6.4).
+- `backend.id: "reducto"` (any concrete id) → Strategy layer bypassed entirely. `limits:` does
+  not apply (§6.4).
 - `backend.id: "strategy:<name>"` → Run the named strategy. Unknown name → `unknown_strategy` error
   (HTTP 400; CLI `parse` exit 2).
 - `backend.id: "strategy:none"` → Force the legacy path even when `defaults.strategy` is set — the
   per-request escape hatch.
-- `backend.id: "auto"` + file sets `defaults.strategy` → Run that strategy (the operator explicitly
-  opted `auto` traffic in).
-- `backend.id: "auto"`, no file or no `defaults.strategy` → The 3-stage router plan + serial
+- `backend.id: null` + file sets `defaults.strategy` → Run that strategy.
+- `backend.id: null`, no file or no `defaults.strategy` → The router plan + serial
   executor, unchanged.
 - CLI `--strategy <name>` / `--no-strategy` → Sugar for `backend.id: "strategy:<name>"` /
   `"strategy:none"`. Python: `openreading.run(..., strategy="<name>")`.
@@ -129,11 +127,9 @@ so the no-file path never imports this package (the no-change law — package do
   before (formally the desugared cascade of §7 rule 7).
 
 Precedence, highest first: **request wire fields → CLI flags → config `defaults:` → built-ins.**
-`policy.backends` is outside precedence: it is an allow-list, and every source of one intersects
-while none widens (`openreading.config.apply`, applied before dispatch and again defensively in
-`prune.compile_strategy`). A caller's own argument and the server's API-key scope intersect with
-it the same way, so what survives is what all of them permit. An EMPTY list permits nothing; an
-absent list is not an empty one.
+`policy.backends` is outside precedence. It supplies the ordered candidates for null-backend and
+dynamic `auto` selection. An explicit backend name runs directly. The server's API-key scope can
+still narrow either form at its caller boundary.
 
 The block used to carry nine keys instead, five of them compliance constraints core enforced from
 a per-vendor table it could not verify. `policy.backends` replaced all nine, because an operator
@@ -201,8 +197,12 @@ with:                         # optional per-leaf request overrides
   outputs:  { tables: html }
 ```
 
-- `backend` — Registry slug. There is no `auto`: it asked the engine to pick from vendor claims
-  it could not verify, and naming the backend you want is the whole grammar now.
+- `backend` — Registry slug, or `auto`. The removal set took `auto` off the REQUEST and out of
+  the Plain dialect, where naming it is now a load error, because asking the engine to pick meant
+  asking it to decide from vendor claims it could not verify. Longhand still accepts it at a leaf:
+  `engine._resolve_backend` resolves it at dispatch to the first backend in `ctx.eligible` this
+  walk has not already attempted, bounded there by the caller's allow-list. Naming the backend you
+  want is the clearer spelling, and `policy.backends` is where a deployment states its order once.
 - `with` — Designed to shallow-merge over the request for this leaf only. Closed allow-list:
   exactly `features`, `outputs`, `pages`, `extraction_schema`; any other key is a load-time
   error — in particular `compliance`, `document`, and `backend` can never appear (a strategy may
@@ -382,9 +382,7 @@ This is the single canonical route shape — `rules:` + `default:` sibling keys;
 list-with-else form. Rules are first-match-wins, top to bottom. All rules are evaluated for the
 trace even after a match (shadowed-rule debugging). `when:` predicates are a flat, enum-keyed map
 over pre-parse facts (§3.1); multiple keys in one `when:` AND together; alternatives are separate
-rules; `any_of:` exists for OR (§4.3); there is no NOT (facts have polar variants). The
-`compliance` fact is a nested `{field: value}` map, not a dotted key (D-v3-11 — the schema's
-`additionalProperties: false` on `when` rejects the dotted spelling). A fact that cannot be
+rules; `any_of:` exists for OR (§4.3); there is no NOT (facts have polar variants). A fact that cannot be
 computed makes the rule not match — its fact record reads `status: "unavailable"` (the spec's
 `fact_unavailable`; no such literal is emitted) — never an error; `default:` is the guaranteed
 floor.
@@ -416,10 +414,9 @@ the UI's display text, inert to the engine. The engine resolves a `decide` to `o
 unconditionally; an enabled LLM decider chooses one member of `among` under the
 `openreading.strategies.decider` contract. Missing `otherwise:` and `among:` with fewer than two
 entries are schema (load-time) errors; `otherwise:` not a member of `among:` is a `strategy
-validate` error (§9). When compliance
-prunes the `otherwise:` target but at least one `among:` survivor remains, the engine substitutes
-the first-listed survivor and traces `decider_downgraded: otherwise_pruned` (D-v3-24 — pruning,
-not decision-making, drives it, so it fires whether or not any decider is configured).
+validate` error (§9). When API-key scope removes the `otherwise:` target but another candidate
+survives, the engine substitutes the first-listed survivor and traces
+`decider_downgraded: otherwise_pruned`.
 
 **Candidate names must be distinct.** Each `among:` entry is named by its `use:` reference, else
 its leaf `backend`, else its explicit `label:`, else — for an unnamed sub-tree — its node kind
@@ -513,10 +510,6 @@ definitions, availability, and computation notes; this section is the binding su
   doesn't match.
 - `filename_matches` [regex string] — source: `document.filename`. If unavailable: rule doesn't
   match.
-- `compliance.<field>` [bool/string] — source: the post-union effective compliance (request ∪
-  file `policy:`, most-restrictive-wins — the same constraint set that pruned the
-  tree). Consequence: a file `policy:` key makes its matching fact constant for every request. If
-  unavailable: always available.
 - `sample_percent` [number 0–100] — source: deterministic sha256(document bytes) bucket — stable per
   input, idempotency-cache compatible. If unavailable: always available once materialized.
 
@@ -697,8 +690,6 @@ The classes map onto the existing four-exception taxonomy (`openreading.types.er
 - `budget_exhausted` — a node's time deadline (`max_duration`) was reached. Default action: `next`
 - `missing_credentials` — broker cannot resolve required env vars. Default action: always `skip` —
   not configurable, never an error
-- *(compliance)* — ScopeRefused. Default action: uncatchable — pruned before execution; naming
-  it in `on_error` is a load-time error
 
 Alias: `transient` = `timeout` + `rate_limited` + `provider_error`. `any` = every catchable
 class.
@@ -935,16 +926,14 @@ Errors follow the Elm doctrine: locate (file + node path, e.g.
 `strategies.cheap.steps[0].escalate_if`), explain in domain terms, suggest the fix. Line-precise
 location is a documented follow-up (D-v3-8: `yaml.safe_load` discards source marks, and the
 injected-`__line__` trick breaks the schema's `additionalProperties: false`; the node path already
-satisfies "locate"). `validate` reads the file's own `policy:` block, so it additionally flags
-steps that can never run *in that compliance context*.
+satisfies "locate"). `validate` also resolves the file's default backend chain.
 
 
 10. JSON Schema and editor experience
 =====================================
 
-The config schema is vendored at `src/openreading/schemas/strategy-config.v0.2.json` (the
-`v0.1.json` artifact is byte-frozen; v0.2 adds the Plain body grammar and the `disagreement_over`
-predicate additively — the config `version` const stays `1`) — the same schema-authority
+The config schema is vendored at `src/openreading/schemas/strategy-config.v0.4.json`. Earlier
+artifacts remain byte-frozen, while the config `version` const stays `1`. This follows the same schema-authority
 convention as request/response/descriptor (and the same wheel force-include gotcha). Shorthands
 are encoded as titled `oneOf: [string, array, object]` branches so editor completion stays clean.
 For completion and inline validation in your editor, point a `# yaml-language-server: $schema=`
@@ -1047,7 +1036,7 @@ class StrategyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     version: int
-    # `policy` carries the compliance and RouterConfig keys, typed and closed by
+    # `policy` carries the default backend chain, typed and closed by
     # `strategy-config` v0.3 for a file and by `openreading.types.policy.Policy` for a config a
     # caller builds in Python. The validator below is STRICT where pydantic's default is lax: a
     # lax bool accepts the string "true", which is the widening the schema refuses on the file

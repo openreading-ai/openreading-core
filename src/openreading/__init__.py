@@ -43,7 +43,7 @@ readings and no labels, and for the leaderboard when you are choosing a backend 
   fabricated.
 - `parse` runs one document; `parse <dir|glob|>=2 files>` runs a BATCH -> one `batch-result` over
   many documents; `compare` diffs N responses (two batches -> a `corpus-report`); `route` picks a
-  backend under compliance constraints.
+  backend from the caller's configured chain.
 - Geometry is canonical [0,1] top-left / y-down; confidence is [0,1]; a truncated or partial
   result is `status.state="partial"`, never a bare success.
 
@@ -103,7 +103,8 @@ Parse one document. `source` is a path, an http(s) URL, or raw bytes (NOT a requ
 
 Extract typed fields (schema-driven). A directly-named backend that cannot do it (pymupdf,
 tesseract, docling) RAISES `UnsupportedFeatureError` (CLI exit 3, HTTP 422) rather than silently
-returning a geometry-only result; `auto` never submits an incapable backend (capability filter).
+returning a geometry-only result. A null-backend chain may learn this only from the backend's
+refusal, then continue to its next entry.
 Only an optional-but-unavailable channel is a returned envelope + `warnings[]` entry:
 
     resp = openreading.run("invoice.pdf", backend="reducto",
@@ -154,11 +155,11 @@ matched, capped per side). Not counts, not structure:
     openreading parse invoices/ --backend reducto > runB.json
     openreading compare runA.json runB.json --format diffs
 
-Route with compliance (HIPAA / no-train / local-only). A plan, no execution:
+Route through the configured default chain. This returns a plan without execution:
 
     plan = openreading.route("doc.pdf")           # the policy: block of your openreading.yaml
     plan.chosen, plan.fallbacks, plan.dropped     # dropped = {backend_id: DropReason, ...}
-    # CLI: openreading route doc.pdf --run        # plan + WHY each drop, then run
+    # CLI: openreading route doc.pdf --run        # print the plan, then run it
 
 `policy.backends` is the whole of it: the backends this deployment permits, in the order you want
 them tried, and `routing.fallback` reorders within it and never adds to it. An EMPTY list permits
@@ -341,8 +342,7 @@ Rules a caller must not get wrong
   `compare a.json b.json`, run no backend and cost nothing. The fan-out form,
   `compare doc.pdf --backends x,y,z`, runs every backend named and bills each hosted one. Do not
   call the fan-out form in a loop believing comparison is free.
-- Three strategy laws: no config file => byte-identical legacy behavior; compliance prunes
-  BEFORE execution and nothing can re-admit a backend; deciders choose but never widen.
+- Strategy decisions stay within the candidates enumerated by the compiled plan.
 
 Let your agents decide: the triage playbook
 ===========================================
@@ -394,8 +394,8 @@ prose. Branch on:
       DISCRIMINATOR is `error.backend_code` (`missing_credentials` or `auth_rejected`), with
       `missing_env[]` naming the vars.
     * The CLI gives you the exit code and English on stderr, and exit 3 covers six conditions with
-      opposite correct actions (a compliance refusal you must never retry, and a `RetryableError`
-      you should). It carries no machine-readable discriminator. An agent that must tell them apart
+      opposite correct actions, such as a missing dependency and a `RetryableError`. It carries
+      no machine-readable discriminator. An agent that must tell them apart
       calls Python or HTTP instead of parsing stderr.
     * A single-document response never populates `status.error` at all. A batch item does:
       `items[].error.code`, which is the adapter's `backend_code` when it set one and otherwise the
@@ -461,8 +461,8 @@ semantics: `openreading.strategies`, with the Plain dialect in `openreading.stra
 
 Decisions DURING a run, the LLM decider: three decision points (gate-band review, `decide:`
 nodes, `pick: best` judging) where an LLM chooses inside hard rails. The engine enumerates the
-candidates (the tool schema's action enum IS the candidate list), compliance is invisible and
-un-overridable, and every failure mode downgrades to the deterministic engine default (an LLM
+candidates, and the tool schema's action enum is that candidate list. Every failure mode
+downgrades to the deterministic engine default, so an LLM
 outage can never fail a parse).
 
 `decisions[]` records only LLM-ELIGIBLE decision points, so it is EMPTY for a plain `pick: best`
@@ -545,7 +545,7 @@ Where deeper docs live
 - `openreading.evals`: the scorer, the runner, and `leaderboard`: the verb that answers which
   backend is CORRECT on documents you labeled, where `compare` only says where two disagree.
 - `openreading.batch`: intake resolution + platform runner.
-- `openreading.router` (`compliance`): the three stages, the compliance filter, the drop reasons.
+- `openreading.router`: the configured chain, request fallback order, and execution plan.
 - `openreading.strategies` (`loader`, `decider`): grammar, execution, the decider.
 - `openreading.credentials`: key resolution order, `.env` handling, security posture.
 - `openreading.ledger`: the journal / resume plane.

@@ -17,7 +17,7 @@ Start here: write one file
 --------------------------
 
 Most people never need the full grammar. Plain is eleven words covering the five things people
-actually want, which are running backends in parallel, cascading on failure, cost tiers,
+actually want, which are running backends in parallel, cascading on failure, quality gates,
 escalating on simple criteria, and compare-and-route. Write `./openreading.yaml` and describe
 the run the way you would say it out loud:
 
@@ -36,7 +36,7 @@ garbled characters, or too many empty pages. Invoke that strategy three equivale
     { "document": { "path": "loan.pdf" }, "backend": { "id": "strategy:cheap_first" } }  # wire
     openreading.run("loan.pdf", strategy="cheap_first")                         # Python
 
-If `pymupdf`'s result passes the gate, that is your answer and it cost nothing. If the gate
+If `pymupdf`'s result passes the gate, that is your answer. If the gate
 fires, that result is retained as best-so-far and `reducto` runs. If every rung gates, you get
 the best retained result with honest `warnings[]`. If every rung fails outright and nothing
 was retained, you get `PlanExhaustedError` with the full attempt trail, never silence and
@@ -55,18 +55,13 @@ Two invariants this package exists to keep
 path and the response is byte-identical to a run without this package. The package is not even
 imported on that path: `openreading.api` inlines the `strategy:` prefix check, reads the file
 through `openreading.config` (which imports nothing from here), and builds the STRATEGY half of
-it lazily, ONLY for `auto` / `strategy:` requests. A named-backend run importing nothing from
+it lazily, only for null-backend or `strategy:` requests. A named-backend run importing nothing from
 `openreading.strategies` is proven in a subprocess test. The reason: an operator who never wrote
 a YAML must be able to upgrade without any behavior change.
 
-**Compliance is never widened.** The 3-stage router's compliance/capability filter prunes the
-tree BEFORE execution (`openreading.strategies.prune`); constraints from the request
-and the file's `policy:` block union most-restrictive-wins; `compliance` is not a catchable
-`on_error` class (naming it is a load-time error); every decision point (gate band, `decide`,
-judge) enumerates its candidates first and any decider — engine or LLM — selects from that list.
-`intent:` prose guides choices under the ceiling and can never move it. The reason: a strategy
-file is authored far from the compliance posture it runs under, and no rule, prose, or model
-output may re-admit a backend the posture dropped.
+**Backend selection stays explicit.** A leaf runs the backend it names. An `auto` leaf chooses
+from `policy.backends` and excludes already attempted backends. Every decision point enumerates
+its candidates before the engine or an LLM selects one.
 
 Discovery (first hit wins; sources are never merged)
 ----------------------------------------------------
@@ -108,10 +103,10 @@ The map — what each module documents
   collisions) and the warning set, located by node path (D-v3-8). Run by `strategy validate`
   only. The run path loads the schema and compiles the tree, and it never calls
   `validate_config` (`model` §9).
-- `prune` — the compile pipeline: route once, normalize, prune out-of-list leaves,
-  union the file `policy:` into the effective compliance (D-v3-12); `CompiledPlan`.
+- `prune` — the compile pipeline: normalize trees and bind dynamic leaves to the configured
+  default chain; `CompiledPlan`.
 - `facts` — pre-parse route facts (`doc_type`, `mime`, page/size probes, `filename_matches`,
-  `compliance`, `sample_percent`); an uncomputable fact means "rule doesn't match", never error.
+  `sample_percent`); an unavailable fact does not match.
 - `signals` — the reference-free quality probe (Tier-1 engine-computed, Tier-2 envelope-reported)
   and `evaluate_gate` (gate maps OR; `any_of`/`all_of`; the missing-signal law).
 - `engine` — what running a tree means: the Outcome algebra, cascade/parallel/route/decide
@@ -119,7 +114,7 @@ The map — what each module documents
   trail (every rung, loser, shadow, judge and decider call is recorded), the concurrency
   contract, `classify_error`, `run_strategy`.
 - `decider` — the LLM decision layer: two-key enablement (file `decider:` block AND the
-  `OPENREADING_LLM_DECIDER` env; no request field can enable it), the per-request compliance gate
+  `OPENREADING_LLM_DECIDER` env; no request field can enable it), API-key scope
   on the decider/judge backend, engine defaults for every decision point, the downgrade
   taxonomy (`decider_downgraded`), deterministic decision ids, replay.
   No LLM is called today. No shipped surface constructs a `DeciderPort`, so an enabled decider
@@ -258,7 +253,7 @@ FAQ
   point resolves to its engine default and the trace says `decider_downgraded: unavailable`.
   When the wire adapter lands it will be opt-in by two keys, and every decider failure will
   still fall back to the engine default.
-- **Can a strategy weaken compliance?** Never — see the second invariant above.
+- **Can a strategy name a backend outside `policy.backends`?** Yes. A named leaf is explicit.
 - **How do I debug why a fallback fired — or didn't?** The trace records everything: every
   attempt with its category, and for gate events each predicate's observed value vs. threshold,
   fired or not (`orchestration.attempts[]`, decision records). `openreading explain` walks a run's

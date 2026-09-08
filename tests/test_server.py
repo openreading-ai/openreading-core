@@ -2423,6 +2423,27 @@ def test_batch_endpoint_unrecognized_field_typo_is_400_not_per_item_failures(cli
     assert "otuput_format" in body["error"]["message"]
 
 
+def test_batch_endpoint_removed_compliance_field_is_rejected_once(client):
+    """The shared-field allow-list must move with the request schema.
+
+    `compliance` was removed from every request. Keeping it here turns one invalid batch request
+    into an HTTP 200 envelope containing one validation failure per document.
+    """
+    r = client.post(
+        "/v1/batch",
+        json={
+            "documents": [_batch_doc("a.pdf"), _batch_doc("b.pdf")],
+            "backend": "pymupdf",
+            "compliance": {"require_local": True},
+        },
+    )
+    assert r.status_code == 400
+    body = r.json()
+    assert "items" not in body
+    assert body["error"]["category"] == "bad_request"
+    assert "compliance" in body["error"]["message"]
+
+
 def test_batch_endpoint_unrecognized_field_names_all_bad_keys_at_once(client):
     r = client.post(
         "/v1/batch",
@@ -2634,28 +2655,12 @@ def test_caller_auth_scope_denial_happens_before_credential_resolution(monkeypat
 
 def test_create_app_survives_ledger_root_configured_as_a_file(tmp_path, monkeypatch):
     """Second M7-review crash path: `OPENREADING_LEDGER` pointing at a FILE, not a directory (a
-    plausible copy-paste/typo misconfiguration), must not crash server startup either —
-    `LocalFsKeyStore.__init__`'s own mkdir would otherwise raise `NotADirectoryError` before a
-    single request is ever served."""
+    plausible copy-paste/typo misconfiguration), must not crash server startup either — a blob
+    store's own mkdir would otherwise raise `NotADirectoryError` before a single request is ever
+    served."""
     not_a_dir = tmp_path / "ledger-is-a-file"
     not_a_dir.write_text("oops", encoding="utf-8")
     monkeypatch.setenv("OPENREADING_LEDGER", str(not_a_dir))
-
-    create_app()  # must not raise
-
-
-def test_create_app_survives_the_keys_subdirectory_existing_as_a_file(tmp_path, monkeypatch):
-    """Fourth M7-review crash path: `OPENREADING_LEDGER` itself is a valid directory (the `is_dir()`
-    fast path in `reap_expired_now` does not catch this), but its `keys` sub-path exists as a plain
-    file rather than a directory. `LocalFsKeyStore.__init__`'s `mkdir(exist_ok=True)` still raises
-    `FileExistsError` in that case — `exist_ok` only suppresses the error when the existing target
-    IS a directory — which used to propagate out of `reap_expired_now`, out of `create_app`, and
-    fail the whole server's startup. Not attacker-reachable, but the same "a broken ledger must
-    never block boot" property every other shape in this finding chain has already been given."""
-    ledger_root = tmp_path / "ledger"
-    ledger_root.mkdir()
-    (ledger_root / "keys").write_bytes(b"x")  # a file where a directory belongs
-    monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
 
     create_app()  # must not raise
 

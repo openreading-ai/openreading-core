@@ -17,8 +17,9 @@ one.
   anyone who did not observe the same boot. Persisting one and comparing it later is the defect
   this split exists to prevent: the ledger's retention stamp held `time.monotonic()` under a field
   named `expires_epoch_ms`, so it read as 1970 to a loader and, after a reboot, sat permanently in
-  the future of a reaper whose own clock had restarted near zero — PHI held past the window an
-  operator had attested to. See `openreading.ledger.retention`.
+  the future of a reaper whose own clock had restarted near zero — documents held past the window
+  an operator had set. That retention machinery is gone (`CHANGELOG.md`, Unreleased), and the rule
+  it taught is why this split stays.
 
 The rule: a number you subtract from another reading of the same clock is `now_ms()`; a number
 that names a moment to anyone else is `now_wall_ms()`.

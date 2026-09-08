@@ -324,8 +324,8 @@ START HERE
 
 DO ONE JOB
   batch          a folder, a glob, or many files as one run and one JSON
-  compliance     say which backends may see a document, and see who was dropped
-  cost           what a run charges you, before it starts charging you
+  backends-policy name the backends this deployment permits, in preference order
+  usage          what a run consumes, in the units each backend meters in
   env            where keys come from, and every variable this CLI reads
   datasets       case.json inputs and expectations for calibration and scoring
 
@@ -644,8 +644,7 @@ YAML
 uv run openreading route examples/1040_2024.pdf
 ```
 
-That refuses rather than quietly running something, which is the same fail-closed direction the
-old compliance keys held.
+That refuses rather than quietly running a backend outside the configured default chain.
 
 Put the two-backend list back before the next step:
 
@@ -773,8 +772,8 @@ strategies:
 
 Every strategy run writes an `orchestration` block onto the envelope.
 A gate checks a result against conditions that can trigger escalation. That block is the trace, and
-it records every attempt, every gate with its observed value and threshold, every backend dropped
-by compliance, and every decision taken. `explain` renders it:
+it records every attempt, every gate with its observed value and threshold, and every decision
+taken. `explain` renders it:
 
 ```bash
 uv run openreading explain run-1988.json
@@ -1045,8 +1044,8 @@ excluded a backend. A strategy step that names a backend outside that list still
 an explicit act, and the list is the default chain rather than a wall. `openreading backends` is
 how you check the named one can actually run here.
 
-That is the ordering rule of the whole system, stated by the tool itself. Compliance prunes the
-tree before anything runs, and no rung, fallback or preset can put a dropped backend back.
+That is the ordering rule of the whole system. A named strategy backend is explicit, while a null
+backend resolves the configured default chain.
 
 ### The advanced grammar in one paragraph
 
@@ -1401,7 +1400,7 @@ Four things about the server differ from the CLI, and each one has a reason.
 
 - **It never reads `./openreading.yaml` from its working directory.** A stray file next to a
   long-running process must not change which backends it may reach. Point it at a config
-  explicitly, or send `compliance` in the request body.
+  explicitly through `OPENREADING_CONFIG`.
 - **`document.path` is refused unless `OPENREADING_SERVER_PATH_ROOT` is set**, and then only
   beneath that root. A request from elsewhere sends `bytes_base64` or a URL.
 - **`POST /v1/batch` takes no `path`.** Each document is `bytes_base64`, `url` or `file_id`.
@@ -1441,8 +1440,8 @@ The exit code is the stream a script reads. Branch on it before parsing anything
 | `0` | success | a completed local parse |
 | `1` | unexpected error, or a batch where nothing succeeded | a bug, or an empty folder |
 | `2` | usage | an unknown `--backend`, a path that does not exist, more files than `--max-items` |
-| `3` | cannot run | a missing key, a refused feature, an unreadable config, a compliance refusal |
-| `4` | `route` found no compliant backend; a batch was partial | a policy nothing satisfies, or one failed document |
+| `3` | cannot run | a missing key, a refused feature, an unreadable config, or replay refusal |
+| `4` | `route` found no backend; a batch was partial | an empty default chain, or one failed document |
 | `5` | `compare` inputs are not valid responses | comparing the wrong files |
 | `6` | interrupted and resumable | Ctrl-C during a strategy run with the journal armed |
 | `130` | interrupted without a journal | Ctrl-C before you arm the ledger |
@@ -1479,7 +1478,7 @@ uv run openreading parse examples/1040-1988.pdf --strategy scan_aware > run.json
 ls .openreading/tutorial
 ```
 ```text
-<run-id>.header.json   <run-id>.jsonl   blobs/   keys/   retention/
+<run-id>.header.json   <run-id>.jsonl   blobs/
 ```
 
 Interrupt a run while that is armed, with Ctrl-C or a supervisor's SIGTERM, and the command exits 6
@@ -1497,8 +1496,8 @@ Start a new `parse --strategy scan_aware` run on the scan when you need the canc
 Two limits are worth knowing before you rely on it. A `--backend` run journals nothing, because
 only a strategy dispatch has decisions worth replaying. A batch prints no single run id, so
 batch-level resume is out of scope. Without the variable set, nothing is written and there is
-nothing to resume. [The run ledger](../src/openreading/ledger/README.md) covers retention, the
-encryption of stored payloads, and erasing what a run recorded.
+nothing to resume. [The run ledger](../src/openreading/ledger/README.md) explains the plaintext
+files it records and the operator-owned retention policy.
 
 ```bash
 uv run openreading help signals      # Ctrl-C, SIGTERM, and what a stopped run leaves behind
@@ -1520,7 +1519,7 @@ one guide, and each guide demonstrates rather than restates.
 | understand why a field is missing rather than invented | [The channel contract](../src/openreading/derive/README.md) |
 | write a bigger strategy, or calibrate a threshold | [Strategies](../src/openreading/strategies/README.md) |
 | read a compare report in full | [Compare](../src/openreading/comparison/README.md) |
-| know where a compliance claim came from | [Routing and keys](../src/openreading/router/README.md) |
+| choose the default backend order | [Routing and keys](../src/openreading/router/README.md) |
 | add a backend's key, or pick a backend by format | [Backend adapters](../src/openreading/adapters/README.md) |
 | run a folder or a glob properly | [Batch runs](../src/openreading/batch/README.md) |
 | resume, replay, or erase a run | [The run ledger](../src/openreading/ledger/README.md) |
@@ -1551,11 +1550,11 @@ Save it as `openreading.yaml` before running the appendix commands, including if
 ```yaml
 version: 1
 
-# ── Compliance. A hard filter applied before anything runs. Nothing below can widen it. ──
+# ── Default backend chain. Explicit backend names still run directly. ──
 policy:
   backends: [pymupdf, tesseract]
 
-# ── Strategies. Named plans over the backends the policy left standing. ──
+# ── Strategies. Named plans over explicitly selected backends. ──
 strategies:
 
   # The workhorse. Cheap local parse first, OCR only when the first result cannot be trusted.

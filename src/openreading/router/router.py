@@ -77,15 +77,14 @@ class RoutePlan:
         fails on a document, the request walks the remaining eligible registry and delivers the
         document to backends the same caller is refused by name.
 
-        Only ever a subtraction, over a list the compliance filter has already produced, so no
-        allow-list can readmit a backend compliance dropped (the never-relaxed invariant above).
+        This only subtracts from the resolved chain, so a scope cannot add another backend.
         The `fallbacks[1:]` reshuffle is not a re-rank: removing a member promotes the next
         surviving one in the caller's own written order, which is what "try the next fallback"
         already means.
 
         An emptied chain is a `chosen=None` plan, and the caller decides what that means — for a
         scoped request it is 403 `scope_denied`, never a silent success on nothing, and never the
-        compliance refusal an already-empty router plan gives (that one's fix is the policy; this
+        routing refusal an already-empty router plan gives (that one's fix is the policy; this
         one's is the token's allow-list).
         """
         if allowlist is None:

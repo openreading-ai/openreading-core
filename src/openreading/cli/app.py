@@ -1044,7 +1044,7 @@ def cmd_replay(args) -> int:
     try:
         compiled = compile_strategy(req, name, loaded.config, registry, router_config)
         # BL-163: a whole-trace check, before any decision point is consulted — `config_hash`
-        # captures the compliance posture + eligible/dropped backend set a trace was recorded
+        # captures the configuration and eligible/dropped backend set a trace was recorded
         # under, so a mismatch means this trace's logged decisions were made against a DIFFERENT
         # configuration than the one compiling right now, not merely a different document. A trace
         # missing config_hash entirely (an older or hand-built trace) has nothing to compare
@@ -1055,7 +1055,7 @@ def cmd_replay(args) -> int:
             print(
                 f"[replay] trace config_hash {trace_config_hash!r} does not match the freshly "
                 f"compiled config_hash {compiled.config_hash!r}. Refusing to replay a trace "
-                f"recorded under a different configuration or compliance posture.",
+                "recorded under a different configuration.",
                 file=sys.stderr,
             )
             return 3
@@ -1222,7 +1222,7 @@ def cmd_leaderboard(args) -> int:
     evals.runner.run_case path (internal/product/specs/eval-leaderboard.product-spec.md) — one
     BenchmarkReport: measured mean score, per-dimension breakdown, a per-case winner table, an
     error tally, and each backend's cost basis reported alongside its score. Reuses run_case's
-    existing per-case compliance gate; never a second scoring or gating path (AC-1/AC-2)."""
+    existing per-case runner; never a second scoring path (AC-1/AC-2)."""
     from openreading.evals.leaderboard import run_leaderboard
 
     try:
@@ -2078,8 +2078,8 @@ Then:
   openreading parse examples/ --strategy fast   # run documents through one
   openreading explain out.json     # what the finished run actually decided
 
-Exits: 0 ok. 3 no config, an unparseable one, a validate error, an unknown
-name, or a compliance refusal. A warning never fails a validate.
+Exits: 0 ok. 3 no config, an unparseable one, a validate error, or an unknown
+name. A warning never fails a validate.
 
 More: openreading help strategy""",
     "strategy show": """\
@@ -2164,15 +2164,15 @@ This verb needs an openreading.yaml even to plan a built-in preset, so pass
 --config when yours is not in the working directory.
 
 You get {strategy, config_hash, eligible, dropped[], tree} as JSON and no
-execution at all, which makes this the plan step: see what this document under
-this policy would do before it spends anything. Every dropped backend carries
+execution at all, which makes this the plan step: see what this configuration
+would do. Every dropped backend carries
 the stage and the code that dropped it.
 
 Then:
   openreading parse doc.pdf --strategy fast    # run the plan you printed
 
-Exits: 0 ok. 3 an unreadable document or policy, an unknown strategy, no
-openreading.yaml found, or a compliance refusal.
+Exits: 0 ok. 3 an unreadable document or config, an unknown strategy, or no
+openreading.yaml found.
 
 More: openreading help strategy, openreading help backends-policy""",
     "compare": """\
@@ -2238,8 +2238,7 @@ Then:
   openreading compare run.json again.json --format diffs   # or where not
 
 Exits: 0 ok. 2 no strategy name in either --strategy or the trace. 3 an
-unreadable document, trace, config or policy, a config_hash mismatch, or a
-compliance refusal.
+unreadable document, trace, or config, or a config_hash mismatch.
 
 More: openreading help replay, openreading help exit-codes""",
     "calibrate": """\
@@ -2260,8 +2259,8 @@ Then:
   openreading strategy validate     # after you paste the recommendation
   openreading parse examples/ --strategy main   # run with the new gate
 
-Exits: 0 ok. 3 no openreading.yaml, an unreadable dataset or policy, a
-compliance refusal on a case, or a first-rung backend that cannot run.
+Exits: 0 ok. 3 no openreading.yaml, an unreadable dataset or config, or a
+first-rung backend that cannot run.
 
 More: openreading help calibrate, openreading help datasets""",
     "benchmark": """\
@@ -2712,7 +2711,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help="absolute time budget override, in seconds. It applies to a single document "
         "run with --backend NAME, and to a batch a backend runs natively. It has no "
-        "effect on `auto` or `--strategy` dispatch, which manage their own time budget. "
+        "effect on null-backend or `--strategy` dispatch, which manage their own time budget. "
         "A value of 0 or less means fail fast, so nothing waits. `openreading help parse` "
         "has the per-dispatch defaults",
     )
@@ -2746,8 +2745,7 @@ def build_parser() -> argparse.ArgumentParser:
         "route",
         parents=[common],
         help="show the routing plan for a document",
-        description="Show which backends your compliance policy allows for a document, and why "
-        "the rest were dropped, before anything runs.",
+        description="Show the configured backend chain for a document before anything runs.",
     )
     route.add_argument("file", help="path or http(s):// URL")
     route.add_argument("--config", default=None, metavar="PATH", help="path to an openreading.yaml")
@@ -2869,7 +2867,7 @@ def build_parser() -> argparse.ArgumentParser:
     st_plan = strat_sub.add_parser(
         "plan",
         help="pruned tree for a document (no execution)",
-        description="Print the pruned tree this document would walk under this policy, and "
+        description="Print the tree this document would walk under this configuration, and "
         "execute none of it.",
     )
     st_plan.add_argument("file", help="path or http(s):// URL")
