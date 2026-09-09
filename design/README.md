@@ -37,17 +37,15 @@ The product spec defines what you get, while the design record defines the propo
 | [`decider-executor.md`](decider-executor.md) | the wire executor behind `DeciderPort` — the real LLM call, the caller's key, offline replay | `decider.product-spec.md` |
 | [`intent.md`](intent.md) | the intent schema and its routing mechanics | `intent.product-spec.md` |
 | [`run-stats-analytics.md`](run-stats-analytics.md) | run stats and routing analytics over the journal | `run-stats-analytics.product-spec.md` |
-| [`http-file-uploads.md`](http-file-uploads.md) | multipart file uploads and client folder iteration | [`http-file-uploads.product-spec.md`](../product/specs/http-file-uploads.product-spec.md) |
 
 `product/specs/hallucination-detection.product-spec.md` has product intent and no design record
 yet.
 
-**The first four records predate the removal set and have not been re-scoped since.** Every one was written
+**The four records predate the removal set and have not been re-scoped since.** Every one was written
 against a router with three stages, and there is one lookup now. `intent.md` is the worst
 affected: its central lock reads "intent is read only by stage-3 scoring", and there is no stage
 3 to read it. Each file carries a dated warning at its head saying so. Re-scope before
 implementing, and read `CHANGELOG.md` under Unreleased first.
 
-The HTTP file-upload proposal follows the current router and requires approval before any implementation work begins.
 
 Nothing else in this directory is a proposal.

@@ -1984,16 +1984,8 @@ def test_request_body_under_cap_is_unaffected(monkeypatch):
 
 
 def test_chunked_body_over_cap_is_cut_off(monkeypatch):
-    # The no-Content-Length (chunked) leg: best-effort by design (class docstring) — it disconnects
-    # mid-stream rather than answering a clean 413, and what the app does with a disconnected
-    # receive is whatever Starlette's own Request.stream() does with one (here: the truncated body
-    # fails JSON decoding, a 400). The one thing that MUST hold regardless of the exact status is
-    # the security property this middleware exists for: an oversized streamed body is never fully
-    # buffered and accepted. Proven against a body that would otherwise SUCCEED (a real, complete,
-    # valid pymupdf parse request, streamed a slice at a time so httpx/TestClient never precomputes
-    # a Content-Length and this leg — not the declared-length fast path above — is what runs): if
-    # the cutoff did nothing, this would be a 200, so a non-200 here is the cutoff actually firing,
-    # not just "the request happened to be malformed."
+    # A valid parse streamed without Content-Length must get the same actionable
+    # size refusal as a declared oversized request, rather than a JSON decode error.
     import openreading.server.app as app_module
 
     raw = json.dumps(_pdf_body("pymupdf")).encode()
@@ -2007,7 +1999,8 @@ def test_chunked_body_over_cap_is_cut_off(monkeypatch):
 
     r = client.post("/v1/parse", content=chunks(), headers={"content-type": "application/json"})
 
-    assert r.status_code != 200
+    assert r.status_code == 413
+    assert r.json()["error"]["backend_code"] == "doc_too_large"
 
 
 def test_compare_over_ceiling_is_400_naming_count_and_limit(client):

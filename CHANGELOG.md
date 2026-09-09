@@ -26,6 +26,11 @@ them.
 
 ### Added
 
+- **HTTP file uploads.** You can send client files to parse, route, and jobs using multipart requests.
+  Uploads reuse existing response schemas and need no server filesystem access configuration.
+  A standard-library folder client sends files serially and saves responses under their relative paths.
+  File, metadata, and streamed body limits return 413, while temporary uploads close before execution.
+
 - **Website and tutorial ownership.** The OSS pages and guided walkthrough live in
   `openreading-web`, served at `/oss` and `/oss-tutorial` through Firebase.
   Core retains its README diagrams and points readers to the hosted tutorial. Tutorial checks
