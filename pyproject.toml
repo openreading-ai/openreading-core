@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-authors = [{ name = "Multiversal Ventures" }]
+authors = [{ name = "OpenReading" }]
 keywords = [
     "document-processing", "document-parsing", "pdf", "ocr", "pdf-parser", "document-ai",
     "unified-api", "backend-router", "compare-parsers", "json-schema", "compliance",
@@ -37,12 +37,12 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/multiversal-ventures/openreading-core"
-Documentation = "https://github.com/multiversal-ventures/openreading-core/blob/main/src/openreading/README.md"
-Repository = "https://github.com/multiversal-ventures/openreading-core"
-Issues = "https://github.com/multiversal-ventures/openreading-core/issues"
-Changelog = "https://github.com/multiversal-ventures/openreading-core/blob/main/CHANGELOG.md"
-Security = "https://github.com/multiversal-ventures/openreading-core/security/policy"
+Homepage = "https://github.com/openreading-ai/openreading-core"
+Documentation = "https://github.com/openreading-ai/openreading-core/blob/main/src/openreading/README.md"
+Repository = "https://github.com/openreading-ai/openreading-core"
+Issues = "https://github.com/openreading-ai/openreading-core/issues"
+Changelog = "https://github.com/openreading-ai/openreading-core/blob/main/CHANGELOG.md"
+Security = "https://github.com/openreading-ai/openreading-core/security/policy"
 
 [project.optional-dependencies]
 # --- adapter extras, one per backend, then the http, server and all umbrellas ---

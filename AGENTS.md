@@ -35,7 +35,7 @@ a proposal has no code to contradict. The risk begins the day it ships. When the
 durable facts move into the module docstrings and **the design file is deleted in the same PR**.
 Nothing mechanizes that. A reviewer has to.
 
-The marketing site, OSS pages, and guided tutorial live in `multiversal-ventures/openreading-web`.
+The marketing site, OSS pages, and guided tutorial live in `openreading-web`.
 The tutorial at `https://openreading.ai/oss-tutorial` runs commands against the documents in this
 repository's `examples/` directory. The website validates its tutorial configurations against
 core, while `tests/test_docs_truth.py` validates only this repository's guides and module docstrings.
@@ -200,7 +200,7 @@ one slug per heading. A new verb owes a docstring section, a `TOPICS` row and an
 
 ## The company repo
 
-The private `multiversal-ventures/openreading` repo checks this repo out as `core/`. It holds
+The private `openreading` company repo checks this repo out as `core/`. It holds
 everything *about* the engine that is not part of it: research packs, design specs, the
 engineering-council process, product intent, run logs, the decision log, and labeled data. It
 also holds the company's own packages that depend on this one, a web UI among them.

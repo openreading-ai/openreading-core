@@ -51,7 +51,7 @@ Setup
 =====
 NOTHING IS ON PyPI. `pip install openreading` does not work; install from a clone:
 
-    git clone https://github.com/multiversal-ventures/openreading-core
+    git clone https://github.com/openreading-ai/openreading-core
     cd openreading-core
     uv sync --all-extras --dev          # every backend extra + dev tools (same as `make sync`)
     uv run openreading backends         # one row per backend, under the header

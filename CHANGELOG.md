@@ -27,7 +27,7 @@ them.
 ### Added
 
 - **Website and tutorial ownership.** The OSS pages and guided walkthrough live in
-  `multiversal-ventures/openreading-web`, served at `/oss` and `/oss-tutorial` through Firebase.
+  `openreading-web`, served at `/oss` and `/oss-tutorial` through Firebase.
   Core retains its README diagrams and points readers to the hosted tutorial. Tutorial checks
   run in the web repository against core, so core verification needs no website checkout.
 

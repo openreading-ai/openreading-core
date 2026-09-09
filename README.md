@@ -2,7 +2,7 @@
 
 # OpenReading: an intelligent, policy-aware router for document processing
 
-[![CI](https://github.com/multiversal-ventures/openreading-core/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/multiversal-ventures/openreading-core/actions/workflows/ci.yml)
+[![CI](https://github.com/openreading-ai/openreading-core/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/openreading-ai/openreading-core/actions/workflows/ci.yml)
 [![coverage](https://img.shields.io/badge/coverage-%E2%89%A594%25-brightgreen)](#status-and-versioning)
 [![python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
@@ -106,7 +106,7 @@ separate system binary, needed only for the `tesseract` backend, and the next se
 Python 3.11+ with `pip` also works. Nothing is on PyPI yet, so install from the clone.
 
 ```bash
-git clone https://github.com/multiversal-ventures/openreading-core
+git clone https://github.com/openreading-ai/openreading-core
 cd openreading-core
 uv sync --all-extras --dev       # every backend extra + the dev tools (same as `make sync`)
 uv run openreading backends      # one row per backend, with a CONFIGURED column and the variables each backend still needs

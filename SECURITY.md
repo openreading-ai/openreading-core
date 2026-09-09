@@ -9,7 +9,7 @@ software protects, and what it does not".
 Do not open a public issue for a security vulnerability.
 
 Report through GitHub's private vulnerability reporting
-([Security → Report a vulnerability](https://github.com/multiversal-ventures/openreading-core/security/advisories/new)),
+([Security → Report a vulnerability](https://github.com/openreading-ai/openreading-core/security/advisories/new)),
 or by email to <creativeaisle@gmail.com> if you would rather not use GitHub.
 
 Include the affected version or commit, what an attacker gains, and a reproduction if you have

@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Security vulnerabilities do not belong here. Follow the
-        [security policy](https://github.com/multiversal-ventures/openreading-core/security/policy)
+        [security policy](https://github.com/openreading-ai/openreading-core/security/policy)
         instead.
   - type: textarea
     id: expected

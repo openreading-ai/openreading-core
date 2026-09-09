@@ -1,5 +1,5 @@
 blank_issues_enabled: true
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/multiversal-ventures/openreading-core/security/advisories/new
+    url: https://github.com/openreading-ai/openreading-core/security/advisories/new
     about: Report privately. Please do not open a public issue.

@@ -11,7 +11,7 @@
 - [ ] Hosted-backend behaviour is proven against fixtures, not live calls
 - [ ] Rationale for non-obvious code is in a module docstring or a comment, not only in this PR
       description (see
-      [AGENTS.md](https://github.com/multiversal-ventures/openreading-core/blob/main/AGENTS.md))
+      [AGENTS.md](https://github.com/openreading-ai/openreading-core/blob/main/AGENTS.md))
 - [ ] No new markdown file outside the allowlist, and nothing added under `docs/`
 - [ ] If this touches routing, strategies, or fallbacks: the PR states why the compliance-eligible
       set cannot widen
