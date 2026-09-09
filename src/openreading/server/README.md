@@ -508,6 +508,8 @@ your own proxy in front before more than one client can reach the port.
 - A `deadline_ms` field over HTTP, so a long hosted job hits 504 at 120 s. The `openreading.server`
   docstring covers it under "HTTP status codes", in the Timeouts paragraph: "no `deadline_ms` field
   or query param".
+- Multipart file uploads. `design/http-file-uploads.md` proposes them with a product spec beside
+  it, and the `openreading.server` docstring lists them under Known gaps.
 - Webhook *signature* verification for `chunkr` and `open-ocr`, because neither vendor offers a
   signing mechanism. Their callbacks are authenticated by the per-job token described under the
   error ladder above.
