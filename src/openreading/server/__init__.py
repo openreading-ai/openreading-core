@@ -51,6 +51,10 @@ server process environment. Request bodies never carry credential values.
 The process binds to ``127.0.0.1:8787`` by default. CORS is disabled unless the operator supplies
 an origin. Body, batch, compare, and job-store limits are defined and documented in
 ``openreading.server.app``. Import ``create_app`` to construct the ASGI application.
+
+Known gaps
+----------
+Multipart file uploads are designed, not built. See ``design/http-file-uploads.md`` and its linked product spec.
 """
 
 from __future__ import annotations
