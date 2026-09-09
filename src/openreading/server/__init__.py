@@ -54,7 +54,8 @@ an origin. Body, batch, compare, and job-store limits are defined and documented
 
 Known gaps
 ----------
-Multipart file uploads are designed, not built. See ``design/http-file-uploads.md`` and its linked product spec.
+Multipart file uploads are designed, not built. See ``design/http-file-uploads.md`` and its
+linked product spec.
 """
 
 from __future__ import annotations

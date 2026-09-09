@@ -60,11 +60,13 @@ Sending `request=@options.json` creates another file part and is rejected with a
 
 Both part names are case-sensitive, and duplicates are rejected instead of choosing the first or last value.
 Unknown parts, multiple file parts, missing parts, and empty file contents are also HTTP 400 errors.
-Duplicate keys inside the multipart JSON field are rejected to prevent ambiguous option or document-source selection.
-Existing JSON-body duplicate-key handling is unchanged because changing it is outside this transport addition.
+The `request` part stays mandatory rather than defaulting to a null backend, because an omitted part and a forgotten part look identical on the wire.
+Duplicate keys inside the multipart JSON field decode exactly as they do in a JSON body, so one decoder serves both encodings.
+The source-exclusivity rules below catch an ambiguous document source after decoding, whichever encoding carried it.
 
 The JSON object keeps the existing `backend` object requirement and all other supported request fields.
 For example, `{"backend":{"id":null}}` requests the existing configured default behavior without an upload-specific backend choice.
+`/v1/jobs` keeps refusing a null backend identifier with its existing 400, because a job record needs a named backend or strategy.
 
 `request.document` may be absent or contain only `mime_type` and `password`, subject to their existing schema types.
 The fields `path`, `url`, `bytes_base64`, and `file_id` are prohibited there, even when their values are null.
@@ -87,6 +89,7 @@ Its extraction stays in the parse handler, and sibling endpoints continue reject
 The decoder derives a basename from the uploaded filename, treating both slash styles as directory separators.
 For example, `C:\fakepath\report.docx` and `/home/user/report.docx` both become the metadata value `report.docx`.
 Unicode characters and spaces are preserved, and the basename must fit within 255 UTF-8 bytes.
+Treating a backslash as a separator drops a Unix name that contains one, which is accepted so a browser `fakepath` prefix never reaches metadata.
 This bound keeps retained filename metadata small independently of the larger multipart request-body size limit.
 An empty basename, `.` or `..`, or a basename containing control characters produces HTTP 400.
 The filename is metadata only and never controls a temporary path or an output destination.
@@ -149,6 +152,7 @@ For example, a valid file followed by an unexpected third part must fail without
 
 The raw body limit bounds temporary disk consumption during parsing, even before the file-size check becomes available.
 The document-size check must run before reading an entire spooled file into memory or constructing its base64 representation.
+A file over the document ceiling but under the body ceiling spools completely before refusal, so one such request can cost up to the full body limit in temporary disk.
 No unbounded `request.body()` call may precede multipart parsing, and `Content-Length` alone never establishes actual received size.
 
 The raw body limiter records overflow independently from downstream handler exceptions and returns the existing 413 envelope.
@@ -169,7 +173,8 @@ A failure to create or write temporary storage returns a sanitized HTTP 500 with
 Upload bodies, document passwords, and full multipart fields must not appear in diagnostic logs or parser error messages.
 Release verification must include a malformed password-bearing metadata field and confirm that the error response never echoes its contents.
 
-Internal base64 allocation remains proportional to document size, even when the receive path spills content to temporary disk.
+Peak memory per upload is several times the file size: the raw bytes, their base64 text, the decoded copy in `api.run_request`, and a backend payload that encodes them again.
+The server README documents that multiplier under Operations, because the receive-time spool does not lower it.
 This design promises bounded ingestion per request, rather than constant-memory execution or a new global concurrency controller.
 Existing explicitly enabled ledger behavior and backend retention remain outside the lifetime of the upload spool.
 
@@ -189,6 +194,7 @@ Existing explicitly enabled ledger behavior and backend retention remain outside
 
 Part count and filename-length violations are shape failures returning 400, whereas the three byte ceilings return 413.
 The 413 message names the exceeded resource and configured limit without echoing uploaded content or passwords.
+The metadata ceiling keeps `doc_too_large` rather than introducing a new backend code, and its message names the `request` field as the exceeded resource.
 An upload size exception must survive handler validation wrappers instead of becoming a generic 400.
 
 Dispatch to multipart decoding only for the parsed `multipart/form-data` media type, with case-insensitive media-type matching.
@@ -215,8 +221,10 @@ The recipe skips hidden entries and symlinks, retains failed HTTP bodies, and re
 It sorts selected files by relative path, continues after failures, and ends with totals and a nonzero failure exit.
 No automatic retries are included, because a failed connection does not establish whether document processing already occurred.
 
-Use existing `openreading.batch.sources` semantics as the reference for traversal rather than silently defining incompatible recursive selection rules.
-The documentation recipe may use standard client libraries, but this release adds no supported remote-client API surface.
+The recipe ships as a standard-library Python script, provisionally `scripts/upload_folder.py`, because the client machine has Python and curl but no OpenReading install.
+It copies the traversal rules of `openreading.batch.sources` (bytewise relative-path order, hidden entries and symlinks skipped) without importing them, and its docstring names that module as the reference.
+Tests under `tests/` run the script against a temporary directory for AC-10, and the server README shows its invocation.
+This release adds no supported remote-client API surface, and the script is a documented recipe rather than a public module.
 If a later remote CLI is approved, reuse the intake implementation wherever its local-source contract applies.
 
 A future multipart `/v1/batch` extension needs a manifest mapping each uploaded part to a document and stable item identity.
@@ -230,7 +238,8 @@ Do not add an archive endpoint or shared filesystem mounts to make ordinary clie
 
 No existing vendored request or response schema changes, because binary ingress normalizes into the existing bytes source.
 The transport's strict part rules live next to the server decoder and in generated HTTP documentation.
-OpenAPI must advertise both `application/json` and `multipart/form-data` on the three supported endpoints, including examples.
+The three handlers take a raw `Request` today, so the generated OpenAPI describes no request body for them at all.
+Implementation adds an `openapi_extra` request body per handler that advertises both `application/json` and `multipart/form-data`, including examples.
 The multipart body defines a binary `file` and JSON-text `request`, with metadata rules matching this record.
 
 Derive request-option descriptions from the vendored schema where practical, without maintaining another independent catalog of processing fields.
@@ -245,8 +254,8 @@ FastAPI's [forms and files documentation](https://fastapi.tiangolo.com/tutorial/
 Update `openreading.server` for the public contract and `openreading.server.app` for body-limit behavior and environment-variable semantics.
 The new decoder module documents metadata precedence, source exclusivity, spooling ownership, and parser failure handling at their implementation sites.
 Update the existing server README walkthrough with single-file and folder examples, plus reachable-host and bearer-auth guidance.
-Update the CLI docstring's HTTP status ladder for upload 400 cases and reliable streamed 413 behavior.
-Document the existing body-limit environment variable in `.env.example` if its required entry is still absent when implementation begins.
+Update the "HTTP status codes" ladder in the `openreading.server` docstring for upload 400 cases and reliable streamed 413 behavior.
+Add `OPENREADING_MAX_BODY_BYTES` to `.env.example`, because the server section there documents every other limit and omits this one today.
 
 Re-run affected walkthrough commands from a fresh checkout, keeping synthetic inputs and response evidence suitable for public review.
 If the hosted tutorial changes, update its sources and run its validation within `openreading-web`, without introducing a core dependency.
@@ -259,9 +268,9 @@ Add a CHANGELOG entry when the feature actually ships, rather than announcing un
 | Canonical input parity | Equivalent requests for direct, default, and configured strategy execution. Preserve meaningful outputs while excluding measured timing and generated identifiers. | AC-1, AC-2, AC-5 |
 | Multipart structure | Both part orders, duplicate names and JSON keys, unknown parts, missing boundary, truncated final boundary, invalid UTF-8, non-object JSON, and empty files. | AC-3, AC-5 |
 | Document metadata | Exact byte preservation, Unicode and spaced names, path stripping, source conflicts, passwords, MIME precedence, and unknown MIME fallback. | AC-4, AC-5 |
-| Endpoints | Route never executes. Jobs cover inline completion and pending retrieval after the upload object closes. Parse preserves `keep_candidates`. | AC-2, AC-6 |
+| Endpoints | Route never executes. Jobs cover inline completion, pending retrieval after the upload object closes, and the existing 400 for a null backend. Parse preserves `keep_candidates`. | AC-2, AC-6 |
 | Authorization | Configured auth rejects before upload parsing. Named, default, and strategy scopes prevent forbidden dispatch. CORS covers error responses. | AC-7 |
-| Resource boundaries | Tiny injected caps cover exact limits and one-byte-over failures. Streamed and understated-length overflow emits exactly one 413. | AC-8 |
+| Resource boundaries | Tiny injected caps cover exact limits and one-byte-over failures. Streamed and understated-length overflow emits exactly one 413. Rewrite `test_chunked_body_over_cap_is_cut_off` to assert 413 rather than any non-200 status. | AC-8 |
 | Cleanup | Force disk spooling and fail during parsing, writing, validation, cancellation, disconnect, and execution. Assert all owned file descriptors close. | AC-9 |
 | Folder recipe | Temporary directory covers duplicate basenames, nested paths, spaces, Unicode, hidden entries, symlinks, unreadable files, and a failed upload. | AC-10 |
 | Packaging and docs | Server-extra installation imports multipart support. Base installation stays separate. OpenAPI and walkthrough examples match actual behavior. | AC-11, AC-12 |
@@ -271,7 +280,7 @@ Add a CHANGELOG entry when the feature actually ships, rather than announcing un
 The first upload test must fail against the current implementation before any multipart decoder is written.
 For each repaired regression, break the fix, observe the focused failure, and restore implementation before completing verification.
 Offline HTTP tests use ASGI transport and mocked adapters, with no live Docling process or network dependency.
-Live validation runs separately against an explicitly configured Docling Serve version and records that version with its evidence.
+Live validation is a keyed test in the `make verify-live` lane, gated on `DOCLING_SERVE_URL`, that records the Docling Serve version with its evidence.
 
 ## 11. Future implementation sequence and release gate
 
@@ -283,7 +292,7 @@ The following steps identify future implementation boundaries for review rather 
 3. Make streamed body failures deterministic and verify cleanup across every parser and handler exit path.
 4. Complete route and job integration tests, scope regressions, and the mocked Docling document-transfer demonstration.
 5. Publish OpenAPI and walkthrough updates, then validate the folder recipe and supported dependency installations.
-6. Run `make verify`, followed separately by the synthetic live Docling demonstration and fresh-checkout walkthrough.
+6. Run `make verify`, then `make verify-live` with `DOCLING_SERVE_URL` set for the synthetic Docling proof, then the fresh-checkout walkthrough.
 
 No multipart batch extension, backend addition, dependency bundling, or container startup behavior belongs in those implementation steps.
 Release requires every acceptance criterion, the unchanged 94 percent coverage floor, and the complete offline verification gate.

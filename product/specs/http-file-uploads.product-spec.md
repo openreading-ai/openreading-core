@@ -37,13 +37,13 @@ Each backend reads the formats its descriptor claims, as listed in the [adapter 
 
 | Goal | What you get | Evidence required before release |
 |---|---|---|
-| G1. Upload directly | One curl command sends a local file without base64 scripting or path-root configuration. | A separate client uploads a synthetic DOCX and receives extracted content through Docling Serve. |
+| G1. Upload directly | One curl command sends a local file without base64 scripting or path-root configuration. | A keyed live test in `make verify-live` uploads a synthetic DOCX from a separate client and receives extracted content through Docling Serve. |
 | G2. Keep one processing contract | Uploads retain request options and existing response semantics across single-document HTTP endpoints. | Equivalent multipart and JSON requests produce equivalent processing inputs and semantic results. |
 | G3. Bound upload resources | Oversized or malformed uploads fail before document processing starts. | Boundary tests prove byte limits, early refusal, and temporary-file cleanup. |
 | G4. Make folder behavior explicit | You can process a client directory through independently tracked file uploads. | A documented client recipe handles nested paths, spaces, duplicate basenames, and an individual failure. |
 | G5. Preserve deployment choices | The server keeps its existing authentication, routing, and backend configuration behavior. | Scope, path-access, and JSON compatibility regressions remain green. |
 
-These measures require reproducible test evidence and a manual demonstration, rather than new production telemetry or retention.
+These measures require reproducible test evidence from the offline suite and the keyed live lane, rather than new production telemetry or retention.
 The feature is complete only when every acceptance criterion below has evidence attached to its implementation review.
 
 ## Proposed experience
@@ -63,6 +63,7 @@ You replace `SERVER_IP` with the OpenReading machine's reachable address, rather
 You configure `DOCLING_SERVE_URL` on that machine to identify the separately running Docling Serve endpoint.
 When caller authentication is enabled, you send the same bearer authorization header used by JSON requests.
 You let curl generate the multipart content type and boundary instead of adding a JSON content-type header.
+The `--fail-with-body` flag needs curl 7.76 or newer, and an older curl can drop it and read the error from the saved response.
 
 The upload supplies the filename automatically, including the extension required by the current Docling adapter.
 For example, the uploaded `report.docx` reaches Docling with that filename rather than its PDF fallback name.
@@ -91,7 +92,9 @@ curl --fail-with-body -sS \
 | CLI and Python | Keep existing local input handling. This release adds no remote-client command or SDK. |
 
 The first release accepts exactly one file and exactly one JSON metadata field per multipart request.
-Backend selection remains explicit through the existing backend object, including its supported null identifier behavior.
+The metadata field stays required, because an omitted part and a forgotten part look identical on the wire.
+Backend selection remains explicit through the existing backend object, including its null identifier on `/v1/parse` and `/v1/route`.
+`/v1/jobs` keeps requiring a named backend or strategy, as it does for JSON today.
 Uploading a file never selects Docling automatically or adds candidates to the configured backend chain.
 
 Both supported encodings produce the same internal request and use the same existing processing pipeline.
@@ -124,7 +127,7 @@ Archives remain opaque document bytes for the selected backend, without automati
 
 | ID | Required behavior | Verification |
 |---|---|---|
-| AC-1 | A remote client uploads one file through `/v1/parse` without path-root configuration or client base64 encoding. | HTTP fixture test plus the remote-client Docling demonstration. |
+| AC-1 | A remote client uploads one file through `/v1/parse` without path-root configuration or client base64 encoding. | HTTP fixture test plus the keyed live Docling test. |
 | AC-2 | Accepted JSON requests retain their processing behavior, response shapes, and endpoint-specific options. | Existing server suite plus JSON/multipart input parity tests. |
 | AC-3 | Multipart carries exactly one `file` and one `request`, with either part order accepted. | Missing, duplicate, extra, malformed, and reversed-part tests. |
 | AC-4 | Uploaded bytes, filename, and supported document metadata reach the selected backend without a server path. | Capture the normalized request and the mocked Docling HTTP payload. |
@@ -137,7 +140,7 @@ Archives remain opaque document bytes for the selected backend, without automati
 | AC-11 | Server installation includes multipart parsing while ordinary library installation gains no server or Docling dependency. | Installation and dependency metadata checks. |
 | AC-12 | HTTP documentation and OpenAPI describe both encodings, exact part names, metadata rules, limits, and errors. | OpenAPI assertions and a fresh-checkout walkthrough. |
 | AC-13 | Existing JSON path restrictions and JSON batch semantics remain intact. | Path-root and batch regression tests, including zero dispatch for multipart batches. |
-| AC-14 | Uploading synthetic DOCX content through Docling retains paragraph and table content without invented page geometry. | Captured response fixture plus a separately executed live validation. |
+| AC-14 | Uploading synthetic DOCX content through Docling retains paragraph and table content without invented page geometry. | Captured response fixture plus the keyed live Docling test. |
 
 Oversized streamed bodies currently have a best-effort refusal, so AC-8 deliberately tightens that failure into HTTP 413.
 This change affects shared body-limit handling, including JSON, while accepted request behavior remains unchanged under AC-2.
@@ -145,11 +148,12 @@ This change affects shared body-limit handling, including JSON, while accepted r
 ## Constraints and risks
 
 The default request-body ceiling remains 150 MiB, including multipart boundaries, part headers, metadata, and file content.
-Each file is limited to the existing 100 MiB document ceiling, with request metadata limited to 1 MiB.
+Each file reuses the 100 MiB ceiling that URL downloads and rooted paths already obey, and request metadata is limited to 1 MiB.
 The effective limit is whichever applicable ceiling the incoming request reaches first during processing.
 
 Multipart simplifies the client, but the current internal request still represents document content as base64 text.
 Temporary spooling therefore reduces receive-time memory pressure without making downstream processing zero-copy or constant-memory.
+Peak memory per upload is several times the file size, and the design record gives that multiplier for operator sizing.
 Concurrent requests can still multiply resource use, so deployment capacity remains an operator responsibility.
 
 Upload files receive temporary storage only for ingestion, with no new upload identifier or persistent file store.
@@ -173,7 +177,7 @@ Docling authentication and timeout improvements identified earlier remain separa
 
 The [design record](../../design/http-file-uploads.md) defines the transport contract, processing boundary, test mapping, and future implementation sequence.
 The future implementation follows failing tests first, focused regression proof, and the full offline `make verify` check.
-Live Docling validation remains separate from that check and uses only synthetic documents during the demonstration.
+Live Docling validation runs in the keyed `make verify-live` lane, skips cleanly without `DOCLING_SERVE_URL`, and uses only synthetic documents.
 
 When implementation ships, move durable facts into server docstrings, OpenAPI, and the existing server walkthrough.
 Delete this product spec, its design record, and their proposal markers in the same finishing pull request.
