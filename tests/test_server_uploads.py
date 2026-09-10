@@ -119,9 +119,11 @@ def test_upload_scope_refuses_before_dispatch(endpoint, monkeypatch):
     assert response.status_code == 403, response.text
 
 
-def test_batch_does_not_accept_multipart():
-    response = TestClient(create_app()).post("/v1/batch", files=upload_parts())
+@pytest.mark.parametrize("endpoint", ["/v1/batch", "/v1/compare"])
+def test_json_only_endpoints_refuse_multipart(endpoint):
+    response = TestClient(create_app()).post(endpoint, files=upload_parts())
     assert response.status_code == 400
+    assert response.json()["error"]["category"] == "bad_request"
 
 
 @pytest.mark.parametrize("endpoint", ["/v1/route", "/v1/jobs"])
@@ -224,3 +226,89 @@ async def test_streamed_multipart_overflow_closes_partial_spool(declared, monkey
     assert spools and all(spool.closed for spool in spools)
     body = b"".join(m.get("body", b"") for m in messages)
     assert json.loads(body)["error"]["backend_code"] == "doc_too_large"
+
+
+def _chunked_pdf_multipart():
+    boundary = b"upload-boundary"
+    body = (
+        b"--" + boundary + b"\r\n"
+        b'Content-Disposition: form-data; name="file"; filename="sample.pdf"\r\n'
+        b"Content-Type: application/pdf\r\n\r\n" + build_sample_pdf() + b"\r\n"
+        b"--" + boundary + b"\r\n"
+        b'Content-Disposition: form-data; name="request"\r\n\r\n'
+        b'{"backend":{"id":"pymupdf"}}\r\n'
+        b"--" + boundary + b"--\r\n"
+    )
+
+    def chunks():
+        for i in range(0, len(body), 2000):
+            yield body[i : i + 2000]
+
+    return body, chunks, {"content-type": b"multipart/form-data; boundary=" + boundary}
+
+
+def test_streamed_upload_overflow_is_413_with_auth_and_cors(monkeypatch):
+    # The auth gate is a BaseHTTPMiddleware between the body limiter and the handler. A streamed
+    # overflow must still surface as the limiter's single 413, carrying CORS headers, and the
+    # token must have been checked first (a wrong token is 401 before any byte is counted).
+    import openreading.server.app as module
+
+    body, chunks, headers = _chunked_pdf_multipart()
+    monkeypatch.setenv("OPENREADING_API_KEYS", "upload-test-key")
+    monkeypatch.setattr(module, "_MAX_BODY_BYTES", len(body) // 2)
+    client = TestClient(create_app(cors_origins=["https://app.example"]))
+    headers = {k: v.decode() for k, v in headers.items()}
+    r = client.post(
+        "/v1/parse",
+        content=chunks(),
+        headers={
+            **headers,
+            "Authorization": "Bearer upload-test-key",
+            "Origin": "https://app.example",
+        },
+    )
+    assert r.status_code == 413, r.text
+    assert r.json()["error"]["backend_code"] == "doc_too_large"
+    assert r.headers.get("access-control-allow-origin") == "https://app.example"
+    denied = client.post(
+        "/v1/parse",
+        content=chunks(),
+        headers={**headers, "Authorization": "Bearer wrong", "Origin": "https://app.example"},
+    )
+    assert denied.status_code == 401
+
+
+async def test_body_limit_forwards_a_response_that_started_before_overflow():
+    # An app that answers before it finishes reading the body (a streaming handler, or one that
+    # never reads it) has already committed a status. Overflow after that point must not leave
+    # the response truncated: the remaining messages are forwarded and no second 413 is sent.
+    from openreading.server.app import _BodyLimitMiddleware
+
+    async def app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"first", "more_body": True})
+        while (await receive())["type"] == "http.request":
+            pass
+        await send({"type": "http.response.body", "body": b"last", "more_body": False})
+
+    chunks = iter([b"x" * 10, b"x" * 10])
+
+    async def receive():
+        try:
+            return {"type": "http.request", "body": next(chunks), "more_body": True}
+        except StopIteration:
+            return {"type": "http.disconnect"}
+
+    messages = []
+
+    async def send(message):
+        messages.append(message)
+
+    await _BodyLimitMiddleware(app, max_bytes=15)({"type": "http", "headers": []}, receive, send)
+    assert [m["type"] for m in messages] == [
+        "http.response.start",
+        "http.response.body",
+        "http.response.body",
+    ]
+    assert messages[0]["status"] == 200
+    assert messages[-1]["body"] == b"last" and messages[-1]["more_body"] is False

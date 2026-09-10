@@ -827,7 +827,9 @@ class _BodyLimitMiddleware:
 
         async def guarded_send(message):
             nonlocal response_started
-            if not overflow:
+            # A response committed before the overflow keeps flowing: dropping its tail would
+            # leave the client with a truncated body and no second status to explain it.
+            if response_started or not overflow:
                 response_started |= message["type"] == "http.response.start"
                 await send(message)
 

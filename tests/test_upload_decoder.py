@@ -337,6 +337,15 @@ async def test_case_insensitive_media_type_and_exact_utf8_filename_length():
     assert result["document"]["filename"] == "é" * 127 + "a"
 
 
+async def test_disposition_type_is_case_insensitive():
+    # RFC 6266 makes the disposition type case-insensitive; only the part names are exact.
+    from openreading.server.uploads import decode_request
+
+    body = _body().replace(b"Content-Disposition: form-data", b"Content-Disposition: FORM-DATA")
+    result = await decode_request(_request(body))
+    assert result["document"]["filename"] == "report.txt"
+
+
 async def test_unknown_mime_is_omitted_so_valid_unknown_content_reaches_backend():
     from openreading.server.uploads import decode_request
 

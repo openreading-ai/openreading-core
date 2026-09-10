@@ -82,7 +82,7 @@ class _UploadParser(MultiPartParser):
         part = self._current_part
         disposition, options = parse_options_header(part.content_disposition)
         name = options.get(b"name")
-        if disposition != b"form-data" or name not in {b"file", b"request"}:
+        if disposition.lower() != b"form-data" or name not in {b"file", b"request"}:
             raise UploadError(400, "Multipart requires exactly the file and request parts.")
         if name in self.names:
             raise UploadError(400, "Multipart part names must not repeat.")
@@ -140,8 +140,10 @@ async def decode_request(request: Request) -> Any:
     if media_type.lower() != b"multipart/form-data":
         try:
             return await request.json()
-        except (ValueError, UnicodeError):
-            raise UploadError(400, "Invalid JSON request body.") from None
+        except (ValueError, UnicodeError) as e:
+            # The decoder's own text names a position, never the body, so it stays useful
+            # and safe to echo, the same wording the JSON handlers used before uploads.
+            raise UploadError(400, f"invalid JSON body: {e}") from None
 
     parser = _UploadParser(request)
     try:
