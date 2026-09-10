@@ -19,7 +19,8 @@ HTTP status codes
     A request completed, including partial batches, job submissions, and job reads.
     Job state determines whether processing is still running.
 400
-    The body or request shape is invalid, or a batch or compare count exceeds its limit.
+    The body or request shape is invalid, a batch or compare count exceeds its limit, or a
+    compare body exceeds ``OPENREADING_MAX_COMPARE_BYTES``.
 401
     Authentication is enabled and the bearer token is missing or invalid.
 403
@@ -27,7 +28,8 @@ HTTP status codes
 404
     A named backend or job identifier is unknown.
 413
-    The request body, uploaded file, or upload metadata exceeds its byte limit.
+    The raw request body exceeds ``OPENREADING_MAX_BODY_BYTES`` on any endpoint, or an
+    uploaded file or its metadata exceeds its own limit.
 422
     The backend cannot provide a requested feature.
 424

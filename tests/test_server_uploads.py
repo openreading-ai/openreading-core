@@ -312,3 +312,54 @@ async def test_body_limit_forwards_a_response_that_started_before_overflow():
     ]
     assert messages[0]["status"] == 200
     assert messages[-1]["body"] == b"last" and messages[-1]["more_body"] is False
+
+
+async def test_body_limit_logs_a_handler_failure_after_overflow(caplog):
+    # After overflow the middleware owns the response, but a handler bug that surfaces in the
+    # same request must still reach the log with its traceback rather than vanish behind a 413.
+    import logging
+
+    from openreading.server.app import _BodyLimitMiddleware
+
+    async def app(scope, receive, send):
+        while (await receive())["type"] == "http.request":
+            pass
+        raise RuntimeError("handler bug after overflow")
+
+    chunks = iter([b"x" * 10, b"x" * 10])
+
+    async def receive():
+        return {"type": "http.request", "body": next(chunks), "more_body": True}
+
+    messages = []
+
+    async def send(message):
+        messages.append(message)
+
+    with caplog.at_level(logging.WARNING, logger="openreading.server.app"):
+        await _BodyLimitMiddleware(app, 15)({"type": "http", "headers": []}, receive, send)
+    assert [m["status"] for m in messages if m["type"] == "http.response.start"] == [413]
+    assert "handler bug after overflow" in caplog.text
+
+
+def test_error_envelope_honors_every_upload_error_status():
+    from openreading.server.app import _error_envelope
+    from openreading.server.uploads import UploadError
+
+    assert _error_envelope(UploadError(400, "shape"))[0] == 400
+    assert _error_envelope(UploadError(400, "shape"))[1]["category"] == "bad_request"
+    assert _error_envelope(UploadError(413, "big"))[1]["backend_code"] == "doc_too_large"
+    assert _error_envelope(UploadError(500, "disk"))[0] == 500
+    assert _error_envelope(UploadError(422, "future"))[0] == 422
+
+
+def test_server_extra_ships_the_multipart_dependency():
+    # openreading.server.app imports the upload decoder unconditionally, so `pip install
+    # openreading[server]` must carry the multipart parser or `openreading serve` cannot start.
+    # The dev group also installs it, which is why `make verify` cannot notice the drift.
+    import tomllib
+    from pathlib import Path
+
+    pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
+    server = pyproject["project"]["optional-dependencies"]["server"]
+    assert any(dep.startswith("python-multipart") for dep in server), server

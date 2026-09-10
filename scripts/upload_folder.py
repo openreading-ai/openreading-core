@@ -22,7 +22,8 @@ already have started processing. Curl streams files directly without Python buff
 Environment variables this module reads
 --------------------------------------
 OPENREADING_API_KEY supplies the optional bearer token for the server you started.
-When unset or empty, uploads omit authentication. PATH locates the installed curl.
+When unset or empty, uploads omit authentication. PATH locates the installed curl, which
+must be 7.55 or newer because the token travels to it through standard input.
 """
 
 from __future__ import annotations
@@ -73,6 +74,8 @@ def upload(path: Path, destination: Path, url: str, backend: str, token: str) ->
         command = [
             "curl",
             "--disable",
+            # Brackets or braces in the URL would otherwise fan out into several uploads.
+            "--globoff",
             "--silent",
             "--show-error",
             "--proto",
@@ -103,13 +106,15 @@ def upload(path: Path, destination: Path, url: str, backend: str, token: str) ->
         return {"outcome": "local_error", "message": error.strerror or "Local operation failed"}
     if result.returncode:
         # Curl distinguishes local file-read/write failures from incomplete network transfers.
+        # Its stderr names the cause and never echoes request headers, so it is safe to keep.
         outcome = "local_error" if result.returncode in (23, 26, 37) else "transport_error"
-        return {"outcome": outcome, "curl_exit": result.returncode}
-    try:
-        status = int(result.stdout)
-    except ValueError:
-        return {"outcome": "transport_error", "message": "curl returned no HTTP status"}
-    if status == 0:
+        return {
+            "outcome": outcome,
+            "curl_exit": result.returncode,
+            "message": result.stderr.strip(),
+        }
+    status = int(result.stdout) if result.stdout.isdigit() else 0
+    if not status:
         return {"outcome": "transport_error", "message": "curl returned no HTTP status"}
     return {"outcome": "success" if 200 <= status < 300 else "http_error", "http_status": status}
 

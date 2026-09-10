@@ -38,6 +38,7 @@ def client(tmp_path: Path):
         "if 'unreadable' in source.name:\n"
         "    sys.exit(26)\n"
         "if 'transport' in source.name:\n"
+        "    print('curl: (7) Failed to connect', file=sys.stderr)\n"
         "    sys.exit(7)\n"
         "body = b'{\"error\":\"refused\"}' if 'http-fail' in source.name else b'{\"ok\":true}'\n"
         "target.write_bytes(body)\n"
@@ -99,6 +100,8 @@ def test_serial_mapping_selection_and_multipart(client):
     ] * 3
     for name, args in zip(sorted(names, key=os.fsencode), calls, strict=True):
         assert "--retry" not in args
+        # Brackets or braces in --url would otherwise fan out into several uploads.
+        assert "--globoff" in args
         assert "--form-string" in args
         assert json.loads(args[args.index("--form-string") + 1].removeprefix("request=")) == {
             "backend": {"id": "docling"}
@@ -133,6 +136,7 @@ def test_failures_continue_without_retries_and_keep_http_body(client):
     }
     assert records[0]["http_status"] == 422
     assert records[1]["curl_exit"] == 7
+    assert records[1]["message"] == "curl: (7) Failed to connect"
     assert records[2]["curl_exit"] == 26
     assert len(log.read_text().splitlines()) == 4
     assert (output / "a-http-fail").read_bytes() == b'{"error":"refused"}'

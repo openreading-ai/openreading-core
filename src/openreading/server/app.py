@@ -11,11 +11,15 @@ _error_envelope (wrapped by _error_response):
   400 unknown_strategy · 504 retryables exhausted / deadline · 502 PlanExhaustedError / other
   terminal · 500 anything else.
 The transport ceiling (M2) returns the same 413 envelope and ``doc_too_large`` backend code.
-Declared oversized bodies fail before parsing, while streamed bodies stop when their counted bytes overflow.
+A declared oversized body fails before parsing, and a chunked body stops when its counted bytes overflow.
+The HTTP server frames a declared length itself, so bytes beyond a Content-Length never reach this process.
 The middleware waits for downstream cleanup and suppresses competing error responses before returning its 413.
-For example, an understated Content-Length cannot turn a size refusal into a JSON decoding error.
+A handler exception raised after the overflow is logged with its traceback instead of being answered.
 Multipart ingress is decoded by ``openreading.server.uploads`` before the existing request validation and dispatch.
-Request-shape and lookup failures never become exceptions, so they bypass _error_envelope and are
+Its ``UploadError`` names the status the decoder chose, and _error_envelope maps it: 400 is the same
+bad_request envelope the JSON legs build by hand, 413 shares ``doc_too_large``, any other status is a
+sanitized ``error``.
+Request-shape and lookup failures on the JSON legs never become exceptions, so they bypass _error_envelope and are
 built by small JSONResponse helpers inside create_app: 400 bad_request (body not JSON, fails the
 request schema, bad `jobs` / `timeout_s`) via _bad_request; 404 unknown_backend via
 _unknown_backend; 404 unknown_job via _not_found. Three more statuses have a dedicated helper
@@ -97,6 +101,7 @@ import contextlib
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import stat
@@ -763,6 +768,17 @@ def _error_envelope(exc: Exception) -> tuple[int, dict[str, Any]]:
         code = exc.backend_code or ""
         status = {"auth_rejected": 424, "doc_too_large": 413}.get(code, 502)
         env = {"category": "terminal", "message": str(exc), "backend_code": exc.backend_code}
+    elif isinstance(exc, UploadError):
+        # The decoder names its own status. Reading it here, rather than in a handler-side
+        # table of the two codes it raises today, keeps a future 415 or 422 from turning into
+        # an unexplained 500 that nothing tests.
+        status = exc.status_code
+        if status == 400:
+            env = {"category": "bad_request", "message": exc.message}
+        elif status == 413:
+            env = {"category": "terminal", "message": exc.message, "backend_code": "doc_too_large"}
+        else:
+            env = {"category": "error", "message": exc.message}
     else:
         status, env = 500, {"category": "error", "message": str(exc)}
     return status, env
@@ -784,20 +800,27 @@ def _validation_message(e: Exception) -> str:
     return str(e)
 
 
+_log = logging.getLogger(__name__)
+
 # M2: without a transport ceiling, unauthenticated callers can force unbounded buffering
 # before schema validation. Count raw bytes independently of endpoint decoders.
-# 150 MB: the 100 MB document cap (`doc_too_large`, TerminalError) base64-inflates a binary
-# document by ~4/3, plus headroom for the surrounding JSON envelope.
-_MAX_BODY_BYTES = int(os.environ.get("OPENREADING_MAX_BODY_BYTES", str(150 * 1024 * 1024)))
+# The default derives from the document cap (`api._MAX_DOWNLOAD_BYTES`, `doc_too_large`): base64
+# inflates a binary document by ~4/3, plus headroom for the JSON envelope or multipart framing,
+# so 100 MiB becomes 150 MiB. Deriving it keeps the two caps from drifting apart when one moves.
+_MAX_BODY_BYTES = int(
+    os.environ.get("OPENREADING_MAX_BODY_BYTES", str(api._MAX_DOWNLOAD_BYTES * 3 // 2))
+)
 
 
 class _BodyLimitMiddleware:
     """Count incoming bytes and return one 413 after downstream cleanup on overflow.
 
     A declared oversized body is refused before parsing or authentication starts.
-    Streamed bodies stop at the same ceiling, even when Content-Length understates
-    their size. Downstream handlers may mistake the cutoff for a disconnect or
-    malformed JSON, so their responses are suppressed after overflow is recorded.
+    A chunked body stops at the same ceiling once its counted bytes pass it. The HTTP
+    server frames a declared Content-Length itself, so this middleware never sees
+    bytes beyond one. Downstream handlers may mistake the cutoff for a disconnect or
+    malformed JSON, so their responses are suppressed after overflow is recorded, and
+    an exception they raise instead is logged rather than answered.
     """
 
     def __init__(self, app, max_bytes: int) -> None:
@@ -838,21 +861,26 @@ class _BodyLimitMiddleware:
         except Exception:  # noqa: BLE001 - overflow can surface as any handler decode failure
             if not overflow:
                 raise
+            # The 413 below is the right answer to the client, but a handler bug that surfaced
+            # in the same request would otherwise vanish with it: ServerErrorMiddleware sits
+            # outside this one, so nothing else ever records the traceback.
+            _log.warning(
+                "handler raised after the request body overflowed; answering 413", exc_info=True
+            )
         if overflow and not response_started:
             # Upload handlers consume the complete body before responding. Waiting
             # for them to unwind here closes partially parsed temporary files first.
             await self._too_large(send)
 
     async def _too_large(self, send):
-        body = json.dumps(
-            {
-                "error": {
-                    "category": "terminal",
-                    "message": "request body too large",
-                    "backend_code": "doc_too_large",
-                }
-            }
-        ).encode()
+        # Built by the same mapper the handlers use, so a field added to the terminal branch
+        # reaches the transport leg too, and the message names the limit that fired.
+        _, env = _error_envelope(
+            TerminalError(
+                f"request body too large: exceeds {self.max} bytes", backend_code="doc_too_large"
+            )
+        )
+        body = json.dumps({"error": env}).encode()
         await send(
             {
                 "type": "http.response.start",
@@ -1001,13 +1029,6 @@ def create_app(*, cors_origins: list[str] | None = None):
             },
         )
 
-    def _upload_error(exc: UploadError):
-        if exc.status_code == 400:
-            return _bad_request(exc.message)
-        if exc.status_code == 413:
-            return _error_response(TerminalError(exc.message, backend_code="doc_too_large"))
-        return _error_response(exc)
-
     async def _parse_request(request: Request) -> OpenReadingRequest:
         body = await decode_request(request)  # raises on invalid JSON → caught by caller
         schemas.validate_request(body)  # vendored request schema (raises → 400)
@@ -1097,7 +1118,7 @@ def create_app(*, cors_origins: list[str] | None = None):
         try:
             body = await decode_request(request)
         except UploadError as e:
-            return _upload_error(e)
+            return _error_response(e)
         except Exception as e:  # noqa: BLE001 — invalid JSON is a 400
             return _bad_request(f"invalid JSON body: {e}")
         # v0.4: opt-in candidate retention (strategy runs). Popped before schema validation so the
@@ -1152,7 +1173,7 @@ def create_app(*, cors_origins: list[str] | None = None):
         try:
             req = await _parse_request(request)
         except UploadError as e:
-            return _upload_error(e)
+            return _error_response(e)
         except Exception as e:  # noqa: BLE001
             return _bad_request(_validation_message(e))
         try:
@@ -1466,7 +1487,7 @@ def create_app(*, cors_origins: list[str] | None = None):
         try:
             req = await _parse_request(request)
         except UploadError as e:
-            return _upload_error(e)
+            return _error_response(e)
         except Exception as e:  # noqa: BLE001
             return _bad_request(_validation_message(e))
         try:

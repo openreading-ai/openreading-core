@@ -9,7 +9,8 @@ Explicit MIME metadata precedes the file header, then ``openreading.derive.mime`
 
 The parser owns every spool until decoding finishes, including partially received files.
 Cleanup runs on success, malformed input, disconnect, cancellation, and storage failure.
-File reads use ``openreading.api._MAX_DOWNLOAD_BYTES`` before allocating base64 content.
+File bytes count against ``openreading.api._MAX_DOWNLOAD_BYTES`` as they arrive, so an
+oversized file stops at the limit instead of after it has been spooled to disk.
 Metadata is bounded separately at 1 MiB, while the application middleware bounds raw bodies.
 Storage failures produce sanitized 500 errors without recording request content or passwords.
 JSON bodies retain their existing values for the endpoint's schema validation to inspect.
@@ -22,6 +23,7 @@ import json
 import re
 import unicodedata
 from copy import deepcopy
+from functools import cache
 from typing import Any
 
 from jsonschema import Draft202012Validator
@@ -29,12 +31,16 @@ from python_multipart.exceptions import MultipartParseError
 from python_multipart.multipart import parse_options_header
 from starlette.datastructures import Headers, UploadFile
 from starlette.formparsers import MultiPartException, MultiPartParser
-from starlette.requests import Request
+from starlette.requests import ClientDisconnect, Request
 
 from openreading import api, schemas
 from openreading.derive.mime import resolve_mime_type
 
 _MAX_METADATA_BYTES = 1024 * 1024
+# The metadata an upload may carry. The file part supplies every other document field.
+_DOCUMENT_METADATA_KEYS = ("mime_type", "password")
+_STORAGE_FAILED = "Upload temporary storage failed."
+_DISCONNECTED = "The client disconnected before the request body was complete."
 
 
 class UploadError(Exception):
@@ -77,6 +83,7 @@ class _UploadParser(MultiPartParser):
         )
         self.complete = False
         self.names: set[bytes] = set()
+        self.file_bytes = 0
 
     def on_headers_finished(self) -> None:
         part = self._current_part
@@ -102,11 +109,18 @@ class _UploadParser(MultiPartParser):
             part.file.filename = filename
 
     def on_part_data(self, data: bytes, start: int, end: int) -> None:
-        if (
-            self._current_part.file is None
-            and len(self._current_part.data) + end - start > _MAX_METADATA_BYTES
-        ):
-            raise UploadError(413, f"The request field exceeds {_MAX_METADATA_BYTES} bytes.")
+        part = self._current_part
+        if part.file is None:
+            if len(part.data) + end - start > _MAX_METADATA_BYTES:
+                raise UploadError(413, f"The request field exceeds {_MAX_METADATA_BYTES} bytes.")
+        else:
+            # Starlette defers the spool write until the whole chunk is parsed, so UploadFile.size
+            # lags this callback. Counting here stops an oversized file at the limit instead of
+            # after the whole part has been spooled, which could cost up to the raw body ceiling.
+            limit = api._MAX_DOWNLOAD_BYTES
+            self.file_bytes += end - start
+            if self.file_bytes > limit:
+                raise UploadError(413, f"The uploaded file exceeds {limit} bytes.")
         super().on_part_data(data, start, end)
 
     def on_part_end(self) -> None:
@@ -122,16 +136,24 @@ class _UploadParser(MultiPartParser):
         # Finalize alone accepts truncated bodies, so require the closing boundary callback.
         self.complete = True
 
-    def close(self) -> None:
-        """Release partial spools even when parsing never produced a complete form."""
-        failed = False
+    def close(self) -> bool:
+        """Release every spool, complete or partial, and report whether all of them closed."""
+        closed = True
         for file in self._files_to_close_on_error:
             try:
                 file.close()
             except OSError:
-                failed = True
-        if failed:
-            raise UploadError(500, "Upload temporary storage failed.")
+                closed = False
+        return closed
+
+
+@cache
+def _metadata_validator(key: str) -> Draft202012Validator:
+    # Built once per key. The vendored schema is process-stable, and constructing a validator
+    # re-checks its schema on every call (BL-167), so a per-request build is pure waste.
+    return Draft202012Validator(
+        schemas.request_schema()["properties"]["document"]["properties"][key]
+    )
 
 
 async def decode_request(request: Request) -> Any:
@@ -144,10 +166,25 @@ async def decode_request(request: Request) -> Any:
             # The decoder's own text names a position, never the body, so it stays useful
             # and safe to echo, the same wording the JSON handlers used before uploads.
             raise UploadError(400, f"invalid JSON body: {e}") from None
+        except ClientDisconnect:
+            raise UploadError(400, _DISCONNECTED) from None
 
     parser = _UploadParser(request)
     try:
-        _utf8_charset(request.headers["content-type"])
+        options = await _upload_options(parser, request.headers["content-type"], params)
+    except BaseException:
+        # The failure in flight is the diagnosis the client needs. A spool that also fails to
+        # close must not replace a 400 or 413 with a 500 that invites a retry of the same body.
+        parser.close()
+        raise
+    if not parser.close():
+        raise UploadError(500, _STORAGE_FAILED)
+    return options
+
+
+async def _upload_options(parser: _UploadParser, content_type: str, params: dict) -> dict[str, Any]:
+    try:
+        _utf8_charset(content_type)
         boundary = params.get(b"boundary", b"")
         if not re.fullmatch(rb"[0-9A-Za-z'()+_,./:=? -]{1,70}", boundary) or boundary.endswith(
             b" "
@@ -162,19 +199,17 @@ async def decode_request(request: Request) -> Any:
         if not isinstance(options, dict):
             raise UploadError(400, "The request field must contain a JSON object.")
         document = options.get("document", {})
-        if not isinstance(document, dict) or set(document) - {"mime_type", "password"}:
-            raise UploadError(400, "Upload document metadata permits only mime_type and password.")
+        if not isinstance(document, dict) or set(document) - set(_DOCUMENT_METADATA_KEYS):
+            raise UploadError(
+                400,
+                f"Upload document metadata permits only {' and '.join(_DOCUMENT_METADATA_KEYS)}.",
+            )
         # Schema error messages can include password values, so reject these without rendering errors.
-        properties = schemas.request_schema()["properties"]["document"]["properties"]
         for key, value in document.items():
-            if not Draft202012Validator(properties[key]).is_valid(value):
+            if not _metadata_validator(key).is_valid(value):
                 raise UploadError(400, "Upload document metadata has an invalid field value.")
-        limit = api._MAX_DOWNLOAD_BYTES
-        if upload.size is not None and upload.size > limit:
-            raise UploadError(413, f"The uploaded file exceeds {limit} bytes.")
-        data = await upload.read(limit + 1)
-        if len(data) > limit:
-            raise UploadError(413, f"The uploaded file exceeds {limit} bytes.")
+        # The parser already refused anything past api._MAX_DOWNLOAD_BYTES while it streamed.
+        data = await upload.read()
         if not data:
             raise UploadError(400, "The uploaded file must not be empty.")
         # A supplied MIME override takes precedence over file headers and byte inference.
@@ -193,10 +228,10 @@ async def decode_request(request: Request) -> Any:
         return options
     except (MultiPartException, MultipartParseError, ValueError, UnicodeError):
         raise UploadError(400, "Invalid multipart request or UTF-8 JSON metadata.") from None
+    except ClientDisconnect:
+        raise UploadError(400, _DISCONNECTED) from None
     except OSError:
-        raise UploadError(500, "Upload temporary storage failed.") from None
-    finally:
-        parser.close()
+        raise UploadError(500, _STORAGE_FAILED) from None
 
 
 def request_body_schema(*, include_keep_candidates: bool = False) -> dict[str, Any]:
@@ -213,7 +248,7 @@ def request_body_schema(*, include_keep_candidates: bool = False) -> dict[str, A
         "type": "object",
         "additionalProperties": False,
         "properties": {
-            key: original_document["properties"][key] for key in ("mime_type", "password")
+            key: original_document["properties"][key] for key in _DOCUMENT_METADATA_KEYS
         },
         "description": "Optional MIME override and password. The file part supplies the source and filename.",
     }

@@ -154,8 +154,8 @@ and the multipart field requirements on the three single-document endpoints.
 
 ### 1b. Upload a folder one file at a time
 
-The [folder recipe](../../../scripts/upload_folder.py) runs on your client with Python 3 and curl,
-without installing OpenReading there. This example copies the sample into two client-side directories.
+The [folder recipe](../../../scripts/upload_folder.py) runs on your client with Python 3 and
+curl 7.55 or newer, without installing OpenReading there. This example copies the sample into two client-side directories.
 
 ```bash
 mkdir -p docs/upload-input/team-a docs/upload-input/team-b
@@ -178,16 +178,12 @@ Responses mirror complete relative paths, so `team-a/report.pdf` contains JSON u
 root despite its extension. `team-b/report.pdf` has its own response, preserving duplicate basenames.
 Exact names also avoid suffix collisions between a file named `a` and a directory named `a.response.json`.
 
-Uploads run serially in bytewise relative-path order, skipping hidden entries and symlinks without
-filtering extensions. HTTP failures retain their response bodies, and readable siblings continue
-after file or directory failures. Each stdout line reports `success`, `http_error`, `transport_error`,
-or `local_error`, followed by totals. An inaccessible directory counts as one failed entry because
-its contents remain unknown. Exit 1 reports failures, while exit 2 reports invalid arguments.
-No retries run because a disconnected request may already have started processing on your server.
+The output above is the whole contract: one JSON line per file naming its outcome, then totals,
+and a nonzero exit when any upload failed. The script's module docstring defines the traversal
+order, the four outcomes, the exit codes, and the no-retry rule, so read those there.
 
 For an authenticated server, set `OPENREADING_API_KEY` in your client environment to its bearer token.
 The script sends that header through curl's stdin, keeping the token out of command arguments.
-The script's module docstring documents reruns and outcomes, including replacing existing response files.
 
 ### 2. Let the cache replay a routed run
 

@@ -381,3 +381,83 @@ async def test_json_metadata_values_remain_for_existing_endpoint_validation():
 
     body = {"backend": {}, "document": {"password": ["TOP_SECRET"], "mime_type": None}}
     assert await decode_request(_request(json.dumps(body).encode(), "application/json")) == body
+
+
+@pytest.mark.parametrize("mode,expected", [("truncated", 400), ("large_file", 413)])
+async def test_close_failure_never_replaces_the_diagnosis_in_flight(monkeypatch, mode, expected):
+    # A spool that fails to close on the error path is noise: the client needs the 400 or 413
+    # that explains its request, not a 500 that invites a retry of the same invalid body.
+    import starlette.formparsers
+
+    from openreading.server import uploads
+
+    factory = tempfile.SpooledTemporaryFile
+
+    def tracked(*args, **kwargs):
+        kwargs["max_size"] = 1
+        file = factory(*args, **kwargs)
+        original = file.close
+
+        def fail():
+            original()
+            raise OSError("SECRET storage path")
+
+        file.close = fail
+        return file
+
+    monkeypatch.setattr(starlette.formparsers, "SpooledTemporaryFile", tracked)
+    body = _body()
+    if mode == "truncated":
+        body = body.removesuffix(b"--sample--\r\n")
+    else:
+        monkeypatch.setattr(api, "_MAX_DOWNLOAD_BYTES", 4)
+    with pytest.raises(uploads.UploadError) as exc:
+        await uploads.decode_request(_request(body))
+    assert exc.value.status_code == expected
+    assert "SECRET" not in str(exc.value)
+
+
+async def test_oversized_file_is_refused_before_spooling(monkeypatch):
+    # The file limit must cut the transfer short. Spooling a whole oversized part to disk and
+    # refusing it afterwards costs the operator up to the raw body ceiling per request.
+    import starlette.formparsers
+
+    from openreading.server import uploads
+
+    written = []
+    factory = tempfile.SpooledTemporaryFile
+
+    def tracked(*args, **kwargs):
+        kwargs["max_size"] = 1
+        file = factory(*args, **kwargs)
+        original = file.write
+
+        def spy(data):
+            written.append(len(data))
+            return original(data)
+
+        file.write = spy
+        return file
+
+    monkeypatch.setattr(starlette.formparsers, "SpooledTemporaryFile", tracked)
+    monkeypatch.setattr(api, "_MAX_DOWNLOAD_BYTES", 4)
+    with pytest.raises(uploads.UploadError) as exc:
+        await uploads.decode_request(_request(_body(data=b"x" * 4096)))
+    assert exc.value.status_code == 413
+    assert sum(written) == 0
+
+
+@pytest.mark.parametrize(
+    "content_type", ["multipart/form-data; boundary=sample", "application/json"]
+)
+async def test_client_disconnect_is_a_sanitized_400(content_type):
+    # A dropped connection is a transport outcome, not malformed JSON. The status only reaches
+    # the server log, so the message must say what happened rather than echo a decoder error.
+    from openreading.server import uploads
+
+    with pytest.raises(uploads.UploadError) as exc:
+        await uploads.decode_request(
+            _request(_body(), content_type=content_type, failure=ClientDisconnect())
+        )
+    assert exc.value.status_code == 400
+    assert "disconnect" in exc.value.message

@@ -118,3 +118,24 @@ def test_upload_docx_reaches_docling_http_with_original_bytes(respx_mock, monkey
     ]
     assert "text" in payload["options"]["to_formats"]
     assert_docx_content(response.json())
+
+
+def test_docling_http_error_is_mapped_not_raised(respx_mock, monkeypatch):
+    # The real client's error branch: a docling-serve failure must land in the error envelope
+    # through the adapter's taxonomy rather than escape as an exception.
+    monkeypatch.setenv("DOCLING_SERVE_URL", "https://docling.test")
+    monkeypatch.delenv("OPENREADING_SERVER_PATH_ROOT", raising=False)
+    monkeypatch.delenv("OPENREADING_CONFIG", raising=False)
+    monkeypatch.delenv("OPENREADING_API_KEYS", raising=False)
+    monkeypatch.delenv("OPENREADING_API_KEY_SCOPES", raising=False)
+    respx_mock.post("https://docling.test/v1/convert/source").mock(
+        return_value=httpx.Response(503, text="docling-serve restarting")
+    )
+    with TestClient(create_app()) as client:
+        response = client.post(
+            "/v1/parse",
+            files={"file": ("report.docx", synthetic_docx(), DOCX_MIME)},
+            data={"request": json.dumps({"backend": {"id": "docling"}})},
+        )
+    assert response.status_code != 200
+    assert response.json()["error"]["category"]
