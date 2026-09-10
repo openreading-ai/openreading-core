@@ -3384,3 +3384,25 @@ def test_an_unscoped_named_strategy_pins_only_what_it_can_dispatch(tmp_path, mon
     assert r.status_code == 200
     header = json.loads(sorted((tmp_path / "ledger").glob("*.header.json"))[0].read_text())
     assert sorted(header["pinned_eligible"]) == ["pymupdf"]
+
+
+def test_schema_400_names_the_rule_and_never_echoes_document_content():
+    # A `oneOf` failure on `document` has the whole document object as its instance, and
+    # jsonschema's message prints that instance: the base64 content and the password would
+    # come back in the 400. Name the rule and the path instead, and keep the readable
+    # message for a scalar field, where echoing a short bad value is the useful part.
+    client = TestClient(create_app())
+    body = {
+        "backend": {"id": "pymupdf"},
+        "document": {"bytes_base64": "QUJDREVG", "path": "/x", "password": "TOP_SECRET"},
+    }
+    r = client.post("/v1/parse", json=body)
+    assert r.status_code == 400
+    message = r.json()["error"]["message"]
+    assert "TOP_SECRET" not in message and "QUJDREVG" not in message
+    assert "$.document" in message and "oneOf" in message
+    scalar = client.post("/v1/parse", json={**body, "document": {"bytes_base64": 7}})
+    assert scalar.status_code == 400
+    assert (
+        "7 is not of type 'string' at $.document.bytes_base64" in scalar.json()["error"]["message"]
+    )

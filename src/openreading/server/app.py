@@ -110,13 +110,14 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 # fastapi lives in the [server] extra; this module is only imported when serving/testing, so a
 # module-level import is fine (and REQUIRED — under `from __future__ import annotations`, FastAPI
 # must resolve the `Request` annotation against these module globals).
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
+from pydantic_core import ValidationError as PydanticValidationError
 from starlette.concurrency import run_in_threadpool
 
 from openreading import __version__, api, config, schemas
@@ -792,10 +793,24 @@ def _error_response(exc: Exception):
 def _validation_message(e: Exception) -> str:
     """The one-line reason a body was refused. `jsonschema`'s own `str()` appends the whole
     vendored schema, so the commonest client mistake would otherwise answer with a 54 KB body
-    whose first line is the only part anyone reads."""
+    whose first line is the only part anyone reads.
+
+    A message that prints the failing value is kept only for a short scalar, where the echoed
+    value is the useful part. A `oneOf` failure on `document` has the whole document object as
+    its instance, and printing that returns the base64 content and the password in the 400.
+    Pydantic's text carries `input_value` the same way, so its errors are rendered without it."""
     from jsonschema import ValidationError
 
+    if isinstance(e, PydanticValidationError):
+        # cast: pyright cannot see pydantic_core's compiled stub in this environment.
+        first = cast(Any, e).errors(include_url=False, include_input=False)[0]
+        return f"{first['msg']} at $." + ".".join(str(part) for part in first["loc"])
     if isinstance(e, ValidationError):
+        bulky = isinstance(e.instance, (dict, list)) or (
+            isinstance(e.instance, str) and len(e.instance) > 80
+        )
+        if bulky and repr(e.instance) in e.message:
+            return f"{e.json_path} fails the request schema's '{e.validator}' rule"
         return f"{e.message} at {e.json_path}"
     return str(e)
 
