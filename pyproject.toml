@@ -85,6 +85,9 @@ all = [
     "google-cloud-documentai>=2.29", "anthropic>=0.39",
     "svix>=1.0",  # reducto's second dep — webhook signature verification, see `reducto` extra
 ]
+agent = [
+    "mcp>=1.28,<2",
+]
 
 [project.scripts]
 openreading = "openreading.cli.__main__:main"

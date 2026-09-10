@@ -1,6 +1,6 @@
 # The channel contract: why a response never lies about what it could not produce
 
-<sub>[Docs home](../README.md) · [← The HTTP server](../server/README.md) · [Evals →](../evals/README.md)</sub>
+<sub>[Docs home](../README.md) · [← MCP tools](../mcp_server/README.md) · [Evals →](../evals/README.md)</sub>
 
 > **In one sentence.** Every channel in a response is measured, computed by one shared package, or
 > left out and missing from `channel_provenance`, so nothing in it is invented.
@@ -288,4 +288,4 @@ applies one vendor's cut to another vendor's scale ([Strategies](../strategies/R
 - [JSON Schemas](../schemas/README.md) describes the response envelope these channels live in.
 - [Compare](../comparison/README.md) explains `not_capable`, which comes from these grades.
 
-<sub>[Docs home](../README.md) · [← The HTTP server](../server/README.md) · [Evals →](../evals/README.md)</sub>
+<sub>[Docs home](../README.md) · [← MCP tools](../mcp_server/README.md) · [Evals →](../evals/README.md)</sub>

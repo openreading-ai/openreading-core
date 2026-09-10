@@ -621,3 +621,13 @@ full table of what to update for each kind of change is under *Where a change ge
 [`AGENTS.md`](../../../AGENTS.md).
 
 <sub>[Docs home](../README.md) · [← Evals](../evals/README.md) · [Backend adapters →](../adapters/README.md)</sub>
+
+### Retained local evidence contracts
+
+| Schema | Owner | Result |
+| --- | --- | --- |
+| `local-document.v1.0.json` | `openreading.artifacts.models` | Source hash, engine identity, and retained file inventory. |
+| `passage.v1.0.json` | `openreading.artifacts.passages` | Exact source spans with physical page provenance. |
+| `agent-document-tool.v1.0.json` | `openreading.mcp_server.tools` | Bounded import, search, read, and error payloads. |
+
+These families wrap retained evidence without changing the normalized extraction response.

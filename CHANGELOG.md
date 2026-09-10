@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add a fixed local document MCP profile with retained source bytes, physical page citations,
+  bounded lexical search, exact passage reads, and cancellable PyMuPDF imports.
+- Add separate v1 schemas for retained manifests, passages, and agent tool payloads.
+
+
 All notable changes to OpenReading are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).

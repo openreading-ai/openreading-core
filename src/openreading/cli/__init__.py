@@ -1231,6 +1231,27 @@ requests, logs the shutdown, and the process exits 143. `serve` is the one
 command excluded from this CLI's own SIGTERM handling, which would otherwise
 fire after that clean shutdown.
 
+mcp --profile local-document-proof-v1
+------------------------------------
+Serve three bounded document tools over stdio with openreading[agent,pymupdf].
+You grant an absolute --input-root and a separate absolute --artifact-root.
+For example, use /absolute/documents and /absolute/evidence respectively.
+The server retains source bytes and page evidence until you remove the store.
+Retrieved excerpts enter the calling agent context. Treat them as untrusted.
+
+Call openreading_import with a relative path, then openreading_search with
+its artifact_id and a query. Call openreading_read with matching evidence_ids.
+Cite the returned filename, physical page, and evidence identifier.
+Follow next_cursor when present. A failed search does not prove absence.
+
+This profile accepts one PDF, at most 25 MiB and 100 physical pages.
+It uses local PyMuPDF without OCR, passwords, routing, or hosted fallback.
+Imports allow 45 seconds and retain at most 512 MiB across the artifact store.
+Import, search, and read allow 4096, 8192, and 16384 UTF-8 bytes.
+These byte limits do not prove token savings or impose a native memory limit.
+Exit 0 means transport closure, 2 invalid setup, and 130 interruption.
+The openreading.artifacts package owns storage, provenance, and error codes.
+
 Exit codes
 ----------
   0  success.

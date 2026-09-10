@@ -31,6 +31,9 @@ Families
 - liveness-report: one backend's liveness answer — ``openreading backends --check``,
   ``POST /v1/backends/{id}/liveness`` (``openreading.liveness``,
   internal/design/liveness.md §5).
+- local-document / passage / agent-document-tool: retained evidence and bounded MCP
+  payloads owned by ``openreading.artifacts``. These separate families leave the existing
+  request and normalized response contracts unchanged.
 - step / journal: the executor step contract and the per-line JSONL journal shape
   (internal/design/ledger.md §5.4).
 
@@ -528,6 +531,9 @@ LIVENESS_REPORT_SCHEMA_FILE = "liveness-report.v0.1.json"
 # (StepRequest/StepResult) and the per-line shape of a run's JSONL journal. Two new families.
 STEP_SCHEMA_FILE = "step.v0.1.json"
 JOURNAL_SCHEMA_FILE = "journal.v0.1.json"
+LOCAL_DOCUMENT_SCHEMA_FILE = "local-document.v1.0.json"
+PASSAGE_SCHEMA_FILE = "passage.v1.0.json"
+AGENT_DOCUMENT_TOOL_SCHEMA_FILE = "agent-document-tool.v1.0.json"
 
 
 _PACKAGE = "openreading.schemas"
@@ -724,6 +730,8 @@ def _cli_validate() -> int:
     _validator(liveness_report_schema())
     _validator(step_schema())
     _validator(journal_schema())
+    for contract in (local_document_schema(), passage_schema(), agent_document_tool_schema()):
+        _validator(contract)
     print(
         f"schemas: {REQUEST_SCHEMA_FILE} OK, {RESPONSE_SCHEMA_FILE} OK, "
         f"{DESCRIPTOR_SCHEMA_FILE} OK, {STRATEGY_CONFIG_SCHEMA_FILE} OK, "
@@ -760,3 +768,18 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def local_document_schema() -> dict[str, Any]:
+    """The retained source and extraction identity contract."""
+    return _load(LOCAL_DOCUMENT_SCHEMA_FILE)
+
+
+def passage_schema() -> dict[str, Any]:
+    """Exact source spans and physical page provenance."""
+    return _load(PASSAGE_SCHEMA_FILE)
+
+
+def agent_document_tool_schema() -> dict[str, Any]:
+    """Bounded import, search, read, and error payloads."""
+    return _load(AGENT_DOCUMENT_TOOL_SCHEMA_FILE)

@@ -1949,6 +1949,17 @@ def cmd_compare(args) -> int:
 # has a home in `openreading help`. Nothing here restates a default that the flag's own `help=`
 # already carries, because two sites for one number is how one of them goes stale.
 EPILOGS = {
+    "mcp": r"""Examples:
+  openreading mcp --profile local-document-proof-v1 \
+    --input-root /absolute/documents --artifact-root /absolute/evidence
+
+Then:
+  Connect your MCP client and call openreading_import with a relative path.
+  Search the returned artifact, then read evidence and cite its physical page.
+
+Exits: 0 transport closed. 2 configuration or dependencies. 130 interrupted.
+
+More: openreading help mcp""",
     "parse": """\
 Examples:
   openreading parse examples/ --backend pymupdf > all.json   # a whole folder
@@ -2550,6 +2561,13 @@ def _attach_epilogs(parser: argparse.ArgumentParser, path: str = "") -> None:
             _attach_epilogs(sub_parser, key)
 
 
+def cmd_mcp(args: argparse.Namespace) -> int:
+    """Launch the fixed local profile without loading ambient credentials."""
+    from openreading.mcp_server.main import launch
+
+    return launch(args)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """The argparse tree for every subcommand. `--version` is declared before the required
     subcommand so it answers without one."""
@@ -2577,6 +2595,16 @@ def build_parser() -> argparse.ArgumentParser:
     # English off the screen. The choices still gate the value and still print in full on a
     # bad one.
     sub = p.add_subparsers(dest="command", required=True, metavar="COMMAND")
+
+    from openreading.mcp_server.main import arguments as mcp_arguments
+
+    mcp = sub.add_parser(
+        "mcp",
+        help="serve bounded local evidence over stdio MCP",
+        description="Import, search, and read retained local evidence with the fixed PyMuPDF profile.",
+    )
+    mcp_arguments(mcp)
+    mcp.set_defaults(func=cmd_mcp)
 
     help_p = sub.add_parser(
         "help",
@@ -3457,6 +3485,8 @@ def main(argv: list[str] | None = None) -> int:
     SIGTERM arrives as KeyboardInterrupt for every command but `serve`, which hands its own
     signals to uvicorn."""
     args = build_parser().parse_args(argv)
+    if args.func is cmd_mcp:
+        return cmd_mcp(args)
     load_dotenv(getattr(args, "env_file", None))  # ./.env or --env-file; never overrides set env
     with _terminate_as_interrupt(enabled=args.func is not cmd_serve):
         return args.func(args)
