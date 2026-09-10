@@ -112,7 +112,7 @@ class DoclingClient(Protocol):
     def convert(self, document: dict, options: dict) -> dict: ...
 
 
-class _HttpxDoclingClient:  # pragma: no cover - real container path
+class _HttpxDoclingClient:
     def __init__(self, base_url: str) -> None:
         from openreading.adapters._http import build_httpx_client
 
@@ -256,7 +256,7 @@ class DoclingAdapter(BackendAdapter):
             raise TerminalError(
                 "Docling needs runtime.endpoint (docling-serve URL)", backend_code="no_endpoint"
             )
-        return _HttpxDoclingClient(endpoint)  # pragma: no cover
+        return _HttpxDoclingClient(endpoint)
 
     def submit(self, req: OpenReadingRequest, ctx: RunContext) -> Job:
         self.assert_supports(req)  # raises UnsupportedFeatureError for extraction_schema

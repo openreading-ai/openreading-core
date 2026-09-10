@@ -1984,16 +1984,8 @@ def test_request_body_under_cap_is_unaffected(monkeypatch):
 
 
 def test_chunked_body_over_cap_is_cut_off(monkeypatch):
-    # The no-Content-Length (chunked) leg: best-effort by design (class docstring) — it disconnects
-    # mid-stream rather than answering a clean 413, and what the app does with a disconnected
-    # receive is whatever Starlette's own Request.stream() does with one (here: the truncated body
-    # fails JSON decoding, a 400). The one thing that MUST hold regardless of the exact status is
-    # the security property this middleware exists for: an oversized streamed body is never fully
-    # buffered and accepted. Proven against a body that would otherwise SUCCEED (a real, complete,
-    # valid pymupdf parse request, streamed a slice at a time so httpx/TestClient never precomputes
-    # a Content-Length and this leg — not the declared-length fast path above — is what runs): if
-    # the cutoff did nothing, this would be a 200, so a non-200 here is the cutoff actually firing,
-    # not just "the request happened to be malformed."
+    # A valid parse streamed without Content-Length must get the same actionable
+    # size refusal as a declared oversized request, rather than a JSON decode error.
     import openreading.server.app as app_module
 
     raw = json.dumps(_pdf_body("pymupdf")).encode()
@@ -2007,7 +1999,8 @@ def test_chunked_body_over_cap_is_cut_off(monkeypatch):
 
     r = client.post("/v1/parse", content=chunks(), headers={"content-type": "application/json"})
 
-    assert r.status_code != 200
+    assert r.status_code == 413
+    assert r.json()["error"]["backend_code"] == "doc_too_large"
 
 
 def test_compare_over_ceiling_is_400_naming_count_and_limit(client):
@@ -3391,3 +3384,44 @@ def test_an_unscoped_named_strategy_pins_only_what_it_can_dispatch(tmp_path, mon
     assert r.status_code == 200
     header = json.loads(sorted((tmp_path / "ledger").glob("*.header.json"))[0].read_text())
     assert sorted(header["pinned_eligible"]) == ["pymupdf"]
+
+
+def test_schema_400_names_the_rule_and_never_echoes_document_content():
+    # A `oneOf` failure on `document` has the whole document object as its instance, and
+    # jsonschema's message prints that instance: the base64 content and the password would
+    # come back in the 400. Name the rule and the path instead, and keep the readable
+    # message for a scalar field, where echoing a short bad value is the useful part.
+    client = TestClient(create_app())
+    body = {
+        "backend": {"id": "pymupdf"},
+        "document": {"bytes_base64": "QUJDREVG", "path": "/x", "password": "TOP_SECRET"},
+    }
+    r = client.post("/v1/parse", json=body)
+    assert r.status_code == 400
+    message = r.json()["error"]["message"]
+    assert "TOP_SECRET" not in message and "QUJDREVG" not in message
+    assert "$.document" in message and "oneOf" in message
+    scalar = client.post("/v1/parse", json={**body, "document": {"bytes_base64": 7}})
+    assert scalar.status_code == 400
+    assert (
+        "7 is not of type 'string' at $.document.bytes_base64" in scalar.json()["error"]["message"]
+    )
+
+
+@pytest.mark.parametrize("endpoint", ["/v1/parse", "/v1/route", "/v1/jobs"])
+@pytest.mark.parametrize(
+    "password", [123456, 123.456, True, ["short-secret"], {"value": "short-secret"}]
+)
+def test_schema_400_never_echoes_invalid_password_values(endpoint, password):
+    client = TestClient(create_app())
+    response = client.post(
+        endpoint,
+        json={
+            "backend": {"id": "pymupdf"},
+            "document": {"bytes_base64": "QUJD", "password": password},
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["message"] == (
+        "$.document.password fails the request schema's 'type' rule"
+    )

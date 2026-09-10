@@ -10,13 +10,16 @@ _error_envelope (wrapped by _error_response):
   `auth_rejected` · 413 doc too large (TerminalError, `doc_too_large`) · 422 unsupported feature ·
   400 unknown_strategy · 504 retryables exhausted / deadline · 502 PlanExhaustedError / other
   terminal · 500 anything else.
-A second, earlier 413 predates all of this (M2): `_BodyLimitMiddleware`, a pure-ASGI middleware
-wrapping the whole app, answers it straight off the transport when a declared Content-Length
-exceeds `_MAX_BODY_BYTES` — before routing, before `_error_envelope`, before FastAPI even starts
-parsing the request. Same envelope shape and the same `doc_too_large` backend_code as the
-TerminalError case above (a caller reacts to either the same way: send less data), even though
-this one fires on raw bytes never decoded into a document at all.
-Request-shape and lookup failures never become exceptions, so they bypass _error_envelope and are
+The transport ceiling (M2) returns the same 413 envelope and ``doc_too_large`` backend code.
+A declared oversized body fails before parsing, and a chunked body stops when its counted bytes overflow.
+The HTTP server frames a declared length itself, so bytes beyond a Content-Length never reach this process.
+The middleware waits for downstream cleanup and suppresses competing error responses before returning its 413.
+A handler exception raised after the overflow is logged with its traceback instead of being answered.
+Multipart ingress is decoded by ``openreading.server.uploads`` before the existing request validation and dispatch.
+Its ``UploadError`` names the status the decoder chose, and _error_envelope maps it: 400 is the same
+bad_request envelope the JSON legs build by hand, 413 shares ``doc_too_large``, any other status is a
+sanitized ``error``.
+Request-shape and lookup failures on the JSON legs never become exceptions, so they bypass _error_envelope and are
 built by small JSONResponse helpers inside create_app: 400 bad_request (body not JSON, fails the
 request schema, bad `jobs` / `timeout_s`) via _bad_request; 404 unknown_backend via
 _unknown_backend; 404 unknown_job via _not_found. Three more statuses have a dedicated helper
@@ -71,6 +74,9 @@ the CLI / Python API, which read them through the same strategy loader and EnvCr
     include an empty entry, missing `=`, an empty key or list, an unlisted token, duplicate token
     scopes, or scopes configured without API keys. Each raises ServerConfigError at startup and
     names the entry position, never the value.
+  OPENREADING_MAX_BODY_BYTES bounds raw incoming request bytes and defaults to 157286400 (150 MiB).
+    It is read at module import and applies to JSON and multipart bodies before dispatch.
+    Multipart file and metadata limits remain independent when this transport ceiling is raised.
   OPENREADING_SERVER_PATH_ROOT — a directory `document.path` may resolve beneath, checked per
     request by `_gate_document_path`. Unset (the default) refuses every `document.path` at
     every caller-body ingress (/v1/parse, /v1/route, /v1/jobs, /v1/batch, /v1/compare): HTTP
@@ -95,6 +101,7 @@ import contextlib
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import stat
@@ -103,13 +110,14 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 # fastapi lives in the [server] extra; this module is only imported when serving/testing, so a
 # module-level import is fine (and REQUIRED — under `from __future__ import annotations`, FastAPI
 # must resolve the `Request` annotation against these module globals).
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
+from pydantic_core import ValidationError as PydanticValidationError
 from starlette.concurrency import run_in_threadpool
 
 from openreading import __version__, api, config, schemas
@@ -133,6 +141,7 @@ from openreading.router.cost import apply_cost_report
 from openreading.router.driver import _DriveSliceExpired, run_to_completion
 from openreading.router.executor import BoundedResultCache
 from openreading.router.router import Router, RouterConfig
+from openreading.server.uploads import UploadError, decode_request, request_body_schema
 from openreading.strategies.loader import strip_strategy_prefix
 from openreading.types.enums import WaitMode
 from openreading.types.errors import (
@@ -760,6 +769,17 @@ def _error_envelope(exc: Exception) -> tuple[int, dict[str, Any]]:
         code = exc.backend_code or ""
         status = {"auth_rejected": 424, "doc_too_large": 413}.get(code, 502)
         env = {"category": "terminal", "message": str(exc), "backend_code": exc.backend_code}
+    elif isinstance(exc, UploadError):
+        # The decoder names its own status. Reading it here, rather than in a handler-side
+        # table of the two codes it raises today, keeps a future 415 or 422 from turning into
+        # an unexplained 500 that nothing tests.
+        status = exc.status_code
+        if status == 400:
+            env = {"category": "bad_request", "message": exc.message}
+        elif status == 413:
+            env = {"category": "terminal", "message": exc.message, "backend_code": "doc_too_large"}
+        else:
+            env = {"category": "error", "message": exc.message}
     else:
         status, env = 500, {"category": "error", "message": str(exc)}
     return status, env
@@ -773,30 +793,51 @@ def _error_response(exc: Exception):
 def _validation_message(e: Exception) -> str:
     """The one-line reason a body was refused. `jsonschema`'s own `str()` appends the whole
     vendored schema, so the commonest client mistake would otherwise answer with a 54 KB body
-    whose first line is the only part anyone reads."""
+    whose first line is the only part anyone reads.
+
+    A message that prints the failing value is kept only for a short non-password scalar.
+    Password errors name the schema rule regardless of the supplied value's type or size.
+    A `oneOf` failure on `document` has the whole document object as
+    its instance, and printing that returns the base64 content and the password in the 400.
+    Pydantic's text carries `input_value` the same way, so its errors are rendered without it."""
     from jsonschema import ValidationError
 
+    if isinstance(e, PydanticValidationError):
+        # cast: pyright cannot see pydantic_core's compiled stub in this environment.
+        first = cast(Any, e).errors(include_url=False, include_input=False)[0]
+        return f"{first['msg']} at $." + ".".join(str(part) for part in first["loc"])
     if isinstance(e, ValidationError):
+        bulky = isinstance(e.instance, (dict, list)) or (
+            isinstance(e.instance, str) and len(e.instance) > 80
+        )
+        password = tuple(e.absolute_path)[:2] == ("document", "password")
+        if password or (bulky and repr(e.instance) in e.message):
+            return f"{e.json_path} fails the request schema's '{e.validator}' rule"
         return f"{e.message} at {e.json_path}"
     return str(e)
 
 
-# M2: every endpoint does `await request.json()` with no transport-level ceiling, so an
-# unauthenticated caller could hand the ASGI server an arbitrarily large body and have it fully
-# buffered into memory before any handler or schema validation ever runs.
-# 150 MB: the 100 MB document cap (`doc_too_large`, TerminalError) base64-inflates a binary
-# document by ~4/3, plus headroom for the surrounding JSON envelope.
-_MAX_BODY_BYTES = int(os.environ.get("OPENREADING_MAX_BODY_BYTES", str(150 * 1024 * 1024)))
+_log = logging.getLogger(__name__)
+
+# M2: without a transport ceiling, unauthenticated callers can force unbounded buffering
+# before schema validation. Count raw bytes independently of endpoint decoders.
+# The default derives from the document cap (`api._MAX_DOWNLOAD_BYTES`, `doc_too_large`): base64
+# inflates a binary document by ~4/3, plus headroom for the JSON envelope or multipart framing,
+# so 100 MiB becomes 150 MiB. Deriving it keeps the two caps from drifting apart when one moves.
+_MAX_BODY_BYTES = int(
+    os.environ.get("OPENREADING_MAX_BODY_BYTES", str(api._MAX_DOWNLOAD_BYTES * 3 // 2))
+)
 
 
 class _BodyLimitMiddleware:
-    """Pure ASGI (no BaseHTTPMiddleware): counts request-body bytes as they arrive and answers 413
-    before the app ever buffers an oversized body. Content-Length is honored when present — the
-    reliable leg, since it rejects before a single body byte is read. A chunked/undeclared-length
-    body has no upfront count to check, so it is only cut off mid-stream once the running total
-    passes the cap (`http.disconnect` in place of the next chunk) — best-effort: whatever the app
-    does with a disconnected receive (typically its own JSON-decode failure) is acceptable, since
-    the goal here is bounding memory/CPU, not guaranteeing a clean 413 on every leg.
+    """Count incoming bytes and return one 413 after downstream cleanup on overflow.
+
+    A declared oversized body is refused before parsing or authentication starts.
+    A chunked body stops at the same ceiling once its counted bytes pass it. The HTTP
+    server frames a declared Content-Length itself, so this middleware never sees
+    bytes beyond one. Downstream handlers may mistake the cutoff for a disconnect or
+    malformed JSON, so their responses are suppressed after overflow is recorded, and
+    an exception they raise instead is logged rather than answered.
     """
 
     def __init__(self, app, max_bytes: int) -> None:
@@ -809,30 +850,54 @@ class _BodyLimitMiddleware:
         if declared and declared.isdigit() and int(declared) > self.max:
             return await self._too_large(send)
         seen = 0
+        overflow = False
+        response_started = False
 
         async def counted_receive():
-            nonlocal seen
+            nonlocal seen, overflow
+            if overflow:
+                return {"type": "http.disconnect"}
             message = await receive()
             if message["type"] == "http.request":
                 seen += len(message.get("body", b""))
                 if seen > self.max:
+                    overflow = True
                     return {"type": "http.disconnect"}
             return message
 
-        await self.app(scope, counted_receive, send)
-        # If the app saw a disconnect mid-body it has already ended its own response; nothing to
-        # send here for that case — see the class docstring on why that leg is best-effort.
+        async def guarded_send(message):
+            nonlocal response_started
+            # A response committed before the overflow keeps flowing: dropping its tail would
+            # leave the client with a truncated body and no second status to explain it.
+            if response_started or not overflow:
+                response_started |= message["type"] == "http.response.start"
+                await send(message)
+
+        try:
+            await self.app(scope, counted_receive, guarded_send)
+        except Exception:  # noqa: BLE001 - overflow can surface as any handler decode failure
+            if not overflow:
+                raise
+            # The 413 below is the right answer to the client, but a handler bug that surfaced
+            # in the same request would otherwise vanish with it: ServerErrorMiddleware sits
+            # outside this one, so nothing else ever records the traceback.
+            _log.warning(
+                "handler raised after the request body overflowed; answering 413", exc_info=True
+            )
+        if overflow and not response_started:
+            # Upload handlers consume the complete body before responding. Waiting
+            # for them to unwind here closes partially parsed temporary files first.
+            await self._too_large(send)
 
     async def _too_large(self, send):
-        body = json.dumps(
-            {
-                "error": {
-                    "category": "terminal",
-                    "message": "request body too large",
-                    "backend_code": "doc_too_large",
-                }
-            }
-        ).encode()
+        # Built by the same mapper the handlers use, so a field added to the terminal branch
+        # reaches the transport leg too, and the message names the limit that fired.
+        _, env = _error_envelope(
+            TerminalError(
+                f"request body too large: exceeds {self.max} bytes", backend_code="doc_too_large"
+            )
+        )
+        body = json.dumps({"error": env}).encode()
         await send(
             {
                 "type": "http.response.start",
@@ -982,7 +1047,7 @@ def create_app(*, cors_origins: list[str] | None = None):
         )
 
     async def _parse_request(request: Request) -> OpenReadingRequest:
-        body = await request.json()  # raises on invalid JSON → caught by caller
+        body = await decode_request(request)  # raises on invalid JSON → caught by caller
         schemas.validate_request(body)  # vendored request schema (raises → 400)
         req = OpenReadingRequest.model_validate(body)
         # Shared by /v1/route and /v1/jobs — a ValueError here lands in each caller's own
@@ -1062,10 +1127,15 @@ def create_app(*, cors_origins: list[str] | None = None):
         schemas.validate_liveness_report(env)  # never emit a non-conforming report
         return env
 
-    @app.post("/v1/parse")
+    @app.post(
+        "/v1/parse",
+        openapi_extra={"requestBody": request_body_schema(include_keep_candidates=True)},
+    )
     async def parse(request: Request):
         try:
-            body = await request.json()
+            body = await decode_request(request)
+        except UploadError as e:
+            return _error_response(e)
         except Exception as e:  # noqa: BLE001 — invalid JSON is a 400
             return _bad_request(f"invalid JSON body: {e}")
         # v0.4: opt-in candidate retention (strategy runs). Popped before schema validation so the
@@ -1115,10 +1185,12 @@ def create_app(*, cors_origins: list[str] | None = None):
         schemas.validate_response(result)  # never emit a non-conforming response
         return result
 
-    @app.post("/v1/route")
+    @app.post("/v1/route", openapi_extra={"requestBody": request_body_schema()})
     async def route(request: Request):
         try:
             req = await _parse_request(request)
+        except UploadError as e:
+            return _error_response(e)
         except Exception as e:  # noqa: BLE001
             return _bad_request(_validation_message(e))
         try:
@@ -1414,7 +1486,7 @@ def create_app(*, cors_origins: list[str] | None = None):
         schemas.validate_batch_result(env)
         return env
 
-    @app.post("/v1/jobs")
+    @app.post("/v1/jobs", openapi_extra={"requestBody": request_body_schema()})
     async def submit_job(request: Request):
         _sweep_jobs(jobs, int(time.time() * 1000))
         # Checked BEFORE anything else -- parsing the body, resolving an adapter, spending a
@@ -1431,6 +1503,8 @@ def create_app(*, cors_origins: list[str] | None = None):
                 return _principal_jobs_full()
         try:
             req = await _parse_request(request)
+        except UploadError as e:
+            return _error_response(e)
         except Exception as e:  # noqa: BLE001
             return _bad_request(_validation_message(e))
         try:

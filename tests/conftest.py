@@ -57,11 +57,12 @@ the ten adapters that build their own real HTTP client (`reducto`, `nuextract`, 
 also have a `test_<slug>_http.py`
 that drives the real `_Httpx*Client` class directly under `@respx.mock` (`respx.post(url).mock(
 return_value=httpx.Response(...))`), not only the higher-level fake in its main test file —
-otherwise the real client has zero coverage anywhere. The tenth, `docling`'s
-`_HttpxDoclingClient`, is the standing exception: it carries `# pragma: no cover`, no offline test
-references it, and it runs only in the live lane behind `DOCLING_SERVE_URL`
-(`tests/test_docling.py::test_live_convert`). The http tests prove OUR normalization and error
-mapping; they are NOT proof the provider's live API behaves as the mock claims (see Lane 2).
+otherwise the real client has zero coverage anywhere. Docling's `_HttpxDoclingClient` also runs
+under respx in `tests/test_server_docling_upload.py`, using a captured synthetic DOCX response.
+That test verifies uploaded bytes and filename through HTTP ingress, routing, and adapter HTTP.
+The live upload test requires `DOCLING_SERVE_URL` and runs in `tests/test_server_uploads_live.py`.
+Offline HTTP tests prove normalization and error mapping against fixtures, rather than current
+provider behavior. Lane 2 supplies that live evidence.
 
 Targeted runs during development:
 
@@ -183,9 +184,9 @@ red build, not a silent hole):
       normalize)
   [ ] `tests/test_<slug>_faults.py` — every error-taxonomy branch (auth, rate-limit, 5xx, bad
       body, timeout)
-  [ ] `tests/test_<slug>_http.py` if the adapter builds its own real `_Httpx*Client` (the
-      `# pragma: no cover` on the class hides its absence from the coverage floor — `docling` is
-      the shipped example of that gap, so the checklist, not `verify`, is what enforces this row)
+  [ ] A respx test drives the real HTTP client when the adapter builds its own `_Httpx*Client`.
+      Use `tests/test_<slug>_http.py` or an ingress test such as `test_server_docling_upload.py`.
+      A coverage exclusion can hide missing tests, so this checklist still requires explicit proof.
   [ ] a `@pytest.mark.live` test in `tests/test_<slug>.py` — skips without keys, real call with
       them
   [ ] `tests/test_conformance.py` + `tests/test_descriptor_specs.py` pass — the descriptor is

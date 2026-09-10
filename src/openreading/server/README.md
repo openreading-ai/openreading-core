@@ -3,7 +3,7 @@
 <sub>[Docs home](../README.md) · [← The run ledger](../ledger/README.md) · [The channel contract →](../derive/README.md)</sub>
 
 > **In one sentence.** `openreading serve` puts parse, compare, batch, and async jobs behind a JSON
-> API on `127.0.0.1:8787`, with bearer auth one variable turns on.
+> API on `127.0.0.1:8787`, with file uploads and bearer auth one variable turns on.
 
 ## What this gives you
 
@@ -117,8 +117,73 @@ jq -c '{state: .status.state, backend: .backend.id, pages: .document.page_count,
 
 **You should see** `ready: true` for `pymupdf`, the missing variables named for `reducto`, and the
 envelope the CLI prints. `ready` means the backend is configured, not that it was reached. To send
-the file inline instead of by `path`, put it in `document.bytes_base64`. Check:
+the file inline in JSON, put it in `document.bytes_base64`. The upload example below sends raw file bytes. Check:
 `jq .schema_version server-pymupdf.json` is `"0.3"`.
+
+### 1a. Upload a file from the client machine
+
+You can send `sample.pdf` from the machine running curl without exposing a server directory.
+Curl reads the path after `@` locally and sends its bytes with the existing request options.
+
+```bash
+curl -sS http://localhost:8787/v1/parse \
+  -F 'file=@sample.pdf' \
+  --form-string 'request={"backend":{"id":"pymupdf"}}' > server-upload.json
+jq -c '{state: .status.state, backend: .backend.id, pages: .document.page_count}' server-upload.json
+```
+
+```json
+{"state":"succeeded","backend":"pymupdf","pages":2}
+```
+
+Uploads work without `OPENREADING_SERVER_PATH_ROOT`, including when the server cannot access the
+client's filesystem. For another machine, replace `localhost` with the server's address reachable
+from your client. You start that server with the network binding and authentication described below.
+For example, the same request can name `docling` when your server has that backend configured.
+
+The `request` field contains JSON options, and `file` supplies the document source and filename.
+For options stored locally, replace `--form-string` with `-F 'request=<options.json'` to send a
+field without a filename. The [adapter catalog](../adapters/README.md) lists each backend's
+claimed formats. A descriptor is a backend's static declaration of its capabilities and configuration.
+Each backend reads the formats its descriptor claims, such as the backend selected above.
+
+The same two multipart fields work on `/v1/route` and `/v1/jobs`, preserving their existing behavior.
+Route inspects routing without processing, while an inline job can finish during submission.
+`/v1/batch` remains JSON-only. Open `/docs` or inspect `/openapi.json` for both request encodings
+and the multipart field requirements on the three single-document endpoints.
+
+### 1b. Upload a folder one file at a time
+
+The [folder recipe](../../../scripts/upload_folder.py) runs on your client with Python 3 and
+curl 7.55 or newer, without installing OpenReading there. This example copies the sample into two client-side directories.
+
+```bash
+mkdir -p docs/upload-input/team-a docs/upload-input/team-b
+cp sample.pdf docs/upload-input/team-a/report.pdf
+cp sample.pdf docs/upload-input/team-b/report.pdf
+python3 scripts/upload_folder.py docs/upload-input \
+  --url http://localhost:8787/v1/parse --backend pymupdf --output docs/upload-output
+jq -c '{state: .status.state, backend: .backend.id}' docs/upload-output/team-a/report.pdf
+```
+
+```json
+{"path": "team-a/report.pdf", "outcome": "success", "http_status": 200}
+{"path": "team-b/report.pdf", "outcome": "success", "http_status": 200}
+{"total": 2, "success": 2, "http_error": 0, "transport_error": 0, "local_error": 0}
+{"state":"succeeded","backend":"pymupdf"}
+```
+
+You select the input folder and an output directory outside it before running the recipe.
+Responses mirror complete relative paths, so `team-a/report.pdf` contains JSON under the output
+root despite its extension. `team-b/report.pdf` has its own response, preserving duplicate basenames.
+Exact names also avoid suffix collisions between a file named `a` and a directory named `a.response.json`.
+
+The output above is the whole contract: one JSON line per file naming its outcome, then totals,
+and a nonzero exit when any upload failed. The script's module docstring defines the traversal
+order, the four outcomes, the exit codes, and the no-retry rule, so read those there.
+
+For an authenticated server, set `OPENREADING_API_KEY` in your client environment to its bearer token.
+The script sends that header through curl's stdin, keeping the token out of command arguments.
 
 ### 2. Let the cache replay a routed run
 
@@ -205,16 +270,17 @@ right, so fix the table.
 |---|---|---|---|
 | `200` | none | success. Also `GET /v1/jobs/{id}` of a failed job, and every liveness probe result | any step above |
 | `204` | none | `DELETE /v1/jobs/{id}` removed the record, whatever its state, with an empty body | `curl -X DELETE localhost:8787/v1/jobs/$(jq -r .job_id job.json)` |
-| `400` | `bad_request`, `unknown_strategy` | body not JSON, fails the request schema, unknown `strategy:<name>`, bad `jobs` or `timeout_s`, `/v1/jobs` with no backend named | `"backend": {"id": "strategy:nope"}` |
+| `400` | `bad_request`, `unknown_strategy` | malformed JSON or multipart fields, fails the request schema, unknown `strategy:<name>`, bad `jobs` or `timeout_s`, `/v1/jobs` with no backend named | `"backend": {"id": "strategy:nope"}` |
 | `401` | `unauthorized`, `bad_signature` | auth on and no valid bearer, on every endpoint but the two named below. Or a webhook signature is invalid or its secret is unset. Or a `chunkr` / `open-ocr` event arrives without its per-job callback token | `POST /v1/webhooks/reducto` with any body and no `REDUCTO_WEBHOOK_SECRET` |
 | `403` | `scope_denied` | an unnamed request has an empty default chain, or token scope excludes every backend the request or strategy can reach | `policy: { backends: [] }`, or a token scoped to a backend the request did not name |
 | `404` | `unknown_backend`, `unknown_job` | the id names nothing | `"backend": {"id": "nope"}`, or `GET /v1/jobs/j_nope` |
-| `413` | `terminal` (`doc_too_large`) | document over the backend's size limit, OR the request body itself over the transport cap `OPENREADING_MAX_BODY_BYTES` (`_BodyLimitMiddleware`) | the doc-size case needs a hosted key, so the shape is shown and not run. The transport cap needs no key, but a 150 MB default body is impractical to demo here |
+| `413` | `terminal` (`doc_too_large`) | document over the backend's size limit, uploaded file over 100 MiB, request metadata over 1 MiB, or body over `OPENREADING_MAX_BODY_BYTES` | offline upload tests cover all ingestion ceilings. These large requests are omitted from this walkthrough |
 | `422` | `unsupported_feature` | the named backend cannot produce what you asked for | `"backend": {"id": "pymupdf"}, "extraction_schema": {"instructions": "totals"}` |
 | `424` | `terminal` (`missing_credentials`, `auth_rejected`) | named backend has no key (`missing_env[]`), or the provider rejected it | `"backend": {"id": "reducto"}` with no `REDUCTO_API_KEY` |
 | `429` | `rate_limited` | the job store already holds `OPENREADING_MAX_ASYNC_JOBS` records (default 1000), or this key holds `OPENREADING_MAX_JOBS_PER_PRINCIPAL` of them (default 100). It bounds the store, and it is not a per-caller request-rate throttle | needs 1000 submits, so the shape is shown and not run |
 | `502` | `plan_exhausted`, `terminal` | every backend in the plan failed (`trail` lists them). Two request-shape refusals also land here rather than at 400. `credentials_ref_alias_not_allowed` means the body's `credentials_ref` named an alias you have not allow-listed. `endpoint_not_request_configurable` means the body set `runtime.endpoint`. Both are permanent, so read `backend_code` before retrying a 502 | `"credentials_ref": "env:OPENREADING_REDUCTO"`, or `"runtime": {"endpoint": "https://example.com"}` |
 | `504` | `retryable_exhausted` | deadline passed or retries exhausted | needs a hosted key, so the shape is shown and not run |
+| `500` | `error` | upload temporary storage could not be created, written, or read | filesystem-fault tests cover this sanitized JSON response |
 | `500` | none. The body is the plain text `Internal Server Error`, not JSON | an error no handler caught | no trigger known today. It is the framework's own fallback, so parse defensively anyway |
 
 `/v1/batch` takes `backend` as one bare string where `/v1/parse` takes an object, which is the
@@ -470,6 +536,17 @@ needed a per-vendor rate this package could not verify, so `cost_usd` and `cost_
 Join these counters to your provider invoice instead. A counter a backend did not report is absent
 rather than zero, so read every field with a default.
 
+### Upload storage and memory
+
+Upload ingestion temporarily spools files before building the existing request, releasing storage
+before backend execution. Invalid requests and interrupted transfers also release their temporary files.
+The raw body cap includes multipart framing and bounds spooled bytes, while the file and metadata
+limits apply separately. Keep temporary storage writable and size it for concurrent incoming requests.
+
+Execution can hold several copies of a document, including bytes, base64 text, and a backend payload.
+Spooling bounds ingestion without making execution constant-memory, so allow several times each file's
+size in memory. Your HTTP server or proxy controls receive-time limits before execution begins.
+
 ### Load and time budgets
 
 One `openreading serve` is one uvicorn process, and it exposes no worker count and no queue depth.
@@ -508,8 +585,6 @@ your own proxy in front before more than one client can reach the port.
 - A `deadline_ms` field over HTTP, so a long hosted job hits 504 at 120 s. The `openreading.server`
   docstring covers it under "HTTP status codes", in the Timeouts paragraph: "no `deadline_ms` field
   or query param".
-- Multipart file uploads. `design/http-file-uploads.md` proposes them with a product spec beside
-  it, and the `openreading.server` docstring lists them under Known gaps.
 - Webhook *signature* verification for `chunkr` and `open-ocr`, because neither vendor offers a
   signing mechanism. Their callbacks are authenticated by the per-job token described under the
   error ladder above.
