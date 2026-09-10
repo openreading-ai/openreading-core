@@ -156,3 +156,34 @@ def test_cli_configuration_failure_has_no_traceback(tmp_path, capsys):
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "Traceback" not in captured.err
+
+
+def test_pre_cancelled_import_does_not_wait_for_a_thread_that_never_started(tmp_path):
+    import subprocess
+
+    root = tmp_path.resolve() / "input"
+    root.mkdir()
+    pdf(root / "sample.pdf")
+    script = """
+import anyio
+import sys
+from pathlib import Path
+from openreading.artifacts.limits import ProfileConfig
+from openreading.artifacts.service import ArtifactService
+from openreading.mcp_server.tools import _import
+async def check():
+    service = ArtifactService(ProfileConfig(Path(sys.argv[1]), Path(sys.argv[2])))
+    with anyio.CancelScope() as scope:
+        scope.cancel()
+        await _import(service, "sample.pdf")
+    print("closed")
+anyio.run(check)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(root), str(tmp_path.resolve() / "store")],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert result.returncode == 0
+    assert result.stdout.strip() == "closed"

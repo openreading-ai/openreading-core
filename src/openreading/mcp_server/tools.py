@@ -7,11 +7,14 @@ Blocking import cancellation waits for child termination before releasing reques
 
 from __future__ import annotations
 
+import asyncio
 import threading
+from contextlib import suppress
 from functools import partial
 
 import anyio
 import jsonschema
+from anyio.lowlevel import checkpoint_if_cancelled
 from anyio.to_thread import run_sync
 from mcp import types
 from mcp.server import Server
@@ -71,20 +74,18 @@ INSTRUCTIONS = "Import each document once, search for relevant words, then read 
 
 
 async def _import(service: ArtifactService, path: str):
-    cancelled, done = threading.Event(), threading.Event()
-
-    def work():
-        try:
-            return service.import_document(path, cancelled=cancelled)
-        finally:
-            done.set()
-
+    # Submit to an executor only after checking cancellation. Once submitted, shield
+    # the future so cancellation cannot discard the cleanup owner before it starts.
+    await checkpoint_if_cancelled()
+    cancelled = threading.Event()
+    work = partial(service.import_document, path, cancelled=cancelled)
+    future = asyncio.get_running_loop().run_in_executor(None, work)
     try:
-        return await run_sync(work, abandon_on_cancel=True)
+        return await asyncio.shield(future)
     except anyio.get_cancelled_exc_class():
         cancelled.set()
-        with anyio.CancelScope(shield=True):
-            await run_sync(done.wait)
+        with anyio.CancelScope(shield=True), suppress(Exception):
+            await asyncio.shield(future)
         raise
 
 
