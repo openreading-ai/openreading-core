@@ -87,15 +87,26 @@ async def _import(service: ArtifactService, path: str):
     # the future so cancellation cannot discard the cleanup owner before it starts.
     await checkpoint_if_cancelled()
     cancelled = threading.Event()
-    work = partial(service.import_document, path, cancelled=cancelled)
+
+    def work():
+        # Python 3.14 logs exceptions from cancelled shields even when cleanup retrieves them.
+        # Return failures as values so the request owner can raise or discard them deliberately.
+        try:
+            return service.import_document(path, cancelled=cancelled)
+        except Exception as error:
+            return error
+
     future = asyncio.get_running_loop().run_in_executor(None, work)
     try:
-        return await asyncio.shield(future)
+        result = await asyncio.shield(future)
     except anyio.get_cancelled_exc_class():
         cancelled.set()
         with anyio.CancelScope(shield=True), suppress(Exception):
             await asyncio.shield(future)
         raise
+    if isinstance(result, Exception):
+        raise result
+    return result
 
 
 def create_server(service: ArtifactService) -> Server:
