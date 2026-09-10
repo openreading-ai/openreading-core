@@ -163,7 +163,7 @@ reading them out of order costs nothing.
 | [`src/openreading/comparison/README.md`](comparison/README.md) | Compare | Where two backends disagree on one document, as a verdict plus findings. | 402 |
 | [`src/openreading/evals/README.md`](evals/README.md) | Evals | Public benchmarks, and ranking backends on documents you labeled. | 713 |
 | [`src/openreading/ledger/README.md`](ledger/README.md) | The run ledger | Resume after an interruption and replay completed work offline. | 410 |
-| [`src/openreading/server/README.md`](server/README.md) | The HTTP server | `openreading serve`: the same engine behind a local JSON API, with bearer auth. | 509 |
+| [`src/openreading/server/README.md`](server/README.md) | The HTTP server | `openreading serve`: the same engine behind a local HTTP API that takes JSON or a file upload, with bearer auth. | 600 |
 | [`src/openreading/adapters/README.md`](adapters/README.md) | Backend adapters | The catalog: each backend's formats, variables, and runtime requirements. | 378 |
 | [`src/openreading/schemas/README.md`](schemas/README.md) | JSON Schemas | The contract every surface speaks, and how a version is cut. | 401 |
 | [`src/openreading/derive/README.md`](derive/README.md) | The channel contract | Why a field is absent rather than wrong, and who computed it. | 280 |

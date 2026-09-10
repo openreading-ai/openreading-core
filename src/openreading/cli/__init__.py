@@ -285,9 +285,9 @@ These are the variables the CLI itself changes behaviour on.
 once at startup: `OPENREADING_API_KEYS` turns authentication on,
 `OPENREADING_API_KEY_SCOPES` narrows one token to named backends, and
 `OPENREADING_SERVER_PATH_ROOT` is the one directory beneath which a request may
-name a local file by path. Without it set, a request sends `bytes_base64` or a
-URL and a `document.path` is refused. `openreading help serve` and
-`openreading.server` carry the rest.
+name a local file by path. Without it set, a request uploads the file as
+multipart form data, or sends `bytes_base64` or a URL, and a `document.path`
+is refused. `openreading help serve` and `openreading.server` carry the rest.
 
 Chaining one verb into the next
 -------------------------------
@@ -1202,7 +1202,8 @@ The server never reads the working directory for a config -- pass
 A request may not name a local file by path unless
 `OPENREADING_SERVER_PATH_ROOT` is set to a directory. With it set,
 `document.path` may resolve beneath that directory and nowhere else. Without
-it, a client sends `bytes_base64` or a URL. Authentication is OFF until
+it, a client uploads the file as multipart form data, or sends `bytes_base64`
+or a URL. Authentication is OFF until
 `OPENREADING_API_KEYS` holds a comma-separated list of bearer tokens; every
 endpoint but `GET /healthz` and `POST /v1/webhooks/{backend_id}` then answers
 401 without an `Authorization: Bearer` header. `OPENREADING_API_KEY_SCOPES`

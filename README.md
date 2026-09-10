@@ -419,6 +419,10 @@ OPENREADING_SERVER_PATH_ROOT="$PWD" uv run openreading serve   # one terminal; l
 curl -s -X POST http://127.0.0.1:8787/v1/parse -H 'content-type: application/json' \
   -d '{"document": {"path": "'"$PWD"'/examples/john_smith_1000_2026_01.pdf"}, "backend": {"id": "pymupdf"}}' | head -c 80
 # {"schema_version":"0.3","status":{"state":"succeeded"},"backend":{"id":"pymupdf"
+# or upload the file from the machine running curl, which needs no path root:
+curl -s http://127.0.0.1:8787/v1/parse -F 'file=@examples/john_smith_1000_2026_01.pdf' \
+  --form-string 'request={"backend":{"id":"pymupdf"}}' | head -c 80
+# {"schema_version":"0.3","status":{"state":"succeeded"},"backend":{"id":"pymupdf"
 curl -s http://127.0.0.1:8787/healthz     # {"status":"ok","version":"0.3.0"}
 ```
 
