@@ -5,6 +5,7 @@ serialized extraction, 512 MiB retained storage, and 45 seconds per import.
 Import, search, and read payloads permit 4096, 8192, and 16384 UTF-8 bytes respectively.
 These caps do not promise a hard native-parser memory ceiling or an operating-system sandbox.
 DoclingLimits requires explicit page, deadline, sampled RSS, and idle limits.
+The legacy profile rejects worker settings that its disposable parser cannot enforce.
 Only busy and storage_limit invite retry after the blocking condition is resolved.
 """
 
@@ -73,6 +74,10 @@ class ProfileLimits:
     search_bytes: int = 8192
     read_bytes: int = 16384
 
+    def __post_init__(self):
+        if self.worker_memory_bytes is not None or self.worker_idle_seconds != 60:
+            raise ArtifactError("configuration_required")
+
 
 @dataclass(frozen=True, kw_only=True)
 class DoclingLimits:
@@ -108,5 +113,5 @@ class ProfileConfig:
     docling: LocalDoclingConfig | None = None
 
     def __post_init__(self):
-        if self.docling is not None and not isinstance(self.limits, DoclingLimits):
+        if (self.docling is not None) != isinstance(self.limits, DoclingLimits):
             raise ArtifactError("configuration_required")
