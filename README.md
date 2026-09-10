@@ -413,18 +413,22 @@ delta = openreading.compare([resp, openreading.run(doc, backend="tesseract")])
 print(delta["headline"]["verdict"])                              # equivalent
 ```
 ```bash
-# document.path is refused over HTTP unless rooted (openreading.server docstring, "Security")
-OPENREADING_SERVER_PATH_ROOT="$PWD" uv run openreading serve   # one terminal; listens on http://127.0.0.1:8787 ([server] extra, included above)
-# in another terminal, from the same clone:
-curl -s -X POST http://127.0.0.1:8787/v1/parse -H 'content-type: application/json' \
-  -d '{"document": {"path": "'"$PWD"'/examples/john_smith_1000_2026_01.pdf"}, "backend": {"id": "pymupdf"}}' | head -c 80
-# {"schema_version":"0.3","status":{"state":"succeeded"},"backend":{"id":"pymupdf"
-# or upload the file from the machine running curl, which needs no path root:
-curl -s http://127.0.0.1:8787/v1/parse -F 'file=@examples/john_smith_1000_2026_01.pdf' \
-  --form-string 'request={"backend":{"id":"pymupdf"}}' | head -c 80
-# {"schema_version":"0.3","status":{"state":"succeeded"},"backend":{"id":"pymupdf"
-curl -s http://127.0.0.1:8787/healthz     # {"status":"ok","version":"0.3.0"}
+# Start the server in one terminal. The server extra is included in the install above.
+uv run openreading serve
+# In another terminal, upload a file from the machine running curl:
+curl --fail-with-body -sS http://127.0.0.1:8787/v1/parse \
+  -F 'file=@examples/john_smith_1000_2026_01.pdf' \
+  --form-string 'request={"backend":{"id":"pymupdf"}}' \
+  | jq -r '.status.state, .backend.id'
+# succeeded
+# pymupdf
+curl --fail-with-body -sS http://127.0.0.1:8787/healthz
+# {"status":"ok","version":"0.3.0"}
 ```
+
+Uploads need no server path root. For another laptop, folder uploads, and a separate Docling process,
+follow the [serving tutorial](https://openreading.ai/oss-tutorial#15-serving-the-same-engine).
+The [server guide](src/openreading/server/README.md) covers explicit server filesystem access and authentication.
 
 ## Status and versioning
 
