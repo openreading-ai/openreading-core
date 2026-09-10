@@ -84,8 +84,9 @@ def test_roots_and_store_symlinks_fail_closed(tmp_path):
             ArtifactService(ProfileConfig(root, store))
     link = root.parent / "link"
     link.symlink_to(root, target_is_directory=True)
-    with pytest.raises(ArtifactError, match="configuration_required"):
-        ArtifactService(ProfileConfig(link, root.parent / "store"))
+    service = ArtifactService(ProfileConfig(link, root.parent / "store"))
+    assert service.config.input_root == root
+    service.close()
 
 
 def test_ambient_hosted_config_cannot_change_profile(service, monkeypatch):

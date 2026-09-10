@@ -192,7 +192,9 @@ readers the field paths, optional-value rules, and distinctions between outer re
   - the output is degraded: ``typed_fields_malformed`` (the vendor's structured output was not
     a JSON object, so the response is PARTIAL), ``typed_fields_unverified``,
     ``output_truncated``, ``interaction_incomplete`` (the vendor stopped before finishing),
-    ``bbox_space_approximate``.
+    ``bbox_space_approximate``, ``ambiguous_page_provenance`` (unattributable text omitted),
+    ``unreadable_pages`` (no page-addressable text), and ``table_text_unavailable``
+    (table text absent while structured table extraction is disabled).
   - the run took a detour: ``fallback_used`` (the router's attempt trail),
     ``idempotent_replay``, ``quality_below_threshold`` (every rung gated, best result
     retained), ``quality_escalated`` (a rung gated and a later rung answered, so the walk
@@ -531,9 +533,9 @@ LIVENESS_REPORT_SCHEMA_FILE = "liveness-report.v0.1.json"
 # (StepRequest/StepResult) and the per-line shape of a run's JSONL journal. Two new families.
 STEP_SCHEMA_FILE = "step.v0.1.json"
 JOURNAL_SCHEMA_FILE = "journal.v0.1.json"
-LOCAL_DOCUMENT_SCHEMA_FILE = "local-document.v0.1.json"
-PASSAGE_SCHEMA_FILE = "passage.v0.1.json"
-AGENT_DOCUMENT_TOOL_SCHEMA_FILE = "agent-document-tool.v0.1.json"
+LOCAL_DOCUMENT_SCHEMA_FILE = "local-document.v0.2.json"
+PASSAGE_SCHEMA_FILE = "passage.v0.2.json"
+AGENT_DOCUMENT_TOOL_SCHEMA_FILE = "agent-document-tool.v0.2.json"
 
 
 _PACKAGE = "openreading.schemas"

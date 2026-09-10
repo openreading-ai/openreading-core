@@ -1249,6 +1249,17 @@ It uses local PyMuPDF without OCR, passwords, routing, or hosted fallback.
 Imports allow 45 seconds and retain at most 512 MiB across the artifact store.
 Import, search, and read allow 4096, 8192, and 16384 UTF-8 bytes.
 These byte limits do not prove token savings or impose a native memory limit.
+Select --profile local-document-proof-v2 for openreading[agent,docling-local].
+That profile requires --profile-config pointing to a local JSON setup file.
+It names pages, deadline_seconds, worker_memory_bytes, worker_idle_seconds,
+and docling. The docling object names artifacts_path and dependency_lock.
+Optional ocr, tesseract_cmd, tessdata_path, languages, and threads select OCR.
+For example, set ocr to true with absolute executable and language-data paths.
+No model assets download automatically. Invalid or absent setup exits 2.
+The artifact guide demonstrates setup. No measured release defaults exist.
+The warm child reports bounded progress, then shuts down after idle timeout.
+Physical-page text_origin labels identify native, OCR, or mixed extraction.
+These labels are provenance, never measured accuracy or confidence.
 Exit 0 means transport closure, 2 invalid setup, and 130 interruption.
 This POSIX profile resolves root symlinks before establishing its input grant.
 Both SIGINT and SIGTERM exit 130 after cancelling imports and reaping workers.

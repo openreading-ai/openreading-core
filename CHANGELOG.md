@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased local Docling profile
+
+- Add the optional `docling_local` adapter with verified local ONNX assets and explicit OCR setup.
+- Add the v2 MCP profile with supervised warm workers and required resource limits.
+- Add v0.2 retained evidence contracts carrying measured physical-page text origins.
+
+
 All notable changes to OpenReading are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).

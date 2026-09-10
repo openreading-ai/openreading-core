@@ -1,0 +1,137 @@
+"""The local pipeline stays optional and refuses settings outside the fixed profile."""
+
+import importlib
+import subprocess
+import sys
+
+
+def test_local_adapter_package_import_does_not_load_native_engines():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import openreading.adapters.docling_local; "
+            "assert not any(n in sys.modules for n in ('docling', 'onnxruntime', 'pypdfium2', 'torch'))",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_pipeline_configuration_requires_explicit_local_assets(tmp_path):
+    module = importlib.import_module("openreading.adapters.docling_local.config")
+    try:
+        module.LocalDoclingConfig(artifacts_path=tmp_path / "missing").validate_assets()
+    except ValueError as error:
+        assert "asset" in str(error).lower()
+    else:
+        raise AssertionError("Missing assets must refuse conversion before model initialization")
+
+
+def test_config_wire_roundtrip_keeps_setup_ocr_and_explicit_paths(tmp_path):
+    from openreading.adapters.docling_local.config import LocalDoclingConfig
+
+    value = LocalDoclingConfig(
+        tmp_path, ocr=True, tesseract_cmd=tmp_path / "tesseract", tessdata_path=tmp_path / "data"
+    )
+    assert LocalDoclingConfig.from_wire(value.wire()) == value
+
+
+def test_pipeline_initializes_selected_stages_without_loading_weights(tmp_path, monkeypatch):
+    from docling.datamodel.base_models import InputFormat
+    from docling.models.inference_engines.object_detection.onnxruntime_engine import (
+        OnnxRuntimeObjectDetectionEngine,
+    )
+    from docling.models.stages.layout.layout_object_detection_model import (
+        LayoutObjectDetectionModel,
+    )
+
+    from openreading.adapters.docling_local.config import LocalDoclingConfig
+    from openreading.adapters.docling_local.pipeline import create_converter
+
+    seen = []
+
+    def initialize(engine):
+        seen.append(engine._resolve_providers())
+
+    monkeypatch.setattr(LocalDoclingConfig, "validate_assets", lambda self: {})
+    monkeypatch.setattr(OnnxRuntimeObjectDetectionEngine, "initialize", initialize)
+    monkeypatch.setattr(LayoutObjectDetectionModel, "_build_label_map", lambda self: {})
+    converter = create_converter(LocalDoclingConfig(tmp_path))
+    converter.initialize_pipeline(InputFormat.PDF)
+    pipeline = next(iter(converter.initialized_pipelines.values()))
+    assert seen == [["CPUExecutionProvider"]]
+    assert pipeline.pipeline_options.enable_remote_services is False
+    assert pipeline.pipeline_options.allow_external_plugins is False
+    assert pipeline.pipeline_options.do_table_structure is False
+    assert pipeline.enrichment_pipe == []
+    assert list(pipeline.table_model(None, iter([1, 2]))) == [1, 2]
+    assert list(pipeline.ocr_model(None, iter([3]))) == [3]
+
+
+def test_asset_validation_hashes_ocr_data_and_lock_and_refuses_mutation(tmp_path, monkeypatch):
+    import hashlib
+    from dataclasses import replace
+
+    import pytest
+
+    from openreading.adapters.docling_local import config
+
+    model = tmp_path / config.MODEL_REPOSITORY.replace("/", "--")
+    model.mkdir()
+    (model / "config.json").write_bytes(b"model")
+    monkeypatch.setattr(
+        config, "MODEL_FILES", {"config.json": hashlib.sha256(b"model").hexdigest()}
+    )
+    (tmp_path / "eng.traineddata").write_bytes(b"language")
+    (tmp_path / "tesseract").write_bytes(b"executable")
+    (tmp_path / "uv.lock").write_bytes(b"lock")
+    selected = config.LocalDoclingConfig(
+        tmp_path,
+        ocr=True,
+        tesseract_cmd=tmp_path / "tesseract",
+        tessdata_path=tmp_path,
+        dependency_lock=tmp_path / "uv.lock",
+    )
+    hashes = selected.validate_assets()
+    assert set(hashes) == {"config.json", "tesseract", "eng.traineddata", "dependency_lock"}
+    for changes in [
+        {"languages": ("../secret",)},
+        {"languages": ()},
+        {"threads": 0},
+        {"tessdata_path": None},
+    ]:
+        with pytest.raises(ValueError, match="assets"):
+            replace(selected, **changes).validate_assets()
+    (model / "config.json").write_bytes(b"changed")
+    with pytest.raises(ValueError, match="assets"):
+        selected.validate_assets()
+
+
+def test_pipeline_rejects_untested_upstream_version(tmp_path, monkeypatch):
+    import pytest
+
+    from openreading.adapters.docling_local import pipeline
+
+    monkeypatch.setattr(pipeline.LocalDoclingConfig, "validate_assets", lambda self: {})
+    monkeypatch.setattr(pipeline.importlib.metadata, "version", lambda name: "unknown")
+    with pytest.raises(ValueError, match="tested Docling version"):
+        pipeline.create_converter(pipeline.LocalDoclingConfig(tmp_path))
+
+
+def test_setup_rejects_invalid_types_before_native_import(tmp_path):
+    import pytest
+
+    from openreading.adapters.docling_local.config import LocalDoclingConfig
+
+    for change in [
+        {"artifacts_path": None},
+        {"ocr": 1},
+        {"threads": True},
+        {"languages": "eng"},
+        {"languages": [1]},
+        {"unexpected": 1},
+    ]:
+        with pytest.raises((ValueError, TypeError)):
+            LocalDoclingConfig.from_wire({"artifacts_path": str(tmp_path), **change})

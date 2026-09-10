@@ -117,6 +117,9 @@ _FROZEN_RELEASED = {
     "strategy-config.v0.1.json": "1080ed4b28d0455766ed5789535c8d4d075eb73b78d167d18c79ed582cd5c0b2",
 }
 _UNRELEASED = {
+    "local-document.v0.2.json",
+    "passage.v0.2.json",
+    "agent-document-tool.v0.2.json",
     "response.v0.3.json",
     "adapter-descriptor.v0.3.json",
     "comparison-report.v0.2.json",

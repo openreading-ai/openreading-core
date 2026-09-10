@@ -20,7 +20,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from openreading.artifacts.intake import directory
+from openreading.artifacts.intake import InputGrant, ancestor_identities, directory
 from openreading.artifacts.limits import ArtifactError, ProfileConfig
 from openreading.artifacts.models import ArtifactManifest, Passage, artifact_id
 from openreading.artifacts.passages import iter_passages
@@ -44,7 +44,13 @@ def safe_read(path: Path, cap: int) -> bytes:
 class Store:
     def __init__(self, config: ProfileConfig):
         self.config = config
-        a, b = config.input_root, config.artifact_root
+        if not config.input_root.is_absolute() or not config.artifact_root.is_absolute():
+            raise ArtifactError("configuration_required")
+        self.input_grant = InputGrant(config.input_root)
+        a, b = self.input_grant.path, config.artifact_root.resolve()
+        from dataclasses import replace
+
+        self.config = replace(config, input_root=a, artifact_root=b)
         if a == b or a in b.parents or b in a.parents:
             raise ArtifactError("configuration_required")
         with directory(a):
@@ -52,10 +58,25 @@ class Store:
         for path in (b, b / "staging", b / "documents"):
             with directory(path, create=True) as fd:
                 os.fchmod(fd, 0o700)
-        self.grant = hashlib.sha256(str(a).encode()).hexdigest()
+        with directory(b) as fd:
+            metadata = os.fstat(fd)
+            if (
+                self.input_grant.identity in ancestor_identities(fd)
+                or (metadata.st_dev, metadata.st_ino) in self.input_grant.ancestors
+            ):
+                raise ArtifactError("configuration_required")
+        self.grant = hashlib.sha256(
+            json.dumps([str(a), *self.input_grant.identity]).encode()
+        ).hexdigest()
         self.documents = b / "documents" / self.grant
         with directory(self.documents, create=True):
             pass
+
+    def source(self, relative: str):
+        return self.input_grant.source(relative)
+
+    def close(self):
+        self.input_grant.close()
 
     def size(self) -> int:
         total = 0
@@ -99,7 +120,7 @@ class Store:
             raw = json.loads(safe_read(root / "manifest.json", 65536))
             if not isinstance(raw, dict):
                 raise ValueError("Manifest is not an object")
-            if raw.get("format") != "local-document.v0.1":
+            if raw.get("format") != "local-document.v0.2":
                 raise ArtifactError("artifact_version_unsupported")
             manifest = ArtifactManifest.model_validate(raw)
             if (
@@ -129,7 +150,7 @@ class Store:
                 Passage.model_validate_json(line) for line in data["passages.jsonl"].splitlines()
             ]
             if (
-                passages != list(iter_passages(response))
+                passages != list(iter_passages(response, manifest.page_origins))
                 or len(passages) != manifest.passage_count
                 or response.document.page_count != manifest.page_count
             ):

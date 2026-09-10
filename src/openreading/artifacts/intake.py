@@ -7,11 +7,14 @@ Concurrent source edits produce a warning when descriptor metadata changes durin
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import os
 import stat
+import sys
+import weakref
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager, nullcontext, suppress
 from pathlib import Path
 
 from openreading.artifacts.limits import ArtifactError
@@ -42,6 +45,8 @@ def directory(path: Path, *, create: bool = False) -> Iterator[int]:
             os.close(fd)
             fd = child
         yield fd
+    except PermissionError:
+        raise ArtifactError("os_permission_denied") from None
     except OSError:
         raise ArtifactError("configuration_required") from None
     finally:
@@ -49,10 +54,10 @@ def directory(path: Path, *, create: bool = False) -> Iterator[int]:
 
 
 @contextmanager
-def source(root: Path, relative: str) -> Iterator[int]:
+def source(root: Path, relative: str, *, root_fd: int | None = None) -> Iterator[int]:
     parts = components(relative)
-    with directory(root) as root_fd:
-        fd = os.dup(root_fd)
+    with directory(root) if root_fd is None else nullcontext(root_fd) as opened_root:
+        fd = os.dup(opened_root)
         try:
             for part in parts[:-1]:
                 child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
@@ -63,7 +68,11 @@ def source(root: Path, relative: str) -> Iterator[int]:
             fd = child
             if not stat.S_ISREG(os.fstat(fd).st_mode):
                 raise ArtifactError("access_denied")
+            flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+            fcntl.fcntl(fd, fcntl.F_SETFL, flags & ~os.O_NONBLOCK)
             yield fd
+        except PermissionError:
+            raise ArtifactError("os_permission_denied") from None
         except FileNotFoundError:
             raise ArtifactError("input_not_found") from None
         except OSError:
@@ -104,3 +113,56 @@ def copy_source(
         after.st_ctime_ns,
     )
     return digest.hexdigest(), changed
+
+
+def ancestor_identities(fd: int) -> set[tuple[int, int]]:
+    identities = set()
+    current = os.dup(fd)
+    try:
+        while True:
+            metadata = os.fstat(current)
+            identity = (metadata.st_dev, metadata.st_ino)
+            if identity in identities:
+                return identities
+            identities.add(identity)
+            parent = os.open("..", os.O_RDONLY | os.O_DIRECTORY, dir_fd=current)
+            os.close(current)
+            current = parent
+    finally:
+        os.close(current)
+
+
+class InputGrant:
+    def __init__(self, path: Path):
+        try:
+            canonical = path.resolve(strict=True)
+            with directory(canonical) as fd:
+                self.fd = os.dup(fd)
+            self._finalizer = weakref.finalize(self, os.close, self.fd)
+            if sys.platform == "darwin":
+                # F_GETPATH asks the opened filesystem for spelling, preserving volume case rules.
+                canonical = Path(
+                    os.fsdecode(fcntl.fcntl(self.fd, 50, bytes(1024)).split(b"\0", 1)[0])
+                )
+            self.path = canonical
+            metadata = os.fstat(self.fd)
+            self.identity = (metadata.st_dev, metadata.st_ino)
+            self.ancestors = ancestor_identities(self.fd)
+        except PermissionError:
+            raise ArtifactError("os_permission_denied") from None
+        except (OSError, RuntimeError):
+            raise ArtifactError("configuration_required") from None
+
+    def close(self):
+        self._finalizer()
+
+    @contextmanager
+    def source(self, relative: str):
+        try:
+            current = self.path.stat()
+        except OSError:
+            raise ArtifactError("access_denied") from None
+        if (current.st_dev, current.st_ino) != self.identity:
+            raise ArtifactError("access_denied")
+        with source(self.path, relative, root_fd=self.fd) as fd:
+            yield fd

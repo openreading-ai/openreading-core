@@ -1,6 +1,6 @@
 """Strict constructors for retained documents and bounded agent tool payloads.
 
-The three vendored v0.1 schemas own these contracts. Artifact identity excludes names
+The three vendored v0.2 schemas own these contracts. Artifact identity excludes names
 and creation time, so identical bytes and engine settings reuse evidence identifiers.
 Character offsets count Unicode code points, relative to the original normalized block.
 Geometry identifies the enclosing block, never an inferred character highlight.
@@ -26,7 +26,11 @@ Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 ArtifactId = Annotated[str, Field(pattern=r"^or1_[0-9a-f]{64}$")]
 EvidenceId = Annotated[str, Field(pattern=r"^p[0-9]{4,}-b[0-9]{4,}-s[0-9]{4,}$")]
 WarningCode = Literal["source_changed", "parser_warnings_present", "no_matches"]
+TextOrigin = Literal["native", "ocr", "mixed"]
 ErrorCode = Literal[
+    "memory_limit",
+    "worker_monitor_failed",
+    "os_permission_denied",
     "configuration_required",
     "engine_identity_unavailable",
     "access_denied",
@@ -80,7 +84,7 @@ class FileRecord(WireModel):
 
 
 class ArtifactManifest(WireModel):
-    format: Literal["local-document.v0.1"] = "local-document.v0.1"
+    format: Literal["local-document.v0.2"] = "local-document.v0.2"
     artifact_id: ArtifactId
     document_sha256: Digest
     display_name: str
@@ -89,13 +93,25 @@ class ArtifactManifest(WireModel):
     page_count: int = Field(ge=1)
     passage_count: int = Field(ge=1)
     engine: EngineIdentity
-    evidence_format: Literal["passages.v0.1"] = "passages.v0.1"
+    evidence_format: Literal["passages.v0.2"] = "passages.v0.2"
     created_at: str
+    page_origins: dict[str, TextOrigin] = Field(default_factory=dict)
     files: dict[str, FileRecord]
     warnings: list[WarningCode] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_files(self) -> ArtifactManifest:
+        if self.page_origins and (
+            len(self.page_origins) != self.page_count
+            or any(
+                not key.isascii()
+                or not key.isdigit()
+                or str(int(key)) != key
+                or not 1 <= int(key) <= self.page_count
+                for key in self.page_origins
+            )
+        ):
+            raise ValueError("Text origins must cover exactly the physical pages")
         if set(self.files) != {"source.pdf", "response.json", "passages.jsonl"}:
             raise ValueError("Unexpected artifact files")
         if len(self.display_name.encode("utf-8")) > 255:
@@ -105,10 +121,10 @@ class ArtifactManifest(WireModel):
 
 def artifact_id(document_sha256: str, engine: EngineIdentity) -> str:
     identity = {
-        "format": "local-document.v0.1",
+        "format": "local-document.v0.2",
         "document_sha256": document_sha256,
         "engine": engine.wire(),
-        "evidence_format": "passages.v0.1",
+        "evidence_format": "passages.v0.2",
     }
     return "or1_" + hashlib.sha256(json_bytes(identity)).hexdigest()
 
@@ -118,6 +134,7 @@ class Passage(WireModel):
     page: int = Field(ge=1)
     block_index: int = Field(ge=0)
     segment_index: int = Field(ge=0)
+    text_origin: TextOrigin | None = None
     source_kind: Literal["block_text", "page_text"]
     text_start: int = Field(ge=0)
     text_end: int = Field(ge=1)
@@ -140,7 +157,7 @@ class Passage(WireModel):
 
 
 class ImportReceipt(WireModel):
-    schema_version: Literal["0.1"] = "0.1"
+    schema_version: Literal["0.2"] = "0.2"
     artifact_id: ArtifactId
     display_name: str
     document_sha256: Digest
@@ -152,6 +169,7 @@ class ImportReceipt(WireModel):
 
 
 class SearchHit(WireModel):
+    text_origin: TextOrigin | None = None
     evidence_id: EvidenceId
     page: int = Field(ge=1)
     matched_terms: list[str]
@@ -161,7 +179,7 @@ class SearchHit(WireModel):
 
 
 class SearchResult(WireModel):
-    schema_version: Literal["0.1"] = "0.1"
+    schema_version: Literal["0.2"] = "0.2"
     artifact_id: ArtifactId
     query: str = Field(max_length=MAX_QUERY_CHARS)
     hits: list[SearchHit]
@@ -170,7 +188,7 @@ class SearchResult(WireModel):
 
 
 class ReadResult(WireModel):
-    schema_version: Literal["0.1"] = "0.1"
+    schema_version: Literal["0.2"] = "0.2"
     artifact_id: ArtifactId
     display_name: str
     passages: list[Passage]
@@ -185,5 +203,5 @@ class ToolError(WireModel):
 
 
 class ErrorEnvelope(WireModel):
-    schema_version: Literal["0.1"] = "0.1"
+    schema_version: Literal["0.2"] = "0.2"
     error: ToolError

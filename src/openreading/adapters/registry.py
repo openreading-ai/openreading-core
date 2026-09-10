@@ -14,6 +14,7 @@ from openreading.adapters.azure_document_intelligence import AzureDocumentIntell
 from openreading.adapters.base import BackendAdapter
 from openreading.adapters.chunkr import ChunkrAdapter
 from openreading.adapters.docling import DoclingAdapter
+from openreading.adapters.docling_local import DoclingLocalAdapter
 from openreading.adapters.google_document_ai import GoogleDocumentAIAdapter
 from openreading.adapters.google_gemini import GoogleGeminiAdapter
 from openreading.adapters.mistral_ocr import MistralOCRAdapter
@@ -33,6 +34,7 @@ BUILTIN_ADAPTERS: dict[str, Callable[[], BackendAdapter]] = {
     "reducto": ReductoAdapter,
     "tesseract": TesseractAdapter,
     "docling": DoclingAdapter,
+    "docling_local": DoclingLocalAdapter,
     "qwen-vl": QwenVLAdapter,
     "google-document-ai": GoogleDocumentAIAdapter,
     "google-gemini": GoogleGeminiAdapter,

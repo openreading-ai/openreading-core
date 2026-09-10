@@ -34,6 +34,7 @@ anthropic-claude               hosted_api         no          ANTHROPIC_API_KEY,
 aws-textract                   hosted_api         no          AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, AWS_REGION, OPENREADING_TEXTRACT_S3_BUCKET
 azure-document-intelligence    hosted_api         no          AZURE_DOCUMENT_INTELLIGENCE_KEY, AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT
 chunkr                         hosted_api         no          CHUNKR_API_KEY
+docling_local                  oss_library        no          DOCLING_LOCAL_ASSETS
 docling                        oss_library        no          DOCLING_SERVE_URL
 google-document-ai             hosted_api         no          GCP_PROJECT_ID, GCP_PROCESSOR_ID
 google-gemini                  hosted_api         no          GEMINI_API_KEY
@@ -106,6 +107,7 @@ and that output disagree, the output is right and the table needs fixing.
 | `aws-textract` | pdf, png, jpg, tiff |
 | `azure-document-intelligence` | pdf, png, jpg, tiff, bmp, docx, xlsx, pptx, html |
 | `chunkr` | pdf, docx, pptx, xlsx, png, jpg, tiff, webp, html |
+| `docling_local` | pdf |
 | `docling` | pdf, docx, pptx, xlsx, html, png, jpg |
 | `google-document-ai` | pdf, tiff, gif, png, jpg, bmp, webp |
 | `google-gemini` | pdf |
@@ -129,6 +131,7 @@ none means the backend declares no variable of that kind.
 | `aws-textract` | hosted_api | `textract` | none | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_REGION` or `AWS_DEFAULT_REGION`, `OPENREADING_TEXTRACT_S3_BUCKET` |
 | `azure-document-intelligence` | hosted_api | `azure-document-intelligence` | `AZURE_DOCUMENT_INTELLIGENCE_KEY`, `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT` | none |
 | `chunkr` | hosted_api | `chunkr` | `CHUNKR_API_KEY` | `CHUNKR_BASE_URL` |
+| `docling_local` | oss_library | `docling_local` | `DOCLING_LOCAL_ASSETS` | none |
 | `docling` | oss_library | `docling` | `DOCLING_SERVE_URL` | none |
 | `google-document-ai` | hosted_api | `google-document-ai` | `GCP_PROJECT_ID` or `GOOGLE_CLOUD_PROJECT`, `GCP_PROCESSOR_ID` | `GOOGLE_APPLICATION_CREDENTIALS`, `GCP_LOCATION` |
 | `google-gemini` | hosted_api | `google-gemini` | `GEMINI_API_KEY` | `GEMINI_MODEL` |
@@ -160,6 +163,7 @@ machine and has nothing to sign up for.
 | `aws-textract` | hosted_api | proprietary | https://aws.amazon.com/textract/ |
 | `azure-document-intelligence` | hosted_api | proprietary | https://azure.microsoft.com/products/ai-services/ai-document-intelligence |
 | `chunkr` | hosted_api | proprietary (AGPL-3.0 self-host available) | https://chunkr.ai |
+| `docling_local` | oss_library | MIT | Tesseract for OCR |
 | `docling` | oss_library | MIT | none |
 | `google-document-ai` | hosted_api | proprietary | https://cloud.google.com/document-ai |
 | `google-gemini` | hosted_api | proprietary | https://aistudio.google.com/apikey |
@@ -233,6 +237,7 @@ Native batch max items is how many documents the vendor's own bulk endpoint acce
 | `aws-textract` | 1 sync / 3000 async | none | none |
 | `azure-document-intelligence` | 2000 | none | none |
 | `chunkr` | 2000 (soft) | none | none |
+| `docling_local` | explicit profile cap | explicit profile cap | none |
 | `docling` | none | none | none |
 | `google-document-ai` | 15 sync / 500 batch | none | none |
 | `google-gemini` | 1000 | none | none |
@@ -279,6 +284,7 @@ that grading enforces, C1 to C11.
 | `aws-textract` | `D` | `D` | `N` | `N` | `N` | `N` | `N` |
 | `azure-document-intelligence` | `N` | `N` | `N` | `N` | `D` | `N` | `N` |
 | `chunkr` | `D` | `N` | `N` | `N` | `N` | `D` | `N` |
+| `docling_local` | `D` | `N` | `N` | `X` | `X` | `X` | `X` |
 | `docling` | `N` | `N` | `N` | `N` | `X` | `N` | `D` |
 | `google-document-ai` | `N` | `D` | `N` | `N` | `N` | `N` | `N` |
 | `google-gemini` | `D` | `N` | `D` | `X` | `X` | `D` | `N` |

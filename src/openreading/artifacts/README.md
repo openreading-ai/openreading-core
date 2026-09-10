@@ -30,9 +30,36 @@ The identifier belongs to that artifact and cannot establish provenance for anot
 - Follow `next_cursor` with the same query and limit, or the same ordered evidence identifiers.
 - Remove a document's retained directory when you want to delete its source and extracted evidence.
 
+### Local Docling developer setup
+
+Install `openreading[agent,docling-local]` and provide the verified model assets described in `openreading.adapters.docling_local.config`.
+Create a setup JSON file with explicit resource limits and absolute local paths:
+
+```json
+{
+  "pages": 10,
+  "deadline_seconds": 60,
+  "worker_memory_bytes": 2147483648,
+  "worker_idle_seconds": 60,
+  "docling": {
+    "artifacts_path": "/absolute/models",
+    "dependency_lock": "/absolute/uv.lock",
+    "ocr": false
+  }
+}
+```
+
+These numbers are developer safeguards, not measured release defaults or host compatibility claims.
+Start `openreading mcp --profile local-document-proof-v2 --profile-config /absolute/setup.json --input-root /absolute/documents --artifact-root /absolute/evidence`.
+Enable OCR through setup with `ocr: true`, `tesseract_cmd`, and `tessdata_path` pointing to your selected executable and language data.
+The default language is `eng`; the configured model, executable, language data, and lock hashes enter the extraction identity.
+The lock hash identifies a selected file. It does not verify that installed packages match that lock.
+Packaging must establish that relationship through a locked build and runtime verification.
+A sampled memory limit includes the worker and its descendants; sampling permits transient overshoot.
+
 ## How it decides
 
-The fixed profile selects local PyMuPDF explicitly, preventing ambient configuration from choosing a hosted backend.
+Each profile selects its local engine explicitly, preventing ambient configuration from choosing a hosted backend.
 Source spans preserve Unicode code points without normalization, preventing quotes from drifting away from extracted text.
 Geometry comes from the enclosing source block, preventing an approximate box from appearing as a precise character highlight.
 Every load checks hashes and regenerates passages from the normalized response, preventing corrupted evidence from being reused.
@@ -60,5 +87,6 @@ The [schema guide](../schemas/README.md#retained-local-evidence-contracts) names
 
 ## Not built yet
 
-This profile has no OCR, folder import, summaries, vector search, local model, or hosted fallback.
+These profiles have no folder import, summaries, vector search, or hosted fallback.
+Docling release limits require separate host and base-machine measurements.
 Its byte caps do not establish token savings, and its process isolation does not impose a native memory ceiling.

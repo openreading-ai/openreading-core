@@ -1,7 +1,8 @@
 """Retain local extraction evidence for bounded, repeatable document retrieval.
 
 A retained artifact contains exact source bytes, a normalized response, and page passages.
-The local-document-proof-v1 profile fixes PyMuPDF and ignores ambient routing configuration.
+The v1 profile selects PyMuPDF; v2 selects local Docling with explicit assets and limits.
+Both ignore ambient routing configuration and refuse hosted fallback.
 Artifacts are partitioned by the explicitly configured input root. Changing that grant
 makes earlier artifacts inaccessible until the original grant is restored.
 
@@ -26,5 +27,17 @@ Reusing ledger blobs would bypass that grant and integrity boundary during later
 Neither store automatically evicts data from the other store or promises compatible directory layouts.
 
 Limits and failure codes live in openreading.artifacts.limits. Exact wire fields live
-in openreading.artifacts.models and the three vendored v0.1 artifact schemas.
+in openreading.artifacts.models and the three vendored v0.2 artifact schemas.
+
+Worker supervision
+------------------
+The v2 worker retains its initialized converter between sequential imports.
+Cancellation, deadlines, invalid messages, and sampled memory limits terminate its process group.
+An idle timer releases the worker without deleting retained evidence.
+Page text origins describe measured native/OCR cells, not confidence or quote accuracy.
+
+Known gaps
+----------
+Docling release defaults require host timeout and base-machine measurements.
+No runtime claims a hard operating-system memory ceiling or sandbox.
 """

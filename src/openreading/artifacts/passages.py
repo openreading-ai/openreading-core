@@ -3,11 +3,13 @@
 from collections.abc import Iterator
 
 from openreading.artifacts.constants import MAX_PASSAGE_CHARS
-from openreading.artifacts.models import Passage
+from openreading.artifacts.models import Passage, TextOrigin
 from openreading.types.response import NormalizedResponse
 
 
-def iter_passages(response: NormalizedResponse) -> Iterator[Passage]:
+def iter_passages(
+    response: NormalizedResponse, origins: dict[str, TextOrigin] | None = None
+) -> Iterator[Passage]:
     for page in sorted(response.document.pages or [], key=lambda p: p.page_number):
         blocks = sorted(
             enumerate(page.blocks or []),
@@ -31,6 +33,7 @@ def iter_passages(response: NormalizedResponse) -> Iterator[Passage]:
                 yield Passage(
                     evidence_id=f"p{page.page_number:04d}-b{index:04d}-s{segment:04d}",
                     page=page.page_number,
+                    text_origin=(origins or {}).get(str(page.page_number)),
                     block_index=index,
                     segment_index=segment,
                     source_kind="block_text" if kind == "block_text" else "page_text",

@@ -121,6 +121,7 @@ def search(
                 SearchHit(
                     evidence_id=passage.evidence_id,
                     page=passage.page,
+                    text_origin=passage.text_origin,
                     matched_terms=found,
                     excerpt_start=start,
                     excerpt_end=end,

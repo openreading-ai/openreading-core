@@ -48,7 +48,7 @@ def test_backends_lists_all_with_readiness(client, monkeypatch):
     r = client.get("/v1/backends")
     assert r.status_code == 200
     rows = {b["slug"]: b for b in r.json()}
-    assert len(rows) == 15
+    assert len(rows) == 16
     assert rows["pymupdf"]["ready"] is True
     assert set(rows["reducto"]) == {
         "slug",

@@ -33,7 +33,7 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
-from openreading.artifacts.intake import copy_source, source
+from openreading.artifacts.intake import copy_source
 from openreading.artifacts.limits import ArtifactError, ProfileConfig
 from openreading.artifacts.models import (
     ArtifactManifest,
@@ -64,7 +64,7 @@ class _WithoutDocstrings(ast.NodeTransformer):
         return node
 
 
-def _source_tree_hash(package: Path) -> str:
+def _source_tree_hash(package: Path, backend: str = "pymupdf") -> str:
     # Extraction calls API, routing, normalization and type code as well as the adapter.
     # Ignore documentation so editing CLI help cannot consume another retained-artifact slot.
     selected = {p for p in package.glob("*.py")}
@@ -76,7 +76,7 @@ def _source_tree_hash(package: Path) -> str:
         "router",
         "ledger",
         "batch",
-        "adapters/pymupdf",
+        f"adapters/{backend}",
     ):
         selected.update(p for p in (package / name).rglob("*") if p.suffix in {".py", ".json"})
     selected.update((package / "adapters").glob("*.py"))
@@ -93,8 +93,70 @@ def _source_tree_hash(package: Path) -> str:
     return digest.hexdigest()
 
 
-def engine_identity() -> EngineIdentity:
+def engine_identity(config: ProfileConfig | None = None) -> EngineIdentity:
     package = Path(__file__).resolve().parents[1]
+    try:
+        if config is not None and config.docling is not None:
+            from openreading.adapters.docling_local.config import (
+                INTEGRATION_REVISION,
+                MODEL_REVISION,
+            )
+
+            versions = {
+                name: importlib.metadata.version(name)
+                for name in (
+                    "docling-slim",
+                    "docling-core",
+                    "docling-parse",
+                    "pypdfium2",
+                    "onnxruntime",
+                    "transformers",
+                    "numpy",
+                    "pillow",
+                    "pandas",
+                    "scipy",
+                    "tokenizers",
+                    "huggingface-hub",
+                )
+            }
+            if config.docling.dependency_lock is None:
+                raise ValueError("A Docling profile requires its dependency lock.")
+            ocr_version = None
+            if config.docling.ocr:
+                if config.docling.tesseract_cmd is None:
+                    raise ValueError("Explicit OCR executable required.")
+                reported = subprocess.run(
+                    [str(config.docling.tesseract_cmd), "--version"],
+                    capture_output=True,
+                    timeout=5,
+                    check=True,
+                    text=True,
+                )
+                ocr_version = reported.stdout.splitlines()[0]
+                if not ocr_version.startswith("tesseract ") or len(ocr_version) > 256:
+                    raise ValueError("Invalid OCR executable identity.")
+            return EngineIdentity(
+                core_version=importlib.metadata.version("openreading"),
+                backend_id="docling_local",
+                backend_version=versions["docling-slim"],
+                extraction_settings={
+                    "integration": INTEGRATION_REVISION,
+                    "tesseract_version": ocr_version,
+                    "model_revision": MODEL_REVISION,
+                    "assets": config.docling.validate_assets(),
+                    "dependencies": versions,
+                    "ocr": config.docling.ocr,
+                    "languages": list(config.docling.languages),
+                    "threads": config.docling.threads,
+                    "tables": False,
+                    "retriever": "lexical-v1",
+                    "source_tree_sha256": _source_tree_hash(package, "docling_local"),
+                },
+            )
+    except importlib.metadata.PackageNotFoundError:
+        raise ImportError("Install the local profile dependencies.") from None
+    except (OSError, ValueError, TypeError, SyntaxError, subprocess.SubprocessError, IndexError):
+        raise ArtifactError("engine_identity_unavailable") from None
     built = package / "engine-identity.json"
     try:
         if built.exists():
@@ -121,17 +183,41 @@ class ArtifactService:
     def __init__(self, config: ProfileConfig, *, identity: EngineIdentity | None = None):
         self.config = config
         self.store = Store(config)
-        self.identity = identity or engine_identity()
+        self.config = self.store.config
+        self.identity = identity or (
+            engine_identity(config) if config.docling else engine_identity()
+        )
+        self._warm = None
+        if config.docling is not None:
+            from openreading.artifacts.supervisor import WarmWorker
+
+            command = [sys.executable]
+            command += (
+                ["--internal-artifact-worker"]
+                if getattr(sys, "frozen", False)
+                else ["-m", "openreading.artifacts.worker"]
+            )
+            assert config.limits.worker_memory_bytes is not None
+            self._warm = WarmWorker(
+                [*command, "--serve"],
+                memory_bytes=config.limits.worker_memory_bytes,
+                idle_seconds=config.limits.worker_idle_seconds,
+            )
+
+    def close(self):
+        if self._warm is not None:
+            self._warm.close()
+        self.store.close()
 
     def load_artifact(self, identifier: str) -> ArtifactManifest:
         return self.store.load(identifier)[0]
 
     def import_document(
-        self, path: str, *, cancelled: threading.Event | None = None
+        self, path: str, *, cancelled: threading.Event | None = None, progress=None
     ) -> ImportReceipt:
         started = time.monotonic()
         self._check_time(started, cancelled)
-        with source(self.config.input_root, path) as fd, self.store.import_lock():
+        with self.store.source(path) as fd, self.store.import_lock():
             staging = Path(tempfile.mkdtemp(dir=self.config.artifact_root / "staging"))
             try:
                 available = self.config.limits.store_bytes - self.store.size()
@@ -159,10 +245,25 @@ class ArtifactService:
                     raise ArtifactError("storage_limit")
                 (staging / "job.json").write_bytes(json_bytes(job))
                 os.chmod(staging / "job.json", 0o600)
-                self._worker(staging, started, cancelled)
+                if self._warm is not None:
+                    assert self.config.docling is not None
+                    self._warm.run(
+                        {
+                            **job,
+                            "docling": self.config.docling.wire(),
+                            "expected_assets": self.identity.extraction_settings["assets"],
+                        },
+                        check=lambda: self._check_time(started, cancelled),
+                        progress=progress,
+                    )
+                else:
+                    self._worker(staging, started, cancelled)
+                result = json.loads(safe_read(staging / "result.json", 8192))
                 response = json.loads(
                     safe_read(staging / "response.json", self.config.limits.extraction_bytes)
                 )
+                if self._warm is not None and not result.get("page_origins"):
+                    raise ArtifactError("parse_failed")
                 passages = safe_read(
                     staging / "passages.jsonl", self.config.limits.extraction_bytes
                 ).splitlines()
@@ -189,6 +290,7 @@ class ArtifactService:
                     page_count=response["document"]["page_count"],
                     passage_count=len(passages),
                     engine=self.identity,
+                    page_origins=result.get("page_origins", {}),
                     created_at=datetime.now(UTC).isoformat(),
                     files=files,
                     warnings=warnings,
@@ -210,7 +312,13 @@ class ArtifactService:
                 self._fsync(self.store.documents)
                 return receipt
             except OSError:
+                if self._warm is not None:
+                    self._warm.close()
                 raise ArtifactError("storage_limit") from None
+            except BaseException:
+                if self._warm is not None:
+                    self._warm.close()
+                raise
             finally:
                 if staging.exists():
                     shutil.rmtree(staging)

@@ -73,6 +73,9 @@ Per-backend reference
             limits: born-digital PDFs only (no OCR); AGPL
   tesseract [tesseract] auth: none (local)   config: system `tesseract` >=5 + langpacks   ops: none
             limits: rasterizes PDFs via pymupdf
+  docling_local [docling_local] auth: none
+            config: DOCLING_LOCAL_ASSETS, DOCLING_LOCAL_TESSERACT, DOCLING_LOCAL_TESSDATA
+            limits: explicit verified assets; OCR requires executable and language data
   docling   [docling]   auth: none   config: DOCLING_SERVE_URL   ops: none
             limits: needs a self-hosted docling-serve container
   qwen-vl   [qwen-vl]   auth: QWEN_VL_API_KEY (opt)   config: QWEN_VL_ENDPOINT, QWEN_VL_MODEL

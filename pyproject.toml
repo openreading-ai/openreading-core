@@ -55,6 +55,7 @@ pulse = ["httpx>=0.27"]                  # dev-first extract API; dual inline/is
 nuextract = ["httpx>=0.27"]              # NuMind platform: typed-template extraction + NuMarkdown
 open-ocr = ["httpx>=0.27"]               # OCR aggregator: ~20 engines behind one API, billed per page
 tesseract = ["pytesseract>=0.3.13", "pillow>=10"]  # requires system `tesseract` binary
+docling_local = ["docling-slim[convert-core,format-pdf,models-onnxruntime]==2.126.0", "transformers==4.57.6", "psutil>=7.2,<8"]
 docling = ["httpx>=0.27"]               # talks to docling-serve over HTTP
 qwen-vl = ["httpx>=0.27"]               # OpenAI-compatible endpoint (user-run vLLM/Ollama)
 google-document-ai = ["google-cloud-documentai>=2.29"]
@@ -80,6 +81,7 @@ extractbench = ["extract-bench @ git+https://github.com/run-llama/ExtractBench.g
 # `server` extra, so the install that covers everything is `.[all,server]`.
 # `scripts/check_extras_parity.py` fails if an adapter extra's package is missing from this list.
 all = [
+    "docling-slim[convert-core,format-pdf,models-onnxruntime]==2.126.0", "transformers==4.57.6", "psutil>=7.2,<8",
     "pymupdf>=1.24.3", "boto3>=1.34", "httpx>=0.27",
     "pytesseract>=0.3.13", "pillow>=10",
     "google-cloud-documentai>=2.29", "anthropic>=0.39",
