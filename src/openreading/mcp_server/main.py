@@ -8,7 +8,11 @@ The launcher supplies all configuration through arguments before accepting tool 
 from __future__ import annotations
 
 import argparse
+import os
+import signal
 import sys
+import threading
+from contextlib import nullcontext
 from pathlib import Path
 
 from openreading.artifacts.limits import ArtifactError, ProfileConfig
@@ -36,14 +40,39 @@ def arguments(parser: argparse.ArgumentParser) -> None:
 
 
 async def serve(config: ProfileConfig) -> None:
-    from mcp.server.stdio import stdio_server
+    import anyio
 
     from openreading.artifacts.service import ArtifactService
     from openreading.mcp_server.tools import create_server
+    from openreading.mcp_server.transport import cancellable_stdio
 
-    server = create_server(ArtifactService(config))
-    async with stdio_server() as (reader, writer):
-        await server.run(reader, writer, server.create_initialization_options())
+    interrupted = False
+    signals = []
+    if threading.current_thread() is threading.main_thread():
+        signals = [
+            value
+            for value in (signal.SIGINT, signal.SIGTERM)
+            if signal.getsignal(value) not in (None, signal.SIG_IGN)
+        ]
+    receiver = anyio.open_signal_receiver(*signals) if signals else nullcontext()
+    with receiver as received:
+        server = create_server(ArtifactService(config))
+        async with anyio.create_task_group() as group, cancellable_stdio() as (reader, writer):
+
+            async def stop_on_signal():
+                nonlocal interrupted
+                assert received is not None
+                async for _ in received:
+                    interrupted = True
+                    group.cancel_scope.cancel()
+                    break
+
+            if received is not None:
+                group.start_soon(stop_on_signal)
+            await server.run(reader, writer, server.create_initialization_options())
+            group.cancel_scope.cancel()
+    if interrupted:
+        raise KeyboardInterrupt
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -56,10 +85,25 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def launch(args: argparse.Namespace) -> int:
+    if os.name != "posix":
+        print(
+            "The local MCP profile requires a POSIX platform; Windows is not supported.",
+            file=sys.stderr,
+        )
+        return 2
     try:
         import anyio
 
-        anyio.run(serve, ProfileConfig(args.input_root, args.artifact_root))
+        from openreading.cli.app import _terminate_as_interrupt
+
+        if not args.input_root.is_absolute() or not args.artifact_root.is_absolute():
+            raise ArtifactError("configuration_required")
+        try:
+            config = ProfileConfig(args.input_root.resolve(), args.artifact_root.resolve())
+        except (OSError, RuntimeError):
+            raise ArtifactError("configuration_required") from None
+        with _terminate_as_interrupt():
+            anyio.run(serve, config)
         return 0
     except ImportError:
         print("Install openreading[agent,pymupdf] to run the local agent profile.", file=sys.stderr)

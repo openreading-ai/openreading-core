@@ -2,6 +2,7 @@
 
 from collections.abc import Iterator
 
+from openreading.artifacts.constants import MAX_PASSAGE_CHARS
 from openreading.artifacts.models import Passage
 from openreading.types.response import NormalizedResponse
 
@@ -22,7 +23,7 @@ def iter_passages(response: NormalizedResponse) -> Iterator[Passage]:
             assert text is not None
             start = segment = 0
             while start < len(text):
-                end = min(start + 1024, len(text))
+                end = min(start + MAX_PASSAGE_CHARS, len(text))
                 if end < len(text):
                     whitespace = [i for i in range(start, end) if text[i].isspace()]
                     if whitespace:

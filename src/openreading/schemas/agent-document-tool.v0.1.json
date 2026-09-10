@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openreading.ai/schemas/agent-document-tool/v1.0.json",
+  "$id": "https://openreading.ai/schemas/agent-document-tool/v0.1.json",
   "$defs": {
     "BBox": {
       "additionalProperties": false,
@@ -79,8 +79,8 @@
       "additionalProperties": false,
       "properties": {
         "schema_version": {
-          "const": "1",
-          "default": "1",
+          "const": "0.1",
+          "default": "0.1",
           "title": "Schema Version",
           "type": "string"
         },
@@ -98,8 +98,8 @@
       "additionalProperties": false,
       "properties": {
         "schema_version": {
-          "const": "1",
-          "default": "1",
+          "const": "0.1",
+          "default": "0.1",
           "title": "Schema Version",
           "type": "string"
         },
@@ -308,8 +308,8 @@
       "additionalProperties": false,
       "properties": {
         "schema_version": {
-          "const": "1",
-          "default": "1",
+          "const": "0.1",
+          "default": "0.1",
           "title": "Schema Version",
           "type": "string"
         },
@@ -415,8 +415,8 @@
       "additionalProperties": false,
       "properties": {
         "schema_version": {
-          "const": "1",
-          "default": "1",
+          "const": "0.1",
+          "default": "0.1",
           "title": "Schema Version",
           "type": "string"
         },
@@ -477,6 +477,7 @@
         "code": {
           "enum": [
             "configuration_required",
+            "engine_identity_unavailable",
             "access_denied",
             "input_not_found",
             "unsupported_format",

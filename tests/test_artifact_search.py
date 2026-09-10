@@ -96,3 +96,68 @@ def test_no_match_is_success_and_invalid_cursor_is_sanitized(manifest):
     assert search(manifest, records(["hello"]), "!!!", 5, None, 8192).warnings == ["no_matches"]
     with pytest.raises(ArtifactError, match="invalid_cursor"):
         search(manifest, records(["hello"]), "hello", 5, "secret", 8192)
+
+
+def test_randomized_utf8_caps_preserve_whole_records_and_terminate(manifest):
+    import random
+
+    randomizer = random.Random(20260910)
+    for _ in range(60):
+        passages = records(
+            [
+                "notice " + randomizer.choice(["😀", "é", "a", "漢"]) * randomizer.randint(1, 900)
+                for _ in range(randomizer.randint(1, 8))
+            ]
+        )
+        ids = [p.evidence_id for p in passages]
+        for operation in [
+            lambda cursor, cap, passages=passages, ids=ids: read(
+                manifest, passages, ids, cursor, cap
+            ),
+            lambda cursor, cap, passages=passages: search(
+                manifest, passages, "notice", 3, cursor, cap
+            ),
+        ]:
+            full = operation(None, 65536)
+            for cap in [
+                0,
+                1,
+                len(json_bytes(full.wire())) - 1,
+                len(json_bytes(full.wire())),
+                16384,
+            ]:
+                cursor, found = None, []
+                for _step in range(len(passages) + 1):
+                    try:
+                        result = operation(cursor, cap)
+                    except ArtifactError as error:
+                        assert error.code == "response_too_large"
+                        break
+                    assert len(json_bytes(result.wire())) <= cap
+                    items = result.passages if hasattr(result, "passages") else result.hits
+                    assert items
+                    found.extend(item.evidence_id for item in items)
+                    cursor = result.next_cursor
+                    if cursor is None:
+                        assert found == ids
+                        break
+                else:
+                    pytest.fail("Pagination did not terminate")
+
+
+def test_large_evidence_indices_match_the_vendored_schema():
+    import jsonschema
+
+    from openreading.schemas import passage_schema
+
+    passage = Passage(
+        evidence_id="p10000-b10000-s10000",
+        page=10000,
+        block_index=10000,
+        segment_index=10000,
+        source_kind="block_text",
+        text_start=0,
+        text_end=1,
+        text="x",
+    )
+    jsonschema.validate(passage.wire(), passage_schema())

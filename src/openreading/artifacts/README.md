@@ -42,6 +42,11 @@ Every load checks hashes and regenerates passages from the normalized response, 
 The store permits one import at a time and refuses new imports when its quota is exhausted.
 The fixed limits live in `openreading.artifacts.limits`, including the source, extraction, storage, deadline, and payload caps.
 Cancellation terminates the parser process before staging cleanup and lock release complete.
+Stop all clients using this store before manual cleanup; no MCP tool deletes retained evidence.
+Under your configured `--artifact-root`, each document lives at `documents/INPUT_GRANT_SHA256/ARTIFACT_ID/`.
+Delete that complete document directory to repair a corrupt artifact, then import the source again.
+Delete the artifact-root directory to remove all retained documents, including artifacts from older grants.
+Re-import deliberately refuses corruption until cleanup, so it cannot silently replace evidence a caller already cited.
 Hashes detect corruption but do not authenticate files against someone who can rewrite the entire store.
 
 Retrieved text can enter the calling agent's cloud context, even though extraction occurs on your machine.

@@ -26,10 +26,12 @@ from openreading.artifacts.models import ArtifactManifest, Passage, artifact_id
 from openreading.artifacts.passages import iter_passages
 from openreading.types.response import NormalizedResponse
 
+__all__ = ["Store", "safe_read"]
+
 
 def safe_read(path: Path, cap: int) -> bytes:
-    with directory(path.parent):
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with directory(path.parent) as parent_fd:
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent_fd)
         with os.fdopen(fd, "rb") as stream:
             if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
                 raise ValueError("Not a regular file")
@@ -97,7 +99,7 @@ class Store:
             raw = json.loads(safe_read(root / "manifest.json", 65536))
             if not isinstance(raw, dict):
                 raise ValueError("Manifest is not an object")
-            if raw.get("format") != "local-document.v1":
+            if raw.get("format") != "local-document.v0.1":
                 raise ArtifactError("artifact_version_unsupported")
             manifest = ArtifactManifest.model_validate(raw)
             if (

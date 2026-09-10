@@ -2,12 +2,15 @@
 
 The SDK's default validation includes offending input in error messages. This handler
 validates first and raises a fixed protocol error, preserving confidential path arguments.
+Direct request_handlers registration intentionally couples this module to MCP SDK 1.x.
+The agent extra pins that major version, and real stdio tests guard dispatch and redaction.
 Blocking import cancellation waits for child termination before releasing request ownership.
 """
 
 from __future__ import annotations
 
 import asyncio
+import importlib.metadata
 import threading
 from contextlib import suppress
 from functools import partial
@@ -20,12 +23,18 @@ from mcp import types
 from mcp.server import Server
 from mcp.shared.exceptions import McpError
 
+from openreading.artifacts.constants import (
+    MAX_CURSOR_CHARS,
+    MAX_QUERY_CHARS,
+    MAX_READ_PASSAGES,
+    MAX_SEARCH_HITS,
+)
 from openreading.artifacts.limits import ArtifactError
 from openreading.artifacts.models import json_bytes
 from openreading.artifacts.service import ArtifactService
 
 ARTIFACT = {"type": "string", "pattern": "^or1_[0-9a-f]{64}$"}
-CURSOR = {"type": ["string", "null"], "maxLength": 512}
+CURSOR = {"type": ["string", "null"], "maxLength": MAX_CURSOR_CHARS}
 INPUTS = {
     "openreading_import": {
         "type": "object",
@@ -39,8 +48,8 @@ INPUTS = {
         "required": ["artifact_id", "query"],
         "properties": {
             "artifact_id": ARTIFACT,
-            "query": {"type": "string", "maxLength": 256},
-            "limit": {"type": "integer", "minimum": 1, "maximum": 10, "default": 5},
+            "query": {"type": "string", "maxLength": MAX_QUERY_CHARS},
+            "limit": {"type": "integer", "minimum": 1, "maximum": MAX_SEARCH_HITS, "default": 5},
             "cursor": CURSOR,
         },
     },
@@ -53,7 +62,7 @@ INPUTS = {
             "evidence_ids": {
                 "type": "array",
                 "minItems": 1,
-                "maxItems": 8,
+                "maxItems": MAX_READ_PASSAGES,
                 "uniqueItems": True,
                 "items": {
                     "type": "string",
@@ -90,7 +99,9 @@ async def _import(service: ArtifactService, path: str):
 
 
 def create_server(service: ArtifactService) -> Server:
-    server = Server("openreading", version="0.3.0", instructions=INSTRUCTIONS)
+    server = Server(
+        "openreading", version=importlib.metadata.version("openreading"), instructions=INSTRUCTIONS
+    )
 
     @server.list_tools()
     async def list_tools() -> list[types.Tool]:

@@ -29,6 +29,9 @@ SETTINGS = {
 }
 
 
+__all__ = ["SETTINGS", "main"]
+
+
 def extract(job: dict) -> None:
     from openreading import run
     from openreading.adapters.pymupdf.intake import preflight_pdf

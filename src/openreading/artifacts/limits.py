@@ -13,6 +13,7 @@ from pathlib import Path
 from openreading.artifacts.models import ErrorCode, ErrorEnvelope, ToolError
 
 MESSAGES: dict[ErrorCode, str] = {
+    "engine_identity_unavailable": "Installed engine identity is missing or invalid. Reinstall the package or verified runtime.",
     "configuration_required": "Configure separate absolute input and artifact directories.",
     "access_denied": "This path is outside the configured grant or is not a regular file.",
     "input_not_found": "The requested input file does not exist.",
@@ -24,7 +25,7 @@ MESSAGES: dict[ErrorCode, str] = {
     "busy": "Another import is using this artifact store. Retry after it finishes.",
     "timeout": "The import exceeded its time limit.",
     "cancelled": "The import was cancelled.",
-    "storage_limit": "The artifact store has insufficient space. Remove retained documents before retrying.",
+    "storage_limit": "The artifact store is full. Stop its clients and manually remove retained directories under --artifact-root, as the artifact guide describes.",
     "parse_failed": "The local parser could not complete this document.",
     "artifact_not_found": "This artifact is unavailable under the current input grant.",
     "artifact_corrupt": "The retained artifact failed integrity validation. Import the source again after removing it.",
@@ -33,6 +34,9 @@ MESSAGES: dict[ErrorCode, str] = {
     "invalid_cursor": "The continuation cursor is invalid for this request.",
     "response_too_large": "The result cannot fit within this tool's payload limit.",
 }
+
+
+__all__ = ["ArtifactError", "ProfileConfig", "ProfileLimits"]
 
 
 class ArtifactError(Exception):

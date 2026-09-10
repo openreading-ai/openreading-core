@@ -586,6 +586,16 @@ entry naming it, so the warning reaches you before the removal does.
   `false` in a Python `run()` call or an HTTP request body. Every adapter honors the setting, and
   no CLI flag exposes it today.
 
+### Retained local evidence contracts
+
+| Schema | Owner | Result |
+| --- | --- | --- |
+| `local-document.v0.1.json` | `openreading.artifacts.models` | Source hash, engine identity, and retained file inventory. |
+| `passage.v0.1.json` | `openreading.artifacts.passages` | Exact source spans with physical page provenance. |
+| `agent-document-tool.v0.1.json` | `openreading.mcp_server.tools` | Bounded import, search, read, and error payloads. |
+
+These families wrap retained evidence without changing the normalized extraction response.
+
 ## Not built yet
 
 - `openreading.SCHEMA_VERSION` prints `0.1`, a number that matches no current family, because the
@@ -621,13 +631,3 @@ full table of what to update for each kind of change is under *Where a change ge
 [`AGENTS.md`](../../../AGENTS.md).
 
 <sub>[Docs home](../README.md) · [← Evals](../evals/README.md) · [Backend adapters →](../adapters/README.md)</sub>
-
-### Retained local evidence contracts
-
-| Schema | Owner | Result |
-| --- | --- | --- |
-| `local-document.v1.0.json` | `openreading.artifacts.models` | Source hash, engine identity, and retained file inventory. |
-| `passage.v1.0.json` | `openreading.artifacts.passages` | Exact source spans with physical page provenance. |
-| `agent-document-tool.v1.0.json` | `openreading.mcp_server.tools` | Bounded import, search, read, and error payloads. |
-
-These families wrap retained evidence without changing the normalized extraction response.

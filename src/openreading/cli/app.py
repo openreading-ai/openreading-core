@@ -17,7 +17,7 @@ package docstring; this module holds the `cmd_*` handlers, `build_parser`, and `
 
 Environment this module reads itself
 ------------------------------------
-- `.env` / `--env-file PATH`: `main` calls `credentials.load_dotenv(args.env_file)` before any
+- `.env` / `--env-file PATH`: `main` calls `credentials.load_dotenv(args.env_file)` before any non-MCP
   handler runs. Default is `./.env` when present; a missing file is silently nothing. It never
   overrides an already-set process variable (`openreading.credentials.load_dotenv`: explicit
   process env always wins), so an exported value always beats the file -- the failure avoided is

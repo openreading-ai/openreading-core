@@ -2,13 +2,21 @@
 
 The service copies an opened source into private staging before launching a disposable
 native parser process. Cancellation and the deadline terminate the entire child process
- group before staging is removed. A successful receipt follows file and directory fsync.
-Source checkouts record their Git revision and a hash of current Python/schema files. Frozen distributions provide engine identity
-through the packager's verified metadata, never a model-supplied tool argument.
+group before staging is removed. A successful receipt follows file and directory fsync.
+Installed distributions record package/backend versions and a fingerprint of their extraction dependency code.
+No Git repository or native parser import participates in parent-side identity discovery.
+A core_commit is omitted unless trusted packaging metadata supplies it.
+
+Frozen launchers must verify openreading/engine-identity.json before invoking this service.
+That file contains the EngineIdentity fields, including extraction settings and optional commit.
+When sys.frozen is true, the executable must dispatch --internal-artifact-worker to
+openreading.artifacts.worker.main with the remaining arguments. This is the packager's
+versioned integration contract; ordinary Python installs use the module entry point.
 """
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib.metadata
 import json
@@ -21,6 +29,7 @@ import tempfile
 import threading
 import time
 import unicodedata
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -38,37 +47,67 @@ from openreading.artifacts.models import (
 from openreading.artifacts.store import Store, safe_read
 from openreading.artifacts.worker import SETTINGS
 
+__all__ = ["ArtifactService", "engine_identity"]
+
+
+class _WithoutDocstrings(ast.NodeTransformer):
+    def generic_visit(self, node):
+        super().generic_visit(node)
+        if (
+            isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.body
+            and isinstance(node.body[0], ast.Expr)
+            and isinstance(node.body[0].value, ast.Constant)
+            and isinstance(node.body[0].value.value, str)
+        ):
+            node.body.pop(0)
+        return node
+
 
 def _source_tree_hash(package: Path) -> str:
-    # An editable checkout may differ from HEAD; never reuse its predecessor's artifacts.
+    # Extraction calls API, routing, normalization and type code as well as the adapter.
+    # Ignore documentation so editing CLI help cannot consume another retained-artifact slot.
+    selected = {p for p in package.glob("*.py")}
+    for name in (
+        "artifacts",
+        "schemas",
+        "types",
+        "derive",
+        "router",
+        "ledger",
+        "batch",
+        "adapters/pymupdf",
+    ):
+        selected.update(p for p in (package / name).rglob("*") if p.suffix in {".py", ".json"})
+    selected.update((package / "adapters").glob("*.py"))
     digest = hashlib.sha256()
-    for path in sorted(package.rglob("*")):
-        if path.suffix in {".py", ".json"}:
-            digest.update(str(path.relative_to(package)).encode())
-            digest.update(b"\0")
-            digest.update(path.read_bytes())
+    for path in sorted(selected):
+        contents = path.read_bytes()
+        if path.suffix == ".py":
+            tree = _WithoutDocstrings().visit(ast.parse(contents))
+            contents = ast.dump(tree, include_attributes=False).encode()
+        digest.update(str(path.relative_to(package)).encode())
+        digest.update(b"\0")
+        digest.update(contents)
+        digest.update(b"\0")
     return digest.hexdigest()
 
 
 def engine_identity() -> EngineIdentity:
-    import pymupdf
-
     package = Path(__file__).resolve().parents[1]
     built = package / "engine-identity.json"
-    if built.exists():
-        return EngineIdentity.model_validate_json(built.read_bytes())
     try:
-        commit = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=package, capture_output=True, text=True, check=True
-        ).stdout.strip()
-    except (OSError, subprocess.CalledProcessError):
-        raise ArtifactError("configuration_required") from None
-    return EngineIdentity(
-        core_commit=commit,
-        core_version=importlib.metadata.version("openreading"),
-        backend_version=pymupdf.VersionBind,
-        extraction_settings={**SETTINGS, "source_tree_sha256": _source_tree_hash(package)},
-    )
+        if built.exists():
+            return EngineIdentity.model_validate_json(built.read_bytes())
+        return EngineIdentity(
+            core_version=importlib.metadata.version("openreading"),
+            backend_version=importlib.metadata.version("pymupdf"),
+            extraction_settings={**SETTINGS, "source_tree_sha256": _source_tree_hash(package)},
+        )
+    except importlib.metadata.PackageNotFoundError:
+        raise ImportError("Install the local profile dependencies.") from None
+    except (OSError, ValueError, TypeError, SyntaxError):
+        raise ArtifactError("engine_identity_unavailable") from None
 
 
 def _display_name(relative: str) -> str:
@@ -91,16 +130,23 @@ class ArtifactService:
         self, path: str, *, cancelled: threading.Event | None = None
     ) -> ImportReceipt:
         started = time.monotonic()
+        self._check_time(started, cancelled)
         with source(self.config.input_root, path) as fd, self.store.import_lock():
             staging = Path(tempfile.mkdtemp(dir=self.config.artifact_root / "staging"))
             try:
                 available = self.config.limits.store_bytes - self.store.size()
                 digest, changed = copy_source(
-                    fd, staging / "source.pdf", self.config.limits.source_bytes, available
+                    fd,
+                    staging / "source.pdf",
+                    self.config.limits.source_bytes,
+                    available,
+                    check=lambda: self._check_time(started, cancelled),
                 )
+                self._check_time(started, cancelled)
                 identifier = artifact_id(digest, self.identity)
                 if (self.store.documents / identifier).exists():
                     manifest = self.load_artifact(identifier)
+                    self._check_time(started, cancelled)
                     return self._receipt(manifest, reused=True)
                 self._check_time(started, cancelled)
                 job = {
@@ -206,7 +252,9 @@ class ArtifactService:
                     raise ArtifactError("parse_failed")
             finally:
                 if process.poll() is None:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    # The child can exit between poll and kill without changing the failure.
+                    with suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGKILL)
                     process.wait()
         try:
             result = json.loads(safe_read(staging / "result.json", 1024))

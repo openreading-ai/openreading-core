@@ -187,3 +187,57 @@ anyio.run(check)
     )
     assert result.returncode == 0
     assert result.stdout.strip() == "closed"
+
+
+def test_launch_canonicalizes_explicit_roots_and_preserves_domain_errors(
+    tmp_path, monkeypatch, capsys
+):
+    import argparse
+
+    from openreading.artifacts.limits import ArtifactError
+    from openreading.mcp_server import main as launcher
+
+    root = tmp_path.resolve() / "input"
+    root.mkdir()
+    link = root.parent / "linked"
+    link.symlink_to(root, target_is_directory=True)
+    seen = []
+
+    async def failing(config):
+        seen.append(config)
+        raise ArtifactError("engine_identity_unavailable")
+
+    monkeypatch.setattr(launcher, "serve", failing)
+    assert (
+        launcher.launch(argparse.Namespace(input_root=link, artifact_root=root.parent / "store"))
+        == 2
+    )
+    assert seen[0].input_root == root
+    assert "Installed engine identity" in capsys.readouterr().err
+
+
+def test_unsupported_platform_is_not_reported_as_missing_dependencies(monkeypatch, capsys):
+    import argparse
+    from types import SimpleNamespace
+
+    from openreading.mcp_server import main as launcher
+
+    monkeypatch.setattr(launcher, "os", SimpleNamespace(name="nt"))
+    assert launcher.launch(argparse.Namespace()) == 2
+    assert "POSIX" in capsys.readouterr().err
+
+
+def test_launch_sanitizes_root_resolution_errors(tmp_path, monkeypatch, capsys):
+    import argparse
+    from pathlib import Path
+
+    from openreading.mcp_server import main as launcher
+
+    def fail(self):
+        raise OSError("secret-root-path")
+
+    monkeypatch.setattr(Path, "resolve", fail)
+    assert launcher.launch(argparse.Namespace(input_root=tmp_path, artifact_root=tmp_path)) == 2
+    output = capsys.readouterr()
+    assert "secret-root-path" not in output.err
+    assert "Configure separate absolute" in output.err

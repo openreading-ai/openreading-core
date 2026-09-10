@@ -63,6 +63,33 @@ No acceptance criterion below is marked complete by the fixed local document pro
 External integration adoption and reductions in manual result handling need baselines before a general surface ships.
 No numerical target or measured result is claimed by this proposal.
 
+```productspec-success-metrics
+- id: SM-1
+  metric: external_agent_integrations
+  target: tbd
+  target_status: provisional
+  target_owner: Akshay
+  window: 90 days after the agent surface ships
+- id: SM-2
+  metric: runs_acted_on_without_human_review
+  target: tbd
+  target_status: provisional
+  target_owner: Akshay
+  window: 60 days after the agent surface ships
+- id: SM-3
+  metric: agent_extra_install_share
+  target: tbd
+  target_status: provisional
+  target_owner: Akshay
+  window: 90 days after the first published release
+```
+
+## Open Product Questions
+
+- Does a general agent surface drive adoption before distribution, or should demonstrated demand order that work?
+- What pre-launch evidence validates demand: an external integration, a real corpus run, or an explicit decision to build without either?
+- Which success metric determines the outcome, and what baseline and target will its owner commit before launch?
+
 ## Risks
 
 A general tool can spend provider credentials and therefore requires explicit authorization and bounded execution.

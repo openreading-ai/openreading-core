@@ -10,11 +10,13 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path
 
 from openreading.artifacts.limits import ArtifactError
+
+__all__ = ["directory"]
 
 
 def components(relative: str) -> list[str]:
@@ -70,7 +72,9 @@ def source(root: Path, relative: str) -> Iterator[int]:
             os.close(fd)
 
 
-def copy_source(fd: int, destination: Path, cap: int, available: int) -> tuple[str, bool]:
+def copy_source(
+    fd: int, destination: Path, cap: int, available: int, *, check: Callable[[], None] | None = None
+) -> tuple[str, bool]:
     before = os.fstat(fd)
     if before.st_size > cap:
         raise ArtifactError("input_too_large")
@@ -78,7 +82,12 @@ def copy_source(fd: int, destination: Path, cap: int, available: int) -> tuple[s
     length = 0
     with destination.open("xb") as output:
         os.chmod(destination, 0o600)
-        while data := os.read(fd, min(65536, cap - length + 1)):
+        while True:
+            if check is not None:
+                check()
+            data = os.read(fd, min(65536, cap - length + 1))
+            if not data:
+                break
             length += len(data)
             if length > cap:
                 raise ArtifactError("input_too_large")

@@ -1,22 +1,30 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openreading.ai/schemas/local-document/v1.0.json",
+  "$id": "https://openreading.ai/schemas/local-document/v0.1.json",
   "$defs": {
     "EngineIdentity": {
       "additionalProperties": false,
       "properties": {
         "core_commit": {
-          "pattern": "^[0-9a-f]{40}$",
-          "title": "Core Commit",
-          "type": "string"
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Core Commit"
         },
         "core_version": {
           "title": "Core Version",
           "type": "string"
         },
         "backend_id": {
-          "const": "pymupdf",
           "default": "pymupdf",
+          "minLength": 1,
           "title": "Backend Id",
           "type": "string"
         },
@@ -31,7 +39,6 @@
         }
       },
       "required": [
-        "core_commit",
         "core_version",
         "backend_version",
         "extraction_settings"
@@ -64,8 +71,8 @@
   "additionalProperties": false,
   "properties": {
     "format": {
-      "const": "local-document.v1",
-      "default": "local-document.v1",
+      "const": "local-document.v0.1",
+      "default": "local-document.v0.1",
       "title": "Format",
       "type": "string"
     },
@@ -93,7 +100,6 @@
       "type": "string"
     },
     "page_count": {
-      "maximum": 100,
       "minimum": 1,
       "title": "Page Count",
       "type": "integer"
@@ -107,8 +113,8 @@
       "$ref": "#/$defs/EngineIdentity"
     },
     "evidence_format": {
-      "const": "passages.v1",
-      "default": "passages.v1",
+      "const": "passages.v0.1",
+      "default": "passages.v0.1",
       "title": "Evidence Format",
       "type": "string"
     },

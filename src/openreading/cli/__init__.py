@@ -1250,6 +1250,8 @@ Imports allow 45 seconds and retain at most 512 MiB across the artifact store.
 Import, search, and read allow 4096, 8192, and 16384 UTF-8 bytes.
 These byte limits do not prove token savings or impose a native memory limit.
 Exit 0 means transport closure, 2 invalid setup, and 130 interruption.
+This POSIX profile resolves root symlinks before establishing its input grant.
+Both SIGINT and SIGTERM exit 130 after cancelling imports and reaping workers.
 The openreading.artifacts package owns storage, provenance, and error codes.
 
 Exit codes
@@ -1306,7 +1308,8 @@ Exit codes
      variable is set, so an interrupted `--backend` batch exits 6 and names no
      id, and there is nothing for `resume` to replay. Arm the ledger for the
      strategy runs you mean to resume.
-143  terminated by SIGTERM with no ledger armed: nothing was resumable, so one
+143  terminated by SIGTERM with no ledger armed (MCP instead exits 130).
+     Nothing was resumable, so one
      `[openreading]` line says so and names `OPENREADING_LEDGER`. Unarmed
      Ctrl-C is unchanged -- it stays an ordinary `KeyboardInterrupt`
      (traceback, 130), byte-for-byte the pre-ledger behaviour.

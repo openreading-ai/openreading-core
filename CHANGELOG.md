@@ -1,12 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- Add a fixed local document MCP profile with retained source bytes, physical page citations,
-  bounded lexical search, exact passage reads, and cancellable PyMuPDF imports.
-- Add separate v1 schemas for retained manifests, passages, and agent tool payloads.
-
-
 All notable changes to OpenReading are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -24,6 +17,10 @@ All notable changes to OpenReading are documented here. The format follows
 > carries and says which one to pin.
 
 ## [Unreleased]
+
+- Add a fixed local document MCP profile with retained source bytes, physical page citations,
+  bounded lexical search, exact passage reads, and cancellable PyMuPDF imports.
+- Add separate v0.1 schemas for retained manifests, passages, and agent tool payloads.
 
 **This repository is `openreading-core`.** The open-core engine (library, CLI, thin JSON server,
 tests) lives here from commit `bd5ee43`, dated 2026-08-28. Its history before that commit is

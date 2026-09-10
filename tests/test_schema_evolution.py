@@ -150,9 +150,9 @@ _UNRELEASED = {
     # T1 (not yet byte-frozen):
     "step.v0.1.json",
     "journal.v0.1.json",
-    "local-document.v1.0.json",
-    "passage.v1.0.json",
-    "agent-document-tool.v1.0.json",
+    "local-document.v0.1.json",
+    "passage.v0.1.json",
+    "agent-document-tool.v0.1.json",
     # Ledger T4a (AC-8) — additive descriptor bump carrying the optional `protocol_version`
     # integer (not yet byte-frozen):
 }

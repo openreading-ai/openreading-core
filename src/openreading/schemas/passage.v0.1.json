@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openreading.ai/schemas/passage/v1.0.json",
+  "$id": "https://openreading.ai/schemas/passage/v0.1.json",
   "$defs": {
     "BBox": {
       "additionalProperties": false,

@@ -1,6 +1,6 @@
 """Strict constructors for retained documents and bounded agent tool payloads.
 
-The three vendored v1 schemas own these contracts. Artifact identity excludes names
+The three vendored v0.1 schemas own these contracts. Artifact identity excludes names
 and creation time, so identical bytes and engine settings reuse evidence identifiers.
 Character offsets count Unicode code points, relative to the original normalized block.
 Geometry identifies the enclosing block, never an inferred character highlight.
@@ -14,6 +14,12 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from openreading.artifacts.constants import (
+    MAX_CURSOR_CHARS,
+    MAX_EXCERPT_CHARS,
+    MAX_PASSAGE_CHARS,
+    MAX_QUERY_CHARS,
+)
 from openreading.types.geometry import BBox
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -22,6 +28,7 @@ EvidenceId = Annotated[str, Field(pattern=r"^p[0-9]{4,}-b[0-9]{4,}-s[0-9]{4,}$")
 WarningCode = Literal["source_changed", "parser_warnings_present", "no_matches"]
 ErrorCode = Literal[
     "configuration_required",
+    "engine_identity_unavailable",
     "access_denied",
     "input_not_found",
     "unsupported_format",
@@ -60,9 +67,9 @@ class WireModel(BaseModel):
 
 
 class EngineIdentity(WireModel):
-    core_commit: Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
+    core_commit: Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")] | None = None
     core_version: str
-    backend_id: Literal["pymupdf"] = "pymupdf"
+    backend_id: str = Field(default="pymupdf", min_length=1)
     backend_version: str
     extraction_settings: dict[str, object]
 
@@ -73,16 +80,16 @@ class FileRecord(WireModel):
 
 
 class ArtifactManifest(WireModel):
-    format: Literal["local-document.v1"] = "local-document.v1"
+    format: Literal["local-document.v0.1"] = "local-document.v0.1"
     artifact_id: ArtifactId
     document_sha256: Digest
     display_name: str
     source_relative_path: str
     input_grant_sha256: Digest
-    page_count: int = Field(ge=1, le=100)
+    page_count: int = Field(ge=1)
     passage_count: int = Field(ge=1)
     engine: EngineIdentity
-    evidence_format: Literal["passages.v1"] = "passages.v1"
+    evidence_format: Literal["passages.v0.1"] = "passages.v0.1"
     created_at: str
     files: dict[str, FileRecord]
     warnings: list[WarningCode] = Field(default_factory=list)
@@ -98,10 +105,10 @@ class ArtifactManifest(WireModel):
 
 def artifact_id(document_sha256: str, engine: EngineIdentity) -> str:
     identity = {
-        "format": "local-document.v1",
+        "format": "local-document.v0.1",
         "document_sha256": document_sha256,
         "engine": engine.wire(),
-        "evidence_format": "passages.v1",
+        "evidence_format": "passages.v0.1",
     }
     return "or1_" + hashlib.sha256(json_bytes(identity)).hexdigest()
 
@@ -114,7 +121,7 @@ class Passage(WireModel):
     source_kind: Literal["block_text", "page_text"]
     text_start: int = Field(ge=0)
     text_end: int = Field(ge=1)
-    text: str = Field(min_length=1, max_length=1024)
+    text: str = Field(min_length=1, max_length=MAX_PASSAGE_CHARS)
     bbox: BBox | None = None
     source_block_id: str | None = None
 
@@ -133,7 +140,7 @@ class Passage(WireModel):
 
 
 class ImportReceipt(WireModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["0.1"] = "0.1"
     artifact_id: ArtifactId
     display_name: str
     document_sha256: Digest
@@ -150,24 +157,24 @@ class SearchHit(WireModel):
     matched_terms: list[str]
     excerpt_start: int = Field(ge=0)
     excerpt_end: int = Field(ge=1)
-    excerpt: str = Field(min_length=1, max_length=240)
+    excerpt: str = Field(min_length=1, max_length=MAX_EXCERPT_CHARS)
 
 
 class SearchResult(WireModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["0.1"] = "0.1"
     artifact_id: ArtifactId
-    query: str = Field(max_length=256)
+    query: str = Field(max_length=MAX_QUERY_CHARS)
     hits: list[SearchHit]
-    next_cursor: str | None = Field(default=None, max_length=512)
+    next_cursor: str | None = Field(default=None, max_length=MAX_CURSOR_CHARS)
     warnings: list[WarningCode] = Field(default_factory=list)
 
 
 class ReadResult(WireModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["0.1"] = "0.1"
     artifact_id: ArtifactId
     display_name: str
     passages: list[Passage]
-    next_cursor: str | None = Field(default=None, max_length=512)
+    next_cursor: str | None = Field(default=None, max_length=MAX_CURSOR_CHARS)
     warnings: list[WarningCode] = Field(default_factory=list)
 
 
@@ -178,5 +185,5 @@ class ToolError(WireModel):
 
 
 class ErrorEnvelope(WireModel):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["0.1"] = "0.1"
     error: ToolError

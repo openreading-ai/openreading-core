@@ -15,6 +15,13 @@ import re
 from collections.abc import Callable
 from typing import TypeVar
 
+from openreading.artifacts.constants import (
+    MAX_CURSOR_CHARS,
+    MAX_EXCERPT_CHARS,
+    MAX_QUERY_CHARS,
+    MAX_READ_PASSAGES,
+    MAX_SEARCH_HITS,
+)
 from openreading.artifacts.limits import ArtifactError
 from openreading.artifacts.models import (
     ArtifactManifest,
@@ -46,7 +53,7 @@ def _offset(cursor: str | None, binding: str, length: int) -> int:
     if cursor is None:
         return 0
     try:
-        if len(cursor) > 512 or not re.fullmatch(r"[A-Za-z0-9_-]+", cursor):
+        if len(cursor) > MAX_CURSOR_CHARS or not re.fullmatch(r"[A-Za-z0-9_-]+", cursor):
             raise ValueError("Invalid encoding")
         value = json.loads(
             base64.b64decode(cursor + "=" * (-len(cursor) % 4), altchars=b"-_", validate=True)
@@ -92,9 +99,9 @@ def search(
 ) -> SearchResult:
     if (
         not isinstance(query, str)
-        or len(query) > 256
+        or len(query) > MAX_QUERY_CHARS
         or type(limit) is not int
-        or not 1 <= limit <= 10
+        or not 1 <= limit <= MAX_SEARCH_HITS
     ):
         raise ValueError("Query or limit is outside the tool contract")
     terms = list(dict.fromkeys(m.group().casefold() for m in TOKEN.finditer(query)))
@@ -106,7 +113,7 @@ def search(
             continue
         first = min(offset for token, offset in tokens if token in found)
         start = max(0, first - 60)
-        end = min(len(passage.text), start + 240)
+        end = min(len(passage.text), start + MAX_EXCERPT_CHARS)
         matches.append(
             (
                 len(found),
@@ -150,7 +157,9 @@ def read(
     cursor: str | None,
     cap: int,
 ) -> ReadResult:
-    if not 1 <= len(evidence_ids) <= 8 or len(set(evidence_ids)) != len(evidence_ids):
+    if not 1 <= len(evidence_ids) <= MAX_READ_PASSAGES or len(set(evidence_ids)) != len(
+        evidence_ids
+    ):
         raise ValueError("Read requires one to eight unique evidence identifiers")
     by_id = {p.evidence_id: p for p in passages}
     if any(identifier not in by_id for identifier in evidence_ids):

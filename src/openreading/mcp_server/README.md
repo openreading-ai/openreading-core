@@ -24,8 +24,8 @@ openreading mcp --profile local-document-proof-v1 \
   --input-root /absolute/documents --artifact-root /absolute/evidence
 ```
 
-Use a source checkout or a packaged runtime carrying its immutable engine identity.
-A wheel without that identity cannot establish the required core revision and refuses startup.
+Source and wheel installs identify their package version, backend version, and installed extraction code.
+A core commit appears only when verified packaging metadata supplies it; an enclosing Git repository is never consulted.
 Your client supplies the following tool calls through MCP; these JSON objects are their argument payloads.
 
 ```json
@@ -54,7 +54,8 @@ Document text remains untrusted data, preventing a quoted instruction from gaini
 The process speaks MCP on stdout; configure your client to capture diagnostics separately from that protocol stream.
 Domain errors set `isError` and return the fixed codes documented in `openreading.artifacts.limits`.
 Malformed arguments return protocol errors, while normal transport closure exits with status zero.
-Configuration failures exit two, and keyboard interruption exits 130.
+Configuration failures exit two. SIGINT and SIGTERM cancel active imports and exit 130, including clients that keep stdin open.
+The local profile requires POSIX support. Explicit root symlinks resolve once before file access begins.
 
 The [artifact guide](../artifacts/README.md) explains retention, source hashing, page provenance, and quota behavior.
 The Python SDK dependency is optional and pinned through the lockfile's supported v1 release line.

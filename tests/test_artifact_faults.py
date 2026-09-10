@@ -162,7 +162,7 @@ def test_malformed_manifest_and_retained_symlink_are_refused(service):
     receipt = service.import_document("test.pdf")
     manifest = next(service.config.artifact_root.rglob("manifest.json"))
     original = manifest.read_bytes()
-    for raw in [[], {"format": "future"}, {"format": "local-document.v1"}]:
+    for raw in [[], {"format": "future"}, {"format": "local-document.v0.1"}]:
         manifest.write_text(json.dumps(raw))
         with pytest.raises(ArtifactError, match="artifact_corrupt|artifact_version_unsupported"):
             service.load_artifact(receipt.artifact_id)
@@ -172,3 +172,73 @@ def test_malformed_manifest_and_retained_symlink_are_refused(service):
     retained.symlink_to(service.config.input_root / "test.pdf")
     with pytest.raises(ArtifactError, match="artifact_corrupt"):
         service.load_artifact(receipt.artifact_id)
+
+
+def test_cancelled_reimport_cannot_return_a_successful_cached_receipt(service):
+    pdf(service.config.input_root / "test.pdf")
+    service.import_document("test.pdf")
+    cancelled = threading.Event()
+    cancelled.set()
+    with pytest.raises(ArtifactError, match="cancelled"):
+        service.import_document("test.pdf", cancelled=cancelled)
+
+
+def test_retained_read_uses_the_validated_parent_descriptor(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+
+    from openreading.artifacts import store
+
+    root = tmp_path.resolve()
+    parent = root / "retained"
+    parent.mkdir()
+    (parent / "text").write_bytes(b"expected")
+    moved = root / "held"
+    original = store.directory
+
+    @contextmanager
+    def replaced(path):
+        with original(path) as fd:
+            parent.rename(moved)
+            parent.mkdir()
+            (parent / "text").write_bytes(b"replacement")
+            yield fd
+
+    monkeypatch.setattr(store, "directory", replaced)
+    assert store.safe_read(parent / "text", 100) == b"expected"
+
+
+def test_worker_exit_race_preserves_cancellation(service, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from openreading.artifacts import service as module
+
+    class ExitedChild:
+        pid = 123
+        waited = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def poll(self):
+            return None
+
+        def wait(self):
+            self.waited = True
+
+    child = ExitedChild()
+    monkeypatch.setattr(
+        module, "subprocess", SimpleNamespace(Popen=lambda *a, **kw: child, DEVNULL=-3)
+    )
+
+    def disappeared(*args):
+        raise ProcessLookupError
+
+    monkeypatch.setattr(module.os, "killpg", disappeared)
+    cancelled = threading.Event()
+    cancelled.set()
+    with pytest.raises(ArtifactError, match="cancelled"):
+        service._worker(tmp_path, 0, cancelled)
+    assert child.waited
