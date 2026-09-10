@@ -3,6 +3,7 @@
 The fixed layout revision prevents an ambient cache or changed weight file from
 silently becoming a different extraction engine. OCR requires explicit executable
 and language data paths, independent of PATH and TESSDATA_PREFIX.
+The selected tessdata directory must contain osd.traineddata for orientation detection.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ MODEL_FILES = {
     "preprocessor_config.json": "54d086cf0d7d371f7fac36e5d3a0dae31e211298affc816106cc376506799d58",
     "model.onnx": "59c81a3a2923042d85034ffc487f8f47e4854117e879aef89b2b9f728fb4922a",
 }
-INTEGRATION_REVISION = "docling-onnx-cpu-pil-v2"
+INTEGRATION_REVISION = "docling-onnx-cpu-pil-v3"
 
 
 def file_digest(path: Path) -> str:
@@ -87,11 +88,12 @@ class LocalDoclingConfig:
                     or self.tessdata_path is None
                     or not self.tessdata_path.is_absolute()
                     or not self.languages
+                    or "auto" in self.languages
                     or any(not re.fullmatch(r"[A-Za-z0-9_]+", lang) for lang in self.languages)
                 ):
                     raise ValueError
                 hashes["tesseract"] = file_digest(self.tesseract_cmd)
-                for lang in self.languages:
+                for lang in sorted({*self.languages, "osd"}):
                     hashes[f"{lang}.traineddata"] = file_digest(
                         self.tessdata_path / f"{lang}.traineddata"
                     )

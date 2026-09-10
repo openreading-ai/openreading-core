@@ -65,7 +65,10 @@ def create_converter(config: LocalDoclingConfig):
                 RTDetrImageProcessorPil,
             )
 
-            return RTDetrImageProcessorPil.from_pretrained(str(model_folder), local_files_only=True)
+            # A directory lookup can prefer an unhashed processor_config.json sibling.
+            return RTDetrImageProcessorPil.from_pretrained(
+                str(model_folder / "preprocessor_config.json"), local_files_only=True
+            )
 
         def _resolve_providers(self):
             return ["CPUExecutionProvider"]
@@ -85,6 +88,43 @@ def create_converter(config: LocalDoclingConfig):
             self._label_map = self._build_label_map()
             self._unmapped_label_ids = set()
 
+    class LocalTesseract(TesseractOcrCliModel):
+        def _set_languages_and_prefix(self):
+            # Setup selects explicit language files; ambient language discovery is irrelevant.
+            self._tesseract_languages = list(config.languages)
+            self._script_prefix = ""
+
+        def _perform_osd(self, filename):
+            import io
+            import subprocess
+
+            import pandas as pd
+
+            # Upstream orientation detection omits the configured tessdata directory.
+            result = subprocess.run(
+                [
+                    self._safe_tesseract_cmd,
+                    "--tessdata-dir",
+                    str(config.tessdata_path),
+                    "--psm",
+                    "0",
+                    "-l",
+                    "osd",
+                    self._sanitize_filename(filename),
+                    "stdout",
+                ],
+                capture_output=True,
+                stdin=subprocess.DEVNULL,
+                check=True,
+                shell=False,
+            )
+            return pd.read_csv(
+                io.StringIO(result.stdout.decode("utf-8")),
+                sep=":",
+                header=None,
+                names=["key", "value"],
+            )
+
     class DisabledStage:
         def __call__(self, conv_res, pages):
             return pages
@@ -99,7 +139,7 @@ def create_converter(config: LocalDoclingConfig):
             )
             if config.ocr:
                 assert isinstance(opts.ocr_options, TesseractCliOcrOptions)
-                self.ocr_model = TesseractOcrCliModel(
+                self.ocr_model = LocalTesseract(
                     enabled=True,
                     artifacts_path=self.artifacts_path,
                     options=opts.ocr_options,

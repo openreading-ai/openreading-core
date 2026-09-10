@@ -85,6 +85,7 @@ def test_asset_validation_hashes_ocr_data_and_lock_and_refuses_mutation(tmp_path
         config, "MODEL_FILES", {"config.json": hashlib.sha256(b"model").hexdigest()}
     )
     (tmp_path / "eng.traineddata").write_bytes(b"language")
+    (tmp_path / "osd.traineddata").write_bytes(b"orientation")
     (tmp_path / "tesseract").write_bytes(b"executable")
     (tmp_path / "uv.lock").write_bytes(b"lock")
     selected = config.LocalDoclingConfig(
@@ -95,7 +96,13 @@ def test_asset_validation_hashes_ocr_data_and_lock_and_refuses_mutation(tmp_path
         dependency_lock=tmp_path / "uv.lock",
     )
     hashes = selected.validate_assets()
-    assert set(hashes) == {"config.json", "tesseract", "eng.traineddata", "dependency_lock"}
+    assert set(hashes) == {
+        "config.json",
+        "tesseract",
+        "eng.traineddata",
+        "osd.traineddata",
+        "dependency_lock",
+    }
     for changes in [
         {"languages": ("../secret",)},
         {"languages": ()},
@@ -171,7 +178,54 @@ def test_selected_preprocessor_uses_numpy_without_torch_or_auto_dispatch(tmp_pat
             }
         )
     )
+    (tmp_path / "processor_config.json").write_text(
+        json.dumps({"image_processor": {"size": {"height": 128, "width": 128}}})
+    )
     processor = engines[0]._load_preprocessor(tmp_path)
     output = processor(images=[Image.new("RGB", (40, 30), "white")], return_tensors="np")
     assert output["pixel_values"].shape == (1, 3, 640, 640)
     assert processor.__class__.__name__ == "RTDetrImageProcessorPil"
+
+
+def test_ocr_orientation_uses_only_selected_tessdata(tmp_path, monkeypatch):
+    import subprocess
+    from types import SimpleNamespace
+
+    from docling.datamodel.base_models import InputFormat
+    from docling.models.inference_engines.object_detection.onnxruntime_engine import (
+        OnnxRuntimeObjectDetectionEngine,
+    )
+    from docling.models.stages.layout.layout_object_detection_model import (
+        LayoutObjectDetectionModel,
+    )
+    from docling.models.stages.ocr.tesseract_ocr_cli_model import TesseractOcrCliModel
+
+    from openreading.adapters.docling_local import pipeline
+
+    monkeypatch.setattr(pipeline.LocalDoclingConfig, "validate_assets", lambda self: {})
+    monkeypatch.setattr(OnnxRuntimeObjectDetectionEngine, "initialize", lambda self: None)
+    monkeypatch.setattr(LayoutObjectDetectionModel, "_build_label_map", lambda self: {})
+    monkeypatch.setattr(
+        TesseractOcrCliModel, "_get_name_and_version", lambda self: ("tesseract", "5.5.1")
+    )
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        assert command[command.index("--tessdata-dir") + 1] == str(tmp_path / "selected")
+        return SimpleNamespace(stdout=b"Orientation in degrees: 0\nScript: Latin\n")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    selected = pipeline.LocalDoclingConfig(
+        tmp_path,
+        ocr=True,
+        tesseract_cmd=tmp_path / "tesseract",
+        tessdata_path=tmp_path / "selected",
+    )
+    converter = pipeline.create_converter(selected)
+    converter.initialize_pipeline(InputFormat.PDF)
+    active = next(iter(converter.initialized_pipelines.values()))
+    frame = active.ocr_model._perform_osd(str(tmp_path / "image.png"))
+    assert str(frame.loc[frame.key == "Orientation in degrees", "value"].iloc[0]).strip() == "0"
+    assert len(commands) == 1
+    assert commands[0][commands[0].index("-l") + 1] == "osd"
