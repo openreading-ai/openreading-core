@@ -3406,3 +3406,22 @@ def test_schema_400_names_the_rule_and_never_echoes_document_content():
     assert (
         "7 is not of type 'string' at $.document.bytes_base64" in scalar.json()["error"]["message"]
     )
+
+
+@pytest.mark.parametrize("endpoint", ["/v1/parse", "/v1/route", "/v1/jobs"])
+@pytest.mark.parametrize(
+    "password", [123456, 123.456, True, ["short-secret"], {"value": "short-secret"}]
+)
+def test_schema_400_never_echoes_invalid_password_values(endpoint, password):
+    client = TestClient(create_app())
+    response = client.post(
+        endpoint,
+        json={
+            "backend": {"id": "pymupdf"},
+            "document": {"bytes_base64": "QUJD", "password": password},
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["message"] == (
+        "$.document.password fails the request schema's 'type' rule"
+    )

@@ -795,8 +795,9 @@ def _validation_message(e: Exception) -> str:
     vendored schema, so the commonest client mistake would otherwise answer with a 54 KB body
     whose first line is the only part anyone reads.
 
-    A message that prints the failing value is kept only for a short scalar, where the echoed
-    value is the useful part. A `oneOf` failure on `document` has the whole document object as
+    A message that prints the failing value is kept only for a short non-password scalar.
+    Password errors name the schema rule regardless of the supplied value's type or size.
+    A `oneOf` failure on `document` has the whole document object as
     its instance, and printing that returns the base64 content and the password in the 400.
     Pydantic's text carries `input_value` the same way, so its errors are rendered without it."""
     from jsonschema import ValidationError
@@ -809,7 +810,8 @@ def _validation_message(e: Exception) -> str:
         bulky = isinstance(e.instance, (dict, list)) or (
             isinstance(e.instance, str) and len(e.instance) > 80
         )
-        if bulky and repr(e.instance) in e.message:
+        password = tuple(e.absolute_path)[:2] == ("document", "password")
+        if password or (bulky and repr(e.instance) in e.message):
             return f"{e.json_path} fails the request schema's '{e.validator}' rule"
         return f"{e.message} at {e.json_path}"
     return str(e)

@@ -432,6 +432,8 @@ and `tests/test_schema_evolution.py` pins every released file byte for byte.
 
 ### Fixed
 
+- HTTP validation errors omit document password values, including incorrectly supplied numeric values.
+
 - Recursive globs select each file once, including patterns such as `corpus/**` that also match
   directories. This prevents repeated backend calls and premature failures from `--max-items`.
 - CLI help examples now use completed comparison alternatives, backend labels and resumable
