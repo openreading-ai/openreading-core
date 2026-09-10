@@ -135,3 +135,43 @@ def test_setup_rejects_invalid_types_before_native_import(tmp_path):
     ]:
         with pytest.raises((ValueError, TypeError)):
             LocalDoclingConfig.from_wire({"artifacts_path": str(tmp_path), **change})
+
+
+def test_selected_preprocessor_uses_numpy_without_torch_or_auto_dispatch(tmp_path, monkeypatch):
+    import json
+
+    from docling.datamodel.base_models import InputFormat
+    from docling.models.inference_engines.object_detection.onnxruntime_engine import (
+        OnnxRuntimeObjectDetectionEngine,
+    )
+    from docling.models.stages.layout.layout_object_detection_model import (
+        LayoutObjectDetectionModel,
+    )
+    from PIL import Image
+
+    from openreading.adapters.docling_local import pipeline
+
+    engines = []
+    monkeypatch.setattr(pipeline.LocalDoclingConfig, "validate_assets", lambda self: {})
+    monkeypatch.setattr(
+        OnnxRuntimeObjectDetectionEngine, "initialize", lambda self: engines.append(self)
+    )
+    monkeypatch.setattr(LayoutObjectDetectionModel, "_build_label_map", lambda self: {})
+    converter = pipeline.create_converter(pipeline.LocalDoclingConfig(tmp_path))
+    converter.initialize_pipeline(InputFormat.PDF)
+    (tmp_path / "preprocessor_config.json").write_text(
+        json.dumps(
+            {
+                "image_processor_type": "RTDetrImageProcessor",
+                "size": {"height": 640, "width": 640},
+                "do_resize": True,
+                "do_rescale": False,
+                "do_normalize": False,
+                "do_pad": False,
+            }
+        )
+    )
+    processor = engines[0]._load_preprocessor(tmp_path)
+    output = processor(images=[Image.new("RGB", (40, 30), "white")], return_tensors="np")
+    assert output["pixel_values"].shape == (1, 3, 640, 640)
+    assert processor.__class__.__name__ == "RTDetrImageProcessorPil"

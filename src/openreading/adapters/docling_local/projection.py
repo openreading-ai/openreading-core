@@ -125,10 +125,16 @@ def project_document(
         )
     text = "\n\n".join("\n".join(b.text or "" for b in blocks[n]) for n in numbers if blocks[n])
     response = NormalizedResponse(
-        status=Status(state=ResponseState.SUCCEEDED),
+        status=Status(
+            state=ResponseState.PARTIAL if payload.get("partial") else ResponseState.SUCCEEDED
+        ),
         backend=BackendInfo(id="docling_local", type=BackendType.OSS_LIBRARY),
         document=Document(page_count=len(pages), pages=pages, text=text if outputs.text else None),
     )
+    if payload.get("partial"):
+        response.add_warning(
+            "partial_conversion", "Local Docling returned a partial extraction.", "text"
+        )
     messages = {
         "table_text_unavailable": "A table region has no independently available text; table structure is disabled.",
         "ambiguous_page_provenance": "Text without unambiguous physical-page spans was omitted from page evidence.",

@@ -181,3 +181,11 @@ def test_manifest_refuses_missing_or_invented_page_origins(tmp_path, monkeypatch
                 ArtifactManifest.model_validate({**value, "page_origins": origins})
     finally:
         service.close()
+
+
+def test_partial_page_set_cannot_shrink_physical_source_count(tmp_path, monkeypatch, extraction):
+    from openreading.adapters.docling_local import client
+
+    monkeypatch.setattr(client, "preflight_pdf", lambda path: (2, False))
+    with pytest.raises(ArtifactError, match="parse_failed"):
+        worker.extract(job(tmp_path))

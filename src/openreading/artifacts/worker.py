@@ -80,6 +80,8 @@ def extract(job: dict, *, client=None, progress=None) -> dict:
                 features=SETTINGS["features"],
             )
         )
+    if response.document.page_count != page_count:
+        raise ArtifactError("parse_failed")
     if response.status.state not in {"succeeded", "partial"}:
         raise ArtifactError("parse_failed")
     passages = list(iter_passages(response, origins))

@@ -2,6 +2,8 @@
 
 ## Unreleased local Docling profile
 
+- Pin CPU ONNX Runtime explicitly and use the upstream PIL preprocessor with audited Transformers 5.16.1.
+
 - Add the optional `docling_local` adapter with verified local ONNX assets and explicit OCR setup.
 - Add the v2 MCP profile with supervised warm workers and required resource limits.
 - Add v0.2 retained evidence contracts carrying measured physical-page text origins.

@@ -54,6 +54,7 @@ class LocalDoclingClient:
             )
         document = result.document.export_to_dict()
         return {
+            "partial": result.status.value == "partial_success",
             "pages": document["pages"],
             "items": [item.model_dump(mode="json") for item, _ in result.document.iterate_items()],
             "page_origins": origins,

@@ -192,7 +192,7 @@ readers the field paths, optional-value rules, and distinctions between outer re
   - the output is degraded: ``typed_fields_malformed`` (the vendor's structured output was not
     a JSON object, so the response is PARTIAL), ``typed_fields_unverified``,
     ``output_truncated``, ``interaction_incomplete`` (the vendor stopped before finishing),
-    ``bbox_space_approximate``, ``ambiguous_page_provenance`` (unattributable text omitted),
+    ``partial_conversion`` (the local converter returned partial output), ``bbox_space_approximate``, ``ambiguous_page_provenance`` (unattributable text omitted),
     ``unreadable_pages`` (no page-addressable text), and ``table_text_unavailable``
     (table text absent while structured table extraction is disabled).
   - the run took a detour: ``fallback_used`` (the router's attempt trail),

@@ -2,6 +2,8 @@
 
 Docling 2.126.0 imports torch during CPU device selection and disabled table-plugin
 loading. Explicit initialization avoids both paths without patching global factories.
+Transformers 5 preprocessing uses its explicit PIL implementation with NumPy tensors.
+The generic AutoImageProcessor instead requires Torchvision.
 The upstream standard pipeline still owns threading, layout postprocessing, assembly,
 and reading order. All native imports occur inside create_converter in the worker.
 """
@@ -56,6 +58,15 @@ def create_converter(config: LocalDoclingConfig):
     from docling.pipeline.standard_pdf_pipeline import StandardPdfPipeline
 
     class CpuEngine(OnnxRuntimeObjectDetectionEngine):
+        def _load_preprocessor(self, model_folder):
+            # AutoImageProcessor selects a Torchvision backend in Transformers 5.
+            # This pinned layout uses the upstream PIL implementation with NumPy tensors.
+            from transformers.models.rt_detr.image_processing_pil_rt_detr import (
+                RTDetrImageProcessorPil,
+            )
+
+            return RTDetrImageProcessorPil.from_pretrained(str(model_folder), local_files_only=True)
+
         def _resolve_providers(self):
             return ["CPUExecutionProvider"]
 

@@ -108,3 +108,12 @@ def test_disabled_table_structure_and_unknown_geometry_are_disclosed():
     )
     assert response.document.pages[0].blocks[0].bbox is None
     assert any(w.code == "table_text_unavailable" for w in response.warnings)
+
+
+def test_upstream_partial_state_is_not_reported_as_complete():
+    from openreading.adapters.docling_local.projection import project_document
+    from openreading.types.request import Outputs
+
+    response, _ = project_document({"pages": {"1": {}}, "items": [], "partial": True}, Outputs())
+    assert response.status.state == "partial"
+    assert any(w.code == "partial_conversion" for w in response.warnings)
