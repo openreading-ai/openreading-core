@@ -3355,7 +3355,7 @@ wheels = [
 
 [[package]]
 name = "svix"
-version = "1.98.0"
+version = "2.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
@@ -3365,9 +3365,9 @@ dependencies = [
     { name = "python-dateutil" },
     { name = "standardwebhooks" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3d/b5/375a2f8611b7b0084bf279ae3a198246bf669df865b7a75e06b834e815b2/svix-1.98.0.tar.gz", hash = "sha256:19c72a7aca07d0768b3f81ad28868d0e8bc3834e84ced9d331fb97dae011520a", size = 55762, upload-time = "2026-07-17T23:04:39.262Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d1/78/fa1367559b1711a3283da4bdf48c2493be1df2de2976469fce643af9f8ab/svix-2.3.0.tar.gz", hash = "sha256:0c13d3397f83759bdcd0aeca8534da6529330c5fe2c6ceb806c4098712ed86da", size = 55103, upload-time = "2026-09-03T07:40:44.807Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3c/31/14abc1a102bfb3cbaa2be86e8ece60f93d8f2a7f834ddf51c74c6c9ff154/svix-1.98.0-py3-none-any.whl", hash = "sha256:75dd3ac196753de15e7cc238c97b1a61dd95c0e8fa8aac49d9c1be079bd7439c", size = 156158, upload-time = "2026-07-17T23:04:37.617Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/aa/8b152ec4f61882e09f44dc4a4909f92a56b86b8a6da2f49a2f22737cfc20/svix-2.3.0-py3-none-any.whl", hash = "sha256:9555de4899c3bf6c27f2be5b8c1dd7a352e445713f4d619fad0f833955b1aa6b", size = 151613, upload-time = "2026-09-03T07:40:43.182Z" },
 ]
 
 [[package]]
