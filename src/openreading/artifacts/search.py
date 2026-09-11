@@ -1,7 +1,10 @@
 """Deterministic lexical retrieval and byte-bounded exact reads over verified passages.
 
-Queries match Unicode letter/number spans after case folding and line-end dehyphenation.
-A lowercase continuation joins a preceding word; inline hyphens and uppercase starts do not. Ranking prefers
+Queries match Unicode letter/number spans after case folding, and every original word stays
+searchable. A hyphen attached to a word and followed by a line break adds the closed-up word when
+the next word starts lowercase. PyMuPDF renders that break as a space, so "re- newal" counts.
+Inline hyphens and uppercase starts never close up. Keeping the halves means a compound wrapped
+after its hyphen, such as "third- party", still matches party. Ranking prefers
 more distinct terms, then physical page and source position. Excerpts retain original
 code-point offsets even when case folding expands a character, such as German sharp S.
 Cursors bind the request and next offset. They convey no authority or filesystem path.
@@ -39,11 +42,15 @@ TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
 Result = TypeVar("Result", bound=WireModel)
 
 
+_WRAPPED = re.compile(r"-(?:\r?\n|[ \t])[ \t]*")
+
+
 def _tokens(text: str) -> list[tuple[str, int]]:
-    # Join only a line-ending hyphen followed by lowercase continuation. The map keeps
+    # Closed-up forms are added beside the original words, never instead of them. The map keeps
     # excerpts in source coordinates, including removed line breaks and expanded casefolds.
+    tokens = [(match.group().casefold(), match.start()) for match in TOKEN.finditer(text)]
     removed = set()
-    for match in re.finditer(r"-\r?\n[ \t]*", text):
+    for match in _WRAPPED.finditer(text):
         if (
             match.start()
             and match.end() < len(text)
@@ -51,9 +58,16 @@ def _tokens(text: str) -> list[tuple[str, int]]:
             and text[match.end()].islower()
         ):
             removed.update(range(match.start(), match.end()))
+    if not removed:
+        return tokens
     offsets = [index for index in range(len(text)) if index not in removed]
     joined = "".join(text[index] for index in offsets)
-    return [(match.group().casefold(), offsets[match.start()]) for match in TOKEN.finditer(joined)]
+    seen = set(tokens)
+    for match in TOKEN.finditer(joined):
+        token = (match.group().casefold(), offsets[match.start()])
+        if token not in seen:
+            tokens.append(token)
+    return tokens
 
 
 def _binding(request: list) -> str:

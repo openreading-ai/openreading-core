@@ -7,4 +7,5 @@ MAX_SEARCH_HITS = 10
 MAX_READ_PASSAGES = 8
 MAX_CURSOR_CHARS = 512
 
-RETRIEVER_REVISION = "lexical-v2-dehyphenated"
+# Cursors bind this value, so change it whenever tokenization or ranking can change a hit list.
+RETRIEVER_REVISION = "lexical-v3-dehyphenated"

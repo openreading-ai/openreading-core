@@ -74,3 +74,10 @@ def test_textless_origin_produces_no_passage():
 def test_textless_origin_cannot_hide_retained_text(page):
     with pytest.raises(ValueError, match="contradicts retained text"):
         list(iter_passages(response([page]), {"1": "none"}))
+
+
+@pytest.mark.parametrize("origin", ["native", "ocr", "mixed", "unknown"])
+def test_measured_origin_cannot_label_a_page_without_retained_text(origin):
+    pages = [{"page_number": 1, "text": " \n"}, {"page_number": 2, "text": "visible"}]
+    with pytest.raises(ValueError, match="without retained text"):
+        list(iter_passages(response(pages), {"1": origin, "2": "native"}))

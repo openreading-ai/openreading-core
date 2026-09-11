@@ -9,6 +9,10 @@ because a transitive upgrade can change extraction while the operator's lock fil
 No Git repository or native parser import participates in parent-side identity discovery.
 A core_commit is omitted unless trusted packaging metadata supplies it.
 
+The identity conservatively includes retrieval code and its revision at import time.
+That stored revision describes the importing runtime, not the retriever currently serving queries.
+Search uses its running revision to bind cursors, including queries over an older artifact.
+
 Frozen launchers must verify openreading/engine-identity.json before invoking this service.
 That file contains the EngineIdentity fields, including extraction settings and optional commit.
 The Docling profile computes its identity from the running install instead, so a frozen v2

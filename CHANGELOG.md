@@ -3,7 +3,8 @@
 ## Unreleased retained evidence v0.3
 
 - Distinguish empty-page and unknown text origins without fabricating mixed extraction.
-- Add lexical-v2-dehyphenated retrieval with exact original quotes and offsets.
+- Add lexical-v3-dehyphenated retrieval. Wrapped words also match closed up, each half stays
+  searchable, and quotes and offsets stay exact.
 - Preserve and byte-pin historical retained evidence schemas.
 
 ## Unreleased local Docling profile

@@ -102,3 +102,20 @@ def test_no_text_and_non_pdf_are_explicit_errors(service):
     ]:
         with pytest.raises(ArtifactError, match=code):
             service.import_document(name)
+
+
+def test_search_finds_a_word_that_pymupdf_wrapped_across_lines(service):
+    # PyMuPDF joins a block's lines with a space, so a wrapped word is stored as "re- newal".
+    with pymupdf.open() as doc:
+        page = doc.new_page()
+        lines = ["Provide notice before re-", "newal of the third-", "party agreement."]
+        for index, line in enumerate(lines):
+            page.insert_text((50, 50 + index * 14), line)
+        doc.save(service.config.input_root / "wrapped.pdf")
+    receipt = service.import_document("wrapped.pdf")
+    for query in ("renewal", "third-party", "party"):
+        hits = service.search(receipt.artifact_id, query).hits
+        assert len(hits) == 1, query
+        passage = service.read(receipt.artifact_id, [hits[0].evidence_id]).passages[0]
+        assert hits[0].excerpt == passage.text[hits[0].excerpt_start : hits[0].excerpt_end]
+    assert "re- newal" in passage.text

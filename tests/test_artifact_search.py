@@ -76,6 +76,17 @@ def test_pagination_does_not_drop_hits_and_rejects_other_query(manifest):
         search(manifest, passages, "other", 2, first.next_cursor, 8192)
 
 
+def test_cursor_refuses_a_different_running_retriever(manifest, monkeypatch):
+    from openreading.artifacts import search as module
+
+    passages = records(["renewal"] * 3)
+    first = search(manifest, passages, "renewal", 1, None, 8192)
+    monkeypatch.setattr(module, "RETRIEVER_REVISION", "future-retriever")
+    with pytest.raises(ArtifactError, match="invalid_cursor"):
+        search(manifest, passages, "renewal", 1, first.next_cursor, 8192)
+    assert search(manifest, passages, "renewal", 1, None, 8192).hits
+
+
 def test_read_paginates_whole_records_with_unicode_byte_cap(manifest):
     passages = records(["😀" * 1000] * 8)
     ids = [p.evidence_id for p in passages]
@@ -163,7 +174,9 @@ def test_large_evidence_indices_match_the_vendored_schema():
     jsonschema.validate(passage.wire(), passage_schema())
 
 
-@pytest.mark.parametrize("text", ["😀 re-\nnewal notice", "re-\r\n  newal notice", "ofﬁce renewal"])
+@pytest.mark.parametrize(
+    "text", ["😀 re-\nnewal notice", "re-\r\n  newal notice", "re- newal notice", "ofﬁce renewal"]
+)
 def test_joined_search_terms_preserve_exact_passage_and_excerpt(manifest, text):
     query = "office" if "ﬁ" in text else "renewal"
     passages = records([text])
@@ -174,6 +187,16 @@ def test_joined_search_terms_preserve_exact_passage_and_excerpt(manifest, text):
     assert read(manifest, passages, [hit.evidence_id], None, 16384).passages[0].text == text
 
 
-@pytest.mark.parametrize("text", ["re-newal", "re-\nNewal", "re- newal", "re-\n123"])
+# "re- newal" is absent on purpose: PyMuPDF stores every wrapped line break as a space.
+@pytest.mark.parametrize("text", ["re-newal", "re-\nNewal", "re-\n123", "- newal"])
 def test_dehyphenation_does_not_join_compounds_or_new_sentences(manifest, text):
     assert search(manifest, records([text]), "renewal", 5, None, 8192).hits == []
+
+
+@pytest.mark.parametrize("query", ["third-party", "party", "third party", "renewal"])
+def test_line_broken_compound_keeps_its_component_words(manifest, query):
+    # lexical-v1 found each part of a line-broken compound. Joining must add a form, not drop parts.
+    text = "The third-\nparty beneficiary may enforce re-\nnewal terms."
+    hits = search(manifest, records([text]), query, 5, None, 8192).hits
+    assert len(hits) == 1
+    assert hits[0].excerpt == text[hits[0].excerpt_start : hits[0].excerpt_end]

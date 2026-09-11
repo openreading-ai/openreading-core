@@ -1,4 +1,9 @@
-"""Project normalized pages into contiguous, exact source spans without invented geometry."""
+"""Project normalized pages into contiguous, exact source spans without invented geometry.
+
+A page origin agrees with retained text: none exactly when the page has nothing to cite.
+Page origins live in the manifest, outside the artifact identity and file hashes. This check,
+run again on every load, is what stops a stored label from describing an empty page.
+"""
 
 from collections.abc import Iterator
 
@@ -12,12 +17,15 @@ def iter_passages(
 ) -> Iterator[Passage]:
     for page in sorted(response.document.pages or [], key=lambda p: p.page_number):
         origin = (origins or {}).get(str(page.page_number))
+        has_text = bool((page.text or "").strip()) or any(
+            (block.text or "").strip() for block in page.blocks or []
+        )
         if origin == "none":
-            if (page.text or "").strip() or any(
-                (block.text or "").strip() for block in page.blocks or []
-            ):
+            if has_text:
                 raise ValueError("Text-less page origin contradicts retained text")
             continue
+        if origin is not None and not has_text:
+            raise ValueError("A measured origin cannot label a page without retained text")
         blocks = sorted(
             enumerate(page.blocks or []),
             key=lambda pair: (

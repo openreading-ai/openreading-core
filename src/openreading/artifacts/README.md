@@ -64,6 +64,8 @@ A sampled memory limit includes the worker and its descendants; sampling permits
 
 Line-end dehyphenation lets a search for renewal find re- followed by newal on the next line.
 Returned passages and excerpt offsets still refer to the original text, including the hyphen and newline.
+PyMuPDF stores that line break as a space, so `re- newal` in its passages also matches renewal.
+The halves stay searchable too, so a search for party still finds `third- party`.
 Empty pages report origin none; text with unmeasured origin reports unknown.
 
 Each profile selects its local engine explicitly, preventing ambient configuration from choosing a hosted backend.
