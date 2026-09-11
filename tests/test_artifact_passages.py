@@ -1,5 +1,7 @@
 """Exact source spans survive segmentation, missing geometry, and physical page gaps."""
 
+import pytest
+
 from openreading.artifacts.passages import iter_passages
 from openreading.types.response import NormalizedResponse
 
@@ -56,3 +58,19 @@ def test_reading_order_and_fallback_are_deterministic():
         "p0003-b0001-s0000",
         "p0004-b0000-s0000",
     ]
+
+
+def test_textless_origin_produces_no_passage():
+    assert list(iter_passages(response([{"page_number": 1, "text": " \n"}]), {"1": "none"})) == []
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        {"page_number": 1, "text": "visible"},
+        {"page_number": 1, "blocks": [{"type": "text", "text": "visible"}]},
+    ],
+)
+def test_textless_origin_cannot_hide_retained_text(page):
+    with pytest.raises(ValueError, match="contradicts retained text"):
+        list(iter_passages(response([page]), {"1": "none"}))

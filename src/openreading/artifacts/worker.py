@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 from openreading.artifacts.limits import ArtifactError
-from openreading.artifacts.models import TextOrigin, json_bytes
+from openreading.artifacts.models import PageOrigin, json_bytes
 from openreading.artifacts.passages import iter_passages
 from openreading.types.response import NormalizedResponse
 
@@ -57,7 +57,7 @@ def extract(job: dict, *, client=None, progress=None) -> dict:
         raise ArtifactError("input_too_large")
     if progress is not None:
         progress("conversion")
-    origins: dict[str, TextOrigin] = {}
+    origins: dict[str, PageOrigin] = {}
     if job.get("docling") is not None:
         from openreading.adapters.docling_local.client import LocalDoclingClient
         from openreading.adapters.docling_local.config import LocalDoclingConfig

@@ -39,6 +39,7 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
+from openreading.artifacts.constants import RETRIEVER_REVISION
 from openreading.artifacts.intake import copy_source
 from openreading.artifacts.limits import INPUT_REJECTIONS, ArtifactError, ProfileConfig
 from openreading.artifacts.models import (
@@ -195,7 +196,7 @@ def engine_identity(config: ProfileConfig | None = None) -> EngineIdentity:
                     "languages": list(config.docling.languages),
                     "threads": config.docling.threads,
                     "tables": False,
-                    "retriever": "lexical-v1",
+                    "retriever": RETRIEVER_REVISION,
                     "source_tree_sha256": _source_tree_hash(package, "docling_local"),
                 },
             )
@@ -210,7 +211,11 @@ def engine_identity(config: ProfileConfig | None = None) -> EngineIdentity:
         return EngineIdentity(
             core_version=importlib.metadata.version("openreading"),
             backend_version=importlib.metadata.version("pymupdf"),
-            extraction_settings={**SETTINGS, "source_tree_sha256": _source_tree_hash(package)},
+            extraction_settings={
+                **SETTINGS,
+                "retriever": RETRIEVER_REVISION,
+                "source_tree_sha256": _source_tree_hash(package),
+            },
         )
     except importlib.metadata.PackageNotFoundError:
         raise ImportError("Install the local profile dependencies.") from None

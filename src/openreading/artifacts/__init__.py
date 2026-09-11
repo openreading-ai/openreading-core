@@ -27,7 +27,7 @@ Reusing ledger blobs would bypass that grant and integrity boundary during later
 Neither store automatically evicts data from the other store or promises compatible directory layouts.
 
 Limits and failure codes live in openreading.artifacts.limits. Exact wire fields live
-in openreading.artifacts.models and the three vendored v0.2 artifact schemas.
+in openreading.artifacts.models and the three vendored v0.3 artifact schemas.
 
 Worker supervision
 ------------------
@@ -36,12 +36,13 @@ Cancellation, deadlines, invalid messages, and sampled memory limits terminate i
 An idle timer releases the worker without deleting retained evidence.
 Page text origins describe measured native/OCR cells, not confidence or quote accuracy.
 
+Text-less pages have origin none. Text without a measured extraction origin has origin unknown.
+Search joins lowercase continuations after line-ending hyphens while retaining original quote offsets.
+
 Known gaps
 ----------
 Docling release defaults require host timeout and base-machine measurements.
 No runtime claims a hard operating-system memory ceiling or sandbox.
-Pages with no measured cells currently receive the mixed origin label, even without text.
-That label cannot establish native or OCR content and needs a future schema correction.
 An import racing idle shutdown can receive retryable busy before any conversion starts.
 Older artifact formats require reimport; their retained files still consume the storage budget.
 ONNX Runtime 1.30 also tries to persist a telemetry device identifier outside the artifact root.

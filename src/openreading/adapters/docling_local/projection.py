@@ -25,7 +25,7 @@ from openreading.types.geometry import to_canonical
 from openreading.types.request import Outputs
 from openreading.types.response import BackendInfo, Document, NormalizedResponse, Page, Status
 
-TextOrigin = Literal["native", "ocr", "mixed"]
+TextOrigin = Literal["native", "ocr", "mixed", "unknown", "none"]
 
 
 def _geometry(prov: dict, size: dict, page: int):
@@ -113,9 +113,11 @@ def project_document(
         text = "\n".join(b.text or "" for b in blocks[number])
         if not text.strip():
             warning_codes.add("unreadable_pages")
-        origin = payload.get("page_origins", {}).get(str(number), "mixed")
-        if origin not in {"native", "ocr", "mixed"}:
-            origin = "mixed"
+        origin = payload.get("page_origins", {}).get(str(number), "unknown")
+        if origin not in {"native", "ocr", "mixed", "unknown"}:
+            origin = "unknown"
+        if not text.strip():
+            origin = "none"
         origins[number] = cast(TextOrigin, origin)
         pages.append(
             Page(

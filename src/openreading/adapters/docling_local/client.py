@@ -45,7 +45,7 @@ class LocalDoclingClient:
         origins = {}
         for page in result.pages:
             if page.predictions.layout is None:
-                origins[str(page.page_no)] = "mixed"
+                origins[str(page.page_no)] = "unknown"
                 continue
             flags = {
                 cell.from_ocr
@@ -53,7 +53,13 @@ class LocalDoclingClient:
                 for cell in cluster.cells
             }
             origins[str(page.page_no)] = (
-                "native" if flags == {False} else "ocr" if flags == {True} else "mixed"
+                "none"
+                if not flags
+                else "native"
+                if flags == {False}
+                else "ocr"
+                if flags == {True}
+                else "mixed"
             )
         document = result.document.export_to_dict()
         furniture = result.document.iterate_items(included_content_layers={ContentLayer.FURNITURE})

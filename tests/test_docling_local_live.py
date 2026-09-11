@@ -61,7 +61,7 @@ def _private_cwd(tmp_path, monkeypatch):
 def test_real_conversion_keeps_physical_pages_and_discloses_furniture(tmp_path):
     raw, response, origins = _convert(_pdf(tmp_path / "source.pdf"))
     assert list(raw["pages"]) == ["1", "2", "3"]
-    assert origins[1] == "native"
+    assert origins == {1: "native", 2: "none", 3: "none"}
     first = response.document.pages[0]
     assert "60 days" in (first.text or "")
     assert "CONFIDENTIAL" not in (response.document.text or "")
@@ -80,5 +80,5 @@ def test_real_ocr_labels_the_scanned_page(tmp_path):
         tesseract_cmd=Path(tesseract),
         tessdata_path=Path(tessdata),
     )
-    assert (origins[1], origins[2]) == ("native", "ocr")
+    assert origins == {1: "native", 2: "ocr", 3: "none"}
     assert "45 days" in (response.document.pages[1].text or "")

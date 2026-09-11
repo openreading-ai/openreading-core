@@ -122,7 +122,7 @@ class Store:
             raw = json.loads(safe_read(root / "manifest.json", 65536))
             if not isinstance(raw, dict):
                 raise ValueError("Manifest is not an object")
-            if raw.get("format") != "local-document.v0.2":
+            if raw.get("format") != "local-document.v0.3":
                 raise ArtifactError("artifact_version_unsupported")
             manifest = ArtifactManifest.model_validate(raw)
             if (

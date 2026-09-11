@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased retained evidence v0.3
+
+- Distinguish empty-page and unknown text origins without fabricating mixed extraction.
+- Add lexical-v2-dehyphenated retrieval with exact original quotes and offsets.
+- Preserve and byte-pin historical retained evidence schemas.
+
 ## Unreleased local Docling profile
 
 - Record the installed dependency closure and Tesseract output configuration in engine identity.

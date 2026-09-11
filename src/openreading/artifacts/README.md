@@ -62,6 +62,10 @@ A sampled memory limit includes the worker and its descendants; sampling permits
 
 ## How it decides
 
+Line-end dehyphenation lets a search for renewal find re- followed by newal on the next line.
+Returned passages and excerpt offsets still refer to the original text, including the hyphen and newline.
+Empty pages report origin none; text with unmeasured origin reports unknown.
+
 Each profile selects its local engine explicitly, preventing ambient configuration from choosing a hosted backend.
 Source spans preserve Unicode code points without normalization, preventing quotes from drifting away from extracted text.
 Geometry comes from the enclosing source block, preventing an approximate box from appearing as a precise character highlight.

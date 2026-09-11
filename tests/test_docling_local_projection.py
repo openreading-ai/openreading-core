@@ -127,3 +127,14 @@ def test_excluded_furniture_text_is_disclosed_not_silently_dropped():
     assert any(w.code == "furniture_text_omitted" for w in response.warnings)
     quiet, _ = project_document({"pages": {"1": {}}, "items": [item()]}, Outputs())
     assert not any(w.code == "furniture_text_omitted" for w in quiet.warnings or [])
+
+
+def test_blank_pages_and_unmeasured_text_do_not_claim_mixed_origin():
+    from openreading.adapters.docling_local.projection import project_document
+
+    response, origins = project_document(
+        {"pages": {"1": {}, "2": {}}, "items": [item("visible text")], "page_origins": {}},
+        Outputs(),
+    )
+    assert origins == {1: "unknown", 2: "none"}
+    assert response.document.pages[1].text == ""

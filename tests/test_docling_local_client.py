@@ -43,7 +43,7 @@ def test_origin_mapping_uses_physical_page_numbers_and_measured_cells(tmp_path, 
         "1": "native",
         "2": "ocr",
         "3": "mixed",
-        "4": "mixed",
+        "4": "unknown",
     }
 
 

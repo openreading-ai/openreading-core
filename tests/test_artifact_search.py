@@ -161,3 +161,19 @@ def test_large_evidence_indices_match_the_vendored_schema():
         text="x",
     )
     jsonschema.validate(passage.wire(), passage_schema())
+
+
+@pytest.mark.parametrize("text", ["😀 re-\nnewal notice", "re-\r\n  newal notice", "ofﬁce renewal"])
+def test_joined_search_terms_preserve_exact_passage_and_excerpt(manifest, text):
+    query = "office" if "ﬁ" in text else "renewal"
+    passages = records([text])
+    result = search(manifest, passages, query, 5, None, 8192)
+    assert len(result.hits) == 1
+    hit = result.hits[0]
+    assert hit.excerpt == text[hit.excerpt_start : hit.excerpt_end]
+    assert read(manifest, passages, [hit.evidence_id], None, 16384).passages[0].text == text
+
+
+@pytest.mark.parametrize("text", ["re-newal", "re-\nNewal", "re- newal", "re-\n123"])
+def test_dehyphenation_does_not_join_compounds_or_new_sentences(manifest, text):
+    assert search(manifest, records([text]), "renewal", 5, None, 8192).hits == []

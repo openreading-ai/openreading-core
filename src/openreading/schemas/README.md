@@ -590,9 +590,9 @@ entry naming it, so the warning reaches you before the removal does.
 
 | Schema | Owner | Result |
 | --- | --- | --- |
-| `local-document.v0.2.json` | `openreading.artifacts.models` | Source hash, engine identity, and retained file inventory. |
-| `passage.v0.2.json` | `openreading.artifacts.passages` | Exact source spans with physical page provenance. |
-| `agent-document-tool.v0.2.json` | `openreading.mcp_server.tools` | Bounded import, search, read, and error payloads. |
+| `local-document.v0.3.json` | `openreading.artifacts.models` | Source hash, engine identity, and retained file inventory. |
+| `passage.v0.3.json` | `openreading.artifacts.passages` | Exact source spans with physical page provenance. |
+| `agent-document-tool.v0.3.json` | `openreading.mcp_server.tools` | Bounded import, search, read, and error payloads. |
 
 These families wrap retained evidence without changing the normalized extraction response.
 
@@ -634,3 +634,6 @@ full table of what to update for each kind of change is under *Where a change ge
 
 The retained evidence v0.2 contracts add measured page origins and supervised-worker failure codes.
 The v0.1 files remain unchanged; this runtime refuses older retained artifacts rather than rewriting cited evidence.
+
+Retained evidence v0.3 distinguishes text-less pages (`none`) from unmeasured text origins (`unknown`).
+Passages cannot use `none`; existing v0.1 and v0.2 files remain byte-identical historical contracts.

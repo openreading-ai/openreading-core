@@ -1,6 +1,7 @@
 """Deterministic lexical retrieval and byte-bounded exact reads over verified passages.
 
-Queries match original Unicode letter/number spans after case folding. Ranking prefers
+Queries match Unicode letter/number spans after case folding and line-end dehyphenation.
+A lowercase continuation joins a preceding word; inline hyphens and uppercase starts do not. Ranking prefers
 more distinct terms, then physical page and source position. Excerpts retain original
 code-point offsets even when case folding expands a character, such as German sharp S.
 Cursors bind the request and next offset. They convey no authority or filesystem path.
@@ -21,6 +22,7 @@ from openreading.artifacts.constants import (
     MAX_QUERY_CHARS,
     MAX_READ_PASSAGES,
     MAX_SEARCH_HITS,
+    RETRIEVER_REVISION,
 )
 from openreading.artifacts.limits import ArtifactError
 from openreading.artifacts.models import (
@@ -35,6 +37,23 @@ from openreading.artifacts.models import (
 
 TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
 Result = TypeVar("Result", bound=WireModel)
+
+
+def _tokens(text: str) -> list[tuple[str, int]]:
+    # Join only a line-ending hyphen followed by lowercase continuation. The map keeps
+    # excerpts in source coordinates, including removed line breaks and expanded casefolds.
+    removed = set()
+    for match in re.finditer(r"-\r?\n[ \t]*", text):
+        if (
+            match.start()
+            and match.end() < len(text)
+            and text[match.start() - 1].isalpha()
+            and text[match.end()].islower()
+        ):
+            removed.update(range(match.start(), match.end()))
+    offsets = [index for index in range(len(text)) if index not in removed]
+    joined = "".join(text[index] for index in offsets)
+    return [(match.group().casefold(), offsets[match.start()]) for match in TOKEN.finditer(joined)]
 
 
 def _binding(request: list) -> str:
@@ -104,10 +123,10 @@ def search(
         or not 1 <= limit <= MAX_SEARCH_HITS
     ):
         raise ValueError("Query or limit is outside the tool contract")
-    terms = list(dict.fromkeys(m.group().casefold() for m in TOKEN.finditer(query)))
+    terms = list(dict.fromkeys(token for token, _ in _tokens(query)))
     matches = []
     for passage in passages:
-        tokens = [(m.group().casefold(), m.start()) for m in TOKEN.finditer(passage.text)]
+        tokens = _tokens(passage.text)
         found = [term for term in terms if any(token == term for token, _ in tokens)]
         if not found:
             continue
@@ -133,7 +152,7 @@ def search(
         key=lambda item: (-item[0], item[1].page, item[1].block_index, item[1].segment_index)
     )
     hits = [item[2] for item in matches]
-    binding = _binding(["search", manifest.artifact_id, terms, limit])
+    binding = _binding(["search", RETRIEVER_REVISION, manifest.artifact_id, terms, limit])
     start = _offset(cursor, binding, len(hits))
     return _fit(
         hits,

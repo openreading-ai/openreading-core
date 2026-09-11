@@ -128,7 +128,7 @@ def create_server(service: ArtifactService) -> Server:
             "Returns a receipt, never document text. No password support or hosted fallback."
         )
         descriptions["openreading_read"] += (
-            " Preserve OCR or mixed text_origin labels in citations."
+            " Preserve OCR, mixed, or unknown text_origin labels in citations."
         )
 
     @server.list_tools()

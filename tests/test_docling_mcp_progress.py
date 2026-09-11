@@ -52,7 +52,7 @@ async def test_progress_is_rate_limited_and_v2_description_uses_explicit_limits(
         )
         assert not result.isError
         assert len(result.content) == 1
-        assert json.loads(result.content[0].text)["schema_version"] == "0.2"
+        assert json.loads(result.content[0].text)["schema_version"] == "0.3"
     assert seen == [(1, None, "preflight"), (3, None, "writing")]
 
 

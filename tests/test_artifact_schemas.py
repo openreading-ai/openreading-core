@@ -20,10 +20,10 @@ from openreading.artifacts.models import (
 @pytest.mark.parametrize(
     "name,model",
     [
-        ("local-document.v0.2.json", ArtifactManifest),
-        ("passage.v0.2.json", Passage),
+        ("local-document.v0.3.json", ArtifactManifest),
+        ("passage.v0.3.json", Passage),
         (
-            "agent-document-tool.v0.2.json",
+            "agent-document-tool.v0.3.json",
             TypeAdapter(ImportReceipt | SearchResult | ReadResult | ErrorEnvelope),
         ),
     ],

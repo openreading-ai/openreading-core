@@ -3,14 +3,21 @@
 from collections.abc import Iterator
 
 from openreading.artifacts.constants import MAX_PASSAGE_CHARS
-from openreading.artifacts.models import Passage, TextOrigin
+from openreading.artifacts.models import PageOrigin, Passage
 from openreading.types.response import NormalizedResponse
 
 
 def iter_passages(
-    response: NormalizedResponse, origins: dict[str, TextOrigin] | None = None
+    response: NormalizedResponse, origins: dict[str, PageOrigin] | None = None
 ) -> Iterator[Passage]:
     for page in sorted(response.document.pages or [], key=lambda p: p.page_number):
+        origin = (origins or {}).get(str(page.page_number))
+        if origin == "none":
+            if (page.text or "").strip() or any(
+                (block.text or "").strip() for block in page.blocks or []
+            ):
+                raise ValueError("Text-less page origin contradicts retained text")
+            continue
         blocks = sorted(
             enumerate(page.blocks or []),
             key=lambda pair: (
@@ -33,7 +40,7 @@ def iter_passages(
                 yield Passage(
                     evidence_id=f"p{page.page_number:04d}-b{index:04d}-s{segment:04d}",
                     page=page.page_number,
-                    text_origin=(origins or {}).get(str(page.page_number)),
+                    text_origin=origin,
                     block_index=index,
                     segment_index=segment,
                     source_kind="block_text" if kind == "block_text" else "page_text",
