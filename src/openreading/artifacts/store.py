@@ -3,6 +3,8 @@
 One advisory lock serializes imports across processes. Reads only observe committed
 artifact directories. Hashes detect corruption, not malicious rewriting by the same OS user.
 No eviction occurs automatically. Administrators remove retained directories to reclaim space.
+The private worker directory is the working directory of parser processes, which keeps
+their relative writes inside the artifact root instead of wherever a client started the server.
 """
 
 from __future__ import annotations
@@ -55,7 +57,7 @@ class Store:
             raise ArtifactError("configuration_required")
         with directory(a):
             pass
-        for path in (b, b / "staging", b / "documents"):
+        for path in (b, b / "staging", b / "documents", b / "worker"):
             with directory(path, create=True) as fd:
                 os.fchmod(fd, 0o700)
         with directory(b) as fd:

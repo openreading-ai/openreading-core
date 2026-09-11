@@ -45,6 +45,20 @@ MESSAGES: dict[ErrorCode, str] = {
 
 __all__ = ["ArtifactError", "DoclingLimits", "ProfileConfig", "ProfileLimits"]
 
+# The worker reports these from preflight or its metered writer, after which it waits for the
+# next job with its converter intact. Restarting it would repeat model initialization for
+# every rejected file in a batch without making the next conversion any safer.
+INPUT_REJECTIONS: frozenset[ErrorCode] = frozenset(
+    {
+        "unsupported_format",
+        "password_required",
+        "input_too_large",
+        "no_readable_text",
+        "extraction_too_large",
+        "storage_limit",
+    }
+)
+
 
 class ArtifactError(Exception):
     def __init__(self, code: ErrorCode):

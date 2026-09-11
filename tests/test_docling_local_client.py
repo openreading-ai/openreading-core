@@ -13,7 +13,7 @@ def test_origin_mapping_uses_physical_page_numbers_and_measured_cells(tmp_path, 
         def export_to_dict(self):
             return {"pages": {"1": {}, "2": {}, "3": {}, "4": {}}}
 
-        def iterate_items(self):
+        def iterate_items(self, included_content_layers=None):
             return []
 
     def page(number, flags):
@@ -80,3 +80,23 @@ def test_client_initializes_once_and_refuses_failed_conversion(tmp_path, monkeyp
         with pytest.raises(ValueError, match="conversion failed"):
             client.convert(b"%PDF")
     assert len(created) == 1
+
+
+def test_furniture_text_is_counted_for_disclosure(tmp_path, monkeypatch):
+    from docling_core.types.doc.common.content_layer import ContentLayer
+
+    monkeypatch.setattr(LocalDoclingConfig, "validate_assets", lambda self: {})
+
+    class Document:
+        def export_to_dict(self):
+            return {"pages": {"1": {}}}
+
+        def iterate_items(self, included_content_layers=None):
+            if included_content_layers == {ContentLayer.FURNITURE}:
+                return [(SimpleNamespace(text="Page 1 of 3"), 0), (SimpleNamespace(text=""), 0)]
+            return []
+
+    result = SimpleNamespace(status=SimpleNamespace(value="success"), document=Document(), pages=[])
+    client = LocalDoclingClient(LocalDoclingConfig(tmp_path))
+    client._converter = SimpleNamespace(convert=lambda source: result)
+    assert client.convert(b"%PDF")["omitted_furniture_items"] == 1

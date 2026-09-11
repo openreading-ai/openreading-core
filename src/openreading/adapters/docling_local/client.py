@@ -2,6 +2,8 @@
 
 Only local bytes enter conversion. PDFium preflight distinguishes encrypted inputs,
 while the standard pipeline supplies item order and physical-page provenance.
+Body iteration excludes Docling furniture, such as running headers and page numbers.
+The client counts furniture items that carry text so projection can disclose the omission.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ class LocalDoclingClient:
 
     def convert(self, data: bytes) -> dict:
         from docling.datamodel.base_models import DocumentStream
+        from docling_core.types.doc.common.content_layer import ContentLayer
 
         from openreading.adapters.docling_local.pipeline import create_converter
 
@@ -53,9 +56,13 @@ class LocalDoclingClient:
                 "native" if flags == {False} else "ocr" if flags == {True} else "mixed"
             )
         document = result.document.export_to_dict()
+        furniture = result.document.iterate_items(included_content_layers={ContentLayer.FURNITURE})
         return {
             "partial": result.status.value == "partial_success",
             "pages": document["pages"],
             "items": [item.model_dump(mode="json") for item, _ in result.document.iterate_items()],
             "page_origins": origins,
+            "omitted_furniture_items": sum(
+                1 for item, _ in furniture if getattr(item, "text", None)
+            ),
         }

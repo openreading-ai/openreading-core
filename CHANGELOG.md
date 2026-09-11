@@ -2,6 +2,11 @@
 
 ## Unreleased local Docling profile
 
+- Record the installed dependency closure and Tesseract output configuration in engine identity.
+- Refuse source-free identity discovery and disclose omitted running headers and footers.
+- Preserve warm workers after clean input rejections and contain their relative file writes.
+- Add opt-in real Docling conversion tests with local model and OCR assets.
+
 - Pin CPU ONNX Runtime explicitly and use the upstream PIL preprocessor with audited Transformers 5.16.1.
 
 - Add the optional `docling_local` adapter with verified local ONNX assets and explicit OCR setup.

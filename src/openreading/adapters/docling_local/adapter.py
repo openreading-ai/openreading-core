@@ -5,6 +5,7 @@ or models. Configuration comes from its declared broker fields or an explicit Py
 configuration. OCR is disabled unless requested explicitly or enabled in that configuration.
 Text and physical-page blocks are supported. Table structure, confidence, typed fields,
 and markdown are omitted with warnings because this profile cannot establish them.
+Running headers, footers, and page numbers are Docling furniture, omitted with a warning.
 Sources: https://docling-project.github.io/docling/usage/advanced_options/ (2026-09-10).
 """
 

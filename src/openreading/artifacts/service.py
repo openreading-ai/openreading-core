@@ -3,12 +3,18 @@
 The service copies an opened source into private staging before launching a disposable
 native parser process. Cancellation and the deadline terminate the entire child process
 group before staging is removed. A successful receipt follows file and directory fsync.
-Installed distributions record package/backend versions and a fingerprint of their extraction dependency code.
+Installed distributions record package/backend versions and a fingerprint of their extraction
+dependency code. The Docling profile records every distribution its installed extra resolves to,
+because a transitive upgrade can change extraction while the operator's lock file stays unchanged.
 No Git repository or native parser import participates in parent-side identity discovery.
 A core_commit is omitted unless trusted packaging metadata supplies it.
 
 Frozen launchers must verify openreading/engine-identity.json before invoking this service.
 That file contains the EngineIdentity fields, including extraction settings and optional commit.
+The Docling profile computes its identity from the running install instead, so a frozen v2
+bundle must ship openreading's module sources and its dependencies' distribution metadata.
+Without them identity discovery refuses with engine_identity_unavailable. Fingerprinting only
+the data files a bundler collects would let two different engines share evidence identifiers.
 When sys.frozen is true, the executable must dispatch --internal-artifact-worker to
 openreading.artifacts.worker.main with the remaining arguments. This is the packager's
 versioned integration contract; ordinary Python installs use the module entry point.
@@ -34,7 +40,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from openreading.artifacts.intake import copy_source
-from openreading.artifacts.limits import ArtifactError, ProfileConfig
+from openreading.artifacts.limits import INPUT_REJECTIONS, ArtifactError, ProfileConfig
 from openreading.artifacts.models import (
     ArtifactManifest,
     EngineIdentity,
@@ -80,6 +86,10 @@ def _source_tree_hash(package: Path, backend: str = "pymupdf") -> str:
     ):
         selected.update(p for p in (package / name).rglob("*") if p.suffix in {".py", ".json"})
     selected.update((package / "adapters").glob("*.py"))
+    adapter = package / "adapters" / backend
+    if not any(path.suffix == ".py" and path.is_relative_to(adapter) for path in selected):
+        # Bundlers keep modules in an archive; hashing the remaining data files is not identity.
+        raise ValueError("Extraction sources are unavailable for fingerprinting.")
     digest = hashlib.sha256()
     for path in sorted(selected):
         contents = path.read_bytes()
@@ -93,6 +103,48 @@ def _source_tree_hash(package: Path, backend: str = "pymupdf") -> str:
     return digest.hexdigest()
 
 
+def _extraction_roots() -> dict[str, tuple[str, ...]]:
+    """The requirements of openreading's own docling-local extra, as installed."""
+    from packaging.requirements import Requirement
+
+    roots: dict[str, tuple[str, ...]] = {}
+    for line in importlib.metadata.distribution("openreading").requires or ():
+        requirement = Requirement(line)
+        if requirement.marker is None or requirement.marker.evaluate({"extra": "docling-local"}):
+            roots[requirement.name] = tuple(sorted(requirement.extras))
+    if "docling-slim" not in roots:
+        raise ValueError("Installed metadata does not declare the local Docling extra.")
+    return roots
+
+
+def _dependency_versions(roots: dict[str, tuple[str, ...]]) -> dict[str, str]:
+    """Installed versions of every distribution the roots resolve to, following markers."""
+    from packaging.requirements import Requirement
+    from packaging.utils import canonicalize_name
+
+    versions: dict[str, str] = {}
+    requested: dict[str, frozenset[str]] = {}
+    pending = [(name, frozenset(extras)) for name, extras in roots.items()]
+    while pending:
+        name, extras = pending.pop()
+        key = canonicalize_name(name)
+        known = requested.get(key)
+        if known is not None and extras <= known:
+            continue
+        requested[key] = (known or frozenset()) | extras
+        # A declared dependency that is absent is a broken install, not an optional input.
+        distribution = importlib.metadata.distribution(key)
+        versions[key] = distribution.version
+        environments = [{"extra": extra} for extra in sorted(requested[key])] or [{"extra": ""}]
+        for line in distribution.requires or ():
+            requirement = Requirement(line)
+            if requirement.marker is None or any(
+                requirement.marker.evaluate(environment) for environment in environments
+            ):
+                pending.append((requirement.name, frozenset(requirement.extras)))
+    return dict(sorted(versions.items()))
+
+
 def engine_identity(config: ProfileConfig | None = None) -> EngineIdentity:
     package = Path(__file__).resolve().parents[1]
     try:
@@ -102,26 +154,11 @@ def engine_identity(config: ProfileConfig | None = None) -> EngineIdentity:
                 MODEL_REVISION,
             )
 
-            versions = {
-                name: importlib.metadata.version(name)
-                for name in (
-                    "docling-slim",
-                    "docling-core",
-                    "docling-parse",
-                    "pypdfium2",
-                    "onnxruntime",
-                    "transformers",
-                    "numpy",
-                    "pillow",
-                    "pandas",
-                    "scipy",
-                    "tokenizers",
-                    "huggingface-hub",
-                )
-            }
+            versions = _dependency_versions(_extraction_roots())
             if config.docling.dependency_lock is None:
                 raise ValueError("A Docling profile requires its dependency lock.")
             ocr_version = None
+            ocr_build = None
             if config.docling.ocr:
                 if config.docling.tesseract_cmd is None:
                     raise ValueError("Explicit OCR executable required.")
@@ -132,8 +169,16 @@ def engine_identity(config: ProfileConfig | None = None) -> EngineIdentity:
                     check=True,
                     text=True,
                 )
-                ocr_version = reported.stdout.splitlines()[0]
-                if not ocr_version.startswith("tesseract ") or len(ocr_version) > 256:
+                lines = reported.stdout.splitlines()
+                ocr_version = lines[0]
+                # The executable is a thin driver; the recognizer and image decoding live in
+                # libtesseract and Leptonica, whose versions only this report names.
+                ocr_build = [line.strip() for line in lines[1:17] if line.strip()]
+                if (
+                    not ocr_version.startswith("tesseract ")
+                    or len(ocr_version) > 256
+                    or any(len(line) > 256 for line in ocr_build)
+                ):
                     raise ValueError("Invalid OCR executable identity.")
             return EngineIdentity(
                 core_version=importlib.metadata.version("openreading"),
@@ -142,6 +187,7 @@ def engine_identity(config: ProfileConfig | None = None) -> EngineIdentity:
                 extraction_settings={
                     "integration": INTEGRATION_REVISION,
                     "tesseract_version": ocr_version,
+                    "tesseract_build": ocr_build,
                     "model_revision": MODEL_REVISION,
                     "assets": config.docling.validate_assets(),
                     "dependencies": versions,
@@ -202,6 +248,7 @@ class ArtifactService:
                 [*command, "--serve"],
                 memory_bytes=config.limits.worker_memory_bytes,
                 idle_seconds=config.limits.worker_idle_seconds,
+                cwd=self.config.artifact_root / "worker",
             )
 
     def close(self):
@@ -315,8 +362,11 @@ class ArtifactService:
                 if self._warm is not None:
                     self._warm.close()
                 raise ArtifactError("storage_limit") from None
-            except BaseException:
-                if self._warm is not None:
+            except BaseException as error:
+                # WarmWorker already stopped any generation it could not trust. A clean input
+                # rejection leaves it between jobs, so closing would only discard the model.
+                rejected = isinstance(error, ArtifactError) and error.code in INPUT_REJECTIONS
+                if self._warm is not None and not rejected:
                     self._warm.close()
                 raise
             finally:
@@ -350,6 +400,7 @@ class ArtifactService:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
+            cwd=self.config.artifact_root / "worker",
         ) as process:
             try:
                 while process.poll() is None:

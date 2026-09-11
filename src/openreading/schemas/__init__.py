@@ -193,8 +193,9 @@ readers the field paths, optional-value rules, and distinctions between outer re
     a JSON object, so the response is PARTIAL), ``typed_fields_unverified``,
     ``output_truncated``, ``interaction_incomplete`` (the vendor stopped before finishing),
     ``partial_conversion`` (the local converter returned partial output), ``bbox_space_approximate``, ``ambiguous_page_provenance`` (unattributable text omitted),
-    ``unreadable_pages`` (no page-addressable text), and ``table_text_unavailable``
-    (table text absent while structured table extraction is disabled).
+    ``unreadable_pages`` (no page-addressable text), ``table_text_unavailable``
+    (table text absent while structured table extraction is disabled), and
+    ``furniture_text_omitted`` (running headers and footers excluded from page evidence).
   - the run took a detour: ``fallback_used`` (the router's attempt trail),
     ``idempotent_replay``, ``quality_below_threshold`` (every rung gated, best result
     retained), ``quality_escalated`` (a rung gated and a later rung answered, so the walk

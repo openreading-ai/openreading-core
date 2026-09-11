@@ -3,6 +3,8 @@
 Every provenance range must fit the item's text and name a known physical page.
 Overlapping ranges are ambiguous and omit the item with a warning. Geometry remains
 optional. Page origin summarizes the measured native/OCR cells conservatively.
+Furniture text, such as a running header, stays out of page evidence with a warning,
+because a search that cannot see it must not look like proof the words are absent.
 """
 
 from __future__ import annotations
@@ -102,6 +104,8 @@ def project_document(
                     bbox=_geometry(prov, metadata[str(page)].get("size", {}), page),
                 )
             )
+    if payload.get("omitted_furniture_items"):
+        warning_codes.add("furniture_text_omitted")
     pages = []
     origins: dict[int, TextOrigin] = {}
     for number in numbers:
@@ -139,6 +143,7 @@ def project_document(
         "table_text_unavailable": "A table region has no independently available text; table structure is disabled.",
         "ambiguous_page_provenance": "Text without unambiguous physical-page spans was omitted from page evidence.",
         "unreadable_pages": "Some physical pages have no page-addressable text; check the source and OCR setting.",
+        "furniture_text_omitted": "Page headers, footers, and other furniture text are excluded from page evidence.",
     }
     for code in sorted(warning_codes):
         response.add_warning(code, messages[code], "text")

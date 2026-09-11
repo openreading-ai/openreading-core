@@ -16,6 +16,8 @@ def test_installed_identity_never_uses_an_enclosing_git_repository(
     package = tmp_path / "package/openreading"
     (package / "artifacts").mkdir(parents=True)
     (package / "artifacts/service.py").write_text("# installed module")
+    (package / "adapters/pymupdf").mkdir(parents=True)
+    (package / "adapters/pymupdf/adapter.py").write_text("# installed adapter")
     if inside_repository:
         subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
         subprocess.run(
@@ -117,4 +119,16 @@ def test_missing_distribution_reports_dependencies_without_native_import(monkeyp
 
     monkeypatch.setattr(service.importlib.metadata, "version", missing)
     with pytest.raises(ImportError, match="Install the local profile dependencies"):
+        service.engine_identity()
+
+
+def test_identity_refuses_an_install_whose_extraction_sources_are_absent(tmp_path, monkeypatch):
+    from openreading.artifacts.limits import ArtifactError
+
+    # A PyInstaller bundle keeps modules in its archive and collects only data files here.
+    package = tmp_path / "openreading"
+    (package / "schemas").mkdir(parents=True)
+    (package / "schemas" / "passage.v0.2.json").write_text("{}")
+    monkeypatch.setattr(service, "__file__", str(package / "artifacts/service.py"))
+    with pytest.raises(ArtifactError, match="engine_identity_unavailable"):
         service.engine_identity()

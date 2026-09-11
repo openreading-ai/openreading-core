@@ -4,6 +4,8 @@ The fixed layout revision prevents an ambient cache or changed weight file from
 silently becoming a different extraction engine. OCR requires explicit executable
 and language data paths, independent of PATH and TESSDATA_PREFIX.
 The selected tessdata directory must contain osd.traineddata for orientation detection.
+It must also contain configs/tsv. Docling asks Tesseract for its tsv output configuration,
+which Tesseract reads from that directory, so those bytes change recognition like model data.
 """
 
 from __future__ import annotations
@@ -97,6 +99,7 @@ class LocalDoclingConfig:
                     hashes[f"{lang}.traineddata"] = file_digest(
                         self.tessdata_path / f"{lang}.traineddata"
                     )
+                hashes["configs/tsv"] = file_digest(self.tessdata_path / "configs" / "tsv")
             if self.dependency_lock is not None:
                 if not self.dependency_lock.is_absolute():
                     raise ValueError

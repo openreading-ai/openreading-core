@@ -1,9 +1,13 @@
 """Own one warm parser process with bounded private control messages and sampled RSS.
 
 A process group includes OCR children. Cancellation, deadline, malformed output, or
-monitoring failure kills that group before a job releases ownership. Idle shutdown
-reaps the worker; the next explicit job starts a new generation without retrying failures.
+monitoring failure kills that group before a job releases ownership. A well-formed input
+rejection, such as a password-protected file, keeps the generation and its loaded model.
+Idle shutdown reaps the worker; the next explicit job starts a new generation without
+retrying failures.
 RSS is a sampled process-tree sum, not a hard operating-system memory reservation.
+The worker starts in a caller-selected private directory. ONNX Runtime 1.30 writes a
+telemetry session file into its working directory, and a client may launch the server anywhere.
 """
 
 from __future__ import annotations
@@ -18,10 +22,14 @@ import uuid
 from collections.abc import Callable
 from contextlib import suppress
 
-from openreading.artifacts.limits import MESSAGES, ArtifactError
+from openreading.artifacts.limits import INPUT_REJECTIONS, MESSAGES, ArtifactError
 from openreading.artifacts.models import ToolError, json_bytes
 
 STAGES = ("preflight", "conversion", "writing")
+
+
+class _Rejected(ArtifactError):
+    """An input rejection the worker reported cleanly, so its generation stays usable."""
 
 
 def process_rss(pid: int) -> int:
@@ -46,11 +54,13 @@ class WarmWorker:
         memory_bytes: int,
         idle_seconds: float,
         rss: Callable[[int], int] = process_rss,
+        cwd: str | os.PathLike[str] | None = None,
     ):
         if memory_bytes <= 0 or idle_seconds <= 0:
             raise ValueError("Worker resource limits must be positive.")
         self.command, self.memory_bytes, self.idle_seconds = command, memory_bytes, idle_seconds
         self.rss = rss
+        self.cwd = cwd
         self._lock = threading.Lock()
         self._process = None
         self._read_fd = None
@@ -74,6 +84,7 @@ class WarmWorker:
                 stderr=subprocess.DEVNULL,
                 pass_fds=(write_fd,),
                 start_new_session=True,
+                cwd=self.cwd,
             )
             self._read_fd = read_fd
         except BaseException:
@@ -102,6 +113,12 @@ class WarmWorker:
     def close(self):
         with self._lock:
             self._stop()
+
+    def _arm_idle(self, token):
+        self._idle_token = token
+        self._timer = threading.Timer(self.idle_seconds, self._idle, (token,))
+        self._timer.daemon = True
+        self._timer.start()
 
     def _idle(self, token):
         with self._lock:
@@ -163,22 +180,24 @@ class WarmWorker:
                         if progress is not None:
                             progress(result["stage"])
                     elif set(result) == {"id", "error"} and result["error"] in MESSAGES:
-                        raise ArtifactError(
-                            ToolError(code=result["error"], message="", retryable=False).code
-                        )
+                        code = ToolError(code=result["error"], message="", retryable=False).code
+                        if code in INPUT_REJECTIONS and not pending:
+                            check()
+                            self._arm_idle(identifier)
+                            raise _Rejected(code)
+                        raise ArtifactError(code)
                     elif (
                         result == {"id": identifier, "ok": True}
                         and result["ok"] is True
                         and not pending
                     ):
                         check()
-                        self._idle_token = identifier
-                        self._timer = threading.Timer(self.idle_seconds, self._idle, (identifier,))
-                        self._timer.daemon = True
-                        self._timer.start()
+                        self._arm_idle(identifier)
                         return
                     else:
                         raise ArtifactError("parse_failed")
+        except _Rejected as rejection:
+            raise ArtifactError(rejection.code) from None
         except BaseException as error:
             self._stop()
             if isinstance(error, (ArtifactError, KeyboardInterrupt, SystemExit)):

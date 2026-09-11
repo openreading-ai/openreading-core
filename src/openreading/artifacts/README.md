@@ -53,8 +53,10 @@ These numbers are developer safeguards, not measured release defaults or host co
 Start `openreading mcp --profile local-document-proof-v2 --profile-config /absolute/setup.json --input-root /absolute/documents --artifact-root /absolute/evidence`.
 Enable OCR through setup with `ocr: true`, `tesseract_cmd`, and `tessdata_path` pointing to your selected executable and language data.
 Include `osd.traineddata` in that directory for orientation detection.
+Include `configs/tsv` there too, because Tesseract reads its output configuration from that directory.
 The default language is `eng`; the configured model, executable, language data, and lock hashes enter the extraction identity.
 The lock hash identifies a selected file. It does not verify that installed packages match that lock.
+The identity separately records the installed version of every distribution the `docling-local` extra resolves to.
 Packaging must establish that relationship through a locked build and runtime verification.
 A sampled memory limit includes the worker and its descendants; sampling permits transient overshoot.
 

@@ -88,6 +88,8 @@ def test_asset_validation_hashes_ocr_data_and_lock_and_refuses_mutation(tmp_path
     (tmp_path / "osd.traineddata").write_bytes(b"orientation")
     (tmp_path / "tesseract").write_bytes(b"executable")
     (tmp_path / "uv.lock").write_bytes(b"lock")
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs" / "tsv").write_bytes(b"tessedit_create_tsv 1")
     selected = config.LocalDoclingConfig(
         tmp_path,
         ocr=True,
@@ -101,6 +103,7 @@ def test_asset_validation_hashes_ocr_data_and_lock_and_refuses_mutation(tmp_path
         "tesseract",
         "eng.traineddata",
         "osd.traineddata",
+        "configs/tsv",
         "dependency_lock",
     }
     for changes in [
@@ -229,3 +232,31 @@ def test_ocr_orientation_uses_only_selected_tessdata(tmp_path, monkeypatch):
     assert str(frame.loc[frame.key == "Orientation in degrees", "value"].iloc[0]).strip() == "0"
     assert len(commands) == 1
     assert commands[0][commands[0].index("-l") + 1] == "osd"
+
+
+def test_ocr_output_configuration_is_hashed_with_language_data(tmp_path, monkeypatch):
+    import hashlib
+
+    import pytest
+
+    from openreading.adapters.docling_local import config
+
+    model = tmp_path / config.MODEL_REPOSITORY.replace("/", "--")
+    model.mkdir()
+    (model / "config.json").write_bytes(b"model")
+    monkeypatch.setattr(
+        config, "MODEL_FILES", {"config.json": hashlib.sha256(b"model").hexdigest()}
+    )
+    for name in ("eng.traineddata", "osd.traineddata", "tesseract"):
+        (tmp_path / name).write_bytes(name.encode())
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs" / "tsv").write_bytes(b"tessedit_create_tsv 1\n")
+    selected = config.LocalDoclingConfig(
+        tmp_path, ocr=True, tesseract_cmd=tmp_path / "tesseract", tessdata_path=tmp_path
+    )
+    before = selected.validate_assets()
+    (tmp_path / "configs" / "tsv").write_bytes(b"tessedit_create_txt 1\n")
+    assert selected.validate_assets()["configs/tsv"] != before["configs/tsv"]
+    (tmp_path / "configs" / "tsv").unlink()
+    with pytest.raises(ValueError, match="assets"):
+        selected.validate_assets()

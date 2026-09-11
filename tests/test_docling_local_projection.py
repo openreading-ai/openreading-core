@@ -117,3 +117,13 @@ def test_upstream_partial_state_is_not_reported_as_complete():
     response, _ = project_document({"pages": {"1": {}}, "items": [], "partial": True}, Outputs())
     assert response.status.state == "partial"
     assert any(w.code == "partial_conversion" for w in response.warnings)
+
+
+def test_excluded_furniture_text_is_disclosed_not_silently_dropped():
+    from openreading.adapters.docling_local.projection import project_document
+
+    payload = {"pages": {"1": {}}, "items": [item()], "omitted_furniture_items": 2}
+    response, _ = project_document(payload, Outputs())
+    assert any(w.code == "furniture_text_omitted" for w in response.warnings)
+    quiet, _ = project_document({"pages": {"1": {}}, "items": [item()]}, Outputs())
+    assert not any(w.code == "furniture_text_omitted" for w in quiet.warnings or [])

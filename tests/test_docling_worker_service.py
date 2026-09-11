@@ -189,3 +189,74 @@ def test_partial_page_set_cannot_shrink_physical_source_count(tmp_path, monkeypa
     monkeypatch.setattr(client, "preflight_pdf", lambda path: (2, False))
     with pytest.raises(ArtifactError, match="parse_failed"):
         worker.extract(job(tmp_path))
+
+
+def test_input_rejection_keeps_the_warm_worker_but_a_parse_failure_closes_it(
+    tmp_path, monkeypatch, extraction
+):
+    from openreading.artifacts.supervisor import WarmWorker
+
+    root = tmp_path / "input"
+    root.mkdir()
+    (root / "test.pdf").write_bytes(b"%PDF-test")
+    config = ProfileConfig(
+        root,
+        tmp_path / "store",
+        DoclingLimits(
+            pages=10, deadline_seconds=60, worker_memory_bytes=2**31, worker_idle_seconds=60
+        ),
+        LocalDoclingConfig(tmp_path),
+    )
+    identity = EngineIdentity(
+        core_version="test",
+        backend_id="docling_local",
+        backend_version="test",
+        extraction_settings={"assets": {"model": "fixed"}},
+    )
+    outcome = ["no_readable_text"]
+    closed = []
+
+    def run(self, value, **kwargs):
+        raise ArtifactError(outcome[0])
+
+    monkeypatch.setattr(WarmWorker, "run", run)
+    monkeypatch.setattr(WarmWorker, "close", lambda self: closed.append(True))
+    service = ArtifactService(config, identity=identity)
+    try:
+        with pytest.raises(ArtifactError, match="no_readable_text"):
+            service.import_document("test.pdf")
+        assert closed == []
+        outcome[0] = "parse_failed"
+        with pytest.raises(ArtifactError, match="parse_failed"):
+            service.import_document("test.pdf")
+        assert closed == [True]
+    finally:
+        service.close()
+
+
+def test_service_confines_parser_workers_to_a_private_store_directory(tmp_path, extraction):
+    import stat
+
+    root = tmp_path / "input"
+    root.mkdir()
+    config = ProfileConfig(
+        root,
+        tmp_path / "store",
+        DoclingLimits(
+            pages=10, deadline_seconds=60, worker_memory_bytes=2**31, worker_idle_seconds=60
+        ),
+        LocalDoclingConfig(tmp_path),
+    )
+    identity = EngineIdentity(
+        core_version="test",
+        backend_id="docling_local",
+        backend_version="test",
+        extraction_settings={"assets": {"model": "fixed"}},
+    )
+    service = ArtifactService(config, identity=identity)
+    try:
+        private = service.config.artifact_root / "worker"
+        assert service._warm.cwd == private
+        assert stat.S_IMODE(private.stat().st_mode) == 0o700
+    finally:
+        service.close()

@@ -40,4 +40,11 @@ Known gaps
 ----------
 Docling release defaults require host timeout and base-machine measurements.
 No runtime claims a hard operating-system memory ceiling or sandbox.
+Pages with no measured cells currently receive the mixed origin label, even without text.
+That label cannot establish native or OCR content and needs a future schema correction.
+An import racing idle shutdown can receive retryable busy before any conversion starts.
+Older artifact formats require reimport; their retained files still consume the storage budget.
+ONNX Runtime 1.30 also tries to persist a telemetry device identifier outside the artifact root.
+Its disable_telemetry_events function does not stop that attempt or its session file. The
+private worker directory contains only the session file.
 """

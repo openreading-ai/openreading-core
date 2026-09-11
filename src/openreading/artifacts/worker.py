@@ -3,6 +3,8 @@
 The parent creates the job file and owns its deadline, process group, lock, and cleanup.
 The parent selects PyMuPDF or the explicit local Docling profile. No job names an endpoint.
 Docling checks PDFium page limits before conversion and preserves the warm converter.
+Missing physical pages reject the entire conversion rather than retaining incomplete evidence.
+A partial result is retained only when its page count still matches the source preflight.
 Its private control pipe carries bounded stage and completion records, never extracted text.
 Parser stdout is discarded by the parent; MCP stdout remains protocol-only.
 """

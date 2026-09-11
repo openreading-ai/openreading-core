@@ -145,3 +145,54 @@ def test_progress_and_concurrent_request_do_not_replace_active_worker(command, t
         worker.close()
     assert not errors
     assert seen == ["preflight", "conversion", "writing"]
+
+
+def test_clean_input_rejection_keeps_the_warm_converter(command, tmp_path):
+    from openreading.artifacts.supervisor import WarmWorker
+
+    child = tmp_path / "child.py"
+    child.write_text(
+        child.read_text().replace(
+            ' if job.get("slow"):',
+            """ if job.get("code"):
+  os.write(fd,(json.dumps({"id":job["id"],"error":job["code"]})+"\\n").encode());continue
+ if job.get("slow"):""",
+        )
+    )
+    worker = WarmWorker(command, memory_bytes=128 * 1024**2, idle_seconds=30)
+    try:
+        worker.run({}, check=lambda: None)
+        pid = worker.pid
+        with pytest.raises(ArtifactError, match="password_required"):
+            worker.run({"code": "password_required"}, check=lambda: None)
+        assert worker.pid == pid
+        worker.run({}, check=lambda: None)
+        assert worker.pid == pid
+        with pytest.raises(ArtifactError, match="parse_failed"):
+            worker.run({"code": "parse_failed"}, check=lambda: None)
+        assert worker.pid is None
+    finally:
+        worker.close()
+
+
+def test_worker_runs_from_its_private_directory(command, tmp_path, monkeypatch):
+    from openreading.artifacts.supervisor import WarmWorker
+
+    # ONNX Runtime writes a telemetry session file relative to its working directory.
+    child = tmp_path / "child.py"
+    child.write_text(
+        child.read_text().replace(
+            " job=json.loads(line)", " job=json.loads(line)\n open('probe','w').close()"
+        )
+    )
+    private, elsewhere = tmp_path / "private", tmp_path / "elsewhere"
+    private.mkdir()
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    worker = WarmWorker(command, memory_bytes=128 * 1024**2, idle_seconds=30, cwd=private)
+    try:
+        worker.run({}, check=lambda: None)
+    finally:
+        worker.close()
+    assert (private / "probe").exists()
+    assert not (elsewhere / "probe").exists()
