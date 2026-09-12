@@ -82,3 +82,80 @@ def test_real_ocr_labels_the_scanned_page(tmp_path):
     )
     assert origins == {1: "native", 2: "ocr", 3: "none"}
     assert "45 days" in (response.document.pages[1].text or "")
+
+
+def test_real_wrapped_compounds_remain_searchable_with_exact_citations(tmp_path):
+    import pymupdf
+
+    from openreading.adapters.docling_local.config import LocalDoclingConfig
+    from openreading.artifacts.limits import DoclingLimits, ProfileConfig
+    from openreading.artifacts.service import ArtifactService
+
+    source = tmp_path / "input"
+    source.mkdir()
+    with pymupdf.open() as doc:
+        page = doc.new_page()
+        for index, line in enumerate(
+            ["A third-", "party beneficiary and any non-", "compete duty survive re-", "newal."]
+        ):
+            page.insert_text((72, 100 + index * 14), line)
+        doc.save(source / "wrapped.pdf")
+    config = ProfileConfig(
+        source,
+        tmp_path / "store",
+        DoclingLimits(
+            pages=5, deadline_seconds=60, worker_memory_bytes=2**32, worker_idle_seconds=60
+        ),
+        LocalDoclingConfig(
+            _assets(), dependency_lock=Path(__file__).resolve().parents[1] / "uv.lock"
+        ),
+    )
+    service = ArtifactService(config)
+    try:
+        receipt = service.import_document("wrapped.pdf")
+        for query in ("third-party", "party", "non-compete", "compete", "renewal", "thirdparty"):
+            hits = service.search(receipt.artifact_id, query).hits
+            assert len(hits) == 1, query
+            passage = service.read(receipt.artifact_id, [hits[0].evidence_id]).passages[0]
+            assert hits[0].page == passage.page == 1
+            assert hits[0].excerpt == passage.text[hits[0].excerpt_start : hits[0].excerpt_end]
+            assert "third-\nparty" in passage.text
+            assert "non-\ncompete" in passage.text
+    finally:
+        service.close()
+
+
+def test_repeated_real_api_conversions_reuse_native_session_with_bounded_growth(
+    tmp_path, monkeypatch
+):
+    import psutil
+
+    from openreading import run
+    from openreading.adapters.docling_local import client, pipeline
+
+    monkeypatch.setenv("DOCLING_LOCAL_ASSETS", str(_assets()))
+    monkeypatch.setattr(client, "_shared", client._SharedClient())
+    create = pipeline.create_converter
+    initialized = 0
+
+    def measured(config):
+        nonlocal initialized
+        initialized += 1
+        return create(config)
+
+    monkeypatch.setattr(pipeline, "create_converter", measured)
+    data = _pdf(tmp_path / "source.pdf")
+    rss = []
+    process = psutil.Process()
+    try:
+        for index in range(25):
+            response = run(data, backend="docling_local", mime_type="application/pdf")
+            assert response["status"]["state"] == "succeeded"
+            assert "60 days" in response["document"]["text"]
+            if index >= 4:
+                rss.append(process.memory_info().rss)
+        assert initialized == 1
+        # Compare post-warmup growth rather than platform-dependent total interpreter RSS.
+        assert max(rss) - rss[0] < 200 * 1024**2
+    finally:
+        client._shared._discard()

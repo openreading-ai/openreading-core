@@ -3,6 +3,7 @@
 Queries match Unicode letter/number spans after case folding, and every original word stays
 searchable. A hyphen attached to a word and followed by a line break adds the closed-up word when
 the next word starts lowercase. PyMuPDF renders that break as a space, so "re- newal" counts.
+ASCII hyphens, soft hyphens (U+00AD), and Unicode hyphens (U+2010) mark these wrap points.
 Inline hyphens and uppercase starts never close up. Keeping the halves means a compound wrapped
 after its hyphen, such as "third- party", still matches party. Ranking prefers
 more distinct terms, then physical page and source position. Excerpts retain original
@@ -42,7 +43,7 @@ TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
 Result = TypeVar("Result", bound=WireModel)
 
 
-_WRAPPED = re.compile(r"-(?:\r?\n|[ \t])[ \t]*")
+_WRAPPED = re.compile(r"[-\u00ad\u2010](?:\r?\n|[ \t])[ \t]*")
 
 
 def _tokens(text: str) -> list[tuple[str, int]]:

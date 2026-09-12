@@ -70,6 +70,39 @@ def test_pipeline_initializes_selected_stages_without_loading_weights(tmp_path, 
     assert list(pipeline.ocr_model(None, iter([3]))) == [3]
 
 
+def test_assembly_preserves_wrapped_compounds_before_normalizing_typography(tmp_path, monkeypatch):
+    from docling.datamodel.base_models import InputFormat
+    from docling.models.inference_engines.object_detection.onnxruntime_engine import (
+        OnnxRuntimeObjectDetectionEngine,
+    )
+    from docling.models.stages.layout.layout_object_detection_model import (
+        LayoutObjectDetectionModel,
+    )
+
+    from openreading.adapters.docling_local.config import LocalDoclingConfig
+    from openreading.adapters.docling_local.pipeline import create_converter
+
+    monkeypatch.setattr(LocalDoclingConfig, "validate_assets", lambda self: {})
+    monkeypatch.setattr(OnnxRuntimeObjectDetectionEngine, "initialize", lambda self: None)
+    monkeypatch.setattr(LayoutObjectDetectionModel, "_build_label_map", lambda self: {})
+    converter = create_converter(LocalDoclingConfig(tmp_path))
+    converter.initialize_pipeline(InputFormat.PDF)
+    assembly = next(iter(converter.initialized_pipelines.values())).assemble_model
+    for lines, expected in [
+        (["A third-", "party beneficiary"], "A third-\nparty beneficiary"),
+        (["The non-", "compete duty survives."], "The non-\ncompete duty survives."),
+        (["Before re-", "newal."], "Before re-\nnewal."),
+        (["Before re\u00ad", "newal."], "Before re\u00ad\nnewal."),
+        (["Before re\u2010", "newal."], "Before re\u2010\nnewal."),
+        (["A re-cover clause", "and a recover clause."], "A re-cover clause and a recover clause."),
+        (["The ‘ﬁ eld’", "is visible."], "The 'field' is visible."),
+        ([], ""),
+    ]:
+        original = list(lines)
+        assert assembly.sanitize_text(lines) == expected
+        assert lines == original
+
+
 def test_asset_validation_hashes_ocr_data_and_lock_and_refuses_mutation(tmp_path, monkeypatch):
     import hashlib
     from dataclasses import replace

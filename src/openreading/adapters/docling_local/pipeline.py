@@ -4,8 +4,12 @@ Docling 2.126.0 imports torch during CPU device selection and disabled table-plu
 loading. Explicit initialization avoids both paths without patching global factories.
 Transformers 5 preprocessing uses its explicit PIL implementation with NumPy tensors.
 The generic AutoImageProcessor instead requires Torchvision.
-The upstream standard pipeline still owns threading, layout postprocessing, assembly,
-and reading order. All native imports occur inside create_converter in the worker.
+The upstream standard pipeline still owns threading, layout postprocessing, and reading order.
+Assembly preserves wrapped hyphens because removing them destroys searchable compound words.
+For example, third-party must remain searchable as party without rewriting retained quotations.
+Ordinary line breaks become spaces; breaks after hyphens remain visible in the stored text.
+Upstream typography normalization still handles ligatures and quotation marks.
+All native imports occur inside create_converter when conversion starts.
 """
 
 from __future__ import annotations
@@ -129,6 +133,18 @@ def create_converter(config: LocalDoclingConfig):
         def __call__(self, conv_res, pages):
             return pages
 
+    class EvidenceAssembly(PageAssembleModel):
+        def sanitize_text(self, lines):
+            # One input line bypasses upstream's irreversible word joining, while retaining
+            # its typography normalization. Search adds joined forms without changing evidence.
+            text = "".join(
+                line + ("\n" if line.endswith(("-", "\u00ad", "\u2010")) else " ")
+                for line in lines[:-1]
+            )
+            if lines:
+                text += lines[-1]
+            return super().sanitize_text([text])
+
     class LocalPdfPipeline(StandardPdfPipeline):
         def _init_models(self):
             opts = self.pipeline_options
@@ -154,7 +170,7 @@ def create_converter(config: LocalDoclingConfig):
                 options=LayoutPostprocessorOptions()
             )
             self.table_model = DisabledStage()
-            self.assemble_model = PageAssembleModel(options=PageAssembleOptions())
+            self.assemble_model = EvidenceAssembly(options=PageAssembleOptions())
             self.reading_order_model = ReadingOrderModel(options=ReadingOrderOptions())
             self.heading_hierarchy_model = HeadingHierarchyModel(
                 options=opts.heading_hierarchy_options

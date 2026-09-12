@@ -3,12 +3,17 @@
 ## Unreleased retained evidence v0.3
 
 - Distinguish empty-page and unknown text origins without fabricating mixed extraction.
-- Add lexical-v3-dehyphenated retrieval. Wrapped words also match closed up, each half stays
+- Add lexical-v4-unicode-wraps retrieval. Wrapped words also match closed up, each half stays
   searchable, and quotes and offsets stay exact.
+- Recognize ASCII, soft, and Unicode hyphens at search wrap points.
 - Preserve and byte-pin historical retained evidence schemas.
 
 ## Unreleased local Docling profile
 
+- Preserve wrapped compounds during local assembly so searches find their component words.
+  Reimport earlier Docling artifacts to recover these words in retained evidence.
+- Reuse one serialized local converter per process across API and HTTP requests.
+  Revalidate assets on every request and release the converter after failures or configuration changes.
 - Record the installed dependency closure and Tesseract output configuration in engine identity.
 - Refuse source-free identity discovery and disclose omitted running headers and footers.
 - Preserve warm workers after clean input rejections and contain their relative file writes.

@@ -44,8 +44,8 @@ Known gaps
 Docling release defaults require host timeout and base-machine measurements.
 No runtime claims a hard operating-system memory ceiling or sandbox.
 An import racing idle shutdown can receive retryable busy before any conversion starts.
-Docling closes words wrapped at a hyphen before core sees them, including true compounds.
-Its retained text can read thirdparty where the page prints third-party, so party misses it.
+Docling artifacts imported before integration v4 can contain closed-up compounds such as thirdparty.
+Reimport those documents to preserve wrapped hyphens and make each component word searchable.
 Older artifact formats require reimport; their retained files still consume the storage budget.
 Search changes also change import identity, so importing again can repeat extraction and storage.
 Separating extraction identity from retrieval remains unbuilt; loading an existing identifier still works.

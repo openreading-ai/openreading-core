@@ -175,7 +175,15 @@ def test_large_evidence_indices_match_the_vendored_schema():
 
 
 @pytest.mark.parametrize(
-    "text", ["😀 re-\nnewal notice", "re-\r\n  newal notice", "re- newal notice", "ofﬁce renewal"]
+    "text",
+    [
+        "😀 re-\nnewal notice",
+        "re-\r\n  newal notice",
+        "re- newal notice",
+        "ofﬁce renewal",
+        "re\u00ad\nnewal notice",
+        "re\u2010\nnewal notice",
+    ],
 )
 def test_joined_search_terms_preserve_exact_passage_and_excerpt(manifest, text):
     query = "office" if "ﬁ" in text else "renewal"

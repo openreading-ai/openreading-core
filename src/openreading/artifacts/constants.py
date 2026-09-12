@@ -8,4 +8,4 @@ MAX_READ_PASSAGES = 8
 MAX_CURSOR_CHARS = 512
 
 # Cursors bind this value, so change it whenever tokenization or ranking can change a hit list.
-RETRIEVER_REVISION = "lexical-v3-dehyphenated"
+RETRIEVER_REVISION = "lexical-v4-unicode-wraps"

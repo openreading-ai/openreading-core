@@ -134,7 +134,7 @@ class DoclingLocalAdapter(BackendAdapter):
             )
             client = self._client
             if client is None:
-                from openreading.adapters.docling_local.client import LocalDoclingClient
+                from openreading.adapters.docling_local.client import convert_shared
 
                 runtime = ctx.runtime or {}
                 config = self.config or LocalDoclingConfig(
@@ -147,8 +147,9 @@ class DoclingLocalAdapter(BackendAdapter):
                     if runtime.get("tessdata_path")
                     else None,
                 )
-                client = LocalDoclingClient(config)
-            raw = client.convert(data)
+                raw = convert_shared(config, data)
+            else:
+                raw = client.convert(data)
         except Exception:
             raise TerminalError(
                 "Local Docling could not process this input or configuration.",

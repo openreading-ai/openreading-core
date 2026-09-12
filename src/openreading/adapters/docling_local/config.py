@@ -22,7 +22,7 @@ MODEL_FILES = {
     "preprocessor_config.json": "54d086cf0d7d371f7fac36e5d3a0dae31e211298affc816106cc376506799d58",
     "model.onnx": "59c81a3a2923042d85034ffc487f8f47e4854117e879aef89b2b9f728fb4922a",
 }
-INTEGRATION_REVISION = "docling-onnx-cpu-pil-v3"
+INTEGRATION_REVISION = "docling-onnx-cpu-pil-v4"
 
 
 def file_digest(path: Path) -> str:
