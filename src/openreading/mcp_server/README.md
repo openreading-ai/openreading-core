@@ -64,6 +64,9 @@ The Python SDK dependency is optional and pinned through the lockfile's supporte
 
 Run `openreading help mcp` for the command contract and `openreading mcp --help` for its required arguments.
 Read `openreading.mcp_server.tools` for input schemas, tool annotations, and server instructions.
+Those instructions prohibit guessed evidence identifiers and distinguish literal search gaps from missing source facts.
+They describe block offsets and generic warnings as limited evidence, rather than explanations for suspected extraction failures.
+Instruction delivery does not prove compliance; each native client needs its own behavior check.
 Client packaging and installation checks belong in the separate `openreading-agent-tools` repository.
 
 ## Not built yet

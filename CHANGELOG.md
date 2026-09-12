@@ -2,6 +2,8 @@
 
 ## Unreleased retained evidence v0.3
 
+- Tell MCP clients to reuse returned evidence identifiers and avoid guessing extraction failures from block offsets.
+
 - Distinguish empty-page and unknown text origins without fabricating mixed extraction.
 - Add lexical-v4-unicode-wraps retrieval. Wrapped words also match closed up, each half stays
   searchable, and quotes and offsets stay exact.
