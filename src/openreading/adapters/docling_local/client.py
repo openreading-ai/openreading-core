@@ -7,7 +7,8 @@ The client counts furniture items that carry text so projection can disclose the
 
 Ordinary API and HTTP requests share one converter per process through convert_shared.
 Conversions are serialized because the pipeline and its native session carry mutable state.
-Settings or asset changes replace the converter; failed conversions discard it before retry.
+Changed settings or asset hashes evict the existing converter before another request can reuse it.
+Failed conversions discard the converter so subsequent requests start with fresh native state.
 Replacement collects unreachable native-session cycles before another model is initialized.
 Assets are verified on every call. The cache retains no document inputs or conversion results.
 The supervised artifact worker owns its separate LocalDoclingClient and process lifecycle.
