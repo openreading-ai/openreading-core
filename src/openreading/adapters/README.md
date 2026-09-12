@@ -131,7 +131,7 @@ none means the backend declares no variable of that kind.
 | `aws-textract` | hosted_api | `textract` | none | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_REGION` or `AWS_DEFAULT_REGION`, `OPENREADING_TEXTRACT_S3_BUCKET` |
 | `azure-document-intelligence` | hosted_api | `azure-document-intelligence` | `AZURE_DOCUMENT_INTELLIGENCE_KEY`, `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT` | none |
 | `chunkr` | hosted_api | `chunkr` | `CHUNKR_API_KEY` | `CHUNKR_BASE_URL` |
-| `docling_local` | oss_library | `docling_local` | `DOCLING_LOCAL_ASSETS` | none |
+| `docling_local` | oss_library | `docling_local` | `DOCLING_LOCAL_ASSETS` | `DOCLING_LOCAL_TESSERACT`, `DOCLING_LOCAL_TESSDATA` |
 | `docling` | oss_library | `docling` | `DOCLING_SERVE_URL` | none |
 | `google-document-ai` | hosted_api | `google-document-ai` | `GCP_PROJECT_ID` or `GOOGLE_CLOUD_PROJECT`, `GCP_PROCESSOR_ID` | `GOOGLE_APPLICATION_CREDENTIALS`, `GCP_LOCATION` |
 | `google-gemini` | hosted_api | `google-gemini` | `GEMINI_API_KEY` | `GEMINI_MODEL` |

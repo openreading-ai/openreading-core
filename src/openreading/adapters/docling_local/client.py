@@ -11,8 +11,12 @@ Changed settings or asset hashes evict the existing converter before another req
 Failed conversions discard the converter so subsequent requests start with fresh native state.
 Replacement collects unreachable native-session cycles before another model is initialized.
 Assets are verified on every call. The cache retains no document inputs or conversion results.
+Request OCR modes select stages inside the loaded pipeline without replacing its layout session.
+Off requests verify model files, while automatic and forced OCR also verify Tesseract assets.
+Previously verified OCR hashes remain cached so later OCR requests detect changed language data.
+Omitting a request override restores the client's configured OCR default for that conversion.
 The supervised artifact worker owns its separate LocalDoclingClient and process lifecycle.
-Session eviction does not promise a process-memory ceiling. Repeated configuration changes
+Session eviction does not promise a process-memory ceiling. Repeated asset or configuration changes
 can leave native allocations resident even after the previous session has been destroyed.
 """
 
@@ -22,8 +26,20 @@ import gc
 import io
 import os
 import threading
+from dataclasses import replace
+from typing import Literal
 
 from openreading.adapters.docling_local.config import LocalDoclingConfig
+
+OcrMode = Literal["auto", "force", "off"]
+
+
+def _selected_config(config: LocalDoclingConfig, mode: OcrMode | None) -> LocalDoclingConfig:
+    if mode is None:
+        return config
+    if mode not in {"auto", "force", "off"}:
+        raise ValueError("Unknown local OCR mode.")
+    return replace(config, ocr=mode != "off")
 
 
 def preflight_pdf(source) -> tuple[int, bool]:
@@ -42,16 +58,21 @@ class LocalDoclingClient:
     def __init__(self, config: LocalDoclingConfig):
         self.config = config
         self._converter = None
+        self._ocr_mode: OcrMode | None = None
 
-    def convert(self, data: bytes) -> dict:
+    def convert(self, data: bytes, *, ocr_mode: OcrMode | None = None) -> dict:
         from docling.datamodel.base_models import DocumentStream
         from docling_core.types.doc.common.content_layer import ContentLayer
 
         from openreading.adapters.docling_local.pipeline import create_converter
 
-        self.config.validate_assets()
+        selected = _selected_config(self.config, ocr_mode)
+        selected.validate_assets()
         if self._converter is None:
-            self._converter = create_converter(self.config)
+            self._converter = create_converter(selected)
+        if ocr_mode != self._ocr_mode:
+            self._converter.set_ocr_mode(ocr_mode or ("auto" if self.config.ocr else "off"))
+            self._ocr_mode = ocr_mode
         result = self._converter.convert(DocumentStream(name="source.pdf", stream=io.BytesIO(data)))
         if result.status.value not in {"success", "partial_success"}:
             raise ValueError("Local conversion failed.")
@@ -103,18 +124,29 @@ class _SharedClient:
             self.assets = None
             gc.collect()
 
-    def convert(self, config: LocalDoclingConfig, data: bytes) -> dict:
+    def convert(
+        self, config: LocalDoclingConfig, data: bytes, *, ocr_mode: OcrMode | None = None
+    ) -> dict:
         if self.pid != os.getpid():
             # A fork can inherit a locked mutex and a session owned by the parent process.
             self.__init__()
         with self.lock:
             try:
-                assets = config.validate_assets()
-                if self.client is None or self.client.config != config or self.assets != assets:
+                assets = _selected_config(config, ocr_mode).validate_assets()
+                # Off-mode validation omits OCR files. Keep their last verified hashes so an
+                # unchanged off/auto/force sequence reuses layout, while changed files evict it.
+                known_assets = self.assets or {}
+                changed = any(
+                    key in known_assets and known_assets[key] != value
+                    for key, value in assets.items()
+                )
+                if self.client is None or self.client.config != config or changed:
                     self._discard()
                     self.client = LocalDoclingClient(config)
-                    self.assets = assets
-                return self.client.convert(data)
+                self.assets = {**(self.assets or {}), **assets}
+                if ocr_mode is None:
+                    return self.client.convert(data)
+                return self.client.convert(data, ocr_mode=ocr_mode)
             except BaseException:
                 self._discard()
                 raise
@@ -123,6 +155,8 @@ class _SharedClient:
 _shared = _SharedClient()
 
 
-def convert_shared(config: LocalDoclingConfig, data: bytes) -> dict:
+def convert_shared(
+    config: LocalDoclingConfig, data: bytes, *, ocr_mode: OcrMode | None = None
+) -> dict:
     """Convert through the process's single bounded, serialized native session."""
-    return _shared.convert(config, data)
+    return _shared.convert(config, data, ocr_mode=ocr_mode)

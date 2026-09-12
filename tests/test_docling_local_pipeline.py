@@ -293,3 +293,47 @@ def test_ocr_output_configuration_is_hashed_with_language_data(tmp_path, monkeyp
     (tmp_path / "configs" / "tsv").unlink()
     with pytest.raises(ValueError, match="assets"):
         selected.validate_assets()
+
+
+def test_request_ocr_modes_switch_stages_without_reloading_layout(tmp_path, monkeypatch):
+    from docling.datamodel.base_models import InputFormat
+    from docling.datamodel.pipeline_options import OcrMode
+    from docling.models.inference_engines.object_detection.onnxruntime_engine import (
+        OnnxRuntimeObjectDetectionEngine,
+    )
+    from docling.models.stages.layout.layout_object_detection_model import (
+        LayoutObjectDetectionModel,
+    )
+    from docling.models.stages.ocr.tesseract_ocr_cli_model import TesseractOcrCliModel
+
+    from openreading.adapters.docling_local import pipeline
+
+    loaded = []
+    monkeypatch.setattr(pipeline.LocalDoclingConfig, "validate_assets", lambda self: {})
+    monkeypatch.setattr(
+        OnnxRuntimeObjectDetectionEngine, "initialize", lambda self: loaded.append(self)
+    )
+    monkeypatch.setattr(LayoutObjectDetectionModel, "_build_label_map", lambda self: {})
+    monkeypatch.setattr(
+        TesseractOcrCliModel, "_get_name_and_version", lambda self: ("tesseract", "5.5.2")
+    )
+    config = pipeline.LocalDoclingConfig(
+        tmp_path, tesseract_cmd=tmp_path / "tesseract", tessdata_path=tmp_path / "data"
+    )
+    converter = pipeline.create_converter(config)
+    ocr_stage = None
+    for mode in ("off", "force", "auto", "off", "force"):
+        converter.set_ocr_mode(mode)
+        converter.initialize_pipeline(InputFormat.PDF)
+        assert len(converter.initialized_pipelines) == 1
+        active = next(iter(converter.initialized_pipelines.values()))
+        if mode == "off":
+            assert list(active.ocr_model(None, iter([1]))) == [1]
+        else:
+            if ocr_stage is not None:
+                assert active.ocr_model is ocr_stage
+            ocr_stage = active.ocr_model
+            assert ocr_stage.options.mode == (
+                OcrMode.FULL_PAGE if mode == "force" else OcrMode.DEFAULT
+            )
+    assert len(loaded) == 1

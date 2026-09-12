@@ -159,3 +159,48 @@ def test_repeated_real_api_conversions_reuse_native_session_with_bounded_growth(
         assert max(rss) - rss[0] < 200 * 1024**2
     finally:
         client._shared._discard()
+
+
+def test_real_request_ocr_modes_read_scans_and_force_native_pages(tmp_path, monkeypatch):
+    from openreading import run
+    from openreading.adapters.docling_local import client, pipeline
+
+    tesseract = os.environ.get("DOCLING_LOCAL_TESSERACT")
+    tessdata = os.environ.get("DOCLING_LOCAL_TESSDATA")
+    if not (tesseract and tessdata):
+        pytest.skip("Set local Tesseract executable and tessdata paths")
+    monkeypatch.setenv("DOCLING_LOCAL_ASSETS", str(_assets()))
+    monkeypatch.setattr(client, "_shared", client._SharedClient())
+    create = pipeline.create_converter
+    loaded = []
+    measured_origins = []
+    convert = client.LocalDoclingClient.convert
+
+    def observed_conversion(self, data, **kwargs):
+        result = convert(self, data, **kwargs)
+        measured_origins.append(result["page_origins"])
+        return result
+
+    def observed(config):
+        converter = create(config)
+        loaded.append(converter)
+        return converter
+
+    monkeypatch.setattr(pipeline, "create_converter", observed)
+    monkeypatch.setattr(client.LocalDoclingClient, "convert", observed_conversion)
+    data = _pdf(tmp_path / "source.pdf")
+    try:
+        for mode in ("off", "force", "auto", "off", "force", "auto"):
+            response = run(
+                data, backend="docling_local", mime_type="application/pdf", features={"ocr": mode}
+            )
+            assert response["status"]["state"] == "succeeded"
+            scan = response["document"]["pages"][1].get("text") or ""
+            assert ("45 days" in scan) == (mode != "off"), mode
+            origins = measured_origins[-1]
+            assert origins["1"] == ("ocr" if mode == "force" else "native"), mode
+            assert origins["2"] == ("none" if mode == "off" else "ocr"), mode
+        assert len(loaded) == 1
+        assert len(loaded[0].initialized_pipelines) == 1
+    finally:
+        client._shared._discard()

@@ -2,7 +2,10 @@
 
 The existing docling adapter still speaks HTTP. This adapter never downloads inputs
 or models. Configuration comes from its declared broker fields or an explicit Python
-configuration. OCR is disabled unless requested explicitly or enabled in that configuration.
+configuration. Automatic OCR uses that configuration's OCR default, which environment setup enables
+when both Tesseract paths are supplied. Otherwise automatic requests disclose skipped OCR.
+The force setting rasterizes every page for OCR and requires both Tesseract paths.
+The off setting disables OCR even when the adapter's configured default enables it.
 Text and physical-page blocks are supported. Table structure, confidence, typed fields,
 and markdown are omitted with warnings because this profile cannot establish them.
 Running headers, footers, and page numbers are Docling furniture, omitted with a warning.
@@ -32,8 +35,8 @@ from openreading.types.descriptor import (
 )
 from openreading.types.enums import BackendType, ChannelGrade, JobState, WaitMode
 from openreading.types.errors import TerminalError
-from openreading.types.request import Outputs
-from openreading.types.runtime import Health, RawResult
+from openreading.types.request import OpenReadingRequest, Outputs
+from openreading.types.runtime import Health, RawResult, RunContext
 
 
 class LocalClient(Protocol):
@@ -122,8 +125,9 @@ class DoclingLocalAdapter(BackendAdapter):
                 missing_deps=[] if self._client else ["openreading[docling-local]"],
             )
 
-    def submit(self, req, ctx):
+    def submit(self, req: OpenReadingRequest, ctx: RunContext):
         self.assert_supports(req)
+        missing_ocr_setup = False
         try:
             if req.document.url or req.document.password or req.pages:
                 raise ValueError("Unsupported local input.")
@@ -139,7 +143,7 @@ class DoclingLocalAdapter(BackendAdapter):
                 runtime = ctx.runtime or {}
                 config = self.config or LocalDoclingConfig(
                     artifacts_path=Path(runtime["assets_path"]),
-                    ocr=req.features is not None and req.features.ocr == "on",
+                    ocr=bool(runtime.get("tesseract_cmd") and runtime.get("tessdata_path")),
                     tesseract_cmd=Path(runtime["tesseract_cmd"])
                     if runtime.get("tesseract_cmd")
                     else None,
@@ -147,13 +151,23 @@ class DoclingLocalAdapter(BackendAdapter):
                     if runtime.get("tessdata_path")
                     else None,
                 )
-                raw = convert_shared(config, data)
+                requested = req.features.ocr if req.features else "auto"
+                mode = "off" if requested == "auto" and not config.ocr else requested
+                if mode != "off" and not (config.tesseract_cmd and config.tessdata_path):
+                    missing_ocr_setup = True
+                    raise ValueError("Missing local OCR setup.")
+                raw = convert_shared(config, data, ocr_mode=mode)
+                if requested == "auto" and mode == "off":
+                    raw = {**raw, "ocr_skipped": True}
             else:
                 raw = client.convert(data)
         except Exception:
             raise TerminalError(
-                "Local Docling could not process this input or configuration.",
-                backend_code="local_conversion_failed",
+                "Local OCR requires DOCLING_LOCAL_TESSERACT and DOCLING_LOCAL_TESSDATA, "
+                "or both paths in the explicit adapter configuration."
+                if missing_ocr_setup
+                else "Local Docling could not process this input or configuration.",
+                backend_code="ocr_unavailable" if missing_ocr_setup else "local_conversion_failed",
             ) from None
         job = self.new_job(
             WaitMode.INLINE, state=JobState.SUCCEEDED, idempotency_key=ctx.idempotency_key
@@ -168,6 +182,13 @@ class DoclingLocalAdapter(BackendAdapter):
     def normalize(self, job, ctx, slim_req):
         assert job.raw is not None
         response, _ = project_document(job.raw.payload, slim_req.outputs or Outputs())
+        if job.raw.payload.get("ocr_skipped"):
+            response.add_warning(
+                "ocr_skipped",
+                "Automatic OCR was skipped because local OCR is disabled or Tesseract paths "
+                "are not configured.",
+                "features.ocr",
+            )
         return response
 
     def report_cost(self, job):

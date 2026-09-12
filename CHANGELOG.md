@@ -10,6 +10,9 @@
 
 ## Unreleased local Docling profile
 
+- Honor local request OCR modes: configured automatic OCR, forced full-page OCR, and explicit off.
+  Automatic requests disclose skipped OCR, while enabled OCR requires explicit Tesseract paths.
+- Reuse the loaded layout pipeline when requests alternate OCR modes without reallocating ONNX sessions.
 - Preserve wrapped compounds during local assembly so searches find their component words.
   Reimport earlier Docling artifacts to recover these words in retained evidence.
 - Reuse one serialized local converter per process across API and HTTP requests.

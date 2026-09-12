@@ -106,6 +106,7 @@ def test_no_module_reads_a_vendor_claim_off_a_descriptor(field: str) -> None:
                 # Explicit local setup is caller input, never a vendor capability claim.
                 local_setup = {
                     "adapters/docling_local/config.py": {"self.ocr", "self.languages"},
+                    "adapters/docling_local/client.py": {"self.config.ocr"},
                     "adapters/docling_local/pipeline.py": {"config.ocr", "config.languages"},
                     "artifacts/service.py": {"config.docling.ocr", "config.docling.languages"},
                     "mcp_server/tools.py": {"service.config.docling.ocr"},

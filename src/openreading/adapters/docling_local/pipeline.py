@@ -9,6 +9,9 @@ Assembly preserves wrapped hyphens because removing them destroys searchable com
 For example, third-party must remain searchable as party without rewriting retained quotations.
 Ordinary line breaks become spaces; breaks after hyphens remain visible in the stored text.
 Upstream typography normalization still handles ligatures and quotation marks.
+Serialized requests select disabled, selective, or full-page OCR inside one initialized pipeline.
+The Tesseract stage initializes on first use and retains separate options from the converter cache key.
+Changing OCR mode therefore keeps the CPU layout session and restores the requested behavior each time.
 All native imports occur inside create_converter when conversion starts.
 """
 
@@ -32,6 +35,7 @@ def create_converter(config: LocalDoclingConfig):
     from docling.datamodel.pipeline_options import (
         LayoutObjectDetectionOptions,
         LayoutPostprocessorOptions,
+        OcrMode,
         PdfPipelineOptions,
         TesseractCliOcrOptions,
     )
@@ -146,6 +150,28 @@ def create_converter(config: LocalDoclingConfig):
             return super().sanitize_text([text])
 
     class LocalPdfPipeline(StandardPdfPipeline):
+        def select_ocr(self, mode):
+            if mode == "off":
+                self.ocr_model = DisabledStage()
+                return
+            if self._local_ocr is None:
+                self._local_ocr = LocalTesseract(
+                    enabled=True,
+                    artifacts_path=self.artifacts_path,
+                    options=TesseractCliOcrOptions(
+                        lang=list(config.languages),
+                        tesseract_cmd=str(config.tesseract_cmd),
+                        path=str(config.tessdata_path),
+                    ),
+                    accelerator_options=self.pipeline_options.accelerator_options,
+                )
+            # Converter options key the heavy pipeline cache. Copy stage options instead of
+            # mutating that key whenever a serialized request changes its OCR mode.
+            self._local_ocr.options = self._local_ocr.options.model_copy(
+                update={"mode": OcrMode.FULL_PAGE if mode == "force" else OcrMode.DEFAULT}
+            )
+            self.ocr_model = self._local_ocr
+
         def _init_models(self):
             opts = self.pipeline_options
             self.keep_images = False
@@ -153,16 +179,8 @@ def create_converter(config: LocalDoclingConfig):
             self.preprocessing_model = PagePreprocessingModel(
                 options=PagePreprocessingOptions(images_scale=1.0)
             )
-            if config.ocr:
-                assert isinstance(opts.ocr_options, TesseractCliOcrOptions)
-                self.ocr_model = LocalTesseract(
-                    enabled=True,
-                    artifacts_path=self.artifacts_path,
-                    options=opts.ocr_options,
-                    accelerator_options=opts.accelerator_options,
-                )
-            else:
-                self.ocr_model = DisabledStage()
+            self._local_ocr = None
+            self.ocr_model = DisabledStage()
             self.layout_model = CpuLayout(
                 opts.layout_options, self.artifacts_path, opts.accelerator_options
             )
@@ -176,6 +194,23 @@ def create_converter(config: LocalDoclingConfig):
                 options=opts.heading_hierarchy_options
             )
             self.enrichment_pipe = []
+
+    class LocalConverter(DocumentConverter):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self._ocr_mode = "auto" if config.ocr else "off"
+
+        def set_ocr_mode(self, mode):
+            if mode not in {"auto", "force", "off"}:
+                raise ValueError("Unknown local OCR mode.")
+            self._ocr_mode = mode
+
+        def _get_pipeline(self, doc_format):
+            active = super()._get_pipeline(doc_format)
+            if active is not None:
+                assert isinstance(active, LocalPdfPipeline)
+                active.select_ocr(self._ocr_mode)
+            return active
 
     options = PdfPipelineOptions(
         artifacts_path=config.artifacts_path,
@@ -196,7 +231,7 @@ def create_converter(config: LocalDoclingConfig):
             tesseract_cmd=str(config.tesseract_cmd),
             path=str(config.tessdata_path),
         )
-    return DocumentConverter(
+    return LocalConverter(
         allowed_formats=[InputFormat.PDF],
         format_options={
             InputFormat.PDF: PdfFormatOption(
