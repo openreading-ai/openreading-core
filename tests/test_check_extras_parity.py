@@ -39,12 +39,12 @@ def test_real_repo_state_is_clean_and_reports_counts():
     report = cep.check_parity(registry_slugs, extras)
 
     assert report.ok, cep.format_errors(report)
-    assert report.registry_slug_count == 15
-    assert report.matching_extra_count == 15
+    assert report.registry_slug_count == 16
+    assert report.matching_extra_count == 16
     assert report.exception_count == 1
     # Benchmark integrations are utility extras, like HTTP and server support. They do not map to
     # adapter slugs, so the parity allowlist accounts for both runnable public profiles.
-    assert report.allowlisted_extra_count == 5
+    assert report.allowlisted_extra_count == 6
 
 
 def test_main_against_real_repo_exits_zero(capsys: pytest.CaptureFixture[str]):
@@ -53,7 +53,7 @@ def test_main_against_real_repo_exits_zero(capsys: pytest.CaptureFixture[str]):
 
     assert rc == 0
     assert "extras-parity: OK" in out
-    assert "15 registry slugs" in out
+    assert "16 registry slugs" in out
 
 
 # --- AC-2: missing extra ------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 # The HTTP server: the same engine over HTTP, with auth
 
-<sub>[Docs home](../README.md) · [← The run ledger](../ledger/README.md) · [The channel contract →](../derive/README.md)</sub>
+<sub>[Docs home](../README.md) · [← The run ledger](../ledger/README.md) · [Retained artifacts →](../artifacts/README.md)</sub>
 
 > **In one sentence.** `openreading serve` puts parse, compare, batch, and async jobs behind a JSON
 > API on `127.0.0.1:8787`, with file uploads and bearer auth one variable turns on.
@@ -597,4 +597,4 @@ your own proxy in front before more than one client can reach the port.
 - [The run ledger](../ledger/README.md) covers resume, which the server does not offer.
 - [Backend adapters](../adapters/README.md) lists which backend needs which variable.
 
-<sub>[Docs home](../README.md) · [← The run ledger](../ledger/README.md) · [The channel contract →](../derive/README.md)</sub>
+<sub>[Docs home](../README.md) · [← The run ledger](../ledger/README.md) · [Retained artifacts →](../artifacts/README.md)</sub>

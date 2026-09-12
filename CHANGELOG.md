@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased retained evidence v0.3
+
+- Tell MCP clients to reuse returned evidence identifiers and avoid guessing extraction failures from block offsets.
+
+- Distinguish empty-page and unknown text origins without fabricating mixed extraction.
+- Add lexical-v4-unicode-wraps retrieval. Wrapped words also match closed up, each half stays
+  searchable, and quotes and offsets stay exact.
+- Recognize ASCII, soft, and Unicode hyphens at search wrap points.
+- Preserve and byte-pin historical retained evidence schemas.
+
+## Unreleased local Docling profile
+
+- Honor local request OCR modes: configured automatic OCR, forced full-page OCR, and explicit off.
+  Automatic requests disclose skipped OCR, while enabled OCR requires explicit Tesseract paths.
+- Reuse the loaded layout pipeline when requests alternate OCR modes without reallocating ONNX sessions.
+- Preserve wrapped compounds during local assembly so searches find their component words.
+  Reimport earlier Docling artifacts to recover these words in retained evidence.
+- Reuse one serialized local converter per process across API and HTTP requests.
+  Revalidate assets on every request and release the converter after failures or configuration changes.
+- Record the installed dependency closure and Tesseract output configuration in engine identity.
+- Refuse source-free identity discovery and disclose omitted running headers and footers.
+- Preserve warm workers after clean input rejections and contain their relative file writes.
+- Add opt-in real Docling conversion tests with local model and OCR assets.
+
+- Pin CPU ONNX Runtime explicitly and use the upstream PIL preprocessor with audited Transformers 5.16.1.
+
+- Add the optional `docling_local` adapter with verified local ONNX assets and explicit OCR setup.
+- Add the v2 MCP profile with supervised warm workers and required resource limits.
+- Add v0.2 retained evidence contracts carrying measured physical-page text origins.
+
+
 All notable changes to OpenReading are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -17,6 +48,10 @@ All notable changes to OpenReading are documented here. The format follows
 > carries and says which one to pin.
 
 ## [Unreleased]
+
+- Add a fixed local document MCP profile with retained source bytes, physical page citations,
+  bounded lexical search, exact passage reads, and cancellable PyMuPDF imports.
+- Add separate v0.1 schemas for retained manifests, passages, and agent tool payloads.
 
 **This repository is `openreading-core`.** The open-core engine (library, CLI, thin JSON server,
 tests) lives here from commit `bd5ee43`, dated 2026-08-28. Its history before that commit is

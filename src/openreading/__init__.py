@@ -497,7 +497,8 @@ state: rails, trace and replay ship and are tested; the executor is a `DeciderPo
 implement (`openreading.strategies.decider`), and no wire adapter ships, so out of the box every
 decision point takes the engine default.
 
-Known gaps: no MCP surface (integrate via CLI/JSON, Python dicts, or HTTP; design records:
+Known gaps: no general parse/compare/strategy MCP tools (the bounded local proof
+ships in openreading.mcp_server; remaining design records:
 `design/agentic.md`, `product/specs/agentic.product-spec.md`); no shipped `DeciderPort` executor
 (design records: `design/decider-executor.md`, `product/specs/decider.product-spec.md`); no
 intent schema or its routing mechanics (design records: `design/intent.md`,

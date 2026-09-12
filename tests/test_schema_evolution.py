@@ -107,6 +107,12 @@ def test_response_envelope_tolerates_unknown_future_fields():
 # extra="forbid" (openreading.types.request). request.v0.1.json is untouched and stays frozen
 # above — this is a new file, not an edit to the old one.
 _FROZEN_RELEASED = {
+    "local-document.v0.1.json": "626ed168340d2ecf0410d3321bed573cd2a1003ba834dfb04c121453ffb3c1b5",
+    "local-document.v0.2.json": "77615561a24b5f7fa8ff2e5a93b24c003ac2a37f0999c2b4b473ea2ae246bfe2",
+    "passage.v0.1.json": "4eebac39056b9e0072d08d61bad04b9cd717d3a657cb3bc488d40feb38e25ae9",
+    "passage.v0.2.json": "ca6771dd18f3c914e471f0d07e4e520a4b8545bc3dcd043f034930d95f07c077",
+    "agent-document-tool.v0.1.json": "1f542ed26c062b262effa222909ec1e899bc319a7510c7a8b3c4c2f36948b900",
+    "agent-document-tool.v0.2.json": "ae35988f90b38af39bd9ab7016b5d3cabda13a7bbe5c71dd777443e11ed82183",
     "request.v0.1.json": "c3fdc3ee4e3fcf5eddc3a7d6be4ef3fb938479f1f982f47d0f72a6b2e4f42a26",
     "request.v0.2.json": "31a32a3b1d1c59a76066477b2565bab39a5fdc197cbbdaf850fb3e7b5d181ad4",
     "response.v0.1.json": "41a1506091027f894508327b50d27f47205dd689f9d5dcfc48b3375ea19d0772",
@@ -117,6 +123,9 @@ _FROZEN_RELEASED = {
     "strategy-config.v0.1.json": "1080ed4b28d0455766ed5789535c8d4d075eb73b78d167d18c79ed582cd5c0b2",
 }
 _UNRELEASED = {
+    "local-document.v0.3.json",
+    "passage.v0.3.json",
+    "agent-document-tool.v0.3.json",
     "response.v0.3.json",
     "adapter-descriptor.v0.3.json",
     "comparison-report.v0.2.json",
@@ -150,6 +159,9 @@ _UNRELEASED = {
     # T1 (not yet byte-frozen):
     "step.v0.1.json",
     "journal.v0.1.json",
+    "local-document.v0.1.json",
+    "passage.v0.1.json",
+    "agent-document-tool.v0.1.json",
     # Ledger T4a (AC-8) — additive descriptor bump carrying the optional `protocol_version`
     # integer (not yet byte-frozen):
 }
