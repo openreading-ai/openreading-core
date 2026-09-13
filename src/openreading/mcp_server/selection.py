@@ -5,9 +5,15 @@ GUI dependency, environment variable, or executable lookup installs one in headl
 The provider's async context manager yields a relative copied-file reference, or None
 when the user cancels. It must dismiss its UI and roll back its own copy on any exception,
 including cancellation during validation. Cleanup must finish before context exit.
+Every asynchronous cleanup must use ``with anyio.CancelScope(shield=True)`` around
+its awaits, including cleanup when cancellation interrupts acquisition before yield.
+For example, shield child termination and ``await child.aclose()`` in a finally block.
+Core cannot shield code inside a provider's interrupted ``__aenter__`` call.
+The provider must propagate cancellation after cleanup, never suppress it.
 A normal exit transfers retention ownership to the local intake implementation.
 
-Selection permits one pending dialog per server, without blocking imports or retrieval.
+Selection permits one pending dialog per server. Cooperative providers leave retrieval
+and imports responsive by moving blocking GUI, copy, and filesystem work off the event loop.
 The default 120-second deadline covers choosing, copying, and reference validation.
 Trusted launchers may shorten it or raise it to 180 seconds. These are finite safety
 limits, not claims about every host's deadline. Cancellation cleanup can exceed them.
@@ -16,6 +22,9 @@ in-process Python code. Providers should isolate native dialogs in a reapable ch
 
 Core validates the reference through the service's opened input grant, checking regular
 file status and source size. Import still owns PDF validation, hashing, and extraction.
+References pass through unchanged. Providers must generate opaque intake directories,
+not mirror original folder names, and roll back only copies owned by this selection.
+Core checks access and size, not provider ownership or source-path confidentiality.
 No returned receipt proves that a disconnected client received it. Host Stop without
 protocol cancellation cannot stop selection; local Cancel and the deadline remain active.
 """
@@ -37,8 +46,22 @@ from openreading.types.selection import SelectionFailure, SelectionReceipt
 
 class SelectionProvider(Protocol):
     def select(self) -> AbstractAsyncContextManager[str | None]:
-        """Yield only this call's private copied reference; roll back on exceptional exit."""
+        """Yield an owned copy; shield async rollback, including failed acquisition.
+
+        Blocking work belongs off the event loop. Cancellation must propagate after
+        cleanup completes, so core retains admission until the provider has finished.
+        """
         ...
+
+
+def validate_selection_timeout(timeout_seconds: float) -> None:
+    """Reject invalid launcher deadlines before opening grants or computing identity."""
+    if (
+        type(timeout_seconds) not in (int, float)
+        or not math.isfinite(timeout_seconds)
+        or not 0 < timeout_seconds <= 180
+    ):
+        raise ValueError("Selection timeout must be positive and at most 180 seconds.")
 
 
 class SelectionCoordinator:
@@ -48,12 +71,7 @@ class SelectionCoordinator:
         provider: SelectionProvider | None,
         timeout_seconds: float,
     ):
-        if (
-            type(timeout_seconds) not in (int, float)
-            or not math.isfinite(timeout_seconds)
-            or not 0 < timeout_seconds <= 180
-        ):
-            raise ValueError("Selection timeout must be positive and at most 180 seconds.")
+        validate_selection_timeout(timeout_seconds)
         self.service = service
         self.provider = provider
         self.timeout_seconds = timeout_seconds

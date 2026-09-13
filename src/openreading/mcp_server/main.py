@@ -87,9 +87,11 @@ async def serve(
     import anyio
 
     from openreading.artifacts.service import ArtifactService
+    from openreading.mcp_server.selection import validate_selection_timeout
     from openreading.mcp_server.tools import create_server
     from openreading.mcp_server.transport import cancellable_stdio
 
+    validate_selection_timeout(selection_timeout_seconds)
     interrupted = False
     signals = []
     if threading.current_thread() is threading.main_thread():
@@ -161,6 +163,13 @@ def launch(
         import anyio
 
         from openreading.cli.app import _terminate_as_interrupt
+        from openreading.mcp_server.selection import validate_selection_timeout
+
+        try:
+            validate_selection_timeout(selection_timeout_seconds)
+        except ValueError as error:
+            print(str(error), file=sys.stderr)
+            return 2
 
         if not args.input_root.is_absolute() or not args.artifact_root.is_absolute():
             raise ArtifactError("configuration_required")

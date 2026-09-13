@@ -45,6 +45,9 @@ Follow `next_cursor` when present, and explain evidence gaps when the returned p
 
 For an embedded chooser, pass `selection_provider=picker` to `openreading.mcp_server.main.main(argv)`.
 The provider follows the transactional context-manager contract in `openreading.mcp_server.selection`.
+Shield asynchronous cleanup, including failed acquisition, so cancellation cannot interrupt child reaping or rollback.
+For example, use `anyio.CancelScope(shield=True)` around cleanup awaits before propagating cancellation.
+Keep blocking work off the event loop and remove only copies created by that selection.
 Call `openreading_select_document` with `{}`, then import the returned `path`.
 The default selection deadline is 120 seconds, independent of extraction.
 Local Cancel remains available when a host Stop button does not deliver protocol cancellation.

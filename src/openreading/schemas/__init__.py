@@ -771,7 +771,7 @@ def _cli_validate() -> int:
         f"{CORPUS_REPORT_SCHEMA_FILE} OK, {LEADERBOARD_REPORT_SCHEMA_FILE} OK, "
         f"{LIVENESS_REPORT_SCHEMA_FILE} OK, {STEP_SCHEMA_FILE} OK, {JOURNAL_SCHEMA_FILE} OK, "
         f"{LOCAL_DOCUMENT_SCHEMA_FILE} OK, {PASSAGE_SCHEMA_FILE} OK, "
-        f"{AGENT_DOCUMENT_TOOL_SCHEMA_FILE} OK"
+        f"{AGENT_DOCUMENT_TOOL_SCHEMA_FILE} OK, {SELECTION_TOOL_SCHEMA_FILE} OK"
     )
 
     # 2. any stored normalized-response fixtures validate against the response schema

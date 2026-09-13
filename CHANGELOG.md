@@ -4,6 +4,8 @@
 
 - Add an optional local selection provider and empty-argument MCP selection tool.
   Standalone core stays headless and returns an explicit refusal without a provider.
+- Require shielded asynchronous selection cleanup, including cancellation during acquisition.
+  Reject invalid selection deadlines before opening stores or computing engine identity.
 
 - Tell MCP clients to reuse returned evidence identifiers and avoid guessing extraction failures from block offsets.
 

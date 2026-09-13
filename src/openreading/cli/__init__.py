@@ -1233,7 +1233,7 @@ fire after that clean shutdown.
 
 mcp --profile local-document-proof-v1
 ------------------------------------
-Serve three bounded document tools over stdio with openreading[agent,pymupdf].
+Serve four bounded document tools over stdio with openreading[agent,pymupdf].
 You grant an absolute --input-root and a separate absolute --artifact-root.
 For example, use /absolute/documents and /absolute/evidence respectively.
 The server retains source bytes and page evidence until you remove the store.
@@ -1243,6 +1243,9 @@ Call openreading_import with a relative path, then openreading_search with
 its artifact_id and a query. Call openreading_read with matching evidence_ids.
 Cite the returned filename, physical page, and evidence identifier.
 Follow next_cursor when present. A failed search does not prove absence.
+Call openreading_select_document with {} when a trusted launcher supplies
+an optional local chooser. Import the returned path to create evidence.
+Without a chooser, selection returns selection_unavailable; other tools work.
 
 This profile accepts one PDF, at most 25 MiB and 100 physical pages.
 It uses local PyMuPDF without OCR, passwords, routing, or hosted fallback.

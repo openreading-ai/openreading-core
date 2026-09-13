@@ -232,7 +232,9 @@ class Provider:
             await anyio.sleep_forever()
             yield None
         finally:
-            Path(sys.argv[2]).write_text('cleaned')
+            with anyio.CancelScope(shield=True):
+                await anyio.sleep(0.05)
+                Path(sys.argv[2]).write_text('cleaned')
 raise SystemExit(main(sys.argv[3:], selection_provider=Provider()))
 """
     args = [
@@ -300,3 +302,137 @@ raise SystemExit(main(sys.argv[3:], selection_provider=Provider()))
             if process.poll() is None:
                 process.kill()
                 process.wait()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ending", ["deadline", "cancel"])
+async def test_async_cleanup_keeps_admission_until_finished(service, ending):
+    entered, started, release, finished = (anyio.Event() for _ in range(4))
+
+    class AsyncProvider:
+        @asynccontextmanager
+        async def select(self):
+            entered.set()
+            try:
+                await anyio.sleep_forever()
+                yield None
+            finally:
+                with anyio.CancelScope(shield=True):
+                    started.set()
+                    await release.wait()
+                    finished.set()
+
+    server = create_server(
+        service, selection_provider=AsyncProvider(), selection_timeout_seconds=0.02
+    )
+    scope = anyio.CancelScope()
+    results = []
+
+    async def first():
+        with scope:
+            results.append(await call(server))
+
+    async with anyio.create_task_group() as tasks:
+        tasks.start_soon(first)
+        if ending == "cancel":
+            await entered.wait()
+            scope.cancel()
+        await started.wait()
+        try:
+            assert (await call(server))[0]["error"]["code"] == "busy"
+            assert not finished.is_set()
+        finally:
+            release.set()
+    assert finished.is_set()
+    if ending == "deadline":
+        assert results[0][0]["error"]["code"] == "selection_timeout"
+
+
+@pytest.mark.parametrize("timeout", [0, -1, 999, float("nan"), float("inf"), True])
+def test_main_refuses_bad_timeout_before_configuration_io(tmp_path, monkeypatch, capsys, timeout):
+    from openreading.mcp_server import main as entry
+
+    def no_io(*args):
+        pytest.fail("invalid timeout reached profile or service setup")
+
+    monkeypatch.setattr(entry, "profile_config", no_io)
+    result = entry.main(
+        [
+            "--profile",
+            "local-document-proof-v1",
+            "--input-root",
+            str(tmp_path / "input"),
+            "--artifact-root",
+            str(tmp_path / "artifacts"),
+        ],
+        selection_timeout_seconds=timeout,
+    )
+    assert result == 2
+    output = capsys.readouterr()
+    assert not output.out
+    assert "Traceback" not in output.err
+    assert "timeout" in output.err.lower()
+    assert not (tmp_path / "artifacts").exists()
+
+
+@pytest.mark.asyncio
+async def test_serve_refuses_bad_timeout_before_service_creation(tmp_path, monkeypatch):
+    import openreading.artifacts.service as service_module
+    from openreading.mcp_server.main import serve
+
+    def no_service(*args):
+        pytest.fail("invalid timeout opened the artifact service")
+
+    monkeypatch.setattr(service_module, "ArtifactService", no_service)
+    with pytest.raises(ValueError, match="timeout"):
+        await serve(
+            ProfileConfig(tmp_path / "input", tmp_path / "artifacts"), selection_timeout_seconds=0
+        )
+
+
+def test_selection_models_and_wire_schema_agree_on_boundaries():
+    from pydantic import ValidationError
+
+    from openreading.schemas import selection_tool_schema
+    from openreading.types.selection import MESSAGES, SelectionFailure, SelectionReceipt
+
+    validator = jsonschema.Draft202012Validator(selection_tool_schema())
+    receipt = {"schema_version": "0.1", "path": "a.pdf", "display_name": "a.pdf", "source_bytes": 1}
+    cases = [(SelectionReceipt, receipt, True)]
+    for key in ("path", "display_name"):
+        for value, valid in (("", False), ("a" * 1024, True), ("a" * 1025, False), (None, False)):
+            cases.append((SelectionReceipt, {**receipt, key: value}, valid))
+    for value in (0, -1, True, "1", None):
+        cases.append((SelectionReceipt, {**receipt, "source_bytes": value}, False))
+    for key in receipt:
+        if key != "schema_version":  # Models insert the version; wire payloads must carry it.
+            cases.append((SelectionReceipt, {k: v for k, v in receipt.items() if k != key}, False))
+    for code in MESSAGES:
+        failure = SelectionFailure.from_code(code).wire()
+        cases.append((SelectionFailure, failure, True))
+        for key, value in (("code", "unknown"), ("retryable", "false"), ("message", 1)):
+            cases.append(
+                (SelectionFailure, {**failure, "error": {**failure["error"], key: value}}, False)
+            )
+        cases.append(
+            (SelectionFailure, {**failure, "error": {**failure["error"], "path": "secret"}}, False)
+        )
+    for model, payload, valid in cases:
+        assert validator.is_valid(payload) == valid, payload
+        if valid:
+            assert model.model_validate(payload).wire() == payload
+        else:
+            with pytest.raises(ValidationError):
+                model.model_validate(payload)
+    for model, payload in (
+        (SelectionReceipt, receipt),
+        (SelectionFailure, SelectionFailure.from_code("busy").wire()),
+    ):
+        for version in ("0.2", 0.1, None):
+            wrong_version = {**payload, "schema_version": version}
+            assert not validator.is_valid(wrong_version)
+            with pytest.raises(ValidationError):
+                model.model_validate(wrong_version)
+        missing_version = {key: value for key, value in payload.items() if key != "schema_version"}
+        assert not validator.is_valid(missing_version)
+        validator.validate(model.model_validate(missing_version).wire())
