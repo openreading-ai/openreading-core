@@ -12,7 +12,8 @@ For example, search for a renewal clause, read its passage, and cite the returne
 
 You start one process with explicit input and artifact directories before the client can call tools.
 The input root grants file access, while the separate artifact root retains copies until you remove them.
-The fixed local profile exposes exactly `openreading_import`, `openreading_search`, and `openreading_read`.
+The profile exposes `openreading_import`, `openreading_search`, `openreading_read`, and `openreading_select_document`.
+Selection returns `selection_unavailable` unless a trusted launcher explicitly supplies a local chooser.
 
 ## Walkthrough
 
@@ -42,6 +43,12 @@ Follow `next_cursor` when present, and explain evidence gaps when the returned p
 - Grant a narrow document directory rather than your home directory, and keep retained evidence outside that grant.
 - Reuse the same artifact identifier across questions instead of importing the same source repeatedly.
 
+For an embedded chooser, pass `selection_provider=picker` to `openreading.mcp_server.main.main(argv)`.
+The provider follows the transactional context-manager contract in `openreading.mcp_server.selection`.
+Call `openreading_select_document` with `{}`, then import the returned `path`.
+The default selection deadline is 120 seconds, independent of extraction.
+Local Cancel remains available when a host Stop button does not deliver protocol cancellation.
+
 ## How it decides
 
 The profile names PyMuPDF explicitly and uses an explicit versioned configuration, preventing ambient routing from changing extraction.
@@ -52,7 +59,8 @@ Document text remains untrusted data, preventing a quoted instruction from gaini
 ## Operations
 
 The process speaks MCP on stdout; configure your client to capture diagnostics separately from that protocol stream.
-Domain errors set `isError` and return the fixed codes documented in `openreading.artifacts.limits`.
+Domain errors set `isError` and return fixed codes from `openreading.artifacts.limits` or `openreading.types.selection`.
+Selection errors use their own v0.1 envelope, leaving artifact payloads at v0.3.
 Malformed arguments return protocol errors, while normal transport closure exits with status zero.
 Configuration failures exit two. SIGINT and SIGTERM cancel active imports and exit 130, including clients that keep stdin open.
 The local profile requires POSIX support. Explicit root symlinks resolve once before file access begins.

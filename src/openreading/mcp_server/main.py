@@ -15,6 +15,10 @@ import sys
 import threading
 from contextlib import nullcontext
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from openreading.mcp_server.selection import SelectionProvider
 
 from openreading.adapters.docling_local.config import LocalDoclingConfig
 from openreading.artifacts.limits import ArtifactError, DoclingLimits, ProfileConfig
@@ -74,7 +78,12 @@ def profile_config(args: argparse.Namespace) -> ProfileConfig:
         raise ArtifactError("configuration_required") from None
 
 
-async def serve(config: ProfileConfig) -> None:
+async def serve(
+    config: ProfileConfig,
+    *,
+    selection_provider: SelectionProvider | None = None,
+    selection_timeout_seconds: float = 120,
+) -> None:
     import anyio
 
     from openreading.artifacts.service import ArtifactService
@@ -92,8 +101,12 @@ async def serve(config: ProfileConfig) -> None:
     receiver = anyio.open_signal_receiver(*signals) if signals else nullcontext()
     with receiver as received:
         service = ArtifactService(config)
-        server = create_server(service)
         try:
+            server = create_server(
+                service,
+                selection_provider=selection_provider,
+                selection_timeout_seconds=selection_timeout_seconds,
+            )
             async with anyio.create_task_group() as group, cancellable_stdio() as (reader, writer):
 
                 async def stop_on_signal():
@@ -114,16 +127,30 @@ async def serve(config: ProfileConfig) -> None:
         raise KeyboardInterrupt
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    selection_provider: SelectionProvider | None = None,
+    selection_timeout_seconds: float = 120,
+) -> int:
     parser = argparse.ArgumentParser(
         description="Serve bounded local document evidence over stdio MCP."
     )
     arguments(parser)
     args = parser.parse_args(argv)
-    return launch(args)
+    return launch(
+        args,
+        selection_provider=selection_provider,
+        selection_timeout_seconds=selection_timeout_seconds,
+    )
 
 
-def launch(args: argparse.Namespace) -> int:
+def launch(
+    args: argparse.Namespace,
+    *,
+    selection_provider: SelectionProvider | None = None,
+    selection_timeout_seconds: float = 120,
+) -> int:
     if os.name != "posix":
         print(
             "The local MCP profile requires a POSIX platform; Windows is not supported.",
@@ -144,7 +171,18 @@ def launch(args: argparse.Namespace) -> int:
         except (OSError, RuntimeError):
             raise ArtifactError("configuration_required") from None
         with _terminate_as_interrupt():
-            anyio.run(serve, config)
+            from functools import partial
+
+            operation = (
+                serve
+                if selection_provider is None and selection_timeout_seconds == 120
+                else partial(
+                    serve,
+                    selection_provider=selection_provider,
+                    selection_timeout_seconds=selection_timeout_seconds,
+                )
+            )
+            anyio.run(operation, config)
         return 0
     except ImportError:
         print(

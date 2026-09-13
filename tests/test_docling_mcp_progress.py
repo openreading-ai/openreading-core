@@ -72,7 +72,7 @@ async def test_server_closes_service_after_transport_failure(tmp_path, monkeypat
         raise RuntimeError("transport failed")
 
     server = SimpleNamespace(run=run, create_initialization_options=lambda: None)
-    monkeypatch.setattr(tools, "create_server", lambda selected: server)
+    monkeypatch.setattr(tools, "create_server", lambda selected, **kwargs: server)
 
     @asynccontextmanager
     async def connection():

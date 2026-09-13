@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/selection-tool.v0.1.json",
+  "title": "Local selection result",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Receipt"
+    },
+    {
+      "$ref": "#/$defs/Failure"
+    }
+  ],
+  "$defs": {
+    "Request": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "Receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.1"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "source_bytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "schema_version",
+        "path",
+        "display_name",
+        "source_bytes"
+      ]
+    },
+    "Failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.1"
+        },
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "enum": [
+                "selection_unavailable",
+                "selection_cancelled",
+                "selection_timeout",
+                "selection_failed",
+                "busy"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message",
+            "retryable"
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "error"
+      ]
+    }
+  }
+}

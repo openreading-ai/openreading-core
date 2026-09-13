@@ -2,6 +2,9 @@
 
 ## Unreleased retained evidence v0.3
 
+- Add an optional local selection provider and empty-argument MCP selection tool.
+  Standalone core stays headless and returns an explicit refusal without a provider.
+
 - Tell MCP clients to reuse returned evidence identifiers and avoid guessing extraction failures from block offsets.
 
 - Distinguish empty-page and unknown text origins without fabricating mixed extraction.

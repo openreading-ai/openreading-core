@@ -34,6 +34,8 @@ Families
 - local-document / passage / agent-document-tool: retained evidence and bounded MCP
   payloads owned by ``openreading.artifacts``. These separate families leave the existing
   request and normalized response contracts unchanged.
+- selection-tool: local copied-file receipts and errors, separate from artifact evidence.
+  The empty Request definition excludes model-supplied dialog controls.
 - step / journal: the executor step contract and the per-line JSONL journal shape
   (internal/design/ledger.md §5.4).
 
@@ -537,6 +539,7 @@ STEP_SCHEMA_FILE = "step.v0.1.json"
 JOURNAL_SCHEMA_FILE = "journal.v0.1.json"
 LOCAL_DOCUMENT_SCHEMA_FILE = "local-document.v0.3.json"
 PASSAGE_SCHEMA_FILE = "passage.v0.3.json"
+SELECTION_TOOL_SCHEMA_FILE = "selection-tool.v0.1.json"
 AGENT_DOCUMENT_TOOL_SCHEMA_FILE = "agent-document-tool.v0.3.json"
 
 
@@ -728,6 +731,11 @@ def agent_document_tool_schema() -> dict[str, Any]:
     return _load(AGENT_DOCUMENT_TOOL_SCHEMA_FILE)
 
 
+def selection_tool_schema() -> dict[str, Any]:
+    """Closed local selection inputs, receipts, and sanitized errors."""
+    return _load(SELECTION_TOOL_SCHEMA_FILE)
+
+
 def _cli_validate() -> int:
     """Validate every vendored schema, then validate any stored normalized fixture.
 
@@ -749,7 +757,12 @@ def _cli_validate() -> int:
     _validator(liveness_report_schema())
     _validator(step_schema())
     _validator(journal_schema())
-    for contract in (local_document_schema(), passage_schema(), agent_document_tool_schema()):
+    for contract in (
+        local_document_schema(),
+        passage_schema(),
+        agent_document_tool_schema(),
+        selection_tool_schema(),
+    ):
         _validator(contract)
     print(
         f"schemas: {REQUEST_SCHEMA_FILE} OK, {RESPONSE_SCHEMA_FILE} OK, "
