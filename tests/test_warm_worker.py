@@ -229,3 +229,43 @@ def test_dead_worker_pipe_cleanup_preserves_failure_and_closes_control_fd(
             os.fstat(control_fd)
     finally:
         worker.close()
+
+
+def test_exited_leader_is_reaped_before_group_cleanup(command, monkeypatch, tmp_path):
+    import signal
+
+    from openreading.artifacts.supervisor import WarmWorker
+
+    child = tmp_path / "child.py"
+    child.write_text(
+        "import os,signal,sys\nsys.stdin.readline()\nos.kill(os.getpid(), signal.SIGTERM)\n"
+    )
+    worker = WarmWorker(command, memory_bytes=None, idle_seconds=30)
+    processes = []
+    group_calls = []
+    start = worker._start
+    killpg = os.killpg
+
+    def capture_start():
+        start()
+        processes.append(worker._process)
+
+    def require_reaped_leader(pid, sig):
+        process = processes[-1]
+        group_calls.append((pid, sig))
+        # macOS can refuse a group signal while its only member remains an unreaped zombie.
+        if process.returncode is None:
+            raise PermissionError("Unreaped process group")
+        killpg(pid, sig)
+
+    monkeypatch.setattr(worker, "_start", capture_start)
+    monkeypatch.setattr(os, "killpg", require_reaped_leader)
+    try:
+        with pytest.raises(ArtifactError, match="parse_failed"):
+            worker.run({}, check=lambda: None)
+        assert processes[0].returncode == -signal.SIGTERM
+        assert group_calls == [(processes[0].pid, signal.SIGKILL)]
+        assert processes[0].stdin.closed
+        assert worker.pid is None and worker._read_fd is None
+    finally:
+        worker.close()

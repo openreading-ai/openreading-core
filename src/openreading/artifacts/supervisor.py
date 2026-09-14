@@ -102,6 +102,9 @@ class WarmWorker:
         self._idle_token = None
         if self._process is not None:
             process, self._process = self._process, None
+            # macOS can refuse group signals while an exited leader is still a zombie.
+            # Reap that leader first without waiting for a live parser to finish.
+            process.poll()
             # Kill the group even if its leader exited while leaving an OCR child alive.
             with suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)

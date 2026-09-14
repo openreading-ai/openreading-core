@@ -69,6 +69,7 @@ All notable changes to OpenReading are documented here. The format follows
 ## [Unreleased]
 
 - Preserve parser failures and cancellation when closing a dead worker raises a pipe error.
+- Reap exited parser leaders before group cleanup to avoid macOS zombie permission errors.
 - Add grant-scoped `openreading_list_imports` to recover job identifiers after reconnecting.
 - Stream retained passage verification and remove duplicate response decoding during retrieval.
   Server memory still grows with normalized document size; no resource cutoff is introduced.
