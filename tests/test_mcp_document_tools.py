@@ -31,7 +31,16 @@ async def test_stdio_import_search_read_and_sanitized_invalid_arguments(tmp_path
         ],
     )
     async with stdio_client(params) as (reader, writer), ClientSession(reader, writer) as session:
-        await session.initialize()
+        initialized = await session.initialize()
+        # This checks instruction delivery over MCP, not whether a model obeys it.
+        guidance = initialized.instructions or ""
+        assert "Inspect the first full-result reply before continuing." in guidance
+        assert (
+            "In that case, ask the user to choose complete retrieval or focused search before continuing."
+            in guidance
+        )
+        assert "follow continuation without asking for the same scope choice again" in guidance
+        assert "not byte or token measurements" in guidance
         tools = (await session.list_tools()).tools
         assert {tool.name for tool in tools} == {
             "openreading_import",

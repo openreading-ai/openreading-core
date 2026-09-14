@@ -66,6 +66,8 @@ All notable changes to OpenReading are documented here. The format follows
 
 ## [Unreleased]
 
+- Deliver retrieval-scope guidance through MCP initialization so focused questions do not imply a complete read.
+
 - Pack complete-document MCP replies by bytes to reduce continuation calls without truncation.
 
 - Add `openreading_get_document` for complete retained normalized JSON without raw provider payloads.
