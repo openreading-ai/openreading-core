@@ -20,6 +20,8 @@ Pointer tokens escape tilde as ``~0`` and slash as ``~1``. No text or field name
 
 Consume fragments in order through ``next_cursor: null``. ``fragment_start`` and ``fragment_count``
 detect skipped pages, while ``content_sha256`` hashes canonical ``json_bytes`` of the whole content.
+Replies take the longest fragment prefix fitting the byte cap, without a separate fragment-count
+ceiling. Packing counts each fragment once and includes the actual continuation-token bytes.
 Cursors bind the artifact, content hash, payload cap and format revision. They contain no paths
 and convey no access rights. Each request revalidates the store, without reparsing the source.
 Each service keeps at most one pagination plan, limited to 8 MiB of serialized plan metadata.
@@ -49,7 +51,7 @@ from openreading.artifacts.models import (
     WireModel,
     json_bytes,
 )
-from openreading.artifacts.search import _binding, _fit, _offset
+from openreading.artifacts.search import _binding, _cursor, _offset
 
 
 class DocumentRequest(WireModel):
@@ -218,19 +220,35 @@ def get_document(
             cache.entry = (key, digest, plan) if size <= PLAN_CACHE_BYTES else None
     binding = _binding(["document", "0.1", manifest.artifact_id, digest, cap])
     start = _offset(cursor, binding, len(plan))
-    return _fit(
-        plan,
-        start,
-        32,
-        binding,
-        cap,
-        lambda values, continuation: DocumentResult(
+
+    def construct(values, continuation):
+        return DocumentResult(
             artifact_id=manifest.artifact_id,
             display_name=manifest.display_name,
             content_sha256=digest,
             fragment_start=start,
             fragment_count=len(plan),
-            fragments=[part.materialize(content) for part in values],
+            fragments=values,
             next_cursor=continuation,
-        ),
-    )
+        )
+
+    first = plan[start].materialize(content)
+    size = len(json_bytes(construct([first], None).wire())) - len(json_bytes(first))
+    values = []
+    accepted = 0
+    continuation = None
+    for index in range(start, len(plan)):
+        value = first if index == start else plan[index].materialize(content)
+        size += len(json_bytes(value)) + bool(values)
+        if size > cap:
+            break
+        values.append(value)
+        token = _cursor(binding, index + 1) if index + 1 < len(plan) else None
+        # Count each fragment once instead of repeatedly serializing an oversized prefix.
+        # A final null cursor can fit after an intermediate continuation token did not.
+        if size - len(b"null") + len(json_bytes(token)) <= cap:
+            accepted = len(values)
+            continuation = token
+    if not accepted:
+        raise ArtifactError("response_too_large")
+    return construct(values[:accepted], continuation)

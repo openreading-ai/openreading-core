@@ -66,6 +66,8 @@ All notable changes to OpenReading are documented here. The format follows
 
 ## [Unreleased]
 
+- Pack complete-document MCP replies by bytes to reduce continuation calls without truncation.
+
 - Add `openreading_get_document` for complete retained normalized JSON without raw provider payloads.
   Bounded continuation preserves existing structure, OCR origins, warnings and citation references.
   Search remains optional; extraction coverage still depends on the import profile.

@@ -355,3 +355,129 @@ def test_oversized_plans_are_not_cached_and_close_releases_plan(tmp_path, monkey
     assert service._document_cache.entry is not None
     service.close()
     assert service._document_cache.entry is None
+
+
+def test_full_replies_use_byte_capacity_without_a_fragment_count_ceiling(tmp_path, monkeypatch):
+    from openreading.artifacts import document, search
+
+    response = rich_response("short")
+    response["typed_fields"] = {f"field-{index:04}": {"value": "界" * 40} for index in range(2000)}
+    service, identifier, _ = retain(tmp_path, response)
+    first = service.get_document(identifier).wire()
+    assert len(first["fragments"]) > 32
+    assert len(json_bytes(first)) > 60000
+    assert first["next_cursor"] is not None
+
+    # Measure real serialization work on a warm plan. Rebuilding an oversized reply and
+    # removing one fragment per attempt must not make a bounded call quadratic.
+    serialized_bytes = 0
+    original = document.json_bytes
+
+    def measured(value):
+        nonlocal serialized_bytes
+        result = original(value)
+        serialized_bytes += len(result)
+        return result
+
+    monkeypatch.setattr(document, "json_bytes", measured)
+    monkeypatch.setattr(search, "json_bytes", measured)
+    again = service.get_document(identifier).wire()
+    assert again == first
+    assert serialized_bytes < 10 * service.config.limits.document_bytes
+    monkeypatch.setattr(document, "json_bytes", original)
+    monkeypatch.setattr(search, "json_bytes", original)
+    replies = get_all(service, identifier)
+    assert len(replies) < 10
+    assert reassemble(replies)["response"] == {
+        k: v for k, v in response.items() if k != "backend_raw"
+    }
+    service.close()
+
+
+@pytest.mark.parametrize(
+    "field,new_value",
+    [("page_origins", {"1": "none", "2": "mixed", "3": "native"}), ("warnings", [])],
+)
+def test_cached_document_rechecks_manifest_content_under_the_same_id(tmp_path, field, new_value):
+    service, identifier, _ = retain(
+        tmp_path, rich_response("large " * 1000), {"1": "none", "2": "ocr", "3": "native"}
+    )
+    before = reassemble(get_all(service, identifier))
+    path = service.store.documents / identifier / "manifest.json"
+    manifest = json.loads(path.read_bytes())
+    manifest[field] = new_value
+    if field == "page_origins":
+        passages_path = path.parent / "passages.jsonl"
+        passages = [json.loads(line) for line in passages_path.read_bytes().splitlines()]
+        for passage in passages:
+            if passage["page"] == 2:
+                passage["text_origin"] = "mixed"
+        data = b"\n".join(json_bytes(passage) for passage in passages) + b"\n"
+        passages_path.write_bytes(data)
+        manifest["files"]["passages.jsonl"] = {
+            "length": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        }
+    path.write_bytes(json_bytes(manifest))
+    replies = get_all(service, identifier)
+    after = reassemble(replies)
+    assert after[field] == new_value != before[field]
+    assert after["response"] == before["response"]
+    service.close()
+
+
+def test_cached_document_replans_when_the_payload_cap_changes(tmp_path):
+    service, identifier, _ = retain(tmp_path, rich_response("content " * 1000))
+    before = reassemble(get_all(service, identifier))
+    service.config = dataclasses.replace(
+        service.config, limits=dataclasses.replace(service.config.limits, document_bytes=2048)
+    )
+    replies = get_all(service, identifier)
+    assert len(replies) > 1
+    assert reassemble(replies) == before
+    service.close()
+
+
+def test_fragmented_object_children_follow_sorted_keys(tmp_path):
+    response = rich_response()
+    response["typed_fields"]["key/~"]["value"] = {"z": "z" * 2000, "a": "a" * 2000}
+    service, identifier, _ = retain(tmp_path, response)
+    # Preserve insertion order in the retained bytes rather than letting the fixture
+    # writer's canonical serialization sort keys before the retriever sees them.
+    data = json.dumps(response, ensure_ascii=False).encode()
+    directory = service.store.documents / identifier
+    (directory / "response.json").write_bytes(data)
+    manifest = json.loads((directory / "manifest.json").read_bytes())
+    manifest["files"]["response.json"] = {
+        "length": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
+    (directory / "manifest.json").write_bytes(json_bytes(manifest))
+    service.config = dataclasses.replace(
+        service.config, limits=dataclasses.replace(service.config.limits, document_bytes=2048)
+    )
+    replies = get_all(service, identifier)
+    paths = [part["path"] for reply in replies for part in reply["fragments"]]
+    prefix = "/response/typed_fields/key~1~0/value/"
+    assert paths.index(prefix + "a") < paths.index(prefix + "z")
+    assert reassemble(replies)["response"]["typed_fields"] == response["typed_fields"]
+    service.close()
+
+
+def test_final_null_cursor_can_fit_after_an_intermediate_prefix_does_not(tmp_path):
+    response = {
+        "schema_version": "0.3",
+        "status": {"state": "succeeded"},
+        "backend": {"id": "synthetic", "type": "oss_library"},
+        "document": {"page_count": 1, "pages": [{"page_number": 1, "text": "n"}]},
+        "typed_fields": {"a": {"value": "x" * 730}, "b": {"value": "end"}},
+    }
+    service, identifier, _ = retain(tmp_path, response)
+    service.config = dataclasses.replace(
+        service.config, limits=dataclasses.replace(service.config.limits, document_bytes=2048)
+    )
+    replies = get_all(service, identifier)
+    # The final reply is 1,980 bytes. Its shorter prefix needs a cursor and reaches 2,049.
+    assert len(replies) == 1
+    assert reassemble(replies)["response"] == response
+    service.close()
