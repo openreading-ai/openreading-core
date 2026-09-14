@@ -436,3 +436,31 @@ def test_selection_models_and_wire_schema_agree_on_boundaries():
         missing_version = {key: value for key, value in payload.items() if key != "schema_version"}
         assert not validator.is_valid(missing_version)
         validator.validate(model.model_validate(missing_version).wire())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_unlimited_selection_has_no_deadline_and_still_cleans_up(service, cancel):
+    import math
+
+    class UnboundedProvider(Provider):
+        @asynccontextmanager
+        async def select(self):
+            assert math.isinf(anyio.current_effective_deadline())
+            async with super().select() as reference:
+                yield reference
+
+    (service.config.input_root / "chosen.pdf").write_bytes(b"selected")
+    provider = UnboundedProvider(service.config.input_root, wait=cancel)
+    server = create_server(service, selection_provider=provider, selection_timeout_seconds=None)
+    task = asyncio.create_task(call(server))
+    if cancel:
+        await provider.entered.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert provider.rolled_back
+    else:
+        payload, failed = await task
+        assert not failed and payload["path"] == "chosen.pdf"
+    assert provider.exited

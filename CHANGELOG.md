@@ -68,6 +68,8 @@ All notable changes to OpenReading are documented here. The format follows
 
 ## [Unreleased]
 
+- Allow trusted MCP launchers to disable the local selection deadline while preserving cancellation cleanup.
+
 - Deliver retrieval-scope guidance through MCP initialization so focused questions do not imply a complete read.
 
 - Pack complete-document MCP replies by bytes to reduce continuation calls without truncation.

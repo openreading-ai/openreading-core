@@ -64,6 +64,8 @@ For example, use `anyio.CancelScope(shield=True)` around cleanup awaits before p
 Keep blocking work off the event loop and remove only copies created by that selection.
 Call `openreading_select_document` with `{}`, then import the returned `path`.
 The default selection deadline is 120 seconds, independent of extraction.
+A trusted launcher can pass `selection_timeout_seconds=None` to disable the local chooser and copy deadline.
+Local Cancel and host-delivered cancellation still clean up the selected copy.
 Local Cancel remains available when a host Stop button does not deliver protocol cancellation.
 
 ## How it decides

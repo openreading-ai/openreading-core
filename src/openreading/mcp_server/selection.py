@@ -15,8 +15,8 @@ A normal exit transfers retention ownership to the local intake implementation.
 Selection permits one pending dialog per server. Cooperative providers leave retrieval
 and imports responsive by moving blocking GUI, copy, and filesystem work off the event loop.
 The default 120-second deadline covers choosing, copying, and reference validation.
-Trusted launchers may shorten it or raise it to 180 seconds. These are finite safety
-limits, not claims about every host's deadline. Cancellation cleanup can exceed them.
+Trusted launchers may pass None to disable that deadline, or set up to 180 seconds.
+A host can still cancel the request independently. Cancellation cleanup can exceed a deadline.
 The provider must cooperate with cancellation; core cannot forcibly terminate arbitrary
 in-process Python code. Providers should isolate native dialogs in a reapable child.
 
@@ -26,7 +26,7 @@ References pass through unchanged. Providers must generate opaque intake directo
 not mirror original folder names, and roll back only copies owned by this selection.
 Core checks access and size, not provider ownership or source-path confidentiality.
 No returned receipt proves that a disconnected client received it. Host Stop without
-protocol cancellation cannot stop selection; local Cancel and the deadline remain active.
+protocol cancellation cannot stop selection. Local Cancel and any configured deadline remain active.
 """
 
 from __future__ import annotations
@@ -54,8 +54,10 @@ class SelectionProvider(Protocol):
         ...
 
 
-def validate_selection_timeout(timeout_seconds: float) -> None:
+def validate_selection_timeout(timeout_seconds: float | None) -> None:
     """Reject invalid launcher deadlines before opening grants or computing identity."""
+    if timeout_seconds is None:
+        return
     if (
         type(timeout_seconds) not in (int, float)
         or not math.isfinite(timeout_seconds)
@@ -69,7 +71,7 @@ class SelectionCoordinator:
         self,
         service: ArtifactService,
         provider: SelectionProvider | None,
-        timeout_seconds: float,
+        timeout_seconds: float | None,
     ):
         validate_selection_timeout(timeout_seconds)
         self.service = service

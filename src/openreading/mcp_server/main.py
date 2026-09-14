@@ -91,7 +91,7 @@ async def serve(
     config: ProfileConfig,
     *,
     selection_provider: SelectionProvider | None = None,
-    selection_timeout_seconds: float = 120,
+    selection_timeout_seconds: float | None = 120,
 ) -> None:
     import anyio
 
@@ -142,7 +142,7 @@ def main(
     argv: list[str] | None = None,
     *,
     selection_provider: SelectionProvider | None = None,
-    selection_timeout_seconds: float = 120,
+    selection_timeout_seconds: float | None = 120,
 ) -> int:
     parser = argparse.ArgumentParser(
         description="Serve bounded local document evidence over stdio MCP."
@@ -160,7 +160,7 @@ def launch(
     args: argparse.Namespace,
     *,
     selection_provider: SelectionProvider | None = None,
-    selection_timeout_seconds: float = 120,
+    selection_timeout_seconds: float | None = 120,
 ) -> int:
     if os.name != "posix":
         print(

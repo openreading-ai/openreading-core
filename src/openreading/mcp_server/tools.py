@@ -134,7 +134,7 @@ def create_server(
     service: ArtifactService,
     *,
     selection_provider: SelectionProvider | None = None,
-    selection_timeout_seconds: float = 120,
+    selection_timeout_seconds: float | None = 120,
 ) -> Server:
     selection = SelectionCoordinator(service, selection_provider, selection_timeout_seconds)
     instructions = INSTRUCTIONS
@@ -174,10 +174,15 @@ def create_server(
             " Preserve OCR, mixed, or unknown text_origin labels in citations."
         )
 
+    selection_allowance = (
+        "Selection and copy have no local elapsed-time cutoff. Host cancellation still applies. "
+        if selection_timeout_seconds is None
+        else f"Selection and copy allow {selection_timeout_seconds:g} seconds before cancellation cleanup. "
+    )
     descriptions["openreading_select_document"] = (
-        f"Open OpenReading's local file chooser at the user's request. No arguments. "
-        f"Selection and copy allow {selection_timeout_seconds:g} seconds before cancellation cleanup. "
-        "Returns a copied relative path for import, never original paths or document text. "
+        "Open OpenReading's local file chooser at the user's request. No arguments. "
+        + selection_allowance
+        + "Returns a copied relative path for import, never original paths or document text. "
         "Use the chooser's Cancel action to dismiss it."
         if selection_provider is not None
         else "Local document selection is unavailable on this server. No chooser is configured."
