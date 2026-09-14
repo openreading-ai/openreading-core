@@ -2345,6 +2345,9 @@ liteparse = [
     { name = "liteparse" },
     { name = "psutil" },
 ]
+llamaparse = [
+    { name = "httpx" },
+]
 mistral-ocr = [
     { name = "httpx" },
 ]
@@ -2425,6 +2428,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'docling'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'google-gemini'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'http'", specifier = ">=0.27" },
+    { name = "httpx", marker = "extra == 'llamaparse'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'mistral-ocr'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nuextract'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'open-ocr'", specifier = ">=0.27" },
@@ -2460,7 +2464,7 @@ requires-dist = [
     { name = "transformers", marker = "extra == 'docling-local'", specifier = "==5.16.1" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.29" },
 ]
-provides-extras = ["pymupdf", "textract", "azure-document-intelligence", "reducto", "chunkr", "pulse", "nuextract", "open-ocr", "tesseract", "docling-local", "docling", "liteparse", "qwen-vl", "google-document-ai", "google-gemini", "anthropic-claude", "mistral-ocr", "http", "server", "parsebench", "extractbench", "all", "agent"]
+provides-extras = ["pymupdf", "textract", "azure-document-intelligence", "reducto", "chunkr", "pulse", "nuextract", "open-ocr", "tesseract", "docling-local", "docling", "liteparse", "llamaparse", "qwen-vl", "google-document-ai", "google-gemini", "anthropic-claude", "mistral-ocr", "http", "server", "parsebench", "extractbench", "all", "agent"]
 
 [package.metadata.requires-dev]
 dev = [

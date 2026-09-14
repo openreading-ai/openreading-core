@@ -79,6 +79,10 @@ Per-backend reference
   liteparse [liteparse] auth: none
             config: LITEPARSE_TESSDATA, LITEPARSE_WORKER_MEMORY_BYTES   ops: parse
             limits: PDF and images in a supervised worker; OCR needs pinned eng tessdata
+  llamaparse-fast, llamaparse-cost-effective, llamaparse-agentic, llamaparse-agentic-plus
+            [llamaparse]   auth: LLAMA_CLOUD_API_KEY (or LLAMA_PARSE_API_KEY)
+            config: LLAMA_CLOUD_BASE_URL   ops: parse
+            limits: poll only; each slug pins one tier and dated version; cost optimizer off
   docling   [docling]   auth: none   config: DOCLING_SERVE_URL   ops: none
             limits: needs a self-hosted docling-serve container
   qwen-vl   [qwen-vl]   auth: QWEN_VL_API_KEY (opt)   config: QWEN_VL_ENDPOINT, QWEN_VL_MODEL

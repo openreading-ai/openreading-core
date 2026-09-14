@@ -18,6 +18,12 @@ from openreading.adapters.docling_local import DoclingLocalAdapter
 from openreading.adapters.google_document_ai import GoogleDocumentAIAdapter
 from openreading.adapters.google_gemini import GoogleGeminiAdapter
 from openreading.adapters.liteparse import LiteParseAdapter
+from openreading.adapters.llamaparse import (
+    LlamaParseAgenticAdapter,
+    LlamaParseAgenticPlusAdapter,
+    LlamaParseCostEffectiveAdapter,
+    LlamaParseFastAdapter,
+)
 from openreading.adapters.mistral_ocr import MistralOCRAdapter
 from openreading.adapters.nuextract import NuExtractAdapter
 from openreading.adapters.open_ocr import OpenOCRAdapter
@@ -37,6 +43,10 @@ BUILTIN_ADAPTERS: dict[str, Callable[[], BackendAdapter]] = {
     "docling": DoclingAdapter,
     "docling_local": DoclingLocalAdapter,
     "liteparse": LiteParseAdapter,
+    "llamaparse-fast": LlamaParseFastAdapter,
+    "llamaparse-cost-effective": LlamaParseCostEffectiveAdapter,
+    "llamaparse-agentic": LlamaParseAgenticAdapter,
+    "llamaparse-agentic-plus": LlamaParseAgenticPlusAdapter,
     "qwen-vl": QwenVLAdapter,
     "google-document-ai": GoogleDocumentAIAdapter,
     "google-gemini": GoogleGeminiAdapter,

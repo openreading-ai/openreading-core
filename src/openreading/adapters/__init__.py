@@ -98,7 +98,8 @@ Pin down ALL ten; when a fact is unknown, §3 says how to encode "unknown" hones
 2. Complete file checklist
 --------------------------
 Slug is HYPHENATED (`open-ocr`); the package directory is UNDERSCORED (`open_ocr`); the pyproject
-extra equals the slug (exception: `aws-textract`'s extra is `textract`, historical -- the
+extra equals the slug (exceptions: `aws-textract`'s extra is `textract`, historical, and the
+four `llamaparse-*` tier slugs share `llamaparse` -- the
 explicit map in `scripts/check_extras_parity.py` is the authority). Files to CREATE:
 
     src/openreading/adapters/<pkg>/__init__.py   docstring + re-export Adapter & Client Protocol

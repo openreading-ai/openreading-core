@@ -39,6 +39,10 @@ docling_local                  oss_library        no          DOCLING_LOCAL_ASSE
 google-document-ai             hosted_api         no          GCP_PROJECT_ID, GCP_PROCESSOR_ID
 google-gemini                  hosted_api         no          GEMINI_API_KEY
 liteparse                      oss_library        yes         LITEPARSE_TESSDATA, LITEPARSE_WORKER_MEMORY_BYTES
+llamaparse-agentic             hosted_api         no          LLAMA_CLOUD_API_KEY
+llamaparse-agentic-plus        hosted_api         no          LLAMA_CLOUD_API_KEY
+llamaparse-cost-effective      hosted_api         no          LLAMA_CLOUD_API_KEY
+llamaparse-fast                hosted_api         no          LLAMA_CLOUD_API_KEY
 mistral-ocr                    hosted_api         no          MISTRAL_API_KEY
 nuextract                      hosted_api         no          NUEXTRACT_API_KEY
 open-ocr                       hosted_api         no          OPENOCR_API_KEY
@@ -113,6 +117,10 @@ and that output disagree, the output is right and the table needs fixing.
 | `google-document-ai` | pdf, tiff, gif, png, jpg, bmp, webp |
 | `google-gemini` | pdf |
 | `liteparse` | pdf, png, jpg, jpeg |
+| `llamaparse-fast` | pdf, doc, docx, ppt, pptx, xls, xlsx, csv, html, rtf, epub, png, jpg, jpeg, tiff, webp, gif, bmp |
+| `llamaparse-cost-effective` | pdf, doc, docx, ppt, pptx, xls, xlsx, csv, html, rtf, epub, png, jpg, jpeg, tiff, webp, gif, bmp |
+| `llamaparse-agentic` | pdf, doc, docx, ppt, pptx, xls, xlsx, csv, html, rtf, epub, png, jpg, jpeg, tiff, webp, gif, bmp |
+| `llamaparse-agentic-plus` | pdf, doc, docx, ppt, pptx, xls, xlsx, csv, html, rtf, epub, png, jpg, jpeg, tiff, webp, gif, bmp |
 | `mistral-ocr` | pdf, docx, pptx, png, jpg, jpeg, avif |
 | `nuextract` | pdf, png, jpg, pptx, odt, txt |
 | `open-ocr` | pdf, png, jpg, gif, webp, tiff, bmp |
@@ -138,6 +146,10 @@ none means the backend declares no variable of that kind.
 | `google-document-ai` | hosted_api | `google-document-ai` | `GCP_PROJECT_ID` or `GOOGLE_CLOUD_PROJECT`, `GCP_PROCESSOR_ID` | `GOOGLE_APPLICATION_CREDENTIALS`, `GCP_LOCATION` |
 | `google-gemini` | hosted_api | `google-gemini` | `GEMINI_API_KEY` | `GEMINI_MODEL` |
 | `liteparse` | oss_library | `liteparse` | none | `LITEPARSE_TESSDATA`, `LITEPARSE_WORKER_MEMORY_BYTES` |
+| `llamaparse-fast` | hosted_api | `llamaparse` | `LLAMA_CLOUD_API_KEY` or `LLAMA_PARSE_API_KEY` | `LLAMA_CLOUD_BASE_URL` |
+| `llamaparse-cost-effective` | hosted_api | `llamaparse` | `LLAMA_CLOUD_API_KEY` or `LLAMA_PARSE_API_KEY` | `LLAMA_CLOUD_BASE_URL` |
+| `llamaparse-agentic` | hosted_api | `llamaparse` | `LLAMA_CLOUD_API_KEY` or `LLAMA_PARSE_API_KEY` | `LLAMA_CLOUD_BASE_URL` |
+| `llamaparse-agentic-plus` | hosted_api | `llamaparse` | `LLAMA_CLOUD_API_KEY` or `LLAMA_PARSE_API_KEY` | `LLAMA_CLOUD_BASE_URL` |
 | `mistral-ocr` | hosted_api | `mistral-ocr` | `MISTRAL_API_KEY` | `MISTRAL_OCR_MODEL` |
 | `nuextract` | hosted_api | `nuextract` | `NUEXTRACT_API_KEY` or `NUMIND_API_KEY` | `NUEXTRACT_BASE_URL` |
 | `open-ocr` | hosted_api | `open-ocr` | `OPENOCR_API_KEY` | `OPENOCR_ENGINE` |
@@ -171,6 +183,10 @@ machine and has nothing to sign up for.
 | `google-document-ai` | hosted_api | proprietary | https://cloud.google.com/document-ai |
 | `google-gemini` | hosted_api | proprietary | https://aistudio.google.com/apikey |
 | `liteparse` | oss_library | Apache-2.0 | none |
+| `llamaparse-fast` | hosted_api | proprietary | https://cloud.llamaindex.ai |
+| `llamaparse-cost-effective` | hosted_api | proprietary | https://cloud.llamaindex.ai |
+| `llamaparse-agentic` | hosted_api | proprietary | https://cloud.llamaindex.ai |
+| `llamaparse-agentic-plus` | hosted_api | proprietary | https://cloud.llamaindex.ai |
 | `mistral-ocr` | hosted_api | proprietary | https://console.mistral.ai/api-keys |
 | `nuextract` | hosted_api | proprietary (open-weight NuExtract 2.0 [MIT 2B/8B] self-hostable via vLLM — different wire protocol, separate adapter) | https://nuextract.ai |
 | `open-ocr` | hosted_api | proprietary | https://open-ocr.com |
@@ -246,6 +262,10 @@ Native batch max items is how many documents the vendor's own bulk endpoint acce
 | `google-document-ai` | 15 sync / 500 batch | none | none |
 | `google-gemini` | 1000 | none | none |
 | `liteparse` | none | none | none |
+| `llamaparse-fast` | none | none | none |
+| `llamaparse-cost-effective` | none | none | none |
+| `llamaparse-agentic` | none | none | none |
+| `llamaparse-agentic-plus` | none | none | none |
 | `mistral-ocr` | none | none | none |
 | `nuextract` | none | none | none |
 | `open-ocr` | engine-dependent: 200 (tesseract) / 5-20 (vision LLMs) | none | none |
@@ -294,6 +314,10 @@ that grading enforces, C1 to C11.
 | `google-document-ai` | `N` | `D` | `N` | `N` | `N` | `N` | `N` |
 | `google-gemini` | `D` | `N` | `D` | `X` | `X` | `D` | `N` |
 | `liteparse` | `N` | `N` | `N` | `N` | `X` | `N` | `N` |
+| `llamaparse-fast` | `N` | `X` | `X` | `X` | `X` | `X` | `X` |
+| `llamaparse-cost-effective` | `N` | `N` | `N` | `X` | `X` | `N` | `X` |
+| `llamaparse-agentic` | `N` | `N` | `N` | `X` | `X` | `N` | `X` |
+| `llamaparse-agentic-plus` | `N` | `N` | `N` | `X` | `X` | `N` | `X` |
 | `mistral-ocr` | `D` | `N` | `N` | `N` | `N` | `D` | `N` |
 | `nuextract` | `D` | `N` | `D` | `X` | `X` | `D` | `N` |
 | `open-ocr` | `N` | `D` | `X` | `X` | `X` | `X` | `X` |

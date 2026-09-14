@@ -4,6 +4,8 @@
 
 - Add the optional `liteparse` adapter for PDF and image parsing in a supervised local worker.
   OCR runs only with pinned, hash-verified English language data, so LiteParse never downloads it.
+- Add four hosted LlamaParse v2 backends, one per tier, each pinned to a dated release.
+  Automatic cost optimization stays off, and no option that adds credits is sent.
 
 ## Unreleased retained evidence v0.3
 

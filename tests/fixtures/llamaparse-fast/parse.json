@@ -1,0 +1,20 @@
+{
+  "job": {
+    "id": "pjb_fast_1",
+    "project_id": "prj_fixture",
+    "status": "COMPLETED",
+    "tier": "fast",
+    "error_message": null,
+    "usage": {"credits": 1.0}
+  },
+  "text": {
+    "pages": [
+      {"page_number": 1, "text": "Invoice\nInvoice total 1,250.00"}
+    ]
+  },
+  "metadata": {
+    "pages": [
+      {"page_number": 1, "confidence": null, "cost_optimized": null}
+    ]
+  }
+}

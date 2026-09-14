@@ -9,13 +9,13 @@ dependency for testing, so a build agent that adds an adapter, writes its tests,
 misspells the `pyproject.toml` extra sees a fully green `make verify` — the dev group already
 supplies what the tests import — while the *shipped* package is broken for a real end user.
 Before this script, nothing mechanical produced that signal. A reviewer re-derived the
-adapter count, the extra count, and the one documented exception by hand each time. This
+adapter count, the extra count, and the documented exceptions by hand each time. This
 script is that mechanism.
 
 Three checks, all offline, stdlib-only:
 
   1. Forward — every `BUILTIN_ADAPTERS` slug has a matching `pyproject.toml` extra, either by
-     the same name or via the one explicit, named entry in `EXTRA_NAME_EXCEPTIONS` below.
+     the same name or via an explicit, named entry in `EXTRA_NAME_EXCEPTIONS` below.
   2. Reverse — every `pyproject.toml` extra outside `NON_ADAPTER_EXTRAS` maps back to a real
      registry slug (again allowing the exception map, applied in reverse).
   3. `all`-extra mirror — every package name that appears in a single-adapter extra (i.e. any
@@ -37,12 +37,17 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# One explicit, named exception per historical naming mismatch between a registry slug and its
-# pyproject.toml extra name. Every exception this check tolerates must be visible here, in code —
-# no wildcard, no silent skip. Today only `aws-textract` differs: its extra is named
-# `textract` for historical reasons, and this map is the authority for that exception.
+# One explicit, named exception per registry slug whose pyproject.toml extra has another name.
+# Every exception this check tolerates must be visible here, in code, with no wildcard and no
+# silent skip. `aws-textract` installs the `textract` extra for historical reasons. The four
+# LlamaParse tier slugs share the `llamaparse` extra, because they call one HTTP API.
 EXTRA_NAME_EXCEPTIONS: dict[str, str] = {
     "aws-textract": "textract",
+    # One hosted API, four tier descriptors. Each tier slug installs the same HTTP client.
+    "llamaparse-fast": "llamaparse",
+    "llamaparse-cost-effective": "llamaparse",
+    "llamaparse-agentic": "llamaparse",
+    "llamaparse-agentic-plus": "llamaparse",
 }
 
 # Documented non-adapter umbrella extras: install conveniences, not a registry slug's install
