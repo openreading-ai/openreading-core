@@ -24,7 +24,7 @@ def conversions(tmp_path, monkeypatch):
         def export_to_dict(self):
             return {"pages": {"1": {"size": {"width": 100, "height": 200}}}}
 
-        def iterate_items(self, included_content_layers=None):
+        def iterate_items(self, included_content_layers=None, traverse_pictures=False):
             if included_content_layers is not None:
                 return []
             return [

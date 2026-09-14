@@ -17,6 +17,8 @@
 
 ## Unreleased local Docling profile
 
+- Retain provider text nested inside picture regions, including its physical-page provenance.
+  Count nested furniture in the existing omission warning. Reimport earlier artifacts to recover this text.
 - Honor local request OCR modes: configured automatic OCR, forced full-page OCR, and explicit off.
   Automatic requests disclose skipped OCR, while enabled OCR requires explicit Tesseract paths.
 - Reuse the loaded layout pipeline when requests alternate OCR modes without reallocating ONNX sessions.
