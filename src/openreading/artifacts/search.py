@@ -115,6 +115,8 @@ def _fit(
 ) -> Result:
     end = min(len(items), start + limit)
     while end >= start:
+        if items and end == start:
+            break
         cursor = _cursor(binding, end) if end < len(items) else None
         result = construct(items[start:end], cursor)
         if len(json_bytes(result.wire())) <= cap and (end > start or not items):

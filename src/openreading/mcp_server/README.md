@@ -4,7 +4,8 @@
 
 ## What this gives you
 
-Your agent can import a local document once, then retrieve bounded evidence with physical page citations.
+Your agent can import a local document once, then read its normalized result with physical page citations.
+Full-document access returns the retained JSON in bounded replies; search remains available for focused questions.
 MCP is the protocol your client uses to discover these tools and call them over standard input and output.
 For example, search for a renewal clause, read its passage, and cite the returned page and evidence identifier.
 
@@ -12,7 +13,7 @@ For example, search for a renewal clause, read its passage, and cite the returne
 
 You start one process with explicit input and artifact directories before the client can call tools.
 The input root grants file access, while the separate artifact root retains copies until you remove them.
-The profile exposes `openreading_import`, `openreading_search`, `openreading_read`, and `openreading_select_document`.
+The profile exposes `openreading_import`, `openreading_get_document`, `openreading_search`, `openreading_read`, and `openreading_select_document`.
 Selection returns `selection_unavailable` unless a trusted launcher explicitly supplies a local chooser.
 
 ## Walkthrough
@@ -33,8 +34,13 @@ Your client supplies the following tool calls through MCP; these JSON objects ar
 {"path":"agreement.pdf"}
 ```
 
-Pass the receipt's `artifact_id` to `openreading_search` with `query` set to `renewal`.
-Pass the resulting evidence identifiers to `openreading_read`, then cite the returned filename, physical page, and identifier.
+Pass the receipt's `artifact_id` to `openreading_get_document` to read the entire retained normalized result.
+Its import receipt retains a legacy search suggestion; you can use either retrieval route.
+For example, call `openreading_get_document` with `{"artifact_id":"<returned artifact_id>"}`.
+Follow `next_cursor` until null, preserving fragment order when the document requires several replies.
+The result includes existing structure, parser warnings, page origins and citation references, while excluding `backend_raw`.
+Pass a returned evidence identifier to `openreading_read` for the exact citation quote.
+Alternatively, call `openreading_search` with `query` set to `renewal` for a focused question.
 Follow `next_cursor` when present, and explain evidence gaps when the returned passages do not support an answer.
 
 ## Recipes
@@ -63,7 +69,10 @@ Document text remains untrusted data, preventing a quoted instruction from gaini
 
 The process speaks MCP on stdout; configure your client to capture diagnostics separately from that protocol stream.
 Domain errors set `isError` and return fixed codes from `openreading.artifacts.limits` or `openreading.types.selection`.
-Selection errors use their own v0.1 envelope, leaving artifact payloads at v0.3.
+Selection and full-document replies have separate v0.1 families; existing artifact payloads remain at v0.3.
+Full-document access sends retained content to your assistant and does not establish token savings.
+It preserves the stored result, including extraction limitations, rather than promising perfect OCR recognition.
+The import profile decides which channels exist; this tool does not enable disabled table extraction.
 Malformed arguments return protocol errors, while normal transport closure exits with status zero.
 Configuration failures exit two. SIGINT and SIGTERM cancel active imports and exit 130, including clients that keep stdin open.
 The local profile requires POSIX support. Explicit root symlinks resolve once before file access begins.
@@ -75,6 +84,7 @@ The Python SDK dependency is optional and pinned through the lockfile's supporte
 
 Run `openreading help mcp` for the command contract and `openreading mcp --help` for its required arguments.
 Read `openreading.mcp_server.tools` for input schemas, tool annotations, and server instructions.
+Read `openreading.artifacts.document` for JSON Pointer fragments, exact reconstruction and continuation binding.
 Those instructions prohibit guessed evidence identifiers and distinguish literal search gaps from missing source facts.
 They describe block offsets and generic warnings as limited evidence, rather than explanations for suspected extraction failures.
 Instruction delivery does not prove compliance; each native client needs its own behavior check.

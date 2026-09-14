@@ -236,6 +236,9 @@ def _display_name(relative: str) -> str:
 
 class ArtifactService:
     def __init__(self, config: ProfileConfig, *, identity: EngineIdentity | None = None):
+        from openreading.artifacts.document import DocumentCache
+
+        self._document_cache = DocumentCache()
         self.config = config
         self.store = Store(config)
         self.config = self.store.config
@@ -261,6 +264,7 @@ class ArtifactService:
             )
 
     def close(self):
+        self._document_cache.entry = None
         if self._warm is not None:
             self._warm.close()
         self.store.close()
@@ -461,3 +465,16 @@ class ArtifactService:
 
         manifest, passages = self.store.load(artifact_id)
         return read(manifest, passages, evidence_ids, cursor, self.config.limits.read_bytes)
+
+    def get_document(self, artifact_id: str, cursor: str | None = None):
+        from openreading.artifacts.document import get_document
+
+        manifest, passages, response = self.store.load_document(artifact_id)
+        return get_document(
+            manifest,
+            passages,
+            response,
+            cursor,
+            self.config.limits.document_bytes,
+            cache=self._document_cache,
+        )

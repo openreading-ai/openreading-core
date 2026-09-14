@@ -1,5 +1,9 @@
 """Retain local extraction evidence for bounded, repeatable document retrieval.
 
+Full normalized retrieval is defined in openreading.artifacts.document and excludes backend_raw.
+It preserves stored channels and warnings without reparsing or selecting relevant blocks.
+The profile determines extraction coverage; full retrieval does not recover unavailable channels.
+
 A retained artifact contains exact source bytes, a normalized response, and page passages.
 The v1 profile selects PyMuPDF; v2 selects local Docling with explicit assets and limits.
 Both ignore ambient routing configuration and refuse hosted fallback.
@@ -15,6 +19,8 @@ Integration exports and return shapes
 ------------------------------------
 Import ArtifactService and engine_identity from openreading.artifacts.service. The service
 returns ImportReceipt, SearchResult, and ReadResult models with JSON-ready wire() dictionaries.
+ArtifactService.get_document returns DocumentResult, defined in openreading.artifacts.document.
+Its wire() preserves explicit nulls within normalized content and provides bounded continuation.
 ProfileConfig and ArtifactError live in openreading.artifacts.limits. The latter exposes envelope().
 Packagers may use intake.directory (a held directory descriptor context), store.Store, and
 store.safe_read (bounded bytes). worker.SETTINGS and worker.main are supported worker entry points.

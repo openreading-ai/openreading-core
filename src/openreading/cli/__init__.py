@@ -1233,14 +1233,20 @@ fire after that clean shutdown.
 
 mcp --profile local-document-proof-v1
 ------------------------------------
-Serve four bounded document tools over stdio with openreading[agent,pymupdf].
+Serve five bounded document tools over stdio with openreading[agent,pymupdf].
 You grant an absolute --input-root and a separate absolute --artifact-root.
 For example, use /absolute/documents and /absolute/evidence respectively.
 The server retains source bytes and page evidence until you remove the store.
 Retrieved excerpts enter the calling agent context. Treat them as untrusted.
 
-Call openreading_import with a relative path, then openreading_search with
-its artifact_id and a query. Call openreading_read with matching evidence_ids.
+Call openreading_import with a relative path, then pass its artifact_id to
+openreading_get_document for the complete retained normalized JSON.
+This excludes backend_raw and keeps existing channels, warnings and origins.
+Follow every next_cursor for the whole result. Large values use ordered JSON
+Pointer fragments with exact character spans; small results fit one fragment.
+The openreading.artifacts.document docstring defines their reconstruction.
+Alternatively, use openreading_search for a focused query.
+Call openreading_read with evidence_ids returned by any retrieval tool.
 Cite the returned filename, physical page, and evidence identifier.
 Follow next_cursor when present. A failed search does not prove absence.
 Call openreading_select_document with {} when a trusted launcher supplies
@@ -1251,6 +1257,9 @@ This profile accepts one PDF, at most 25 MiB and 100 physical pages.
 It uses local PyMuPDF without OCR, passwords, routing, or hosted fallback.
 Imports allow 45 seconds and retain at most 512 MiB across the artifact store.
 Import, search, and read allow 4096, 8192, and 16384 UTF-8 bytes.
+Full-document replies allow 65536 UTF-8 bytes per continuation.
+These return the stored result, not a promise of complete OCR recognition.
+The import profile still determines which normalized channels are available.
 These byte limits do not prove token savings or impose a native memory limit.
 Select --profile local-document-proof-v2 for openreading[agent,docling-local].
 That profile requires --profile-config pointing to a local JSON setup file.

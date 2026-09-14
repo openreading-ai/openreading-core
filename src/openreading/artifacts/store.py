@@ -113,6 +113,11 @@ class Store:
             os.close(fd)
 
     def load(self, identifier: str) -> tuple[ArtifactManifest, list[Passage]]:
+        manifest, passages, _ = self.load_document(identifier)
+        return manifest, passages
+
+    def load_document(self, identifier: str) -> tuple[ArtifactManifest, list[Passage], dict]:
+        """Return response bytes parsed from the same integrity-checked read as the passages."""
         if not re.fullmatch(r"or1_[0-9a-f]{64}", identifier):
             raise ArtifactError("artifact_not_found")
         root = self.documents / identifier
@@ -157,7 +162,7 @@ class Store:
                 or response.document.page_count != manifest.page_count
             ):
                 raise ValueError("Evidence mismatch")
-            return manifest, passages
+            return manifest, passages, json.loads(data["response.json"])
         except ArtifactError as error:
             if error.code == "artifact_version_unsupported":
                 raise

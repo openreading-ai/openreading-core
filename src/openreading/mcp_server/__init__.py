@@ -6,7 +6,9 @@ SIGINT and SIGTERM cancel imports, reap workers, and exit 130 even while stdin r
 
 Start openreading mcp with the local-document-proof-v1 profile and explicit input and
 artifact roots. The server exposes openreading_import, openreading_search, and
-openreading_read. The openreading_select_document tool accepts only an empty object.
+openreading_read, plus openreading_get_document for the complete retained normalized result.
+That result excludes backend_raw and uses lossless pagination defined by openreading.artifacts.document.
+Search remains optional. The openreading_select_document tool accepts only an empty object.
 Without an explicitly supplied provider, it returns selection_unavailable and opens no UI.
 Every successful call returns one JSON TextContent payload without
 structuredContent duplication. Domain failures set isError; malformed arguments receive

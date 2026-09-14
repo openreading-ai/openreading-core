@@ -8,6 +8,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.shared.exceptions import McpError
 
+from tests.test_artifact_document import reassemble
 from tests.test_artifact_service import pdf
 
 
@@ -37,6 +38,7 @@ async def test_stdio_import_search_read_and_sanitized_invalid_arguments(tmp_path
             "openreading_search",
             "openreading_read",
             "openreading_select_document",
+            "openreading_get_document",
         }
         unavailable = await session.call_tool("openreading_select_document", {})
         assert unavailable.isError
@@ -47,6 +49,15 @@ async def test_stdio_import_search_read_and_sanitized_invalid_arguments(tmp_path
         assert receipt_result.structuredContent is None
         assert len(receipt_result.content) == 1
         receipt = json.loads(receipt_result.content[0].text)
+        whole = await session.call_tool(
+            "openreading_get_document", {"artifact_id": receipt["artifact_id"]}
+        )
+        assert not whole.isError
+        content = reassemble([json.loads(whole.content[0].text)])
+        assert "60 days" in content["response"]["document"]["pages"][0]["text"]
+        stored = json.loads(next((tmp_path / "store").rglob("response.json")).read_text())
+        stored.pop("backend_raw", None)
+        assert content["response"] == stored
         found = await session.call_tool(
             "openreading_search", {"artifact_id": receipt["artifact_id"], "query": "renewal"}
         )
@@ -79,7 +90,7 @@ async def test_inprocess_protocol_checks_unknown_tool_bounds_and_error_redaction
     pdf(root / "sample.pdf")
     service = ArtifactService(ProfileConfig(root, tmp_path.resolve() / "store"))
     async with create_connected_server_and_client_session(create_server(service)) as session:
-        assert len((await session.list_tools()).tools) == 4
+        assert len((await session.list_tools()).tools) == 5
         receipt = await session.call_tool("openreading_import", {"path": "sample.pdf"})
         identifier = json.loads(receipt.content[0].text)["artifact_id"]
         for name, args in [

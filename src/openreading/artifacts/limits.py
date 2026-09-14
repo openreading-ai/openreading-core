@@ -3,6 +3,7 @@
 The historical v1 profile permits one import per store, 25 MiB input, 100 physical pages, 64 MiB
 serialized extraction, 512 MiB retained storage, and 45 seconds per import.
 Import, search, and read payloads permit 4096, 8192, and 16384 UTF-8 bytes respectively.
+Full-document continuation payloads default to 65536 UTF-8 bytes, with no silent truncation.
 These caps do not promise a hard native-parser memory ceiling or an operating-system sandbox.
 DoclingLimits requires explicit page, deadline, sampled RSS, and idle limits.
 The legacy profile rejects worker settings that its disposable parser cannot enforce.
@@ -87,6 +88,7 @@ class ProfileLimits:
     import_bytes: int = 4096
     search_bytes: int = 8192
     read_bytes: int = 16384
+    document_bytes: int = 65536
 
     def __post_init__(self):
         if self.worker_memory_bytes is not None or self.worker_idle_seconds != 60:
@@ -101,6 +103,7 @@ class DoclingLimits:
     import_bytes: int = 4096
     search_bytes: int = 8192
     read_bytes: int = 16384
+    document_bytes: int = 65536
     pages: int = field()
     deadline_seconds: float = field()
     worker_memory_bytes: int = field()

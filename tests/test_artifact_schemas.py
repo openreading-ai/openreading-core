@@ -7,6 +7,7 @@ import jsonschema
 import pytest
 from pydantic import TypeAdapter
 
+from openreading.artifacts.document import DocumentPayload
 from openreading.artifacts.models import (
     ArtifactManifest,
     ErrorEnvelope,
@@ -22,6 +23,7 @@ from openreading.artifacts.models import (
     [
         ("local-document.v0.3.json", ArtifactManifest),
         ("passage.v0.3.json", Passage),
+        ("document-tool.v0.1.json", TypeAdapter(DocumentPayload)),
         (
             "agent-document-tool.v0.3.json",
             TypeAdapter(ImportReceipt | SearchResult | ReadResult | ErrorEnvelope),

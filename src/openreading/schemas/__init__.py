@@ -34,6 +34,8 @@ Families
 - local-document / passage / agent-document-tool: retained evidence and bounded MCP
   payloads owned by ``openreading.artifacts``. These separate families leave the existing
   request and normalized response contracts unchanged.
+- document-tool: complete retained normalized JSON with lossless continuation, excluding raw payloads.
+  The response keeps existing structure, warnings and page origins without a search requirement.
 - selection-tool: local copied-file receipts and errors, separate from artifact evidence.
   The empty Request definition excludes model-supplied dialog controls.
 - step / journal: the executor step contract and the per-line JSONL journal shape
@@ -541,6 +543,7 @@ LOCAL_DOCUMENT_SCHEMA_FILE = "local-document.v0.3.json"
 PASSAGE_SCHEMA_FILE = "passage.v0.3.json"
 SELECTION_TOOL_SCHEMA_FILE = "selection-tool.v0.1.json"
 AGENT_DOCUMENT_TOOL_SCHEMA_FILE = "agent-document-tool.v0.3.json"
+DOCUMENT_TOOL_SCHEMA_FILE = "document-tool.v0.1.json"
 
 
 _PACKAGE = "openreading.schemas"
@@ -736,6 +739,11 @@ def selection_tool_schema() -> dict[str, Any]:
     return _load(SELECTION_TOOL_SCHEMA_FILE)
 
 
+def document_tool_schema() -> dict[str, Any]:
+    """Whole retained normalized results with lossless continuation and existing artifact errors."""
+    return _load(DOCUMENT_TOOL_SCHEMA_FILE)
+
+
 def _cli_validate() -> int:
     """Validate every vendored schema, then validate any stored normalized fixture.
 
@@ -762,6 +770,7 @@ def _cli_validate() -> int:
         passage_schema(),
         agent_document_tool_schema(),
         selection_tool_schema(),
+        document_tool_schema(),
     ):
         _validator(contract)
     print(
@@ -771,7 +780,8 @@ def _cli_validate() -> int:
         f"{CORPUS_REPORT_SCHEMA_FILE} OK, {LEADERBOARD_REPORT_SCHEMA_FILE} OK, "
         f"{LIVENESS_REPORT_SCHEMA_FILE} OK, {STEP_SCHEMA_FILE} OK, {JOURNAL_SCHEMA_FILE} OK, "
         f"{LOCAL_DOCUMENT_SCHEMA_FILE} OK, {PASSAGE_SCHEMA_FILE} OK, "
-        f"{AGENT_DOCUMENT_TOOL_SCHEMA_FILE} OK, {SELECTION_TOOL_SCHEMA_FILE} OK"
+        f"{AGENT_DOCUMENT_TOOL_SCHEMA_FILE} OK, {SELECTION_TOOL_SCHEMA_FILE} OK, "
+        f"{DOCUMENT_TOOL_SCHEMA_FILE} OK"
     )
 
     # 2. any stored normalized-response fixtures validate against the response schema
