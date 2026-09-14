@@ -38,8 +38,9 @@ a guess. Block confidence is X too, since it rides on that box. Page confidence 
 `expand=metadata`. Typed fields are X, because form enrichment is a separate paid pass. A page
 the service marks failed makes the response PARTIAL.
 
-Usage. Polls request `expand=usage` because billed credits are absent unless that section is requested.
-`usage.credits` is the job's own credit count, and the service leaves it null until billing records it.
+Usage. Polls request `expand=usage` because billed credits are absent unless that section is
+requested. `usage.credits` is the job's own credit count, and the service leaves it null until
+billing records it.
 `report_cost` returns credits when present and the page count otherwise.
 LlamaIndex caches a parse of the same file for 48 hours at no charge, so a repeat can show zero.
 

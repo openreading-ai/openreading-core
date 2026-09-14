@@ -195,6 +195,7 @@ def test_form_field_name_and_id_collisions_preserve_every_value_and_citation():
         {"name": "f2#2", "id": "f3", "value": "second"},
         {"name": "f2", "id": "f2", "value": "third"},
         {"name": "f2", "id": "f2", "value": "fourth"},
+        {"name": "f2", "id": "f4", "value": "fifth"},
     ]
     raw["pages"] = [
         {**copy.deepcopy(RAW["pages"][0]), "page_num": i, "form_fields": [field]}
@@ -204,6 +205,7 @@ def test_form_field_name_and_id_collisions_preserve_every_value_and_citation():
     request = _req(outputs={"typed_fields": True})
     response = _run(adapter, request)
     assert len(response.typed_fields) == len(fields)
+    assert list(response.typed_fields) == ["f2", "f2#2", "f2#3", "f2#4", "f4"]
     assert [(f.value, f.citations[0].page) for f in response.typed_fields.values()] == [
         (field["value"], i) for i, field in enumerate(fields, start=1)
     ]

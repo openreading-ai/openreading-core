@@ -7,7 +7,8 @@
 - Add four hosted LlamaParse v2 backends, one per tier, each pinned to a dated release.
   Automatic cost optimization stays off, and no option that adds credits is sent.
 - Preserve every LiteParse form widget when field names and fallback identifiers collide.
-- Request LlamaParse's billed usage metadata and honor disabled table output while preserving table text.
+- Request LlamaParse's billed usage metadata and honor disabled table output while preserving
+  table text.
 
 ## Unreleased retained evidence v0.3
 
