@@ -76,6 +76,9 @@ Per-backend reference
   docling_local [docling_local] auth: none
             config: DOCLING_LOCAL_ASSETS, DOCLING_LOCAL_TESSERACT, DOCLING_LOCAL_TESSDATA
             limits: explicit verified assets; OCR requires executable and language data
+  liteparse [liteparse] auth: none
+            config: LITEPARSE_TESSDATA, LITEPARSE_WORKER_MEMORY_BYTES   ops: parse
+            limits: PDF and images in a supervised worker; OCR needs pinned eng tessdata
   docling   [docling]   auth: none   config: DOCLING_SERVE_URL   ops: none
             limits: needs a self-hosted docling-serve container
   qwen-vl   [qwen-vl]   auth: QWEN_VL_API_KEY (opt)   config: QWEN_VL_ENDPOINT, QWEN_VL_MODEL

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased LiteParse and LlamaParse adapters
+
+- Add the optional `liteparse` adapter for PDF and image parsing in a supervised local worker.
+  OCR runs only with pinned, hash-verified English language data, so LiteParse never downloads it.
+
 ## Unreleased retained evidence v0.3
 
 - Add an optional local selection provider and empty-argument MCP selection tool.

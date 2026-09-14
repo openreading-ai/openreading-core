@@ -30,6 +30,7 @@ EXPECTED_CRED_KEYS = {
     "tesseract": set(),
     "docling": set(),
     "docling_local": set(),
+    "liteparse": set(),
 }
 EXPECTED_CONFIG_KEYS = {
     "aws-textract": {"region", "s3_bucket"},
@@ -39,6 +40,7 @@ EXPECTED_CONFIG_KEYS = {
     "anthropic-claude": {"model"},
     "docling": {"endpoint"},
     "docling_local": {"assets_path", "tesseract_cmd", "tessdata_path"},
+    "liteparse": {"tessdata_path", "worker_memory_bytes"},
     "qwen-vl": {"endpoint", "model"},
     "chunkr": {"base_url"},
     "nuextract": {"base_url"},

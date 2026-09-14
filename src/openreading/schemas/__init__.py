@@ -191,7 +191,7 @@ readers the field paths, optional-value rules, and distinctions between outer re
     ``channel_unavailable_in_mode`` and ``channel_not_produced_by_operation`` (the capability
     exists, the operation or mode this run chose does not carry it), ``typed_fields_empty``,
     ``confidence_unavailable``, ``page_attribution_unavailable``, ``cost_unavailable``,
-    ``ocr_skipped`` (automatic local OCR disabled or missing its configured Tesseract paths).
+    ``ocr_skipped`` (automatic local OCR disabled or missing its configured, verified assets).
   - the output is degraded: ``typed_fields_malformed`` (the vendor's structured output was not
     a JSON object, so the response is PARTIAL), ``typed_fields_unverified``,
     ``output_truncated``, ``interaction_incomplete`` (the vendor stopped before finishing),

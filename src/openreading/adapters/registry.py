@@ -17,6 +17,7 @@ from openreading.adapters.docling import DoclingAdapter
 from openreading.adapters.docling_local import DoclingLocalAdapter
 from openreading.adapters.google_document_ai import GoogleDocumentAIAdapter
 from openreading.adapters.google_gemini import GoogleGeminiAdapter
+from openreading.adapters.liteparse import LiteParseAdapter
 from openreading.adapters.mistral_ocr import MistralOCRAdapter
 from openreading.adapters.nuextract import NuExtractAdapter
 from openreading.adapters.open_ocr import OpenOCRAdapter
@@ -35,6 +36,7 @@ BUILTIN_ADAPTERS: dict[str, Callable[[], BackendAdapter]] = {
     "tesseract": TesseractAdapter,
     "docling": DoclingAdapter,
     "docling_local": DoclingLocalAdapter,
+    "liteparse": LiteParseAdapter,
     "qwen-vl": QwenVLAdapter,
     "google-document-ai": GoogleDocumentAIAdapter,
     "google-gemini": GoogleGeminiAdapter,
