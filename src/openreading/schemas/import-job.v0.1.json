@@ -332,6 +332,88 @@
           }
         }
       }
+    },
+    "ListRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 20
+        },
+        "cursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512,
+          "default": null
+        }
+      }
+    },
+    "ImportJobSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "job_id",
+        "state",
+        "elapsed_seconds"
+      ],
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "pattern": "^j1_[0-9a-f]{32}$"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "running",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "unavailable"
+          ]
+        },
+        "elapsed_seconds": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "ImportJobList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jobs"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "0.1",
+          "default": "0.1"
+        },
+        "jobs": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/ImportJobSummary"
+          }
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 512,
+          "default": null
+        }
+      }
     }
   },
   "oneOf": [
@@ -340,6 +422,9 @@
     },
     {
       "$ref": "#/$defs/JobFailure"
+    },
+    {
+      "$ref": "#/$defs/ImportJobList"
     }
   ]
 }

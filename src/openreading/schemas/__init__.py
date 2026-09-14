@@ -36,7 +36,7 @@ Families
   request and normalized response contracts unchanged.
 - document-tool: complete retained normalized JSON with lossless continuation, excluding raw payloads.
   The response keeps existing structure, warnings and page origins without a search requirement.
-- import-job: persistent local import status and background start, status, and cancel requests.
+- import-job: persistent local import status and background start, status, list, and cancel requests.
 - selection-tool: local copied-file receipts and errors, separate from artifact evidence.
   The empty Request definition excludes model-supplied dialog controls.
 - step / journal: the executor step contract and the per-line JSONL journal shape

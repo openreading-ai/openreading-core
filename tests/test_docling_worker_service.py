@@ -54,6 +54,60 @@ def job(tmp_path):
     }
 
 
+@pytest.mark.parametrize("failure_kind", ["dead_parser", "disk_write"])
+def test_service_distinguishes_dead_parser_from_storage_failure(
+    tmp_path, monkeypatch, failure_kind
+):
+    from openreading.artifacts import service as module
+
+    root = tmp_path / "input"
+    root.mkdir()
+    (root / "test.pdf").write_bytes(b"%PDF-test")
+    config = ProfileConfig(
+        root,
+        tmp_path / "store",
+        DoclingLimits(
+            pages=None, deadline_seconds=None, worker_memory_bytes=None, worker_idle_seconds=60
+        ),
+        LocalDoclingConfig(tmp_path),
+    )
+    identity = EngineIdentity(
+        core_version="test",
+        backend_id="docling_local",
+        backend_version="test",
+        extraction_settings={"assets": {}},
+    )
+    service = ArtifactService(config, identity=identity)
+    if failure_kind == "dead_parser":
+        worker = service._warm
+        worker.command = [sys.executable, "-c", "import time; time.sleep(60)"]
+        start = worker._start
+
+        def dead_start():
+            start()
+            worker._process.kill()
+            worker._process.wait()
+
+        monkeypatch.setattr(worker, "_start", dead_start)
+    else:
+
+        def disk_full(*args, **kwargs):
+            raise OSError("private storage diagnostic")
+
+        monkeypatch.setattr(module, "copy_source", disk_full)
+    try:
+        with pytest.raises(ArtifactError) as failure:
+            service.import_document("test.pdf")
+        assert failure.value.code == (
+            "parse_failed" if failure_kind == "dead_parser" else "storage_limit"
+        )
+        assert service._warm.pid is None
+        assert not list((config.artifact_root / "staging").iterdir())
+        assert not list(service.store.documents.iterdir())
+    finally:
+        service.close()
+
+
 def test_private_worker_loop_writes_origins_and_rejects_configuration_changes(
     tmp_path, monkeypatch, extraction
 ):

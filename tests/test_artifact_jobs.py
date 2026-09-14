@@ -65,6 +65,95 @@ def test_queue_can_be_cancelled_without_waiting_for_other_import(service):
     assert not list(service.store.documents.glob("*/manifest.json"))
 
 
+def test_reconnected_service_discovers_and_cancels_job_without_saved_identifier(service):
+    jobs = ImportJobs(service)
+    restarted = ArtifactService(service.config)
+    try:
+        with service.store.import_lock():
+            original = jobs.start("test.pdf")
+            recovered = ImportJobs(restarted)
+            listing = recovered.list()
+            assert [job.job_id for job in listing.jobs] == [original.job_id]
+            assert listing.jobs[0].state == "queued"
+            assert "test.pdf" not in json.dumps(listing.wire())
+            assert str(service.config.input_root) not in json.dumps(listing.wire())
+            recovered.cancel(listing.jobs[0].job_id)
+            assert terminal(recovered, original.job_id).state == "cancelled"
+    finally:
+        restarted.close()
+
+
+def test_job_listing_pages_are_grant_bound_and_keep_unreadable_ids(service, tmp_path):
+    import jsonschema
+
+    from openreading.artifacts.jobs import _write
+    from openreading.schemas import import_job_schema
+    from openreading.types.import_job import ImportJob
+
+    jobs = ImportJobs(service)
+    identifiers = ["j1_" + f"{index:032x}" for index in range(4)]
+    for identifier in identifiers:
+        root = jobs.root / identifier
+        root.mkdir()
+        value = ImportJob(
+            job_id=identifier,
+            state="failed",
+            stage="stopped",
+            elapsed_seconds=1.0,
+            error=ArtifactError("parse_failed").envelope().error,
+        )
+        _write(root / "status.json", value.wire())
+    (jobs.root / identifiers[1] / "status.json").write_bytes(b"private broken status")
+    (jobs.root / ("j1_" + "e" * 32)).symlink_to(
+        jobs.root / identifiers[0], target_is_directory=True
+    )
+    (jobs.root / "unrelated").mkdir()
+    first = jobs.list(limit=2)
+    assert [row.job_id for row in first.jobs] == identifiers[:2]
+    assert first.jobs[1].state == "unavailable"
+    assert first.jobs[1].elapsed_seconds is None
+    assert first.next_cursor is not None
+    jsonschema.validate(first.wire(), import_job_schema())
+    assert "private" not in json.dumps(first.wire())
+    second = jobs.list(limit=2, cursor=first.next_cursor)
+    assert [row.job_id for row in second.jobs] == identifiers[2:]
+    assert second.next_cursor is None
+    with pytest.raises(ArtifactError, match="invalid_cursor"):
+        jobs.list(limit=1, cursor=first.next_cursor)
+    other = tmp_path / "different-grant"
+    other.mkdir()
+    switched = ArtifactService(ProfileConfig(other, service.config.artifact_root))
+    try:
+        assert ImportJobs(switched).list().jobs == []
+        with pytest.raises(ArtifactError, match="invalid_cursor"):
+            ImportJobs(switched).list(limit=2, cursor=first.next_cursor)
+    finally:
+        switched.close()
+    for limit in (0, 51, True):
+        with pytest.raises(ValueError):
+            jobs.list(limit=limit)
+
+
+@pytest.mark.asyncio
+async def test_mcp_lists_jobs_after_reconnect_before_cancellation(service):
+    from mcp.shared.memory import create_connected_server_and_client_session
+
+    from openreading.mcp_server.tools import create_server
+
+    with service.store.import_lock():
+        job = ImportJobs(service).start("test.pdf")
+        async with create_connected_server_and_client_session(create_server(service)) as session:
+            result = await session.call_tool("openreading_list_imports", {})
+            assert not result.isError
+            listing = json.loads(result.content[0].text)
+            assert listing["jobs"][0]["job_id"] == job.job_id
+            result = await session.call_tool(
+                "openreading_cancel_import", {"job_id": listing["jobs"][0]["job_id"]}
+            )
+            assert not result.isError
+        assert terminal(ImportJobs(service), job.job_id).state == "cancelled"
+
+
 def test_cancel_is_idempotent_after_success(service):
     jobs = ImportJobs(service)
     result = terminal(jobs, jobs.start("test.pdf").job_id)

@@ -481,3 +481,31 @@ def test_final_null_cursor_can_fit_after_an_intermediate_prefix_does_not(tmp_pat
     assert len(replies) == 1
     assert reassemble(replies)["response"] == response
     service.close()
+
+
+@pytest.mark.parametrize("operation", ["search", "read", "get_document"])
+def test_retrieval_streams_passages_and_verifies_trailing_bytes(tmp_path, monkeypatch, operation):
+    from openreading.artifacts import store
+
+    service, identifier, passages = retain(tmp_path, rich_response("OCR code " * 3000))
+    original = store.safe_read
+
+    def without_passage_buffer(path, cap):
+        assert path.name != "passages.jsonl", "Retained passages must be read incrementally"
+        return original(path, cap)
+
+    monkeypatch.setattr(store, "safe_read", without_passage_buffer)
+    calls = {
+        "search": lambda: service.search(identifier, "OCR"),
+        "read": lambda: service.read(identifier, [passages[0].evidence_id]),
+        "get_document": lambda: service.get_document(identifier),
+    }
+    try:
+        calls[operation]()
+        # JSON still parses, and every passage matches. Only byte verification can reject this.
+        path = service.store.documents / identifier / "passages.jsonl"
+        path.write_bytes(path.read_bytes()[:-1] + b" \n")
+        with pytest.raises(ArtifactError, match="artifact_corrupt"):
+            calls[operation]()
+    finally:
+        service.close()

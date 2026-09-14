@@ -196,3 +196,36 @@ def test_worker_runs_from_its_private_directory(command, tmp_path, monkeypatch):
         worker.close()
     assert (private / "probe").exists()
     assert not (elsewhere / "probe").exists()
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_dead_worker_pipe_cleanup_preserves_failure_and_closes_control_fd(
+    command, monkeypatch, cancelled
+):
+    from openreading.artifacts.supervisor import WarmWorker
+
+    worker = WarmWorker(command, memory_bytes=None, idle_seconds=30)
+    worker.run({}, check=lambda: None)
+    process = worker._process
+    control_fd = worker._read_fd
+    process.kill()
+    process.wait()
+    # A pending buffered write must fail both at flush and at close, as with a dead parser.
+    process.stdin.write(b"pending")
+
+    def check():
+        if cancelled:
+            raise ArtifactError("cancelled")
+
+    monkeypatch.setattr(worker, "_start", lambda: None)
+    try:
+        with pytest.raises(ArtifactError) as failure:
+            worker.run({}, check=check)
+        assert failure.value.code == ("cancelled" if cancelled else "parse_failed")
+        assert worker.pid is None
+        assert process.stdin.closed
+        assert worker._read_fd is None
+        with pytest.raises(OSError):
+            os.fstat(control_fd)
+    finally:
+        worker.close()

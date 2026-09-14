@@ -11,6 +11,7 @@ openreading_read, plus openreading_get_document for the complete retained normal
 That result excludes backend_raw and uses lossless pagination defined by openreading.artifacts.document.
 Background tools openreading_start_import, openreading_get_import and openreading_cancel_import
 return persistent job status without keeping a tool request open during extraction.
+Use openreading_list_imports after reconnecting when the original job ID is unavailable.
 Search remains optional. The openreading_select_document tool accepts only an empty object.
 Without an explicitly supplied provider, it returns selection_unavailable and opens no UI.
 Every successful call returns one JSON TextContent payload without

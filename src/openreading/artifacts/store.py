@@ -5,6 +5,10 @@ artifact directories. Hashes detect corruption, not malicious rewriting by the s
 No eviction occurs automatically. Administrators remove retained directories to reclaim space.
 The private worker directory is the working directory of parser processes, which keeps
 their relative writes inside the artifact root instead of wherever a client started the server.
+Passages are decoded and checked against the normalized response one line at a time.
+The response is decoded once, and comparison generates one expected passage at a time.
+Retrieval still materializes the normalized document and returned passage list; memory grows
+with retained content. Bounded reply sizes do not establish bounded server-process memory.
 """
 
 from __future__ import annotations
@@ -57,6 +61,24 @@ def file_record(path: Path, cap: int | None) -> FileRecord:
                     raise ValueError("File exceeds cap")
                 digest.update(data)
             return FileRecord(length=length, sha256=digest.hexdigest())
+
+
+def _verified_lines(path: Path, record: FileRecord, cap: int | None) -> Iterator[bytes]:
+    """Hash one descriptor's lines; callers must exhaust this iterator before publishing results."""
+    with directory(path.parent) as parent_fd:
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent_fd)
+        with os.fdopen(fd, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise ValueError("Not a regular file")
+            digest, length = hashlib.sha256(), 0
+            for line in stream:
+                length += len(line)
+                if cap is not None and length > cap:
+                    raise ValueError("File exceeds cap")
+                digest.update(line)
+                yield line
+            if FileRecord(length=length, sha256=digest.hexdigest()) != record:
+                raise ValueError("Integrity mismatch")
 
 
 class Store:
@@ -129,11 +151,16 @@ class Store:
             os.close(fd)
 
     def load(self, identifier: str) -> tuple[ArtifactManifest, list[Passage]]:
-        manifest, passages, _ = self.load_document(identifier)
+        manifest, passages, _ = self._load_document(identifier, include_response=False)
         return manifest, passages
 
     def load_document(self, identifier: str) -> tuple[ArtifactManifest, list[Passage], dict]:
-        """Return response bytes parsed from the same integrity-checked read as the passages."""
+        """Return retained normalized values and passages after verifying their bytes."""
+        return self._load_document(identifier, include_response=True)
+
+    def _load_document(
+        self, identifier: str, *, include_response: bool
+    ) -> tuple[ArtifactManifest, list[Passage], dict]:
         if not re.fullmatch(r"or1_[0-9a-f]{64}", identifier):
             raise ArtifactError("artifact_not_found")
         root = self.documents / identifier
@@ -152,36 +179,42 @@ class Store:
                 or manifest.input_grant_sha256 != self.grant
             ):
                 raise ValueError("Identity mismatch")
-            data = {}
-            for name, record in manifest.files.items():
-                cap = (
-                    self.config.limits.source_bytes
-                    if name == "source.pdf"
-                    else self.config.limits.extraction_bytes
-                )
-                if name == "source.pdf":
-                    measured = file_record(root / name, cap)
-                    if measured != record or measured.sha256 != manifest.document_sha256:
-                        raise ValueError("Source mismatch")
-                    continue
-                contents = safe_read(root / name, cap)
-                if (
-                    len(contents) != record.length
-                    or hashlib.sha256(contents).hexdigest() != record.sha256
-                ):
-                    raise ValueError("Integrity mismatch")
-                data[name] = contents
-            response = NormalizedResponse.model_validate_json(data["response.json"])
-            passages = [
-                Passage.model_validate_json(line) for line in data["passages.jsonl"].splitlines()
-            ]
+            measured = file_record(root / "source.pdf", self.config.limits.source_bytes)
             if (
-                passages != list(iter_passages(response, manifest.page_origins))
+                measured != manifest.files["source.pdf"]
+                or measured.sha256 != manifest.document_sha256
+            ):
+                raise ValueError("Source mismatch")
+            contents = safe_read(root / "response.json", self.config.limits.extraction_bytes)
+            record = manifest.files["response.json"]
+            if (
+                len(contents) != record.length
+                or hashlib.sha256(contents).hexdigest() != record.sha256
+            ):
+                raise ValueError("Integrity mismatch")
+            data = json.loads(contents)
+            del contents
+            response = NormalizedResponse.model_validate(data)
+            if not include_response:
+                data = {}
+            expected = iter_passages(response, manifest.page_origins)
+            passages = []
+            for line in _verified_lines(
+                root / "passages.jsonl",
+                manifest.files["passages.jsonl"],
+                self.config.limits.extraction_bytes,
+            ):
+                passage = Passage.model_validate_json(line)
+                if passage != next(expected, None):
+                    raise ValueError("Evidence mismatch")
+                passages.append(passage)
+            if (
+                next(expected, None) is not None
                 or len(passages) != manifest.passage_count
                 or response.document.page_count != manifest.page_count
             ):
                 raise ValueError("Evidence mismatch")
-            return manifest, passages, json.loads(data["response.json"])
+            return manifest, passages, data
         except ArtifactError as error:
             if error.code == "artifact_version_unsupported":
                 raise

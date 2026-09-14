@@ -5,6 +5,8 @@ monitoring failure kills that group before a job releases ownership. A well-form
 rejection, such as a password-protected file, keeps the generation and its loaded model.
 Idle shutdown reaps the worker; the next explicit job starts a new generation without
 retrying failures.
+Closing a dead worker's buffered input can fail again after a broken pipe.
+Cleanup discards that pipe error so parser failure or cancellation remains the reported outcome.
 RSS is a sampled process-tree sum, not a hard operating-system memory reservation.
 The worker starts in a caller-selected private directory. ONNX Runtime 1.30 writes a
 telemetry session file into its working directory, and a client may launch the server anywhere.
@@ -105,7 +107,10 @@ class WarmWorker:
                 os.killpg(process.pid, signal.SIGKILL)
             process.wait()
             if process.stdin is not None:
-                process.stdin.close()
+                # Closing flushes buffered input even after the parser has exited.
+                # That second pipe failure must not replace cancellation or parse_failed.
+                with suppress(OSError):
+                    process.stdin.close()
         if self._read_fd is not None:
             os.close(self._read_fd)
             self._read_fd = None

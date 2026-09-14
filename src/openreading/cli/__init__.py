@@ -1233,7 +1233,7 @@ fire after that clean shutdown.
 
 mcp --profile local-document-proof-v1
 ------------------------------------
-Serve eight document tools over stdio with openreading[agent,pymupdf].
+Serve nine document tools over stdio with openreading[agent,pymupdf].
 You grant an absolute --input-root and a separate absolute --artifact-root.
 For example, use /absolute/documents and /absolute/evidence respectively.
 The server retains source bytes and page evidence until you remove the store.
@@ -1245,6 +1245,9 @@ For example, call status with job_id and wait_seconds set to 20.
 Use openreading_cancel_import to stop that job. Host Stop does not cancel it.
 A succeeded job carries a receipt. Failed or cancelled jobs carry an error.
 Jobs continue after client disconnect; restarting can retrieve their status.
+Use openreading_list_imports with {} to recover job IDs after reconnecting.
+Follow next_cursor for more jobs, then inspect status before cancelling.
+Cancel unwanted jobs before uninstalling. Client removal does not stop them.
 Call openreading_import for synchronous use, then pass its artifact_id to
 openreading_get_document for the complete retained normalized JSON.
 This excludes backend_raw and keeps existing channels, warnings and origins.

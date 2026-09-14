@@ -640,5 +640,5 @@ The v0.1 files remain unchanged; this runtime refuses older retained artifacts r
 Retained evidence v0.3 distinguishes text-less pages (`none`) from unmeasured text origins (`unknown`).
 Passages cannot use `none`; existing v0.1 and v0.2 files remain byte-identical historical contracts.
 
-The `import-job.v0.1.json` contract defines persistent local import progress and closed start, status, and cancel requests.
+The `import-job.v0.1.json` contract defines persistent local import progress and closed start, status, list, and cancel requests.
 Its models live in `openreading.types.import_job`; successful jobs carry the existing artifact receipt.

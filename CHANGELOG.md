@@ -68,6 +68,11 @@ All notable changes to OpenReading are documented here. The format follows
 
 ## [Unreleased]
 
+- Preserve parser failures and cancellation when closing a dead worker raises a pipe error.
+- Add grant-scoped `openreading_list_imports` to recover job identifiers after reconnecting.
+- Stream retained passage verification and remove duplicate response decoding during retrieval.
+  Server memory still grows with normalized document size; no resource cutoff is introduced.
+
 - Allow trusted MCP launchers to disable the local selection deadline while preserving cancellation cleanup.
 
 - Deliver retrieval-scope guidance through MCP initialization so focused questions do not imply a complete read.

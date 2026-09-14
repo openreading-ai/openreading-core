@@ -13,6 +13,11 @@ copying, queue wait and conversion. Publication wins a cancellation race once co
 Jobs are not retried automatically, including after an interrupted supervisor. Process
 identity includes its creation time so a reused PID cannot appear to own an older job.
 Abrupt OS termination can leave staging; the next importer sweeps it under the store lock.
+Listing discovers retained job IDs after reconnecting, including completed or unreadable records.
+Pages follow job-ID order, not creation order. Concurrent new jobs can sort before a cursor;
+restart listing to discover them. Each reply contains at most fifty summaries without source paths.
+Uninstalling a client has no cancellation hook here. Cancel jobs before uninstalling and
+wait for terminal states. Reconnecting with the same roots permits discovery and cancellation.
 
 Frozen clients dispatch --internal-artifact-job to main, after verifying their runtime.
 The job owns a serialized profile, so removing a launcher's temporary profile is safe.
@@ -21,6 +26,7 @@ No network endpoint, credential, percentage estimate or provider-specific infere
 
 from __future__ import annotations
 
+import heapq
 import json
 import os
 import re
@@ -42,7 +48,7 @@ from openreading.artifacts.limits import ArtifactError, DoclingLimits, ProfileCo
 from openreading.artifacts.models import EngineIdentity, json_bytes
 from openreading.artifacts.service import ArtifactService
 from openreading.artifacts.store import safe_read
-from openreading.types.import_job import ImportJob
+from openreading.types.import_job import ImportJob, ImportJobList, ImportJobSummary
 
 TERMINAL = {"succeeded", "failed", "cancelled"}
 
@@ -196,6 +202,50 @@ class ImportJobs:
         root = self._root(job_id)
         _write(root / "cancel", {})
         return self.get(job_id)
+
+    def list(self, limit: int = 20, cursor: str | None = None) -> ImportJobList:
+        from openreading.artifacts.search import _binding, _cursor, _offset
+
+        if type(limit) is not int or not 1 <= limit <= 50:
+            raise ValueError("List limit must be between one and fifty jobs.")
+        binding = _binding(["import_jobs", "0.1", str(self.root), self.service.store.grant, limit])
+        start = _offset(cursor, binding, (1 << 128) + 1)
+        try:
+            with directory(self.root) as fd, os.scandir(fd) as entries:
+                # Keep one page in memory even when the retained history is large.
+                identifiers = heapq.nsmallest(
+                    limit + 1,
+                    (
+                        entry.name
+                        for entry in entries
+                        if re.fullmatch(r"j1_[0-9a-f]{32}", entry.name)
+                        and int(entry.name[3:], 16) >= start
+                        and entry.is_dir(follow_symlinks=False)
+                    ),
+                )
+        except (OSError, ArtifactError):
+            raise JobError("job_state_invalid") from None
+        rows = []
+        for identifier in identifiers[:limit]:
+            try:
+                value = self.get(identifier)
+                rows.append(
+                    ImportJobSummary(
+                        job_id=identifier, state=value.state, elapsed_seconds=value.elapsed_seconds
+                    )
+                )
+            except JobError as error:
+                if error.code == "job_not_found":
+                    continue
+                rows.append(
+                    ImportJobSummary(job_id=identifier, state="unavailable", elapsed_seconds=None)
+                )
+        continuation = (
+            _cursor(binding, int(identifiers[limit - 1][3:], 16) + 1)
+            if len(identifiers) > limit
+            else None
+        )
+        return ImportJobList(jobs=rows, next_cursor=continuation)
 
 
 def run(root: Path) -> int:

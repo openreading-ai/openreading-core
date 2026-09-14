@@ -52,6 +52,10 @@ Stage and elapsed time describe observed work; no percentage or completion estim
 After `succeeded`, use the returned receipt for normal retrieval and citations.
 Call `openreading_cancel_import` to stop a job, then check its terminal state.
 A host disconnect or cancelled status request leaves background work running.
+After reconnecting, call `openreading_list_imports` with `{}` to recover job identifiers.
+Follow its `next_cursor` for more summaries, then request status or cancellation by identifier.
+The list covers this input grant only, including completed jobs and unreadable status records.
+Job order follows identifiers rather than creation time; restart listing to discover concurrent arrivals.
 
 - Configure arguments as an array in your MCP client so spaces in directory names remain intact.
 - Grant a narrow document directory rather than your home directory, and keep retained evidence outside that grant.
@@ -67,6 +71,8 @@ The default selection deadline is 120 seconds, independent of extraction.
 A trusted launcher can pass `selection_timeout_seconds=None` to disable the local chooser and copy deadline.
 Local Cancel and host-delivered cancellation still clean up the selected copy.
 Local Cancel remains available when a host Stop button does not deliver protocol cancellation.
+If the chooser cannot be reached, restart the client to reset selection.
+Detached imports continue across that restart and can be discovered through the job listing.
 
 ## How it decides
 
@@ -86,6 +92,9 @@ The import profile decides which channels exist; this tool does not enable disab
 Malformed arguments return protocol errors, while normal transport closure exits with status zero.
 Configuration failures exit two. SIGINT and SIGTERM cancel synchronous imports and exit 130, including clients that keep stdin open.
 Detached imports continue and keep private status under `jobs/INPUT_GRANT_SHA256/JOB_ID/`.
+Before uninstalling a client, cancel unwanted jobs and wait for terminal states.
+There is no uninstall cancellation hook; removing the client can leave detached work running.
+Reconnecting with the same input and artifact roots restores job discovery and cancellation.
 The local profile requires POSIX support. Explicit root symlinks resolve once before file access begins.
 
 The [artifact guide](../artifacts/README.md) explains retention, source hashing, page provenance, and quota behavior.
