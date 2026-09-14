@@ -26,8 +26,10 @@ layout blocks in reading order, each with a box in top-left 72-DPI page points, 
 the page width and height (N). A table block becomes cells from its native header and rows.
 Header cells are marked because LiteParse separates them. Spans are never inferred, and a cell
 without a box keeps none. AcroForm widgets become `typed_fields` keyed by field name, falling
-back to LiteParse's widget id when a name repeats or is missing. Each carries the value LiteParse
-resolved (text, checked state, or selected options) and its widget rectangle as a citation (N).
+back to LiteParse's widget id when a name repeats or is missing. If that key also exists, a
+numbered suffix preserves every widget and its citation, including names such as `f2#2`.
+Each carries the value LiteParse resolved (text, checked state, or selected options) and its widget
+rectangle as a citation (N).
 Per-block confidence does not exist, because OCR confidence is per text item and averaging it
 onto a block would be invented (X). Page errors make the response PARTIAL with a
 `partial_conversion` warning.
@@ -521,6 +523,12 @@ class LiteParseAdapter(BackendAdapter):
     ) -> None:
         name = field.get("name")
         key = name if name and name not in typed else str(field.get("id"))
+        # Widget names and IDs share one output namespace, so either can collide with a prior key.
+        base = key
+        suffix = 2
+        while key in typed:
+            key = f"{base}#{suffix}"
+            suffix += 1
         if field.get("value") is not None:
             value: Any = field["value"]
         elif field.get("checked") is not None:

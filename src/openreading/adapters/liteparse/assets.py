@@ -8,8 +8,8 @@ below. The adapter checks it before any worker starts, and the worker checks it 
 
 Only English is pinned. Both published variants are accepted, because they are both real
 upstream files: tessdata_best is LiteParse's own default, and tessdata_fast is the smaller file
-Homebrew's Tesseract ships. They recognize text differently, so the verified variant and hash
-travel with every job rather than being assumed.
+Homebrew's Tesseract ships. They recognize text differently, so the parent sends the verified
+hash to the worker for a second check before loading LiteParse.
 """
 
 from __future__ import annotations

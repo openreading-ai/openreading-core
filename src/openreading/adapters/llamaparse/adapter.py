@@ -38,8 +38,9 @@ a guess. Block confidence is X too, since it rides on that box. Page confidence 
 `expand=metadata`. Typed fields are X, because form enrichment is a separate paid pass. A page
 the service marks failed makes the response PARTIAL.
 
-Usage. `usage.credits` is the job's own credit count, and the service leaves it null until
-billing records it. `report_cost` returns credits when present and the page count otherwise.
+Usage. Polls request `expand=usage` because billed credits are absent unless that section is requested.
+`usage.credits` is the job's own credit count, and the service leaves it null until billing records it.
+`report_cost` returns credits when present and the page count otherwise.
 LlamaIndex caches a parse of the same file for 48 hours at no charge, so a repeat can show zero.
 
 Credentials. `LLAMA_CLOUD_API_KEY`, or the SDK alias `LLAMA_PARSE_API_KEY`, is sent as a bearer
@@ -246,7 +247,7 @@ def _descriptor(profile: TierProfile) -> AdapterDescriptor:
             table_cells=structured,
             typed_fields=X,
         ),
-        **({"block_granularity": "element"} if profile.structured else {}),
+        block_granularity="element" if profile.structured else None,
     )
     return AdapterDescriptor(
         id=profile.slug,
@@ -396,7 +397,8 @@ class LlamaParseAdapter(BackendAdapter):
         return HttpxLlamaParseClient(key, base_url)
 
     def _expand(self) -> list[str]:
-        return list(_RESULT_SECTIONS) if self._profile.structured else ["text", "metadata"]
+        sections = list(_RESULT_SECTIONS) if self._profile.structured else ["text", "metadata"]
+        return [*sections, "usage"]
 
     def _version(self, req: OpenReadingRequest) -> str:
         requested = req.backend.version
@@ -538,6 +540,9 @@ class LlamaParseAdapter(BackendAdapter):
             if profile.structured and items_page.get("success"):
                 for item in items_page.get("items") or []:
                     self._flatten(item, number, blocks, in_list=False)
+            if outputs.tables == "none":
+                for block in blocks:
+                    block.table = None
             has_blocks = has_blocks or bool(blocks)
             has_tables = has_tables or any(block.table is not None for block in blocks)
             width = items_page.get("page_width") if items_page.get("success") else None

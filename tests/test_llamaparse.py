@@ -231,9 +231,9 @@ def test_poll_waits_for_completion_and_expands_only_what_the_tier_returns(tier):
     _run(ADAPTERS[tier](client=client), _req(tier))
     expands = {tuple(expand) for _job_id, expand in client.gets}
     if tier == "fast":
-        assert expands == {("text", "metadata")}
+        assert expands == {("text", "metadata", "usage")}
     else:
-        assert expands == {("text", "markdown", "items", "metadata")}
+        assert expands == {("text", "markdown", "items", "metadata", "usage")}
     assert len(client.gets) == 3
 
 
@@ -336,6 +336,37 @@ def test_missing_credits_fall_back_to_pages_rather_than_a_guess():
     assert response.usage.credits is None
     report = LlamaParseAgenticAdapter().report_cost(job)
     assert (report.native_unit, report.native_quantity) == ("page", 2.0)
+
+
+@respx.mock
+@pytest.mark.parametrize("tier", sorted(ADAPTERS))
+def test_billed_credits_are_requested_over_http_and_reach_both_reports(tier):
+    respx.post(f"{API}/api/v2/parse/upload").respond(200, json={"id": "pjb_1", "status": "PENDING"})
+
+    def expanded_response(request):
+        final = _fixture(tier)
+        final["job"].pop("usage", None)
+        if "usage" in request.url.params.get_list("expand"):
+            final["job"]["usage"] = {"credits": 12.5}
+        return httpx.Response(200, json=final)
+
+    respx.get(f"{API}/api/v2/parse/pjb_1").mock(side_effect=expanded_response)
+    adapter = ADAPTERS[tier](client=HttpxLlamaParseClient("test-key", API))
+    job, response = _run(adapter, _req(tier))
+    assert response.usage.credits == 12.5
+    cost = adapter.report_cost(job)
+    assert (cost.native_unit, cost.native_quantity) == ("credit", 12.5)
+
+
+def test_disabling_table_output_keeps_table_text_without_cells_or_cell_provenance():
+    _job, response = _run(
+        LlamaParseAgenticAdapter(client=FakeClient()), _req(outputs={"tables": "none"})
+    )
+    tables = [b for p in response.document.pages for b in p.blocks if b.type is BlockType.TABLE]
+    assert tables and tables[0].text == "Name\tQty\nWidget\t2\n\t2.5"
+    assert all(block.table is None for block in tables)
+    assert "table_cells" not in response.channel_provenance
+    assert not any(w.code == "table_cells_unavailable" for w in response.warnings)
 
 
 def test_cancel_calls_the_vendor_once_and_skips_finished_jobs():

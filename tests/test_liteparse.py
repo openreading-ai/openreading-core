@@ -188,6 +188,28 @@ def test_form_fields_become_typed_fields_only_when_requested():
     assert (paid.value, paid.type, paid.citations[0].bbox) == (True, "checkbox", None)
 
 
+def test_form_field_name_and_id_collisions_preserve_every_value_and_citation():
+    raw = copy.deepcopy(RAW)
+    fields = [
+        {"name": "f2", "id": "f1", "value": "first"},
+        {"name": "f2#2", "id": "f3", "value": "second"},
+        {"name": "f2", "id": "f2", "value": "third"},
+        {"name": "f2", "id": "f2", "value": "fourth"},
+    ]
+    raw["pages"] = [
+        {**copy.deepcopy(RAW["pages"][0]), "page_num": i, "form_fields": [field]}
+        for i, field in enumerate(fields, start=1)
+    ]
+    adapter = LiteParseAdapter(runner=FakeRunner(raw))
+    request = _req(outputs={"typed_fields": True})
+    response = _run(adapter, request)
+    assert len(response.typed_fields) == len(fields)
+    assert [(f.value, f.citations[0].page) for f in response.typed_fields.values()] == [
+        (field["value"], i) for i, field in enumerate(fields, start=1)
+    ]
+    assert _run(adapter, request).typed_fields == response.typed_fields
+
+
 def test_ocr_off_never_needs_or_sends_assets():
     runner = FakeRunner()
     _run(LiteParseAdapter(runner=runner), _req(features={"ocr": "off"}))
