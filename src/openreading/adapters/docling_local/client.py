@@ -4,6 +4,8 @@ Only local bytes enter conversion. PDFium preflight distinguishes encrypted inpu
 while the standard pipeline supplies item order and physical-page provenance.
 Body iteration excludes Docling furniture, such as running headers and page numbers.
 The client counts furniture items that carry text so projection can disclose the omission.
+Both walks descend into pictures, whose children can contain an entire page's extracted text.
+The payload preserves each item's provider label, parent reference, order, and page provenance.
 
 Ordinary API and HTTP requests share one converter per process through convert_shared.
 Conversions are serialized because the pipeline and its native session carry mutable state.
@@ -96,11 +98,16 @@ class LocalDoclingClient:
                 else "mixed"
             )
         document = result.document.export_to_dict()
-        furniture = result.document.iterate_items(included_content_layers={ContentLayer.FURNITURE})
+        furniture = result.document.iterate_items(
+            included_content_layers={ContentLayer.FURNITURE}, traverse_pictures=True
+        )
         return {
             "partial": result.status.value == "partial_success",
             "pages": document["pages"],
-            "items": [item.model_dump(mode="json") for item, _ in result.document.iterate_items()],
+            "items": [
+                item.model_dump(mode="json")
+                for item, _ in result.document.iterate_items(traverse_pictures=True)
+            ],
             "page_origins": origins,
             "omitted_furniture_items": sum(
                 1 for item, _ in furniture if getattr(item, "text", None)
