@@ -2295,6 +2295,7 @@ dependencies = [
 [package.optional-dependencies]
 agent = [
     { name = "mcp" },
+    { name = "psutil" },
 ]
 all = [
     { name = "anthropic" },
@@ -2445,6 +2446,7 @@ requires-dist = [
     { name = "parse-bench", marker = "python_full_version >= '3.12' and extra == 'parsebench'", specifier = "==1.0.2" },
     { name = "pillow", marker = "extra == 'all'", specifier = ">=10" },
     { name = "pillow", marker = "extra == 'tesseract'", specifier = ">=10" },
+    { name = "psutil", marker = "extra == 'agent'", specifier = ">=7.2,<8" },
     { name = "psutil", marker = "extra == 'all'", specifier = ">=7.2,<8" },
     { name = "psutil", marker = "extra == 'docling-local'", specifier = ">=7.2,<8" },
     { name = "psutil", marker = "extra == 'liteparse'", specifier = ">=7.2,<8" },

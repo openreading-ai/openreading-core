@@ -2,6 +2,8 @@
 
 ## Unreleased LiteParse and LlamaParse adapters
 
+- Add persistent local MCP import jobs with status and explicit cancellation. Docling profiles can omit document and resource ceilings; source hashing and file handoff avoid full-PDF Python buffers.
+
 - Add the optional `liteparse` adapter for PDF and image parsing in a supervised local worker.
   OCR runs only with pinned, hash-verified English language data, so LiteParse never downloads it.
 - Add four hosted LlamaParse v2 backends, one per tier, each pinned to a dated release.

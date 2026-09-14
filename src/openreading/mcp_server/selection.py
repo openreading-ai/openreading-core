@@ -94,7 +94,10 @@ class SelectionCoordinator:
                         raise ValueError("Invalid provider reference.")
                     with self.service.store.source(reference) as opened:
                         size = os.fstat(opened).st_size
-                        if not 0 < size <= self.service.config.limits.source_bytes:
+                        if size <= 0 or (
+                            self.service.config.limits.source_bytes is not None
+                            and size > self.service.config.limits.source_bytes
+                        ):
                             raise ValueError("Invalid selected size.")
                     receipt = SelectionReceipt(
                         path=reference,

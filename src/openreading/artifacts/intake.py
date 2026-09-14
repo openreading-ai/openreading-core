@@ -82,10 +82,15 @@ def source(root: Path, relative: str, *, root_fd: int | None = None) -> Iterator
 
 
 def copy_source(
-    fd: int, destination: Path, cap: int, available: int, *, check: Callable[[], None] | None = None
+    fd: int,
+    destination: Path,
+    cap: int | None,
+    available: int | None,
+    *,
+    check: Callable[[], None] | None = None,
 ) -> tuple[str, bool]:
     before = os.fstat(fd)
-    if before.st_size > cap:
+    if cap is not None and before.st_size > cap:
         raise ArtifactError("input_too_large")
     digest = hashlib.sha256()
     length = 0
@@ -94,13 +99,13 @@ def copy_source(
         while True:
             if check is not None:
                 check()
-            data = os.read(fd, min(65536, cap - length + 1))
+            data = os.read(fd, 65536 if cap is None else min(65536, cap - length + 1))
             if not data:
                 break
             length += len(data)
-            if length > cap:
+            if cap is not None and length > cap:
                 raise ArtifactError("input_too_large")
-            if length > available:
+            if available is not None and length > available:
                 raise ArtifactError("storage_limit")
             output.write(data)
             digest.update(data)

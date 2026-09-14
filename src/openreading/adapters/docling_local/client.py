@@ -29,6 +29,7 @@ import io
 import os
 import threading
 from dataclasses import replace
+from pathlib import Path
 from typing import Literal
 
 from openreading.adapters.docling_local.config import LocalDoclingConfig
@@ -64,6 +65,14 @@ class LocalDoclingClient:
 
     def convert(self, data: bytes, *, ocr_mode: OcrMode | None = None) -> dict:
         from docling.datamodel.base_models import DocumentStream
+
+        return self._convert(DocumentStream(name="source.pdf", stream=io.BytesIO(data)), ocr_mode)
+
+    def convert_path(self, path: Path, *, ocr_mode: OcrMode | None = None) -> dict:
+        """Convert a private local input without duplicating its bytes in Python memory."""
+        return self._convert(path, ocr_mode)
+
+    def _convert(self, source, ocr_mode: OcrMode | None) -> dict:
         from docling_core.types.doc.common.content_layer import ContentLayer
 
         from openreading.adapters.docling_local.pipeline import create_converter
@@ -75,7 +84,7 @@ class LocalDoclingClient:
         if ocr_mode != self._ocr_mode:
             self._converter.set_ocr_mode(ocr_mode or ("auto" if self.config.ocr else "off"))
             self._ocr_mode = ocr_mode
-        result = self._converter.convert(DocumentStream(name="source.pdf", stream=io.BytesIO(data)))
+        result = self._converter.convert(source)
         if result.status.value not in {"success", "partial_success"}:
             raise ValueError("Local conversion failed.")
         origins = {}

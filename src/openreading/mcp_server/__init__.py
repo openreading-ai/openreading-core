@@ -2,12 +2,15 @@
 
 This profile requires POSIX descriptor and process-group support. Windows startup exits 2.
 The launcher resolves explicit root symlinks once, then intake refuses symlinks below that grant.
-SIGINT and SIGTERM cancel imports, reap workers, and exit 130 even while stdin remains open.
+SIGINT and SIGTERM cancel synchronous imports, reap their workers, and exit 130.
+Detached imports continue across transport closure and require explicit job cancellation.
 
 Start openreading mcp with the local-document-proof-v1 profile and explicit input and
 artifact roots. The server exposes openreading_import, openreading_search, and
 openreading_read, plus openreading_get_document for the complete retained normalized result.
 That result excludes backend_raw and uses lossless pagination defined by openreading.artifacts.document.
+Background tools openreading_start_import, openreading_get_import and openreading_cancel_import
+return persistent job status without keeping a tool request open during extraction.
 Search remains optional. The openreading_select_document tool accepts only an empty object.
 Without an explicitly supplied provider, it returns selection_unavailable and opens no UI.
 Every successful call returns one JSON TextContent payload without

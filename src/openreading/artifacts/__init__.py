@@ -5,14 +5,14 @@ It preserves stored channels and warnings without reparsing or selecting relevan
 The profile determines extraction coverage; full retrieval does not recover unavailable channels.
 
 A retained artifact contains exact source bytes, a normalized response, and page passages.
-The v1 profile selects PyMuPDF; v2 selects local Docling with explicit assets and limits.
+The v1 profile selects PyMuPDF; v2 selects local Docling with explicit assets and optional operator limits.
 Both ignore ambient routing configuration and refuse hosted fallback.
 Artifacts are partitioned by the explicitly configured input root. Changing that grant
 makes earlier artifacts inaccessible until the original grant is restored.
 
 The service owns import, integrity verification, lexical search, and exact passage reads.
 The sibling openreading.mcp_server package exposes these operations over stdio MCP.
-No operation summarizes documents or calls a model. Retrieved excerpts can enter the
+No operation summarizes documents or calls a model. Requested document content can enter the
 calling agent's cloud context; local parsing does not prevent that disclosure.
 
 Integration exports and return shapes
@@ -35,10 +35,20 @@ Neither store automatically evicts data from the other store or promises compati
 Limits and failure codes live in openreading.artifacts.limits. Exact wire fields live
 in openreading.artifacts.models and the three vendored v0.3 artifact schemas.
 
+Background imports
+------------------
+ImportJobs in openreading.artifacts.jobs exposes start(path), get(job_id), and cancel(job_id).
+Each returns an ImportJob with wire() data defined by import-job.v0.1.json.
+Detached supervisors preserve work after client disconnect and publish existing artifact receipts.
+Frozen launchers dispatch --internal-artifact-job to jobs.main after verifying their inventory.
+The supervisor retains its own profile and closes its parser before a terminal status is written.
+
 Worker supervision
 ------------------
 The v2 worker retains its initialized converter between sequential imports.
-Cancellation, deadlines, invalid messages, and sampled memory limits terminate its process group.
+Cancellation, invalid messages, and configured time or memory limits terminate its process group.
+Null Docling limits impose no file, page, extraction, storage, deadline or sampled RSS ceiling.
+Source hashing is streamed and Docling receives a file path; the parser still controls memory use.
 An idle timer releases the worker without deleting retained evidence.
 Page text origins describe measured native/OCR cells, not confidence or quote accuracy.
 

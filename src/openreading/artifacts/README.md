@@ -33,13 +33,13 @@ The identifier belongs to that artifact and cannot establish provenance for anot
 ### Local Docling developer setup
 
 Install `openreading[agent,docling-local]` and provide the verified model assets described in `openreading.adapters.docling_local.config`.
-Create a setup JSON file with explicit resource limits and absolute local paths:
+Create a setup JSON file with optional operator limits and absolute local paths:
 
 ```json
 {
-  "pages": 10,
-  "deadline_seconds": 60,
-  "worker_memory_bytes": 2147483648,
+  "pages": null,
+  "deadline_seconds": null,
+  "worker_memory_bytes": null,
   "worker_idle_seconds": 60,
   "docling": {
     "artifacts_path": "/absolute/models",
@@ -49,7 +49,8 @@ Create a setup JSON file with explicit resource limits and absolute local paths:
 }
 ```
 
-These numbers are developer safeguards, not measured release defaults or host compatibility claims.
+Null disables the page, deadline and memory cutoff; omitted source, extraction and storage limits also default to null.
+Explicit positive values impose operator limits. Uncapped intake does not promise that every document fits available memory.
 Start `openreading mcp --profile local-document-proof-v2 --profile-config /absolute/setup.json --input-root /absolute/documents --artifact-root /absolute/evidence`.
 Enable OCR through setup with `ocr: true`, `tesseract_cmd`, and `tessdata_path` pointing to your selected executable and language data.
 Include `osd.traineddata` in that directory for orientation detection.
@@ -75,8 +76,10 @@ Every load checks hashes and regenerates passages from the normalized response, 
 
 ## Operations
 
-The store permits one import at a time and refuses new imports when its quota is exhausted.
-The fixed limits live in `openreading.artifacts.limits`, including the source, extraction, storage, deadline, and payload caps.
+The store permits one import at a time; background jobs wait for that import to finish.
+Use `openreading_start_import`, check `openreading_get_import`, and cancel explicitly with `openreading_cancel_import`.
+A completed job returns the ordinary artifact receipt; disconnecting the host leaves background work running.
+Optional Docling limits and historical PyMuPDF defaults live in `openreading.artifacts.limits`, including the source, extraction, storage, deadline, and payload caps.
 Cancellation terminates the parser process before staging cleanup and lock release complete.
 Stop all clients using this store before manual cleanup; no MCP tool deletes retained evidence.
 Under your configured `--artifact-root`, each document lives at `documents/INPUT_GRANT_SHA256/ARTIFACT_ID/`.

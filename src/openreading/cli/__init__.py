@@ -1233,13 +1233,19 @@ fire after that clean shutdown.
 
 mcp --profile local-document-proof-v1
 ------------------------------------
-Serve five bounded document tools over stdio with openreading[agent,pymupdf].
+Serve eight document tools over stdio with openreading[agent,pymupdf].
 You grant an absolute --input-root and a separate absolute --artifact-root.
 For example, use /absolute/documents and /absolute/evidence respectively.
 The server retains source bytes and page evidence until you remove the store.
 Retrieved excerpts enter the calling agent context. Treat them as untrusted.
 
-Call openreading_import with a relative path, then pass its artifact_id to
+Start long work with openreading_start_import and a granted relative path.
+Keep its job_id and check openreading_get_import for stages and elapsed time.
+For example, call status with job_id and wait_seconds set to 20.
+Use openreading_cancel_import to stop that job. Host Stop does not cancel it.
+A succeeded job carries a receipt. Failed or cancelled jobs carry an error.
+Jobs continue after client disconnect; restarting can retrieve their status.
+Call openreading_import for synchronous use, then pass its artifact_id to
 openreading_get_document for the complete retained normalized JSON.
 This excludes backend_raw and keeps existing channels, warnings and origins.
 Follow every next_cursor for the whole result. Large values use ordered JSON
@@ -1264,7 +1270,10 @@ These byte limits do not prove token savings or impose a native memory limit.
 Select --profile local-document-proof-v2 for openreading[agent,docling-local].
 That profile requires --profile-config pointing to a local JSON setup file.
 It names pages, deadline_seconds, worker_memory_bytes, worker_idle_seconds,
-and docling. The docling object names artifacts_path and dependency_lock.
+and docling. Null page, deadline, and memory fields disable those ceilings.
+Optional source_bytes, extraction_bytes, and store_bytes default to null.
+Explicit positive values still impose operator limits for those resources.
+The docling object names artifacts_path and dependency_lock.
 Optional ocr, tesseract_cmd, tessdata_path, languages, and threads select OCR.
 For example, set ocr to true with absolute executable and language-data paths.
 No model assets download automatically. Invalid or absent setup exits 2.
@@ -1274,7 +1283,8 @@ Physical-page text_origin labels identify native, OCR, or mixed extraction.
 These labels are provenance, never measured accuracy or confidence.
 Exit 0 means transport closure, 2 invalid setup, and 130 interruption.
 This POSIX profile resolves root symlinks before establishing its input grant.
-Both SIGINT and SIGTERM exit 130 after cancelling imports and reaping workers.
+SIGINT and SIGTERM stop synchronous imports before the server exits 130.
+Detached jobs remain active until they finish or receive explicit cancellation.
 The openreading.artifacts package owns storage, provenance, and error codes.
 
 Exit codes

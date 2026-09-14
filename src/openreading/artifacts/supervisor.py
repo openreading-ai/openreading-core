@@ -51,12 +51,12 @@ class WarmWorker:
         self,
         command: list[str],
         *,
-        memory_bytes: int,
+        memory_bytes: int | None,
         idle_seconds: float,
         rss: Callable[[int], int] = process_rss,
         cwd: str | os.PathLike[str] | None = None,
     ):
-        if memory_bytes <= 0 or idle_seconds <= 0:
+        if (memory_bytes is not None and memory_bytes <= 0) or idle_seconds <= 0:
             raise ValueError("Worker resource limits must be positive.")
         self.command, self.memory_bytes, self.idle_seconds = command, memory_bytes, idle_seconds
         self.rss = rss
@@ -148,16 +148,17 @@ class WarmWorker:
             last_stage = -1
             while True:
                 check()
-                try:
-                    rss = self.rss(self._process.pid)
-                    if type(rss) is not int or rss < 0:
-                        raise ValueError
-                except Exception:
-                    if self._process.poll() is not None:
-                        raise ArtifactError("parse_failed") from None
-                    raise ArtifactError("worker_monitor_failed") from None
-                if rss > self.memory_bytes:
-                    raise ArtifactError("memory_limit")
+                if self.memory_bytes is not None:
+                    try:
+                        rss = self.rss(self._process.pid)
+                        if type(rss) is not int or rss < 0:
+                            raise ValueError
+                    except Exception:
+                        if self._process.poll() is not None:
+                            raise ArtifactError("parse_failed") from None
+                        raise ArtifactError("worker_monitor_failed") from None
+                    if rss > self.memory_bytes:
+                        raise ArtifactError("memory_limit")
                 readable, _, _ = select.select([self._read_fd], [], [], 0.1)
                 if not readable:
                     continue

@@ -5,7 +5,8 @@ serialized extraction, 512 MiB retained storage, and 45 seconds per import.
 Import, search, and read payloads permit 4096, 8192, and 16384 UTF-8 bytes respectively.
 Full-document continuation payloads default to 65536 UTF-8 bytes, with no silent truncation.
 These caps do not promise a hard native-parser memory ceiling or an operating-system sandbox.
-DoclingLimits requires explicit page, deadline, sampled RSS, and idle limits.
+Docling limits accept None for uncapped documents, storage, time, and sampled RSS.
+Explicit positive operator limits remain enforced. Idle shutdown and tool reply caps remain bounded.
 The legacy profile rejects worker settings that its disposable parser cannot enforce.
 Only busy and storage_limit invite retry after the blocking condition is resolved.
 """
@@ -33,7 +34,7 @@ MESSAGES: dict[ErrorCode, str] = {
     "busy": "Another import is using this artifact store. Retry after it finishes.",
     "timeout": "The import exceeded its time limit.",
     "cancelled": "The import was cancelled.",
-    "storage_limit": "The artifact store is full. Stop its clients and manually remove retained directories under --artifact-root, as the artifact guide describes.",
+    "storage_limit": "Local storage could not retain this document. Check free disk space and any configured storage limit.",
     "parse_failed": "The local parser could not complete this document.",
     "artifact_not_found": "This artifact is unavailable under the current input grant.",
     "artifact_corrupt": "The retained artifact failed integrity validation. Import the source again after removing it.",
@@ -97,29 +98,35 @@ class ProfileLimits:
 
 @dataclass(frozen=True, kw_only=True)
 class DoclingLimits:
-    source_bytes: int = 25 * 1024 * 1024
-    extraction_bytes: int = 64 * 1024 * 1024
-    store_bytes: int = 512 * 1024 * 1024
+    source_bytes: int | None = None
+    extraction_bytes: int | None = None
+    store_bytes: int | None = None
     import_bytes: int = 4096
     search_bytes: int = 8192
     read_bytes: int = 16384
     document_bytes: int = 65536
-    pages: int = field()
-    deadline_seconds: float = field()
-    worker_memory_bytes: int = field()
+    pages: int | None = field()
+    deadline_seconds: float | None = field()
+    worker_memory_bytes: int | None = field()
     worker_idle_seconds: float = field()
 
     def __post_init__(self):
+        for value in (self.deadline_seconds, self.worker_idle_seconds):
+            if value is not None and (
+                type(value) not in (int, float) or not math.isfinite(value) or value <= 0
+            ):
+                raise ValueError("Docling time limits require positive finite numbers or null.")
+        if self.worker_idle_seconds is None:
+            raise ValueError("Worker idle shutdown must be configured.")
         for value in (
+            self.source_bytes,
+            self.extraction_bytes,
+            self.store_bytes,
             self.pages,
-            self.deadline_seconds,
             self.worker_memory_bytes,
-            self.worker_idle_seconds,
         ):
-            if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
-                raise ValueError("Docling resource limits must be positive finite numbers.")
-        if type(self.pages) is not int or type(self.worker_memory_bytes) is not int:
-            raise ValueError("Page and memory limits require integers.")
+            if value is not None and (type(value) is not int or value <= 0):
+                raise ValueError("Docling byte and page limits require positive integers or null.")
 
 
 @dataclass(frozen=True)

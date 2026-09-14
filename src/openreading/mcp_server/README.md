@@ -14,6 +14,7 @@ For example, search for a renewal clause, read its passage, and cite the returne
 You start one process with explicit input and artifact directories before the client can call tools.
 The input root grants file access, while the separate artifact root retains copies until you remove them.
 The profile exposes `openreading_import`, `openreading_get_document`, `openreading_search`, `openreading_read`, and `openreading_select_document`.
+Long work uses `openreading_start_import`, `openreading_get_import`, and `openreading_cancel_import`.
 Selection returns `selection_unavailable` unless a trusted launcher explicitly supplies a local chooser.
 
 ## Walkthrough
@@ -45,6 +46,13 @@ Follow `next_cursor` when present, and explain evidence gaps when the returned p
 
 ## Recipes
 
+For a long import, pass `{"path":"agreement.pdf"}` to `openreading_start_import`.
+It returns a job ID promptly. Pass that ID to `openreading_get_import` with `wait_seconds` up to 20.
+Stage and elapsed time describe observed work; no percentage or completion estimate is invented.
+After `succeeded`, use the returned receipt for normal retrieval and citations.
+Call `openreading_cancel_import` to stop a job, then check its terminal state.
+A host disconnect or cancelled status request leaves background work running.
+
 - Configure arguments as an array in your MCP client so spaces in directory names remain intact.
 - Grant a narrow document directory rather than your home directory, and keep retained evidence outside that grant.
 - Reuse the same artifact identifier across questions instead of importing the same source repeatedly.
@@ -74,7 +82,8 @@ Full-document access sends retained content to your assistant and does not estab
 It preserves the stored result, including extraction limitations, rather than promising perfect OCR recognition.
 The import profile decides which channels exist; this tool does not enable disabled table extraction.
 Malformed arguments return protocol errors, while normal transport closure exits with status zero.
-Configuration failures exit two. SIGINT and SIGTERM cancel active imports and exit 130, including clients that keep stdin open.
+Configuration failures exit two. SIGINT and SIGTERM cancel synchronous imports and exit 130, including clients that keep stdin open.
+Detached imports continue and keep private status under `jobs/INPUT_GRANT_SHA256/JOB_ID/`.
 The local profile requires POSIX support. Explicit root symlinks resolve once before file access begins.
 
 The [artifact guide](../artifacts/README.md) explains retention, source hashing, page provenance, and quota behavior.

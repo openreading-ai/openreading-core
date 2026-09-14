@@ -23,7 +23,7 @@ def extraction(monkeypatch):
     monkeypatch.setattr(LocalDoclingConfig, "validate_assets", lambda self: {"model": "fixed"})
     monkeypatch.setattr(
         LocalDoclingClient,
-        "convert",
+        "convert_path",
         lambda self, data: {
             "pages": {"1": {"size": {"width": 100, "height": 100}}},
             "items": [

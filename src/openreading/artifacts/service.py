@@ -49,13 +49,12 @@ from openreading.artifacts.limits import INPUT_REJECTIONS, ArtifactError, Profil
 from openreading.artifacts.models import (
     ArtifactManifest,
     EngineIdentity,
-    FileRecord,
     ImportReceipt,
     WarningCode,
     artifact_id,
     json_bytes,
 )
-from openreading.artifacts.store import Store, safe_read
+from openreading.artifacts.store import Store, file_record, safe_read
 from openreading.artifacts.worker import SETTINGS
 
 __all__ = ["ArtifactService", "engine_identity"]
@@ -255,7 +254,6 @@ class ArtifactService:
                 if getattr(sys, "frozen", False)
                 else ["-m", "openreading.artifacts.worker"]
             )
-            assert config.limits.worker_memory_bytes is not None
             self._warm = WarmWorker(
                 [*command, "--serve"],
                 memory_bytes=config.limits.worker_memory_bytes,
@@ -280,7 +278,9 @@ class ArtifactService:
         with self.store.source(path) as fd, self.store.import_lock():
             staging = Path(tempfile.mkdtemp(dir=self.config.artifact_root / "staging"))
             try:
-                available = self.config.limits.store_bytes - self.store.size()
+                if progress is not None:
+                    progress("copying")
+                available = self._available()
                 digest, changed = copy_source(
                     fd,
                     staging / "source.pdf",
@@ -299,9 +299,9 @@ class ArtifactService:
                     "directory": str(staging),
                     "pages": self.config.limits.pages,
                     "extraction_bytes": self.config.limits.extraction_bytes,
-                    "available": self.config.limits.store_bytes - self.store.size() - 65536,
+                    "available": self._available(reserve=65536),
                 }
-                if job["available"] < 0:
+                if job["available"] is not None and job["available"] < 0:
                     raise ArtifactError("storage_limit")
                 (staging / "job.json").write_bytes(json_bytes(job))
                 os.chmod(staging / "job.json", 0o600)
@@ -318,7 +318,7 @@ class ArtifactService:
                     )
                 else:
                     self._worker(staging, started, cancelled)
-                result = json.loads(safe_read(staging / "result.json", 8192))
+                result = json.loads(safe_read(staging / "result.json", None))
                 response = json.loads(
                     safe_read(staging / "response.json", self.config.limits.extraction_bytes)
                 )
@@ -329,13 +329,12 @@ class ArtifactService:
                 ).splitlines()
                 files = {}
                 for name in ("source.pdf", "response.json", "passages.jsonl"):
-                    contents = safe_read(
-                        staging / name,
-                        max(self.config.limits.source_bytes, self.config.limits.extraction_bytes),
+                    cap = (
+                        self.config.limits.source_bytes
+                        if name == "source.pdf"
+                        else self.config.limits.extraction_bytes
                     )
-                    files[name] = FileRecord(
-                        length=len(contents), sha256=hashlib.sha256(contents).hexdigest()
-                    )
+                    files[name] = file_record(staging / name, cap)
                 warnings: list[WarningCode] = []
                 if changed:
                     warnings.append("source_changed")
@@ -356,7 +355,10 @@ class ArtifactService:
                     warnings=warnings,
                 )
                 encoded = json_bytes(manifest.wire())
-                if self.store.size() + len(encoded) > self.config.limits.store_bytes:
+                if (
+                    self.config.limits.store_bytes is not None
+                    and self.store.size() + len(encoded) > self.config.limits.store_bytes
+                ):
                     raise ArtifactError("storage_limit")
                 with (staging / "manifest.json").open("xb") as stream:
                     os.chmod(staging / "manifest.json", 0o600)
@@ -386,6 +388,10 @@ class ArtifactService:
                 if staging.exists():
                     shutil.rmtree(staging)
 
+    def _available(self, reserve: int = 0) -> int | None:
+        cap = self.config.limits.store_bytes
+        return None if cap is None else cap - self.store.size() - reserve
+
     @staticmethod
     def _fsync(path: Path) -> None:
         fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -397,7 +403,10 @@ class ArtifactService:
     def _check_time(self, started: float, cancelled: threading.Event | None) -> None:
         if cancelled is not None and cancelled.is_set():
             raise ArtifactError("cancelled")
-        if time.monotonic() - started >= self.config.limits.deadline_seconds:
+        if (
+            self.config.limits.deadline_seconds is not None
+            and time.monotonic() - started >= self.config.limits.deadline_seconds
+        ):
             raise ArtifactError("timeout")
 
     def _worker(self, staging: Path, started: float, cancelled: threading.Event | None) -> None:

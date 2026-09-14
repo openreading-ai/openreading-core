@@ -36,6 +36,7 @@ Families
   request and normalized response contracts unchanged.
 - document-tool: complete retained normalized JSON with lossless continuation, excluding raw payloads.
   The response keeps existing structure, warnings and page origins without a search requirement.
+- import-job: persistent local import status and background start, status, and cancel requests.
 - selection-tool: local copied-file receipts and errors, separate from artifact evidence.
   The empty Request definition excludes model-supplied dialog controls.
 - step / journal: the executor step contract and the per-line JSONL journal shape
@@ -544,6 +545,7 @@ PASSAGE_SCHEMA_FILE = "passage.v0.3.json"
 SELECTION_TOOL_SCHEMA_FILE = "selection-tool.v0.1.json"
 AGENT_DOCUMENT_TOOL_SCHEMA_FILE = "agent-document-tool.v0.3.json"
 DOCUMENT_TOOL_SCHEMA_FILE = "document-tool.v0.1.json"
+IMPORT_JOB_SCHEMA_FILE = "import-job.v0.1.json"
 
 
 _PACKAGE = "openreading.schemas"
@@ -744,6 +746,11 @@ def document_tool_schema() -> dict[str, Any]:
     return _load(DOCUMENT_TOOL_SCHEMA_FILE)
 
 
+def import_job_schema() -> dict[str, Any]:
+    """Persistent local import status and closed background tool requests."""
+    return _load(IMPORT_JOB_SCHEMA_FILE)
+
+
 def _cli_validate() -> int:
     """Validate every vendored schema, then validate any stored normalized fixture.
 
@@ -771,6 +778,7 @@ def _cli_validate() -> int:
         agent_document_tool_schema(),
         selection_tool_schema(),
         document_tool_schema(),
+        import_job_schema(),
     ):
         _validator(contract)
     print(
@@ -781,7 +789,7 @@ def _cli_validate() -> int:
         f"{LIVENESS_REPORT_SCHEMA_FILE} OK, {STEP_SCHEMA_FILE} OK, {JOURNAL_SCHEMA_FILE} OK, "
         f"{LOCAL_DOCUMENT_SCHEMA_FILE} OK, {PASSAGE_SCHEMA_FILE} OK, "
         f"{AGENT_DOCUMENT_TOOL_SCHEMA_FILE} OK, {SELECTION_TOOL_SCHEMA_FILE} OK, "
-        f"{DOCUMENT_TOOL_SCHEMA_FILE} OK"
+        f"{DOCUMENT_TOOL_SCHEMA_FILE} OK, {IMPORT_JOB_SCHEMA_FILE} OK"
     )
 
     # 2. any stored normalized-response fixtures validate against the response schema

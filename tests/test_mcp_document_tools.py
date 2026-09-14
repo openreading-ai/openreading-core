@@ -48,6 +48,9 @@ async def test_stdio_import_search_read_and_sanitized_invalid_arguments(tmp_path
             "openreading_read",
             "openreading_select_document",
             "openreading_get_document",
+            "openreading_start_import",
+            "openreading_get_import",
+            "openreading_cancel_import",
         }
         unavailable = await session.call_tool("openreading_select_document", {})
         assert unavailable.isError
@@ -99,7 +102,7 @@ async def test_inprocess_protocol_checks_unknown_tool_bounds_and_error_redaction
     pdf(root / "sample.pdf")
     service = ArtifactService(ProfileConfig(root, tmp_path.resolve() / "store"))
     async with create_connected_server_and_client_session(create_server(service)) as session:
-        assert len((await session.list_tools()).tools) == 5
+        assert len((await session.list_tools()).tools) == 8
         receipt = await session.call_tool("openreading_import", {"path": "sample.pdf"})
         identifier = json.loads(receipt.content[0].text)["artifact_id"]
         for name, args in [

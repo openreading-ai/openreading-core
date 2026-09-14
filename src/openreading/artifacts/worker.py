@@ -53,7 +53,7 @@ def extract(job: dict, *, client=None, progress=None) -> dict:
         raise ArtifactError("unsupported_format") from None
     if protected:
         raise ArtifactError("password_required")
-    if page_count > job["pages"]:
+    if job["pages"] is not None and page_count > job["pages"]:
         raise ArtifactError("input_too_large")
     if progress is not None:
         progress("conversion")
@@ -69,7 +69,7 @@ def extract(job: dict, *, client=None, progress=None) -> dict:
             raise ArtifactError("engine_identity_unavailable")
         if client is None:
             client = LocalDoclingClient(configuration)
-        raw = client.convert((root / "source.pdf").read_bytes())
+        raw = client.convert_path(root / "source.pdf")
         response, page_origins = project_document(raw, Outputs(**SETTINGS["outputs"]))
         origins = {str(page): origin for page, origin in page_origins.items()}
     else:
@@ -102,10 +102,14 @@ def extract(job: dict, *, client=None, progress=None) -> dict:
             for record in records:
                 data = json_bytes(record) + b"\n"
                 extraction_size += len(data)
-                remaining -= len(data)
-                if extraction_size > job["extraction_bytes"]:
+                if remaining is not None:
+                    remaining -= len(data)
+                if (
+                    job["extraction_bytes"] is not None
+                    and extraction_size > job["extraction_bytes"]
+                ):
                     raise ArtifactError("extraction_too_large")
-                if remaining < 0:
+                if remaining is not None and remaining < 0:
                     raise ArtifactError("storage_limit")
                 stream.write(data)
             stream.flush()

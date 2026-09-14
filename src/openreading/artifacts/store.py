@@ -24,23 +24,39 @@ from pydantic import ValidationError
 
 from openreading.artifacts.intake import InputGrant, ancestor_identities, directory
 from openreading.artifacts.limits import ArtifactError, ProfileConfig
-from openreading.artifacts.models import ArtifactManifest, Passage, artifact_id
+from openreading.artifacts.models import ArtifactManifest, FileRecord, Passage, artifact_id
 from openreading.artifacts.passages import iter_passages
 from openreading.types.response import NormalizedResponse
 
 __all__ = ["Store", "safe_read"]
 
 
-def safe_read(path: Path, cap: int) -> bytes:
+def safe_read(path: Path, cap: int | None) -> bytes:
     with directory(path.parent) as parent_fd:
         fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent_fd)
         with os.fdopen(fd, "rb") as stream:
             if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
                 raise ValueError("Not a regular file")
-            data = stream.read(cap + 1)
-            if len(data) > cap:
+            data = stream.read() if cap is None else stream.read(cap + 1)
+            if cap is not None and len(data) > cap:
                 raise ValueError("File exceeds cap")
             return data
+
+
+def file_record(path: Path, cap: int | None) -> FileRecord:
+    """Fingerprint source bytes incrementally without retaining a document-sized buffer."""
+    with directory(path.parent) as parent_fd:
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent_fd)
+        with os.fdopen(fd, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise ValueError("Not a regular file")
+            digest, length = hashlib.sha256(), 0
+            while data := stream.read(65536):
+                length += len(data)
+                if cap is not None and length > cap:
+                    raise ValueError("File exceeds cap")
+                digest.update(data)
+            return FileRecord(length=length, sha256=digest.hexdigest())
 
 
 class Store:
@@ -124,7 +140,7 @@ class Store:
         if not root.exists():
             raise ArtifactError("artifact_not_found")
         try:
-            raw = json.loads(safe_read(root / "manifest.json", 65536))
+            raw = json.loads(safe_read(root / "manifest.json", self.config.limits.extraction_bytes))
             if not isinstance(raw, dict):
                 raise ValueError("Manifest is not an object")
             if raw.get("format") != "local-document.v0.3":
@@ -143,6 +159,11 @@ class Store:
                     if name == "source.pdf"
                     else self.config.limits.extraction_bytes
                 )
+                if name == "source.pdf":
+                    measured = file_record(root / name, cap)
+                    if measured != record or measured.sha256 != manifest.document_sha256:
+                        raise ValueError("Source mismatch")
+                    continue
                 contents = safe_read(root / name, cap)
                 if (
                     len(contents) != record.length
@@ -150,8 +171,6 @@ class Store:
                 ):
                     raise ValueError("Integrity mismatch")
                 data[name] = contents
-            if hashlib.sha256(data["source.pdf"]).hexdigest() != manifest.document_sha256:
-                raise ValueError("Source mismatch")
             response = NormalizedResponse.model_validate_json(data["response.json"])
             passages = [
                 Passage.model_validate_json(line) for line in data["passages.jsonl"].splitlines()

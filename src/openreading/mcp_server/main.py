@@ -29,12 +29,12 @@ def arguments(parser: argparse.ArgumentParser) -> None:
         "--profile",
         required=True,
         choices=["local-document-proof-v1", "local-document-proof-v2"],
-        help="fixed local extraction and retrieval limits",
+        help="local extraction engine and retrieval profile",
     )
     parser.add_argument(
         "--profile-config",
         type=Path,
-        help="closed Docling setup JSON with assets and measured resource limits",
+        help="closed Docling setup JSON with assets and optional operator limits",
     )
     parser.add_argument(
         "--input-root",
@@ -64,12 +64,21 @@ def profile_config(args: argparse.Namespace) -> ProfileConfig:
         if len(data) > 16384:
             raise ValueError
         value = json.loads(data)
-        if set(value) != {
+        if not {
             "pages",
             "deadline_seconds",
             "worker_memory_bytes",
             "worker_idle_seconds",
             "docling",
+        } <= set(value) or set(value) - {
+            "pages",
+            "deadline_seconds",
+            "worker_memory_bytes",
+            "worker_idle_seconds",
+            "docling",
+            "source_bytes",
+            "extraction_bytes",
+            "store_bytes",
         }:
             raise ValueError
         docling = LocalDoclingConfig.from_wire(value.pop("docling"))

@@ -92,6 +92,7 @@ all = [
 ]
 agent = [
     "mcp>=1.28,<2",
+    "psutil>=7.2,<8",  # verifies detached import process identity
 ]
 
 [project.scripts]
