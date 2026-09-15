@@ -1237,7 +1237,7 @@ Serve nine document tools over stdio with openreading[agent,pymupdf].
 You grant an absolute --input-root and a separate absolute --artifact-root.
 For example, use /absolute/documents and /absolute/evidence respectively.
 The server retains source bytes and page evidence until you remove the store.
-Retrieved excerpts enter the calling agent context. Treat them as untrusted.
+Requested document content enters the calling agent. Treat it as untrusted.
 
 Start long work with openreading_start_import and a granted relative path.
 Keep its job_id and check openreading_get_import for stages and elapsed time.
@@ -1251,9 +1251,18 @@ Cancel unwanted jobs before uninstalling. Client removal does not stop them.
 Call openreading_import for synchronous use, then pass its artifact_id to
 openreading_get_document for the complete retained normalized JSON.
 This excludes backend_raw and keeps existing channels, warnings and origins.
-Follow every next_cursor for the whole result. Large values use ordered JSON
-Pointer fragments with exact character spans; small results fit one fragment.
-The openreading.artifacts.document docstring defines their reconstruction.
+Set delivery to auto for one complete result or a saved local JSON file.
+The response budget counts serialized MCP bytes, including escaping.
+--document-response-bytes defaults to 1000000. It does not limit parsing.
+--document-export-root selects a trusted local export directory.
+Without that flag, exports stay under the private artifact store.
+A local-file receipt includes byte count, SHA-256, and warning-code counts.
+It does not mean the host received a file. Attach it or use authorized access.
+Attaching an export sends its content to the assistant host.
+Set delivery to file to export even when the result fits the budget.
+Omitting delivery retains fragments mode and its ordered JSON Pointer spans.
+Follow every next_cursor in that mode for complete retained content.
+The openreading.artifacts.document docstring defines fragment reconstruction.
 Alternatively, use openreading_search for a focused query.
 Call openreading_read with evidence_ids returned by any retrieval tool.
 Cite the returned filename, physical page, and evidence identifier.

@@ -7,6 +7,7 @@ import jsonschema
 import pytest
 from pydantic import TypeAdapter
 
+from openreading.artifacts.delivery import DeliveryPayload
 from openreading.artifacts.document import DocumentPayload
 from openreading.artifacts.models import (
     ArtifactManifest,
@@ -24,6 +25,7 @@ from openreading.artifacts.models import (
         ("local-document.v0.3.json", ArtifactManifest),
         ("passage.v0.3.json", Passage),
         ("document-tool.v0.1.json", TypeAdapter(DocumentPayload)),
+        ("document-tool.v0.2.json", TypeAdapter(DeliveryPayload)),
         (
             "agent-document-tool.v0.3.json",
             TypeAdapter(ImportReceipt | SearchResult | ReadResult | ErrorEnvelope),

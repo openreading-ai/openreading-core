@@ -544,7 +544,7 @@ LOCAL_DOCUMENT_SCHEMA_FILE = "local-document.v0.3.json"
 PASSAGE_SCHEMA_FILE = "passage.v0.3.json"
 SELECTION_TOOL_SCHEMA_FILE = "selection-tool.v0.1.json"
 AGENT_DOCUMENT_TOOL_SCHEMA_FILE = "agent-document-tool.v0.3.json"
-DOCUMENT_TOOL_SCHEMA_FILE = "document-tool.v0.1.json"
+DOCUMENT_TOOL_SCHEMA_FILE = "document-tool.v0.2.json"
 IMPORT_JOB_SCHEMA_FILE = "import-job.v0.1.json"
 
 

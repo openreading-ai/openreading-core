@@ -14,6 +14,10 @@
 
 ## Unreleased retained evidence v0.3
 
+- Add complete MCP delivery with a configurable serialized-response budget and private JSON export fallback.
+  Preserve normalized values, parser warnings, page origins, and citation mappings without raw provider payloads.
+  Keep fragment retrieval compatible; local export receipts never claim automatic host file access.
+
 - Add an optional local selection provider and empty-argument MCP selection tool.
   Standalone core stays headless and returns an explicit refusal without a provider.
 - Require shielded asynchronous selection cleanup, including cancellation during acquisition.

@@ -37,8 +37,15 @@ Your client supplies the following tool calls through MCP; these JSON objects ar
 
 Pass the receipt's `artifact_id` to `openreading_get_document` to read the entire retained normalized result.
 Its import receipt retains a legacy search suggestion; you can use either retrieval route.
-For example, call `openreading_get_document` with `{"artifact_id":"<returned artifact_id>"}`.
-Follow `next_cursor` until null, preserving fragment order when the document requires several replies.
+For example, call `openreading_get_document` with `{"artifact_id":"<returned artifact_id>","delivery":"auto"}`.
+A fitting result contains intact `content.response`, with page origins and citation mappings alongside it.
+Otherwise, the receipt reports a complete local JSON file, byte count, SHA-256, and warning-code summary.
+The summary states how many warnings it omits; full details remain inside the exported content.
+A local path does not prove that the host received the file or can open it.
+Use an existing authorized file tool when available, or attach the export to share it with the assistant host.
+If the host saves an accepted tool response into its own file, its existing file tools can inspect that result.
+Set `delivery` to `file` to export a small result, or omit it to retain the previous fragment interface.
+In fragment mode, follow `next_cursor` until null and preserve every fragment's order.
 The result includes existing structure, parser warnings, page origins and citation references, while excluding `backend_raw`.
 Pass a returned evidence identifier to `openreading_read` for the exact citation quote.
 Alternatively, call `openreading_search` with `query` set to `renewal` for a focused question.
@@ -85,10 +92,16 @@ Document text remains untrusted data, preventing a quoted instruction from gaini
 
 The process speaks MCP on stdout; configure your client to capture diagnostics separately from that protocol stream.
 Domain errors set `isError` and return fixed codes from `openreading.artifacts.limits` or `openreading.types.selection`.
-Selection and full-document replies have separate v0.1 families; existing artifact payloads remain at v0.3.
+Selection uses v0.1; complete delivery uses document-tool v0.2 and preserves the v0.1 fragment result.
+Existing retained artifact payloads remain at v0.3.
 Full-document access sends retained content to your assistant and does not establish token savings.
 It preserves the stored result, including extraction limitations, rather than promising perfect OCR recognition.
 The import profile decides which channels exist; this tool does not enable disabled table extraction.
+`--document-response-bytes` defaults to 1000000 bytes for the complete serialized MCP response, including escaping and request ID.
+It controls delivery, never document processing. Different hosts can impose smaller independent limits.
+`--document-export-root` selects a trusted local directory; without it, exports stay under the private artifact store.
+Exports use private files beneath a grant-specific directory and remain until explicitly removed.
+Removing an artifact does not remove an already exported copy. Model arguments cannot set export paths.
 Malformed arguments return protocol errors, while normal transport closure exits with status zero.
 Configuration failures exit two. SIGINT and SIGTERM cancel synchronous imports and exit 130, including clients that keep stdin open.
 Detached imports continue and keep private status under `jobs/INPUT_GRANT_SHA256/JOB_ID/`.

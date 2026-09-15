@@ -8,7 +8,12 @@ Detached imports continue across transport closure and require explicit job canc
 Start openreading mcp with the local-document-proof-v1 profile and explicit input and
 artifact roots. The server exposes openreading_import, openreading_search, and
 openreading_read, plus openreading_get_document for the complete retained normalized result.
-That result excludes backend_raw and uses lossless pagination defined by openreading.artifacts.document.
+That result excludes backend_raw. Its auto delivery returns intact content or a local export.
+The operator sets --document-response-bytes, default 1000000 serialized MCP bytes including escaping.
+The optional --document-export-root selects a trusted destination; the private artifact store is default.
+For example, delivery="file" exports even a small result without sending its document content.
+A local export path establishes no host access and performs no upload. Existing fragment mode
+uses lossless pagination defined by openreading.artifacts.document.
 Background tools openreading_start_import, openreading_get_import and openreading_cancel_import
 return persistent job status without keeping a tool request open during extraction.
 Use openreading_list_imports after reconnecting when the original job ID is unavailable.

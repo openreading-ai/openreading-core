@@ -125,6 +125,7 @@ _FROZEN_RELEASED = {
 _UNRELEASED = {
     "import-job.v0.1.json",
     "document-tool.v0.1.json",
+    "document-tool.v0.2.json",
     "selection-tool.v0.1.json",
     "local-document.v0.3.json",
     "passage.v0.3.json",

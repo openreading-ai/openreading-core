@@ -26,6 +26,17 @@ from openreading.artifacts.limits import ArtifactError, DoclingLimits, ProfileCo
 
 def arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
+        "--document-response-bytes",
+        type=int,
+        default=1_000_000,
+        help="complete-document delivery budget in serialized MCP bytes (default: 1000000)",
+    )
+    parser.add_argument(
+        "--document-export-root",
+        type=Path,
+        help="trusted export directory (default: exports inside the private artifact store)",
+    )
+    parser.add_argument(
         "--profile",
         required=True,
         choices=["local-document-proof-v1", "local-document-proof-v2"],
@@ -92,15 +103,19 @@ async def serve(
     *,
     selection_provider: SelectionProvider | None = None,
     selection_timeout_seconds: float | None = 120,
+    document_response_bytes: int = 1_000_000,
+    document_export_root: Path | None = None,
 ) -> None:
     import anyio
 
     from openreading.artifacts.service import ArtifactService
+    from openreading.mcp_server.delivery import validate_delivery_config
     from openreading.mcp_server.selection import validate_selection_timeout
     from openreading.mcp_server.tools import create_server
     from openreading.mcp_server.transport import cancellable_stdio
 
     validate_selection_timeout(selection_timeout_seconds)
+    validate_delivery_config(document_response_bytes, document_export_root)
     interrupted = False
     signals = []
     if threading.current_thread() is threading.main_thread():
@@ -117,6 +132,8 @@ async def serve(
                 service,
                 selection_provider=selection_provider,
                 selection_timeout_seconds=selection_timeout_seconds,
+                document_response_bytes=document_response_bytes,
+                document_export_root=document_export_root,
             )
             async with anyio.create_task_group() as group, cancellable_stdio() as (reader, writer):
 
@@ -172,9 +189,13 @@ def launch(
         import anyio
 
         from openreading.cli.app import _terminate_as_interrupt
+        from openreading.mcp_server.delivery import validate_delivery_config
         from openreading.mcp_server.selection import validate_selection_timeout
 
+        budget = getattr(args, "document_response_bytes", 1_000_000)
+        export_root = getattr(args, "document_export_root", None)
         try:
+            validate_delivery_config(budget, export_root)
             validate_selection_timeout(selection_timeout_seconds)
         except ValueError as error:
             print(str(error), file=sys.stderr)
@@ -193,11 +214,16 @@ def launch(
 
             operation = (
                 serve
-                if selection_provider is None and selection_timeout_seconds == 120
+                if selection_provider is None
+                and selection_timeout_seconds == 120
+                and budget == 1_000_000
+                and export_root is None
                 else partial(
                     serve,
                     selection_provider=selection_provider,
                     selection_timeout_seconds=selection_timeout_seconds,
+                    document_response_bytes=budget,
+                    document_export_root=export_root,
                 )
             )
             anyio.run(operation, config)

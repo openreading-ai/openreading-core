@@ -41,7 +41,7 @@ async def test_ocr_from_provider_through_normalization_storage_and_mcp(tmp_path)
     async with create_connected_server_and_client_session(create_server(service)) as session:
         tools = (await session.list_tools()).tools
         tool = next(t for t in tools if t.name == "openreading_get_document")
-        assert tool.annotations.readOnlyHint and tool.annotations.idempotentHint
+        assert not tool.annotations.readOnlyHint and tool.annotations.idempotentHint
         assert not tool.annotations.openWorldHint
         while True:
             result = await session.call_tool(

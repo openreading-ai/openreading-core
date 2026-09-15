@@ -195,15 +195,9 @@ def get_document(
     *,
     cache: DocumentCache | None = None,
 ) -> DocumentResult:
-    content = {
-        "response": {key: value for key, value in response.items() if key != "backend_raw"},
-        "page_origins": manifest.page_origins,
-        "evidence": [
-            {key: value for key, value in passage.wire().items() if key not in {"text", "bbox"}}
-            for passage in passages
-        ],
-        "warnings": manifest.warnings,
-    }
+    from openreading.artifacts.delivery import document_content
+
+    content = document_content(manifest, passages, response)
     # Reserve room for the fixed envelope and a continuation token before subdividing values.
     if cap < 2048:
         raise ArtifactError("response_too_large")
