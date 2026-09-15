@@ -14,6 +14,9 @@
 
 ## Unreleased retained evidence v0.3
 
+- Preserve Docling numbered-list text using its provider original and unchanged page spans.
+  Reimport existing documents to recover list items omitted by older artifacts.
+
 - Resolve trusted export directory aliases at server startup and skip inline construction
   when complete content already exceeds the response budget.
 

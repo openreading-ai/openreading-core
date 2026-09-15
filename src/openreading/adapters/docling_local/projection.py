@@ -3,6 +3,8 @@
 Every provenance range must fit the item's text and name a known physical page.
 Overlapping ranges are ambiguous and omit the item with a warning. Geometry remains
 optional. Page origin summarizes the measured native/OCR cells conservatively.
+Docling list markers shorten text without updating spans, which still address orig.
+List projection uses that provider original, including its marker, without rewriting offsets.
 Furniture text, such as a running header, stays out of page evidence with a warning,
 because a search that cannot see it must not look like proof the words are absent.
 """
@@ -61,6 +63,9 @@ def project_document(
     warning_codes = set()
     for index, item in enumerate(payload["items"]):
         text = item.get("text")
+        original = item.get("orig")
+        if item.get("label") == "list_item" and isinstance(original, str) and original:
+            text = original
         if not isinstance(text, str) or not text:
             if item.get("label") == "table":
                 warning_codes.add("table_text_unavailable")

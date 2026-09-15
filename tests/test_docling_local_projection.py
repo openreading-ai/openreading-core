@@ -138,3 +138,63 @@ def test_blank_pages_and_unmeasured_text_do_not_claim_mixed_origin():
     )
     assert origins == {1: "unknown", 2: "none"}
     assert response.document.pages[1].text == ""
+
+
+def test_real_docling_list_marker_text_preserves_original_page_spans():
+    from copy import deepcopy
+
+    from docling.models.postprocessing.list_marker_processor import ListItemMarkerProcessor
+    from docling_core.types.doc import BoundingBox, DoclingDocument, ProvenanceItem
+
+    document = DoclingDocument(name="synthetic")
+    original = "12. Retain this numbered instruction"
+    entry = document.add_list_item(
+        text=original,
+        prov=ProvenanceItem(
+            page_no=2,
+            charspan=(0, len(original)),
+            bbox=BoundingBox(l=10, t=20, r=70, b=40),
+        ),
+    )
+    ListItemMarkerProcessor().process_list_item(entry)
+    payload = entry.model_dump(mode="json")
+    before = deepcopy(payload)
+    assert payload["text"] == "Retain this numbered instruction"
+    assert payload["orig"] == original
+    assert payload["prov"][0]["charspan"] == [0, len(original)]
+    response, origins = project([payload], {"2": "ocr"})
+    assert response.document.pages[1].text == original
+    block = response.document.pages[1].blocks[0]
+    assert block.native_type == "list_item"
+    assert block.bbox.page == 2
+    assert origins[2] == "ocr"
+    assert not any(w.code == "ambiguous_page_provenance" for w in response.warnings or [])
+    assert payload == before
+
+
+def test_list_original_text_uses_all_explicit_spans_without_clamping():
+    entry = item(
+        "alpha beta", [{"page_no": 1, "charspan": [0, 9]}, {"page_no": 2, "charspan": [9, 13]}]
+    )
+    entry.update(label="list_item", orig="1. alpha beta", marker="1.")
+    response, _ = project([entry])
+    assert [page.text for page in response.document.pages] == ["1. alpha ", "beta"]
+    entry["prov"][1]["charspan"][1] = 14
+    response, _ = project([entry])
+    assert not response.document.text
+    assert any(w.code == "ambiguous_page_provenance" for w in response.warnings)
+
+
+@pytest.mark.parametrize("original", [None, "", 123])
+def test_list_without_usable_original_keeps_valid_text(original):
+    entry = item()
+    entry.update(label="list_item", orig=original)
+    response, _ = project([entry])
+    assert response.document.pages[0].text == "alpha beta"
+
+
+def test_ordinary_text_does_not_switch_to_original_representation():
+    entry = item()
+    entry["orig"] = "unrelated original representation"
+    response, _ = project([entry])
+    assert response.document.pages[0].text == "alpha beta"
