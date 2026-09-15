@@ -14,6 +14,7 @@ Exports remain until explicitly removed. Removing an artifact does not remove it
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import stat
@@ -154,6 +155,8 @@ def save_export(root: Path, grant: str, data: bytes) -> Path:
                         os.unlink(temporary, dir_fd=fd)
         except PermissionError:
             raise ArtifactError("os_permission_denied") from None
-        except OSError:
+        except OSError as error:
+            if error.errno == errno.ELOOP:
+                raise ArtifactError("artifact_corrupt") from None
             raise ArtifactError("storage_limit") from None
     return target / name

@@ -14,6 +14,9 @@
 
 ## Unreleased retained evidence v0.3
 
+- Resolve trusted export directory aliases at server startup and skip inline construction
+  when complete content already exceeds the response budget.
+
 - Add complete MCP delivery with a configurable serialized-response budget and private JSON export fallback.
   Preserve normalized values, parser warnings, page origins, and citation mappings without raw provider payloads.
   Keep fragment retrieval compatible; local export receipts never claim automatic host file access.

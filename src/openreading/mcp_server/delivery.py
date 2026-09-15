@@ -7,6 +7,8 @@ real stdio tests bind this calculation to the bytes written by the pinned MCP SD
 
 An accepted result may enter context or become a host-created file. Core guarantees neither.
 An oversized result becomes a local export receipt, never truncated normalized content.
+Content already larger than the budget skips inline construction and its additional copies.
+The server resolves trusted export directory aliases once before accepting requests.
 No network transfer, host filesystem staging, or code execution occurs in this module.
 """
 
@@ -77,7 +79,8 @@ def deliver_document(
         passage_count=manifest.passage_count,
         parser_warnings=warning_summary(response),
     ).wire()
-    if mode == "auto":
+    # JSON escaping and the response envelope cannot shrink the canonical content bytes.
+    if mode == "auto" and len(data) <= budget:
         candidate = tool_result(CompleteResult(**receipt, content=content).wire())
         if response_bytes(candidate, request_id) <= budget:
             return candidate

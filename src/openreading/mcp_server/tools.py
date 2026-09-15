@@ -144,6 +144,9 @@ def create_server(
     from openreading.mcp_server.delivery import validate_delivery_config
 
     validate_delivery_config(document_response_bytes, document_export_root)
+    # Resolve operator-selected aliases once; later requests cannot redirect the destination.
+    if document_export_root is not None:
+        document_export_root = document_export_root.resolve()
     selection = SelectionCoordinator(service, selection_provider, selection_timeout_seconds)
     instructions = INSTRUCTIONS
     if selection_provider is not None:

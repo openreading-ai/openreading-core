@@ -183,7 +183,7 @@ def test_export_never_overwrites_corrupt_entries_or_follows_links(tmp_path):
     outside = tmp_path / "outside"
     outside.write_bytes(payload)
     path.symlink_to(outside)
-    with pytest.raises(ArtifactError):
+    with pytest.raises(ArtifactError, match="artifact_corrupt"):
         save_export(root, "grant", payload)
     assert outside.read_bytes() == payload
     assert not list(path.parent.glob("*.tmp"))
@@ -371,3 +371,66 @@ def test_real_stdio_matches_budget_with_escaped_request_ids(tmp_path):
                 process.stdin.close()
                 process.wait(timeout=10)
             assert process.returncode == 0
+
+
+@pytest.mark.asyncio
+async def test_trusted_export_root_resolves_alias_once_before_requests(tmp_path):
+    service, identifier, _ = retain(tmp_path, rich_response())
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    alias = tmp_path / "Downloads"
+    alias.symlink_to(first, target_is_directory=True)
+    try:
+        server = create_server(service, document_export_root=alias / "OpenReading")
+        alias.unlink()
+        alias.symlink_to(second, target_is_directory=True)
+        async with create_connected_server_and_client_session(server) as session:
+            result = await session.call_tool(
+                "openreading_get_document", {"artifact_id": identifier, "delivery": "file"}
+            )
+            assert not result.isError
+            payload = json.loads(result.content[0].text)
+            path = Path(payload["local_path"])
+            assert path.is_relative_to(first.resolve())
+            assert path.is_file()
+            assert list(second.iterdir()) == []
+    finally:
+        service.close()
+
+
+def test_oversize_skips_complete_result_materialization(tmp_path, monkeypatch):
+    import openreading.mcp_server.delivery as delivery
+
+    service, identifier, _ = retain(tmp_path, rich_response("x" * 20_000))
+
+    def forbidden(**kwargs):
+        pytest.fail("Oversized content must not build an inline result")
+
+    monkeypatch.setattr(delivery, "CompleteResult", forbidden)
+    try:
+        result = delivery.deliver_document(
+            service, identifier, mode="auto", budget=4096, root=None, request_id=1
+        )
+        payload = json.loads(result.content[0].text)
+        assert payload["delivery"] == "local_file"
+        assert Path(payload["local_path"]).stat().st_size == payload["content_bytes"]
+    finally:
+        service.close()
+
+
+def test_export_permission_failure_is_reported_without_publishing(tmp_path, monkeypatch):
+    import os
+
+    from openreading.artifacts.delivery import save_export
+    from openreading.artifacts.limits import ArtifactError
+
+    def denied(*args, **kwargs):
+        raise PermissionError(13, "private-path")
+
+    monkeypatch.setattr(os, "link", denied)
+    root = tmp_path.resolve() / "exports"
+    with pytest.raises(ArtifactError, match="os_permission_denied") as error:
+        save_export(root, "grant", b"data")
+    assert "private-path" not in str(error.value)
+    assert list((root / "grant").iterdir()) == []
