@@ -594,7 +594,7 @@ entry naming it, so the warning reaches you before the removal does.
 | `passage.v0.3.json` | `openreading.artifacts.passages` | Exact source spans with physical page provenance. |
 | `selection-tool.v0.1.json` | `openreading.mcp_server.selection` | Copied-file receipts, empty selection input, and sanitized refusals. |
 | `document-tool.v0.1.json` | `openreading.artifacts.document` | Complete retained normalized results through lossless JSON continuation. |
-| `document-tool.v0.2.json` | Complete MCP delivery or private file export, retaining the v0.1 fragment interface |
+| `document-tool.v0.2.json` | `openreading.artifacts.delivery` | Complete MCP delivery or private file export, retaining the v0.1 fragment interface. |
 | `agent-document-tool.v0.3.json` | `openreading.mcp_server.tools` | Bounded import, search, read, and error payloads. |
 
 These families wrap retained evidence without changing the normalized extraction response.
