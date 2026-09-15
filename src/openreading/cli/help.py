@@ -101,6 +101,7 @@ TOPICS: tuple[Topic, ...] = (
     # when something stops
     Topic("exit-codes", "Exit codes", ("exits", "exit", "exitcodes")),
     Topic("signals", "Signals, and what a stopped run leaves behind", ("ctrl-c", "sigterm")),
+    Topic("mcp", "mcp --profile local-document-proof-v1"),
     # one command at a time
     Topic("parse", "parse <file|url|dir|glob ...>"),
     Topic("backends", "backends [--check SLUG[,SLUG...]|all] [--timeout SECONDS]", ("check",)),
@@ -144,6 +145,7 @@ _GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "leaderboard",
             "rules",
             "serve",
+            "mcp",
         ),
     ),
     ("EVERY COMMAND", ("invariants",)),
@@ -176,6 +178,7 @@ _BLURBS: dict[str, str] = {
     "leaderboard": "rank backends on documents you labeled yourself",
     "rules": "seed publisher rules from a dataset's own expectations",
     "serve": "run the HTTP API on this machine",
+    "mcp": "serve bounded local document evidence",
     "invariants": "what holds no matter which verb you type",
 }
 

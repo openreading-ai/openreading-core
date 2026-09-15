@@ -39,12 +39,12 @@ def test_real_repo_state_is_clean_and_reports_counts():
     report = cep.check_parity(registry_slugs, extras)
 
     assert report.ok, cep.format_errors(report)
-    assert report.registry_slug_count == 15
-    assert report.matching_extra_count == 15
-    assert report.exception_count == 1
+    assert report.registry_slug_count == 21
+    assert report.matching_extra_count == 21
+    assert report.exception_count == 5
     # Benchmark integrations are utility extras, like HTTP and server support. They do not map to
     # adapter slugs, so the parity allowlist accounts for both runnable public profiles.
-    assert report.allowlisted_extra_count == 5
+    assert report.allowlisted_extra_count == 6
 
 
 def test_main_against_real_repo_exits_zero(capsys: pytest.CaptureFixture[str]):
@@ -53,7 +53,7 @@ def test_main_against_real_repo_exits_zero(capsys: pytest.CaptureFixture[str]):
 
     assert rc == 0
     assert "extras-parity: OK" in out
-    assert "15 registry slugs" in out
+    assert "21 registry slugs" in out
 
 
 # --- AC-2: missing extra ------------------------------------------------------------------------
@@ -81,11 +81,29 @@ def test_orphaned_extra_is_flagged_by_exact_extra_name():
     assert any("bar-orphan" in e for e in cep.format_errors(report))
 
 
-# --- AC-4: the aws-textract/textract exception is explicit, named, and load-bearing -------------
+# --- AC-4: every slug-to-extra exception is explicit, named, and load-bearing ---------------------
 
 
-def test_exception_map_has_exactly_the_one_documented_entry():
-    assert cep.EXTRA_NAME_EXCEPTIONS == {"aws-textract": "textract"}
+def test_exception_map_has_exactly_the_documented_entries():
+    assert cep.EXTRA_NAME_EXCEPTIONS == {
+        "aws-textract": "textract",
+        "llamaparse-fast": "llamaparse",
+        "llamaparse-cost-effective": "llamaparse",
+        "llamaparse-agentic": "llamaparse",
+        "llamaparse-agentic-plus": "llamaparse",
+    }
+
+
+def test_several_slugs_may_share_one_extra_in_both_directions():
+    exceptions = {"tier-a": "shared", "tier-b": "shared"}
+    report = cep.check_parity(
+        registry_slugs={"tier-a", "tier-b"},
+        extras={"shared": ["httpx>=0.27"]},
+        exceptions=exceptions,
+    )
+    assert report.ok
+    missing = cep.check_parity(registry_slugs={"tier-a"}, extras={}, exceptions=exceptions)
+    assert missing.missing_extras == ["tier-a"]
 
 
 def test_exception_map_applied_reconciles_the_naming_mismatch():

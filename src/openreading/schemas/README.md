@@ -586,6 +586,19 @@ entry naming it, so the warning reaches you before the removal does.
   `false` in a Python `run()` call or an HTTP request body. Every adapter honors the setting, and
   no CLI flag exposes it today.
 
+### Retained local evidence contracts
+
+| Schema | Owner | Result |
+| --- | --- | --- |
+| `local-document.v0.3.json` | `openreading.artifacts.models` | Source hash, engine identity, and retained file inventory. |
+| `passage.v0.3.json` | `openreading.artifacts.passages` | Exact source spans with physical page provenance. |
+| `selection-tool.v0.1.json` | `openreading.mcp_server.selection` | Copied-file receipts, empty selection input, and sanitized refusals. |
+| `document-tool.v0.1.json` | `openreading.artifacts.document` | Complete retained normalized results through lossless JSON continuation. |
+| `document-tool.v0.2.json` | `openreading.artifacts.delivery` | Complete MCP delivery or private file export, retaining the v0.1 fragment interface. |
+| `agent-document-tool.v0.3.json` | `openreading.mcp_server.tools` | Bounded import, search, read, and error payloads. |
+
+These families wrap retained evidence without changing the normalized extraction response.
+
 ## Not built yet
 
 - `openreading.SCHEMA_VERSION` prints `0.1`, a number that matches no current family, because the
@@ -621,3 +634,12 @@ full table of what to update for each kind of change is under *Where a change ge
 [`AGENTS.md`](../../../AGENTS.md).
 
 <sub>[Docs home](../README.md) · [← Evals](../evals/README.md) · [Backend adapters →](../adapters/README.md)</sub>
+
+The retained evidence v0.2 contracts add measured page origins and supervised-worker failure codes.
+The v0.1 files remain unchanged; this runtime refuses older retained artifacts rather than rewriting cited evidence.
+
+Retained evidence v0.3 distinguishes text-less pages (`none`) from unmeasured text origins (`unknown`).
+Passages cannot use `none`; existing v0.1 and v0.2 files remain byte-identical historical contracts.
+
+The `import-job.v0.1.json` contract defines persistent local import progress and closed start, status, list, and cancel requests.
+Its models live in `openreading.types.import_job`; successful jobs carry the existing artifact receipt.

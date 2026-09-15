@@ -1,0 +1,251 @@
+{
+  "$defs": {
+    "DocumentRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "pattern": "^or1_[0-9a-f]{64}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cursor"
+        }
+      },
+      "required": [
+        "artifact_id"
+      ],
+      "title": "DocumentRequest",
+      "type": "object"
+    },
+    "DocumentResult": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.1",
+          "default": "0.1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "scope": {
+          "const": "retained_normalized_response",
+          "default": "retained_normalized_response",
+          "title": "Scope",
+          "type": "string"
+        },
+        "artifact_id": {
+          "pattern": "^or1_[0-9a-f]{64}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "display_name": {
+          "title": "Display Name",
+          "type": "string"
+        },
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "fragment_start": {
+          "minimum": 0,
+          "title": "Fragment Start",
+          "type": "integer"
+        },
+        "fragment_count": {
+          "minimum": 1,
+          "title": "Fragment Count",
+          "type": "integer"
+        },
+        "fragments": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ValueFragment"
+              },
+              {
+                "$ref": "#/$defs/TextFragment"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Fragments",
+          "type": "array"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Cursor"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "display_name",
+        "content_sha256",
+        "fragment_start",
+        "fragment_count",
+        "fragments"
+      ],
+      "title": "DocumentResult",
+      "type": "object"
+    },
+    "ErrorEnvelope": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.3",
+          "default": "0.3",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "error": {
+          "$ref": "#/$defs/ToolError"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "title": "ErrorEnvelope",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "TextFragment": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "end": {
+          "minimum": 1,
+          "title": "End",
+          "type": "integer"
+        },
+        "length": {
+          "minimum": 1,
+          "title": "Length",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "text",
+        "start",
+        "end",
+        "length"
+      ],
+      "title": "TextFragment",
+      "type": "object"
+    },
+    "ToolError": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "memory_limit",
+            "worker_monitor_failed",
+            "os_permission_denied",
+            "configuration_required",
+            "engine_identity_unavailable",
+            "access_denied",
+            "input_not_found",
+            "unsupported_format",
+            "password_required",
+            "input_too_large",
+            "extraction_too_large",
+            "no_readable_text",
+            "busy",
+            "timeout",
+            "cancelled",
+            "storage_limit",
+            "parse_failed",
+            "artifact_not_found",
+            "artifact_corrupt",
+            "artifact_version_unsupported",
+            "evidence_not_found",
+            "invalid_cursor",
+            "response_too_large"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 256,
+          "title": "Message",
+          "type": "string"
+        },
+        "retryable": {
+          "title": "Retryable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "title": "ToolError",
+      "type": "object"
+    },
+    "ValueFragment": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/JsonValue"
+        }
+      },
+      "required": [
+        "path",
+        "value"
+      ],
+      "title": "ValueFragment",
+      "type": "object"
+    }
+  },
+  "anyOf": [
+    {
+      "$ref": "#/$defs/DocumentRequest"
+    },
+    {
+      "$ref": "#/$defs/DocumentResult"
+    },
+    {
+      "$ref": "#/$defs/ErrorEnvelope"
+    }
+  ],
+  "title": "OpenReading Document Tool v0.1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/document-tool.v0.1.json"
+}

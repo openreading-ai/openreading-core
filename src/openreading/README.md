@@ -124,6 +124,8 @@ The table below tells you which guide answers which need and how long each takes
 
 | You want to… | Guide | Read time |
 |---|---|---|
+| retrieve retained local evidence through an agent | [MCP tools](mcp_server/README.md) | 5 min |
+| inspect source spans and retained files | [Artifacts](artifacts/README.md) | 5 min |
 | know what this is, where to go next, and how an agent uses it | this page | 10 min |
 | understand and consume the response JSON across backends | [Response guide](schemas/README.md#understanding-the-response-json), or `uv run openreading help response` | 10 min |
 | script it from a shell or CI: stdout, exit codes, `.env` | [The command line](cli/README.md) | 10 min |
@@ -195,6 +197,9 @@ restates a docstring. The maintenance rule is "Where a change gets documented" i
 [`AGENTS.md`](../../AGENTS.md).
 
 ## Using OpenReading from an agent
+
+For retained local evidence, start with the [MCP guide](mcp_server/README.md).
+The [artifact guide](artifacts/README.md) explains page citations and local retention.
 
 Everything an agent needs to act (succeed, retry, escalate, reject) is a typed field, not prose.
 
@@ -432,11 +437,9 @@ openreading.adapters` instead.
 
 Nothing below exists in the package today. Each line names where the gap is recorded.
 
-- `openreading mcp`, a native tool surface for agents, does not exist. Integrate through the CLI,
-  Python dicts, or HTTP. The gap is recorded in the `openreading` package docstring (Known gaps)
-  and `AGENTS.md` (Also here when built), and designed in
-  [design/agentic.md](../../design/agentic.md) with
-  [its product spec](../../product/specs/agentic.product-spec.md).
+- General parse, compare, and strategy MCP tools remain proposed in
+  [design/agentic.md](../../design/agentic.md). The bounded local document profile ships
+  separately through the [MCP guide](mcp_server/README.md).
 - `triage`, a verb that would apply the playbook above for you, does not exist. `uv run
   openreading --help` lists no such verb. The gap is recorded in `AGENTS.md` (Also here when
   built) and designed alongside the tool surface in
