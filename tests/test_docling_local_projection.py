@@ -198,3 +198,45 @@ def test_ordinary_text_does_not_switch_to_original_representation():
     entry["orig"] = "unrelated original representation"
     response, _ = project([entry])
     assert response.document.pages[0].text == "alpha beta"
+
+
+def test_real_docling_merge_gaps_keep_every_proven_span_and_its_geometry():
+    from copy import deepcopy
+    from types import SimpleNamespace
+
+    from docling.models.stages.reading_order.readingorder_model import ReadingOrderModel
+    from docling_core.types.doc import BoundingBox, DocItemLabel, DoclingDocument, ProvenanceItem
+
+    document = DoclingDocument(name="synthetic")
+    first_box = BoundingBox(l=10, t=180, r=40, b=170)
+    second_box = BoundingBox(l=50, t=40, r=80, b=50, coord_origin="TOPLEFT")
+    entry = document.add_text(
+        label=DocItemLabel.TEXT,
+        text="alpha",
+        prov=ProvenanceItem(page_no=2, charspan=(0, 5), bbox=first_box),
+    )
+    original_element = SimpleNamespace(label=DocItemLabel.TEXT)
+    continuation = SimpleNamespace(
+        label=DocItemLabel.TEXT,
+        text="beta",
+        page_no=2,
+        cluster=SimpleNamespace(bbox=second_box),
+        hyperlink=None,
+    )
+    ReadingOrderModel._merge_elements(None, original_element, continuation, entry, 200)
+    payload = entry.model_dump(mode="json")
+    before = deepcopy(payload)
+    assert payload["text"] == "alpha beta"
+    assert [p["charspan"] for p in payload["prov"]] == [[0, 5], [6, 10]]
+    response, origins = project([payload], {"2": "ocr"})
+    blocks = response.document.pages[1].blocks
+    assert [b.text for b in blocks] == ["alpha", "beta"]
+    assert [b.id for b in blocks] == ["d0-p2-s0", "d0-p2-s6"]
+    assert [b.bbox.bbox_native.coords for b in blocks] == [
+        [10, 180, 40, 170],
+        [50, 160, 80, 150],
+    ]
+    assert response.document.pages[1].text == "alpha\nbeta"
+    assert origins[2] == "ocr"
+    assert any(w.code == "ambiguous_page_provenance" for w in response.warnings)
+    assert payload == before
