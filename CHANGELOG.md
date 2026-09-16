@@ -14,6 +14,12 @@
 
 ## Unreleased retained evidence v0.3
 
+- Sweep abandoned exports on the next export under the same grant, without removing active writes.
+  Completed JSON exports and legacy temporary names remain until explicitly removed.
+
+- Distinguish preserved Docling text fragments from omitted text in provenance warnings.
+  Existing artifacts keep their recorded warnings until reimported.
+
 - Preserve Docling numbered-list text using its provider original and unchanged page spans.
   Reimport existing documents to recover list items omitted by older artifacts.
 

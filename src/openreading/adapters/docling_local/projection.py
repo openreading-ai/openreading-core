@@ -2,7 +2,8 @@
 
 Every provenance range must fit the item's text and name a known physical page.
 Overlapping ranges are ambiguous and omit the item with a warning. Geometry remains
-optional. Page origin summarizes the measured native/OCR cells conservatively.
+optional. Single-space gaps between same-page spans disclose fragmentation, not lost text.
+Other uncovered characters retain the omission warning. Page origin summarizes the measured native/OCR cells conservatively.
 Docling list markers shorten text without updating spans, which still address orig.
 List projection uses that provider original, including its marker, without rewriting offsets.
 Furniture text, such as a running header, stays out of page evidence with a warning,
@@ -95,7 +96,19 @@ def project_document(
             or spans[-1][1] != len(text)
             or any(a[1] < b[0] for a, b in zip(spans, spans[1:], strict=False))
         ):
-            warning_codes.add("ambiguous_page_provenance")
+            # Docling inserts spaces between merged elements without assigning source boxes.
+            # Preserve every proven span and distinguish those separators from omitted content.
+            separators_only = (
+                spans[0][0] == 0
+                and spans[-1][1] == len(text)
+                and len({span[2] for span in spans}) == 1
+                and all(
+                    text[a[1] : b[0]] in {"", " "} for a, b in zip(spans, spans[1:], strict=False)
+                )
+            )
+            warning_codes.add(
+                "text_provenance_fragmented" if separators_only else "ambiguous_page_provenance"
+            )
         for start, end, page, prov in spans:
             label = item.get("label", "text")
             kind = BlockType.TITLE if label in {"title", "section_header"} else BlockType.TEXT
@@ -149,6 +162,7 @@ def project_document(
     messages = {
         "table_text_unavailable": "A table region has no independently available text; table structure is disabled.",
         "ambiguous_page_provenance": "Text without unambiguous physical-page spans was omitted from page evidence.",
+        "text_provenance_fragmented": "Provider separator spaces have no source boxes; proven text spans remain as separate blocks.",
         "unreadable_pages": "Some physical pages have no page-addressable text; check the source and OCR setting.",
         "furniture_text_omitted": "Page headers, footers, and other furniture text are excluded from page evidence.",
     }

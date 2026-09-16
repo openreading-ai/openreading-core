@@ -9,14 +9,20 @@ Exports use a trusted operator directory, the input grant, and the content diges
 Model arguments never choose a destination, filename, callback, or executable.
 Publication links a completed private temporary file without replacing an existing entry.
 Existing entries must match the expected bytes and refuse symlinks or special files.
-Exports remain until explicitly removed. Removing an artifact does not remove its exports.
+Completed exports remain until explicitly removed. Removing an artifact retains its exports.
+The next export sweeps abandoned .openreading-export-<uuid>.tmp files under the same grant.
+A short directory lock coordinates creation and sweeping; each writer locks its temporary file.
+Sweeping skips locked files, so an active write never expires or blocks another publisher.
+Legacy temporary names lack this lock protocol and require manual removal after writers exit.
 """
 
 from __future__ import annotations
 
 import errno
+import fcntl
 import hashlib
 import os
+import re
 import stat
 import uuid
 from collections import Counter
@@ -112,22 +118,59 @@ def warning_summary(response: dict) -> WarningSummary:
     )
 
 
+def _sweep_exports(fd: int) -> None:
+    with os.scandir(fd) as entries:
+        for entry in entries:
+            if not re.fullmatch(r"\.openreading-export-[0-9a-f]{32}\.tmp", entry.name):
+                continue
+            if not entry.is_file(follow_symlinks=False):
+                continue
+            try:
+                opened = os.open(entry.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+                with os.fdopen(opened, "rb") as stream:
+                    metadata = os.fstat(stream.fileno())
+                    if not stat.S_ISREG(metadata.st_mode):
+                        continue
+                    try:
+                        fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError:
+                        continue
+                    current = os.stat(entry.name, dir_fd=fd, follow_symlinks=False)
+                    if (current.st_dev, current.st_ino) == (metadata.st_dev, metadata.st_ino):
+                        os.unlink(entry.name, dir_fd=fd)
+            except FileNotFoundError:
+                continue
+            except OSError as error:
+                if error.errno != errno.ELOOP:
+                    raise
+
+
 def save_export(root: Path, grant: str, data: bytes) -> Path:
     digest = hashlib.sha256(data).hexdigest()
     target = root / grant
     name = digest + ".json"
-    temporary = "." + uuid.uuid4().hex + ".tmp"
+    temporary = ".openreading-export-" + uuid.uuid4().hex + ".tmp"
     with directory(target, create=True) as fd:
         try:
-            with os.fdopen(
-                os.open(
+            # Creation and acquiring the writer lock must be atomic relative to sweeping.
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            try:
+                _sweep_exports(fd)
+                opened = os.open(
                     temporary,
                     os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                     0o600,
                     dir_fd=fd,
-                ),
-                "wb",
-            ) as stream:
+                )
+                try:
+                    fcntl.flock(opened, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BaseException:
+                    os.close(opened)
+                    os.unlink(temporary, dir_fd=fd)
+                    raise
+            finally:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            with os.fdopen(opened, "wb") as stream:
                 try:
                     stream.write(data)
                     stream.flush()

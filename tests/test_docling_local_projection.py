@@ -238,5 +238,40 @@ def test_real_docling_merge_gaps_keep_every_proven_span_and_its_geometry():
     ]
     assert response.document.pages[1].text == "alpha\nbeta"
     assert origins[2] == "ocr"
-    assert any(w.code == "ambiguous_page_provenance" for w in response.warnings)
+    assert any(w.code == "text_provenance_fragmented" for w in response.warnings)
+    assert not any(w.code == "ambiguous_page_provenance" for w in response.warnings)
     assert payload == before
+
+
+@pytest.mark.parametrize(
+    ("text", "prov"),
+    [
+        ("alphaXbeta", [{"page_no": 1, "charspan": [0, 5]}, {"page_no": 1, "charspan": [6, 10]}]),
+        ("alpha  beta", [{"page_no": 1, "charspan": [0, 5]}, {"page_no": 1, "charspan": [7, 11]}]),
+        ("alpha beta", [{"page_no": 1, "charspan": [0, 5]}, {"page_no": 2, "charspan": [6, 10]}]),
+        (" alpha", [{"page_no": 1, "charspan": [1, 6]}]),
+        ("alpha ", [{"page_no": 1, "charspan": [0, 5]}]),
+    ],
+)
+def test_unattributed_characters_still_report_omission(text, prov):
+    response, _ = project([item(text, prov)])
+    assert any(w.code == "ambiguous_page_provenance" for w in response.warnings)
+    assert not any(w.code == "text_provenance_fragmented" for w in response.warnings)
+    assert [b.text for p in response.document.pages for b in p.blocks] == [
+        text[p["charspan"][0] : p["charspan"][1]] for p in prov
+    ]
+
+
+def test_fragmentation_does_not_hide_omission_in_another_item():
+    response, _ = project(
+        [
+            item(
+                "alpha beta",
+                [{"page_no": 1, "charspan": [0, 5]}, {"page_no": 1, "charspan": [6, 10]}],
+            ),
+            item("bad", [{"page_no": 1, "charspan": [0, 4]}]),
+        ]
+    )
+    codes = {w.code for w in response.warnings}
+    assert {"text_provenance_fragmented", "ambiguous_page_provenance"} <= codes
+    assert response.document.pages[0].text == "alpha\nbeta"

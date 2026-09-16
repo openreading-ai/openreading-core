@@ -199,6 +199,7 @@ readers the field paths, optional-value rules, and distinctions between outer re
     a JSON object, so the response is PARTIAL), ``typed_fields_unverified``,
     ``output_truncated``, ``interaction_incomplete`` (the vendor stopped before finishing),
     ``partial_conversion`` (the converter or service returned some pages as failed), ``bbox_space_approximate``, ``ambiguous_page_provenance`` (unattributable text omitted),
+    ``text_provenance_fragmented`` (same-page text spans preserved separately without provider separator spaces),
     ``unreadable_pages`` (no page-addressable text), ``table_text_unavailable``
     (table text absent while structured table extraction is disabled), and
     ``furniture_text_omitted`` (running headers and footers excluded from page evidence).
