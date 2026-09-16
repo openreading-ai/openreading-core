@@ -643,4 +643,5 @@ Retained evidence v0.3 distinguishes text-less pages (`none`) from unmeasured te
 Passages cannot use `none`; existing v0.1 and v0.2 files remain byte-identical historical contracts.
 
 The `import-job.v0.1.json` contract defines persistent local import progress and closed start, status, list, and cancel requests.
+| `import-job.v0.2.json` | `openreading.types.import_job` | Persistent status with optional observed page-assembly counts; v0.1 job listings remain compatible. |
 Its models live in `openreading.types.import_job`; successful jobs carry the existing artifact receipt.

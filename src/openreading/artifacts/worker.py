@@ -5,7 +5,10 @@ The parent selects PyMuPDF or the explicit local Docling profile. No job names a
 Docling checks PDFium page limits before conversion and preserves the warm converter.
 Missing physical pages reject the entire conversion rather than retaining incomplete evidence.
 A partial result is retained only when its page count still matches the source preflight.
-Its private control pipe carries bounded stage and completion records, never extracted text.
+Its private control pipe carries bounded stage, observed page and completion records, never extracted text.
+Distinct successful page assembly is counted against PDFium preflight, without inferring successful OCR.
+Updates coalesce at one-second intervals, with initial and final counts flushed explicitly.
+Document-wide assembly and publication can still fail after all pages have been assembled.
 Parser stdout is discarded by the parent; MCP stdout remains protocol-only.
 """
 
@@ -14,11 +17,13 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 from openreading.artifacts.limits import ArtifactError
 from openreading.artifacts.models import PageOrigin, json_bytes
 from openreading.artifacts.passages import iter_passages
+from openreading.types.import_job import PageProgress
 from openreading.types.response import NormalizedResponse
 
 SETTINGS = {
@@ -36,7 +41,7 @@ SETTINGS = {
 __all__ = ["SETTINGS", "main"]
 
 
-def extract(job: dict, *, client=None, progress=None) -> dict:
+def extract(job: dict, *, client=None, progress=None, page_progress=None) -> dict:
     from openreading import run
 
     if job.get("docling") is not None:
@@ -69,7 +74,31 @@ def extract(job: dict, *, client=None, progress=None) -> dict:
             raise ArtifactError("engine_identity_unavailable")
         if client is None:
             client = LocalDoclingClient(configuration)
-        raw = client.convert_path(root / "source.pdf")
+        if page_progress is None:
+            raw = client.convert_path(root / "source.pdf")
+        else:
+            assembled = set()
+            last_count, last_time = -1, 0.0
+
+            def publish(force=False):
+                nonlocal last_count, last_time
+                now = time.monotonic()
+                count = len(assembled)
+                if count != last_count and (force or now - last_time >= 1):
+                    page_progress(PageProgress(pages_assembled=count, total_pages=page_count))
+                    last_count, last_time = count, now
+
+            def completed(page):
+                if type(page) is not int or not 1 <= page <= page_count:
+                    raise ValueError("Page observation is outside the physical source.")
+                assembled.add(page)
+                publish(force=len(assembled) == page_count)
+
+            publish(force=True)
+            try:
+                raw = client.convert_path(root / "source.pdf", page_completed=completed)
+            finally:
+                publish(force=True)
         response, page_origins = project_document(raw, Outputs(**SETTINGS["outputs"]))
         origins = {str(page): origin for page, origin in page_origins.items()}
     else:
@@ -144,7 +173,12 @@ def serve_worker(control_fd: int) -> int:
                 client = LocalDoclingClient(LocalDoclingConfig.from_wire(configuration))
             elif configuration != job["docling"]:
                 raise ArtifactError("parse_failed")
-            origins = extract(job, client=client, progress=lambda stage: send({"stage": stage}))
+            origins = extract(
+                job,
+                client=client,
+                progress=lambda stage: send({"stage": stage}),
+                page_progress=lambda pages: send(pages.model_dump()),
+            )
             result = Path(job["directory"]) / "result.json"
             result.write_bytes(json_bytes({"ok": True, "page_origins": origins}))
             os.chmod(result, 0o600)

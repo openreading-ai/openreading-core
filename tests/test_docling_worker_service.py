@@ -24,7 +24,7 @@ def extraction(monkeypatch):
     monkeypatch.setattr(
         LocalDoclingClient,
         "convert_path",
-        lambda self, data: {
+        lambda self, data, **kwargs: {
             "pages": {"1": {"size": {"width": 100, "height": 100}}},
             "items": [
                 {

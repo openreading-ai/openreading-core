@@ -13,6 +13,8 @@ Serialized requests select disabled, selective, or full-page OCR inside one init
 The Tesseract stage initializes on first use and retains separate options from the converter cache key.
 Changing OCR mode therefore keeps the CPU layout session and restores the requested behavior each time.
 All native imports occur inside create_converter when conversion starts.
+An optional observer sees successful page assembly after upstream resource release.
+Document-wide reading order still follows assembly, so this observation never means import completion.
 """
 
 from __future__ import annotations
@@ -150,6 +152,13 @@ def create_converter(config: LocalDoclingConfig):
             return super().sanitize_text([text])
 
     class LocalPdfPipeline(StandardPdfPipeline):
+        _page_completed = None
+
+        def _release_page_resources(self, item):
+            super()._release_page_resources(item)
+            if not item.is_failed and item.payload is not None and self._page_completed is not None:
+                self._page_completed(item.page_no)
+
         def select_ocr(self, mode):
             if mode == "off":
                 self.ocr_model = DisabledStage()
@@ -199,6 +208,13 @@ def create_converter(config: LocalDoclingConfig):
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
             self._ocr_mode = "auto" if config.ocr else "off"
+            self._page_completed = None
+
+        def set_page_completed(self, callback):
+            self._page_completed = callback
+            for active in self.initialized_pipelines.values():
+                assert isinstance(active, LocalPdfPipeline)
+                active._page_completed = callback
 
         def set_ocr_mode(self, mode):
             if mode not in {"auto", "force", "off"}:
@@ -210,6 +226,7 @@ def create_converter(config: LocalDoclingConfig):
             if active is not None:
                 assert isinstance(active, LocalPdfPipeline)
                 active.select_ocr(self._ocr_mode)
+                active._page_completed = self._page_completed
             return active
 
     options = PdfPipelineOptions(

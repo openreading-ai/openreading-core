@@ -14,6 +14,9 @@
 
 ## Unreleased retained evidence v0.3
 
+- Add observed Docling page-assembly counts to background import status, without changing normalized output.
+  Older jobs remain readable without invented counters. Assembly completion does not imply import success.
+
 - Add document-tool v0.3 receipts with measured page-origin counts and bounded empty-text page previews.
   Label warning counts as warning records without changing the exported normalized content.
 - Report denied parser cleanup as an operating-system permission error, preserving descriptor cleanup.

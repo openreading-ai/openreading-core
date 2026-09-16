@@ -131,3 +131,8 @@ Client packaging and installation checks belong in the separate `openreading-age
 The local proof does not expose general parse, compare, strategy, triage, or remote document tools.
 The remaining agent surface is proposed in [the agent design](../../../design/agentic.md).
 Passing stdio tests does not establish desktop installation compatibility or measured model token savings.
+
+Background status exposes `page_progress` when Docling reports successful physical-page assembly.
+For example, `pages_assembled: 12` with `total_pages: 251` describes observed assembly, not an estimated percentage.
+Document-wide processing and publication can still be pending after all pages finish assembly.
+Absent progress means no observation; cached imports do not invent new processing.

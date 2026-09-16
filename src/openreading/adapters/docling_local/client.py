@@ -18,6 +18,8 @@ Off requests verify model files, while automatic and forced OCR also verify Tess
 Previously verified OCR hashes remain cached so later OCR requests detect changed language data.
 Omitting a request override restores the client's configured OCR default for that conversion.
 The supervised artifact worker owns its separate LocalDoclingClient and process lifecycle.
+Its optional observer receives assembled page numbers without changing parser inputs or output.
+Observer failures are raised on the conversion caller, never inside a pipeline stage thread.
 Session eviction does not promise a process-memory ceiling. Repeated asset or configuration changes
 can leave native allocations resident even after the previous session has been destroyed.
 """
@@ -68,11 +70,13 @@ class LocalDoclingClient:
 
         return self._convert(DocumentStream(name="source.pdf", stream=io.BytesIO(data)), ocr_mode)
 
-    def convert_path(self, path: Path, *, ocr_mode: OcrMode | None = None) -> dict:
+    def convert_path(
+        self, path: Path, *, ocr_mode: OcrMode | None = None, page_completed=None
+    ) -> dict:
         """Convert a private local input without duplicating its bytes in Python memory."""
-        return self._convert(path, ocr_mode)
+        return self._convert(path, ocr_mode, page_completed)
 
-    def _convert(self, source, ocr_mode: OcrMode | None) -> dict:
+    def _convert(self, source, ocr_mode: OcrMode | None, page_completed=None) -> dict:
         from docling_core.types.doc.common.content_layer import ContentLayer
 
         from openreading.adapters.docling_local.pipeline import create_converter
@@ -84,7 +88,26 @@ class LocalDoclingClient:
         if ocr_mode != self._ocr_mode:
             self._converter.set_ocr_mode(ocr_mode or ("auto" if self.config.ocr else "off"))
             self._ocr_mode = ocr_mode
-        result = self._converter.convert(source)
+        observer_errors = []
+
+        def observed(page):
+            if not observer_errors:
+                try:
+                    assert page_completed is not None
+                    page_completed(page)
+                except Exception as error:
+                    # An exception escaping the threaded stage can strand its output queue.
+                    observer_errors.append(error)
+
+        if page_completed is not None:
+            self._converter.set_page_completed(observed)
+        try:
+            result = self._converter.convert(source)
+        finally:
+            if page_completed is not None:
+                self._converter.set_page_completed(None)
+        if observer_errors:
+            raise ValueError("Local page-progress observation failed.") from None
         if result.status.value not in {"success", "partial_success"}:
             raise ValueError("Local conversion failed.")
         origins = {}

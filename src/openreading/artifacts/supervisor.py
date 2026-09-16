@@ -10,6 +10,8 @@ Cleanup discards that pipe error so parser failure or cancellation remains the r
 If macOS refuses a group signal after leader exit, cleanup reaps that leader and retries once.
 Permission failures for a leader still running remain errors rather than claiming successful cleanup.
 Denied process cleanup reports os_permission_denied; it never becomes a storage-capacity error.
+Page observations are accepted only during conversion, with a fixed source count and increasing completed counts.
+Malformed counters terminate the generation, including when no caller requests progress updates.
 RSS is a sampled process-tree sum, not a hard operating-system memory reservation.
 The worker starts in a caller-selected private directory. ONNX Runtime 1.30 writes a
 telemetry session file into its working directory, and a client may launch the server anywhere.
@@ -29,6 +31,7 @@ from contextlib import suppress
 
 from openreading.artifacts.limits import INPUT_REJECTIONS, MESSAGES, ArtifactError
 from openreading.artifacts.models import ToolError, json_bytes
+from openreading.types.import_job import PageProgress
 
 STAGES = ("preflight", "conversion", "writing")
 
@@ -149,7 +152,12 @@ class WarmWorker:
                 self._stop()
 
     def run(
-        self, job: dict, *, check: Callable[[], None], progress: Callable[[str], None] | None = None
+        self,
+        job: dict,
+        *,
+        check: Callable[[], None],
+        progress: Callable[[str], None] | None = None,
+        page_progress: Callable[[PageProgress], None] | None = None,
     ):
         if not self._lock.acquire(blocking=False):
             raise ArtifactError("busy")
@@ -169,6 +177,7 @@ class WarmWorker:
             self._process.stdin.flush()
             pending = b""
             last_stage = -1
+            last_pages = None
             while True:
                 check()
                 if self.memory_bytes is not None:
@@ -203,6 +212,21 @@ class WarmWorker:
                         last_stage = stage
                         if progress is not None:
                             progress(result["stage"])
+                    elif set(result) == {"id", "pages_assembled", "total_pages"}:
+                        pages = PageProgress.model_validate(
+                            {k: v for k, v in result.items() if k != "id"}
+                        )
+                        if last_stage != STAGES.index("conversion") or (
+                            last_pages is not None
+                            and (
+                                pages.total_pages != last_pages.total_pages
+                                or pages.pages_assembled <= last_pages.pages_assembled
+                            )
+                        ):
+                            raise ArtifactError("parse_failed")
+                        last_pages = pages
+                        if page_progress is not None:
+                            page_progress(pages)
                     elif set(result) == {"id", "error"} and result["error"] in MESSAGES:
                         code = ToolError(code=result["error"], message="", retryable=False).code
                         if code in INPUT_REJECTIONS and not pending:

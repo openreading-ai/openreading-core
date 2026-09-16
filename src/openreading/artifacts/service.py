@@ -271,7 +271,12 @@ class ArtifactService:
         return self.store.load(identifier)[0]
 
     def import_document(
-        self, path: str, *, cancelled: threading.Event | None = None, progress=None
+        self,
+        path: str,
+        *,
+        cancelled: threading.Event | None = None,
+        progress=None,
+        page_progress=None,
     ) -> ImportReceipt:
         started = time.monotonic()
         self._check_time(started, cancelled)
@@ -315,6 +320,7 @@ class ArtifactService:
                         },
                         check=lambda: self._check_time(started, cancelled),
                         progress=progress,
+                        **({"page_progress": page_progress} if page_progress is not None else {}),
                     )
                 else:
                     self._worker(staging, started, cancelled)

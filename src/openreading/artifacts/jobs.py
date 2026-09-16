@@ -18,6 +18,8 @@ Pages follow job-ID order, not creation order. Concurrent new jobs can sort befo
 restart listing to discover them. Each reply contains at most fifty summaries without source paths.
 Uninstalling a client has no cancellation hook here. Cancel jobs before uninstalling and
 wait for terminal states. Reconnecting with the same roots permits discovery and cancellation.
+Optional page progress preserves observed assembly counts across status reads and reconnects.
+Legacy v0.1 status is read as v0.2 without a page observation; reads never rewrite terminal records.
 
 Frozen clients dispatch --internal-artifact-job to main, after verifying their runtime.
 The job owns a serialized profile, so removing a launcher's temporary profile is safe.
@@ -48,7 +50,15 @@ from openreading.artifacts.limits import ArtifactError, DoclingLimits, ProfileCo
 from openreading.artifacts.models import EngineIdentity, json_bytes
 from openreading.artifacts.service import ArtifactService
 from openreading.artifacts.store import safe_read
-from openreading.types.import_job import ImportJob, ImportJobList, ImportJobSummary
+from openreading.types.import_job import ImportJob, ImportJobList, ImportJobSummary, PageProgress
+
+
+def _status(path: Path) -> ImportJob:
+    value = _read(path)
+    if value.get("schema_version") == "0.1" and "page_progress" not in value:
+        value = {**value, "schema_version": "0.2"}
+    return ImportJob.model_validate(value)
+
 
 TERMINAL = {"succeeded", "failed", "cancelled"}
 
@@ -163,7 +173,7 @@ class ImportJobs:
         until = time.monotonic() + wait_seconds
         try:
             while True:
-                value = ImportJob.model_validate(_read(root / "status.json"))
+                value = _status(root / "status.json")
                 if value.job_id != job_id:
                     raise ValueError("Job identity mismatch")
                 if value.state in TERMINAL:
@@ -182,7 +192,7 @@ class ImportJobs:
                     alive = False
                 if not alive:
                     # Read again after observing exit; the child may have published while polled.
-                    final = ImportJob.model_validate(_read(root / "status.json"))
+                    final = _status(root / "status.json")
                     if final.state in TERMINAL:
                         return final
                     value.state, value.stage = "failed", "stopped"
@@ -257,7 +267,7 @@ def run(root: Path) -> int:
         LocalDoclingConfig.from_wire(request["docling"]) if request["docling"] else None,
     )
     service = ArtifactService(config)
-    value = ImportJob.model_validate(_read(root / "status.json"))
+    value = _status(root / "status.json")
 
     class Cancellation(threading.Event):
         def is_set(self):
@@ -278,6 +288,10 @@ def run(root: Path) -> int:
         value.elapsed_seconds = max(0.0, time.time() - request["started"])
         _write(root / "status.json", value.wire())
 
+    def page_progress(pages: PageProgress):
+        value.page_progress = pages
+        stage("conversion")
+
     try:
         if service.store.grant != request[
             "grant"
@@ -288,7 +302,10 @@ def run(root: Path) -> int:
                 raise ArtifactError("cancelled")
             try:
                 receipt = service.import_document(
-                    request["path"], cancelled=cancelled, progress=stage
+                    request["path"],
+                    cancelled=cancelled,
+                    progress=stage,
+                    page_progress=page_progress,
                 )
                 break
             except ArtifactError as error:
