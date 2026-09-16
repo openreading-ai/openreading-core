@@ -73,6 +73,10 @@ Job order follows identifiers rather than creation time; restart listing to disc
 
 For an embedded chooser, pass `selection_provider=picker` to `openreading.mcp_server.main.main(argv)`.
 The provider follows the transactional context-manager contract in `openreading.mcp_server.selection`.
+A batch provider yields copied references and skipped-entry counts; the selection tool returns paginated receipts.
+For example, call the same tool with its `next_cursor` to continue without reopening a chooser.
+Import each item separately and retain its job and artifact identifiers for cross-document questions.
+A folder snapshot never grants live access; later files require another explicit selection.
 Shield asynchronous cleanup, including failed acquisition, so cancellation cannot interrupt child reaping or rollback.
 For example, use `anyio.CancelScope(shield=True)` around cleanup awaits before propagating cancellation.
 Keep blocking work off the event loop and remove only copies created by that selection.

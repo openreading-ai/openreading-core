@@ -1,5 +1,9 @@
 """Coordinate a trusted local chooser without granting model-selected paths.
 
+A batch provider yields SelectionBatch with copied references and aggregate skipped-entry counts.
+Receipt continuations pass only a cursor and never reopen the chooser. Each copied PDF uses
+the existing import tool and its own job and artifact. Legacy providers may still yield one string.
+
 A launcher explicitly passes a SelectionProvider to create_server or serve. No discovery,
 GUI dependency, environment variable, or executable lookup installs one in headless core.
 The provider's async context manager yields a relative copied-file reference, or None
@@ -31,21 +35,30 @@ protocol cancellation cannot stop selection. Local Cancel and any configured dea
 
 from __future__ import annotations
 
+import asyncio
 import math
 import os
-from contextlib import AbstractAsyncContextManager
+import threading
+from contextlib import AbstractAsyncContextManager, suppress
 from pathlib import PurePosixPath
 from typing import Protocol
 
 import anyio
 from anyio.lowlevel import checkpoint
+from anyio.to_thread import run_sync
 
 from openreading.artifacts.service import ArtifactService
-from openreading.types.selection import SelectionFailure, SelectionReceipt
+from openreading.mcp_server.selection_pages import SelectionPages
+from openreading.types.selection import (
+    SelectionBatch,
+    SelectionFailure,
+    SelectionPage,
+    SelectionReceipt,
+)
 
 
 class SelectionProvider(Protocol):
-    def select(self) -> AbstractAsyncContextManager[str | None]:
+    def select(self) -> AbstractAsyncContextManager[str | SelectionBatch | dict | None]:
         """Yield an owned copy; shield async rollback, including failed acquisition.
 
         Blocking work belongs off the event loop. Cancellation must propagate after
@@ -66,6 +79,28 @@ def validate_selection_timeout(timeout_seconds: float | None) -> None:
         raise ValueError("Selection timeout must be positive and at most 180 seconds.")
 
 
+async def _publish(pages: SelectionPages, batch: SelectionBatch) -> SelectionPage:
+    cancelled = threading.Event()
+
+    def work():
+        try:
+            return pages.publish(batch, cancelled=cancelled.is_set)
+        except Exception as error:
+            return error
+
+    future = asyncio.get_running_loop().run_in_executor(None, work)
+    try:
+        result = await asyncio.shield(future)
+    except anyio.get_cancelled_exc_class():
+        cancelled.set()
+        with anyio.CancelScope(shield=True):
+            await asyncio.shield(future)
+        raise
+    if isinstance(result, Exception):
+        raise result
+    return result
+
+
 class SelectionCoordinator:
     def __init__(
         self,
@@ -79,19 +114,36 @@ class SelectionCoordinator:
         self.timeout_seconds = timeout_seconds
         self.pending = False
 
-    async def select(self) -> SelectionReceipt | SelectionFailure:
+    async def select(
+        self, cursor: str | None = None
+    ) -> SelectionReceipt | SelectionPage | SelectionFailure:
         await checkpoint()
+        if cursor is not None:
+            try:
+                return await run_sync(SelectionPages(self.service).read, cursor)
+            except Exception:
+                return SelectionFailure.from_code("selection_failed")
         if self.provider is None:
             return SelectionFailure.from_code("selection_unavailable")
         if self.pending:
             return SelectionFailure.from_code("busy")
         # There is no await between admission and ownership, so another call cannot enter.
         self.pending = True
+        pages = None
+        accepted = False
         try:
             with anyio.fail_after(self.timeout_seconds):
                 async with self.provider.select() as reference:
                     if reference is None:
                         return SelectionFailure.from_code("selection_cancelled")
+                    if isinstance(reference, dict):
+                        reference = SelectionBatch(**reference)
+                    if isinstance(reference, SelectionBatch):
+                        pages = SelectionPages(self.service)
+                        receipt_page = await _publish(pages, reference)
+                        await checkpoint()
+                        accepted = True
+                        return receipt_page
                     if not isinstance(reference, str):
                         raise ValueError("Invalid provider reference.")
                     with self.service.store.source(reference) as opened:
@@ -110,8 +162,17 @@ class SelectionCoordinator:
                     await checkpoint()
                     return receipt
         except TimeoutError:
+            accepted = False
             return SelectionFailure.from_code("selection_timeout")
         except Exception:
+            accepted = False
             return SelectionFailure.from_code("selection_failed")
+        except BaseException:
+            accepted = False
+            raise
         finally:
+            # Provider rollback owns copies; the coordinator owns only receipt pages.
+            if pages is not None and not accepted:
+                with anyio.CancelScope(shield=True), suppress(Exception):
+                    await run_sync(pages.rollback)
             self.pending = False

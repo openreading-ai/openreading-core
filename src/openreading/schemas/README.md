@@ -592,7 +592,8 @@ entry naming it, so the warning reaches you before the removal does.
 | --- | --- | --- |
 | `local-document.v0.3.json` | `openreading.artifacts.models` | Source hash, engine identity, and retained file inventory. |
 | `passage.v0.3.json` | `openreading.artifacts.passages` | Exact source spans with physical page provenance. |
-| `selection-tool.v0.1.json` | `openreading.mcp_server.selection` | Copied-file receipts, empty selection input, and sanitized refusals. |
+| `selection-tool.v0.1.json` | Historical selection | Frozen single-file receipts and empty selection input. |
+| `selection-tool.v0.2.json` | `openreading.mcp_server.selection` | Legacy receipts plus paginated snapshots, skipped-entry counts and cursor continuation. |
 | `document-tool.v0.1.json` | `openreading.artifacts.document` | Complete retained normalized results through lossless JSON continuation. |
 | `document-tool.v0.2.json` | `openreading.artifacts.delivery` | Complete MCP delivery or private file export, retaining the v0.1 fragment interface. |
 | `document-tool.v0.3.json` | `openreading.artifacts.delivery` | Complete delivery with measured page origins, empty-text page previews, and explicit warning-record counts. |

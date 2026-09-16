@@ -166,7 +166,9 @@ async def test_catalog_shape_matches_availability_and_selection_is_not_readonly(
         tool = tools["openreading_select_document"]
         assert tool.inputSchema == {
             "type": "object",
-            "properties": {},
+            "properties": {
+                "cursor": {"type": ["string", "null"], "maxLength": 512, "default": None}
+            },
             "additionalProperties": False,
         }
         assert not tool.annotations.readOnlyHint

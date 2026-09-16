@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased selection snapshots
+
+- Accept trusted multi-file snapshot providers with paginated, grant-scoped selection receipts.
+  Receipt continuations survive restart and never reopen a chooser. Legacy single-file providers remain supported.
+  Each copied reference uses its own existing import job and artifact; no document relationships are inferred.
+
 ## Unreleased LiteParse and LlamaParse adapters
 
 - Add persistent local MCP import jobs with status and explicit cancellation. Docling profiles can omit document and resource ceilings; source hashing and file handoff avoid full-PDF Python buffers.
