@@ -9,6 +9,7 @@ after its hyphen, such as "third- party", still matches party. Ranking prefers
 more distinct terms, then physical page and source position. Excerpts retain original
 code-point offsets even when case folding expands a character, such as German sharp S.
 Cursors bind the request and next offset. They convey no authority or filesystem path.
+Search and read retain document-level warning flags; they do not assign faults to passages.
 """
 
 from __future__ import annotations
@@ -182,7 +183,7 @@ def search(
             query=query,
             hits=values,
             next_cursor=continuation,
-            warnings=[] if hits else ["no_matches"],
+            warnings=[*manifest.warnings, *([] if hits else ["no_matches"])],
         ),
     )
 
@@ -215,5 +216,6 @@ def read(
             display_name=manifest.display_name,
             passages=values,
             next_cursor=continuation,
+            warnings=manifest.warnings,
         ),
     )

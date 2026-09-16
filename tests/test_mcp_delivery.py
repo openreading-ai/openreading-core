@@ -65,6 +65,7 @@ async def test_complete_auto_preserves_schema_ocr_warnings_and_exact_read(tmp_pa
                 },
             )
             assert json.loads(read.content[0].text)["passages"][0]["text"] == passages[0].text
+            assert json.loads(read.content[0].text)["warnings"] == ["parser_warnings_present"]
             assert result.structuredContent is None
     finally:
         service.close()

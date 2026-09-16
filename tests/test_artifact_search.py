@@ -208,3 +208,17 @@ def test_line_broken_compound_keeps_its_component_words(manifest, query):
     hits = search(manifest, records([text]), query, 5, None, 8192).hits
     assert len(hits) == 1
     assert hits[0].excerpt == text[hits[0].excerpt_start : hits[0].excerpt_end]
+
+
+def test_document_warnings_survive_search_read_and_empty_search(manifest):
+    manifest.warnings = ["source_changed", "parser_warnings_present"]
+    passages = records(["alpha", "alpha beta", "other"])
+    first = search(manifest, passages, "alpha", 1, None, 8192)
+    second = search(manifest, passages, "alpha", 1, first.next_cursor, 8192)
+    assert first.warnings == second.warnings == manifest.warnings
+    empty = search(manifest, passages, "absent", 1, None, 8192)
+    assert empty.warnings == [*manifest.warnings, "no_matches"]
+    quoted = read(manifest, passages, [passages[0].evidence_id], None, 16384)
+    assert quoted.warnings == manifest.warnings
+    assert quoted.passages[0].text == "alpha"
+    assert manifest.warnings == ["source_changed", "parser_warnings_present"]

@@ -14,6 +14,8 @@
 
 ## Unreleased retained evidence v0.3
 
+- Preserve document-level warning flags in search and exact-read replies, including empty searches.
+
 - Sweep abandoned exports on the next export under the same grant, without removing active writes.
   Completed JSON exports and legacy temporary names remain until explicitly removed.
 
