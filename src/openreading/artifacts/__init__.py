@@ -4,7 +4,10 @@ Full normalized retrieval is defined in openreading.artifacts.document and exclu
 It preserves stored channels and warnings without reparsing or selecting relevant blocks.
 The profile determines extraction coverage; full retrieval does not recover unavailable channels.
 
-A retained artifact contains exact source bytes, a normalized response, and page passages.
+A retained artifact contains exact source bytes, a normalized response, and citation passages.
+Physical pages remain authoritative only when the provider establishes them.
+Unpaginated blocks use exact JSON locations, such as /document/pages/0/blocks/0/text.
+Their synthetic normalized container does not become a physical page citation.
 The v1 profile selects PyMuPDF; v2 selects local Docling with explicit assets and optional operator limits.
 Both ignore ambient routing configuration and refuse hosted fallback.
 Artifacts are partitioned by the explicitly configured input root. Changing that grant
@@ -33,12 +36,12 @@ Reusing ledger blobs would bypass that grant and integrity boundary during later
 Neither store automatically evicts data from the other store or promises compatible directory layouts.
 
 Limits and failure codes live in openreading.artifacts.limits. Exact wire fields live
-in openreading.artifacts.models and the three vendored v0.3 artifact schemas.
+in openreading.artifacts.models and the vendored v0.4 artifact schemas. Legacy v0.3 artifacts remain readable.
 
 Background imports
 ------------------
 ImportJobs in openreading.artifacts.jobs exposes start(path), get(job_id), and cancel(job_id).
-Each returns an ImportJob with wire() data defined by import-job.v0.1.json.
+Each returns an ImportJob with wire() data defined by import-job.v0.3.json. Older persisted job records remain readable.
 Detached supervisors preserve work after client disconnect and publish existing artifact receipts.
 Frozen launchers dispatch --internal-artifact-job to jobs.main after verifying their inventory.
 The supervisor retains its own profile and closes its parser before a terminal status is written.
@@ -62,7 +65,7 @@ No runtime claims a hard operating-system memory ceiling or sandbox.
 An import racing idle shutdown can receive retryable busy before any conversion starts.
 Docling artifacts imported before integration v4 can contain closed-up compounds such as thirdparty.
 Reimport those documents to preserve wrapped hyphens and make each component word searchable.
-Older artifact formats require reimport; their retained files still consume the storage budget.
+Artifact formats before v0.3 require reimport; their retained files still consume the storage budget.
 Search changes also change import identity, so importing again can repeat extraction and storage.
 Separating extraction identity from retrieval remains unbuilt; loading an existing identifier still works.
 ONNX Runtime 1.30 also tries to persist a telemetry device identifier outside the artifact root.

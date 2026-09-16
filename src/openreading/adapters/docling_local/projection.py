@@ -1,5 +1,6 @@
 """Project Docling item spans into physical pages without guessing cross-page text.
 
+The pinned image backend scales pixels by DPI into PDF points before emitting provenance.
 Every provenance range must fit the item's text and name a known physical page.
 Overlapping ranges are ambiguous and omit the item with a warning. Geometry remains
 optional. Single-space gaps between same-page spans disclose fragmentation, not lost text.
@@ -57,6 +58,12 @@ def project_document(
     payload: dict, outputs: Outputs
 ) -> tuple[NormalizedResponse, dict[int, TextOrigin]]:
     metadata = payload["pages"]
+    if (not metadata or payload.get("unpaginated")) and isinstance(
+        payload.get("document_text"), str
+    ):
+        from openreading.adapters.docling_local.unpaginated import project_unpaginated
+
+        return project_unpaginated(payload, outputs), {}
     numbers = sorted(int(n) for n in metadata)
     if numbers != list(range(1, len(numbers) + 1)):
         raise ValueError("Local PDF page metadata is incomplete.")

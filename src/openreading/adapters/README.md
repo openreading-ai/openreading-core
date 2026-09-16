@@ -112,7 +112,7 @@ and that output disagree, the output is right and the table needs fixing.
 | `aws-textract` | pdf, png, jpg, tiff |
 | `azure-document-intelligence` | pdf, png, jpg, tiff, bmp, docx, xlsx, pptx, html |
 | `chunkr` | pdf, docx, pptx, xlsx, png, jpg, tiff, webp, html |
-| `docling_local` | pdf |
+| `docling_local` | Configured provider formats in `openreading.adapters.docling_local.formats.INPUT_FORMATS` |
 | `docling` | pdf, docx, pptx, xlsx, html, png, jpg |
 | `google-document-ai` | pdf, tiff, gif, png, jpg, bmp, webp |
 | `google-gemini` | pdf |
@@ -178,7 +178,7 @@ machine and has nothing to sign up for.
 | `aws-textract` | hosted_api | proprietary | https://aws.amazon.com/textract/ |
 | `azure-document-intelligence` | hosted_api | proprietary | https://azure.microsoft.com/products/ai-services/ai-document-intelligence |
 | `chunkr` | hosted_api | proprietary (AGPL-3.0 self-host available) | https://chunkr.ai |
-| `docling_local` | oss_library | MIT | Tesseract for OCR |
+| `docling_local` | oss_library | MIT | Tesseract for OCR; LibreOffice when the provider requires legacy conversion |
 | `docling` | oss_library | MIT | none |
 | `google-document-ai` | hosted_api | proprietary | https://cloud.google.com/document-ai |
 | `google-gemini` | hosted_api | proprietary | https://aistudio.google.com/apikey |
@@ -309,7 +309,7 @@ that grading enforces, C1 to C11.
 | `aws-textract` | `D` | `D` | `N` | `N` | `N` | `N` | `N` |
 | `azure-document-intelligence` | `N` | `N` | `N` | `N` | `D` | `N` | `N` |
 | `chunkr` | `D` | `N` | `N` | `N` | `N` | `D` | `N` |
-| `docling_local` | `D` | `N` | `N` | `X` | `X` | `X` | `X` |
+| `docling_local` | `D` | `X` | `N` | `N` | `X` | `N` | `X` |
 | `docling` | `N` | `N` | `N` | `N` | `X` | `N` | `D` |
 | `google-document-ai` | `N` | `D` | `N` | `N` | `N` | `N` | `N` |
 | `google-gemini` | `D` | `N` | `D` | `X` | `X` | `D` | `N` |
@@ -326,6 +326,9 @@ that grading enforces, C1 to C11.
 | `qwen-vl` | `D` | `D` | `D` | `D` | `X` | `D` | `D` |
 | `reducto` | `D` | `N` | `N` | `N` | `D` | `N` | `N` |
 | `tesseract` | `N` | `D` | `N` | `N` | `N` | `X` | `X` |
+
+Local Docling table cells come from model-free provider formats. Its raster table-recognition stage remains disabled.
+Formats requiring external resources refuse those resources under the local profile, and legacy conversion requires its declared system dependency.
 
 Source: `OutputChannels` in `src/openreading/types/descriptor.py`, read through
 `make_adapter(id).descriptor.output.channels`. Live truth: `uv run python -c "from

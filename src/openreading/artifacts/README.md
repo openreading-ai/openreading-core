@@ -21,7 +21,9 @@ Import your document using a relative path such as `agreement.pdf` inside the co
 Search the returned `artifact_id` for `renewal`, then read the matching `evidence_id` values.
 
 A returned passage can identify `p0013-b0002-s0000`, meaning physical page 13 and a deterministic block segment.
-Cite its displayed filename, page, and evidence identifier alongside the exact quote you use.
+Cite the artifact identifier and evidence identifier together, alongside the displayed filename and physical page when supplied.
+Unpaginated evidence instead supplies a `source_pointer`, such as `/document/pages/0/blocks/0/text`, and exact character offsets.
+A synthetic normalized container never establishes a physical page, and duplicate filenames remain distinct artifacts.
 The identifier belongs to that artifact and cannot establish provenance for another extraction.
 
 ## Recipes
@@ -67,7 +69,9 @@ Line-end dehyphenation lets a search for renewal find re- followed by newal on t
 Returned passages and excerpt offsets still refer to the original text, including the hyphen and newline.
 PyMuPDF stores that line break as a space, so `re- newal` in its passages also matches renewal.
 The halves stay searchable too, so a search for party still finds `third- party`.
-Empty pages report origin none; text with unmeasured origin reports unknown.
+Empty physical pages report origin none; text with unmeasured origin reports unknown.
+Unpaginated evidence omits physical-page origins rather than inventing a measurement.
+The configured adapter claims its input formats in the [adapter catalog](../adapters/README.md).
 
 Each profile selects its local engine explicitly, preventing ambient configuration from choosing a hosted backend.
 Source spans preserve Unicode code points without normalization, preventing quotes from drifting away from extracted text.

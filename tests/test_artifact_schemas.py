@@ -22,12 +22,12 @@ from openreading.artifacts.models import (
 @pytest.mark.parametrize(
     "name,model",
     [
-        ("local-document.v0.3.json", ArtifactManifest),
-        ("passage.v0.3.json", Passage),
+        ("local-document.v0.4.json", ArtifactManifest),
+        ("passage.v0.4.json", Passage),
         ("document-tool.v0.1.json", TypeAdapter(DocumentPayload)),
-        ("document-tool.v0.3.json", TypeAdapter(DeliveryPayload)),
+        ("document-tool.v0.4.json", TypeAdapter(DeliveryPayload)),
         (
-            "agent-document-tool.v0.3.json",
+            "agent-document-tool.v0.4.json",
             TypeAdapter(ImportReceipt | SearchResult | ReadResult | ErrorEnvelope),
         ),
     ],

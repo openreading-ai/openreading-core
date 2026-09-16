@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased adapter-format evidence
+
+- Route local inputs through the formats claimed by the configured Docling adapter.
+  Preserve provider-reported model-free blocks and table cells without enabling raster table recognition.
+- Add v0.4 retained evidence and delivery for unpaginated documents, using exact normalized JSON locations.
+  Keep physical-page citations for measured sources and preserve legacy v0.3 artifact reads.
+- Add import-job v0.3 receipts without inventing physical page counts or conversion progress.
+  Source suffixes enter artifact identity because the provider can interpret identical bytes differently.
+
 ## Unreleased selection snapshots
 
 - Accept trusted multi-file snapshot providers with paginated, grant-scoped selection receipts.

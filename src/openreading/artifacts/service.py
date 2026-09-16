@@ -31,6 +31,7 @@ import hashlib
 import importlib.metadata
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -199,6 +200,7 @@ def engine_identity(config: ProfileConfig | None = None) -> EngineIdentity:
                     "languages": list(config.docling.languages),
                     "threads": config.docling.threads,
                     "tables": False,
+                    "native_format_tables": True,
                     "retriever": RETRIEVER_REVISION,
                     "source_tree_sha256": _source_tree_hash(package, "docling_local"),
                 },
@@ -281,6 +283,10 @@ class ArtifactService:
         started = time.monotonic()
         self._check_time(started, cancelled)
         with self.store.source(path) as fd, self.store.import_lock():
+            suffix = Path(path).suffix.lower()
+            if not re.fullmatch(r"\.[a-z0-9]{1,16}", suffix):
+                suffix = ".bin"
+            source_file = "source" + suffix if self.config.docling else "source.pdf"
             staging = Path(tempfile.mkdtemp(dir=self.config.artifact_root / "staging"))
             try:
                 if progress is not None:
@@ -288,13 +294,13 @@ class ArtifactService:
                 available = self._available()
                 digest, changed = copy_source(
                     fd,
-                    staging / "source.pdf",
+                    staging / source_file,
                     self.config.limits.source_bytes,
                     available,
                     check=lambda: self._check_time(started, cancelled),
                 )
                 self._check_time(started, cancelled)
-                identifier = artifact_id(digest, self.identity)
+                identifier = artifact_id(digest, self.identity, source_file=source_file)
                 if (self.store.documents / identifier).exists():
                     manifest = self.load_artifact(identifier)
                     self._check_time(started, cancelled)
@@ -302,6 +308,7 @@ class ArtifactService:
                 self._check_time(started, cancelled)
                 job = {
                     "directory": str(staging),
+                    "source_file": source_file,
                     "pages": self.config.limits.pages,
                     "extraction_bytes": self.config.limits.extraction_bytes,
                     "available": self._available(reserve=65536),
@@ -328,16 +335,20 @@ class ArtifactService:
                 response = json.loads(
                     safe_read(staging / "response.json", self.config.limits.extraction_bytes)
                 )
-                if self._warm is not None and not result.get("page_origins"):
+                if (
+                    self._warm is not None
+                    and response["document"].get("page_count") is not None
+                    and not result.get("page_origins")
+                ):
                     raise ArtifactError("parse_failed")
                 passages = safe_read(
                     staging / "passages.jsonl", self.config.limits.extraction_bytes
                 ).splitlines()
                 files = {}
-                for name in ("source.pdf", "response.json", "passages.jsonl"):
+                for name in (source_file, "response.json", "passages.jsonl"):
                     cap = (
                         self.config.limits.source_bytes
-                        if name == "source.pdf"
+                        if name == source_file
                         else self.config.limits.extraction_bytes
                     )
                     files[name] = file_record(staging / name, cap)
@@ -351,8 +362,9 @@ class ArtifactService:
                     document_sha256=digest,
                     display_name=_display_name(path),
                     source_relative_path=path,
+                    source_file=source_file,
                     input_grant_sha256=self.store.grant,
-                    page_count=response["document"]["page_count"],
+                    page_count=response["document"].get("page_count"),
                     passage_count=len(passages),
                     engine=self.identity,
                     page_origins=result.get("page_origins", {}),

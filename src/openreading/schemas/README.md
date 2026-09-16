@@ -590,16 +590,20 @@ entry naming it, so the warning reaches you before the removal does.
 
 | Schema | Owner | Result |
 | --- | --- | --- |
-| `local-document.v0.3.json` | `openreading.artifacts.models` | Source hash, engine identity, and retained file inventory. |
-| `passage.v0.3.json` | `openreading.artifacts.passages` | Exact source spans with physical page provenance. |
+| `local-document.v0.4.json` | `openreading.artifacts.models` | Source hash, engine identity, and retained file inventory. |
+| `passage.v0.4.json` | `openreading.artifacts.passages` | Exact spans with physical pages or normalized JSON locations. |
 | `selection-tool.v0.1.json` | Historical selection | Frozen single-file receipts and empty selection input. |
 | `selection-tool.v0.2.json` | `openreading.mcp_server.selection` | Legacy receipts plus paginated snapshots, skipped-entry counts and cursor continuation. |
 | `document-tool.v0.1.json` | `openreading.artifacts.document` | Complete retained normalized results through lossless JSON continuation. |
 | `document-tool.v0.2.json` | `openreading.artifacts.delivery` | Complete MCP delivery or private file export, retaining the v0.1 fragment interface. |
 | `document-tool.v0.3.json` | `openreading.artifacts.delivery` | Complete delivery with measured page origins, empty-text page previews, and explicit warning-record counts. |
-| `agent-document-tool.v0.3.json` | `openreading.mcp_server.tools` | Bounded import, search, read, and error payloads. |
+| `agent-document-tool.v0.4.json` | `openreading.mcp_server.tools` | Bounded import, search, read, and error payloads. |
+
+| `document-tool.v0.4.json` | `openreading.artifacts.delivery` | Complete delivery with nullable physical-page summaries for unpaginated documents. |
+| `import-job.v0.3.json` | `openreading.types.import_job` | Background status with compatible older receipts and unpaginated import receipts. |
 
 These families wrap retained evidence without changing the normalized extraction response.
+The v0.3 retained artifact reader remains supported without rewriting stored files.
 
 ## Not built yet
 

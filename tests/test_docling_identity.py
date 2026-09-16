@@ -122,6 +122,18 @@ def test_extraction_roots_come_from_the_installed_extra_not_a_second_list():
     from openreading.artifacts import service
 
     roots = service._extraction_roots()
-    assert set(roots["docling-slim"]) == {"convert-core", "format-pdf"}
+    assert set(roots["docling-slim"]) == {
+        "convert-core",
+        "format-pdf",
+        "format-office",
+        "format-web",
+        "format-opendocument",
+        "format-email",
+        "format-iwork",
+        "format-latex",
+        "format-xml-jats",
+        "format-xml-uspto",
+        "format-xml-xbrl",
+    }
     assert {"onnxruntime", "transformers"} <= set(roots)
     assert {"pydantic", "jsonschema", "puremagic"} <= set(roots)

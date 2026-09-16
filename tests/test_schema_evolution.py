@@ -107,6 +107,11 @@ def test_response_envelope_tolerates_unknown_future_fields():
 # extra="forbid" (openreading.types.request). request.v0.1.json is untouched and stays frozen
 # above — this is a new file, not an edit to the old one.
 _FROZEN_RELEASED = {
+    "import-job.v0.2.json": "bfb15572474bbe2598e13f5103bf6c0792aa1e26943f9f7a560c586041e1aaf8",
+    "document-tool.v0.3.json": "b41b87e8995e5babf1903e2c8723e42aeb054e4ceb4d0d09f8e2b2f2b99d74ed",
+    "agent-document-tool.v0.3.json": "e4a63ce3658626db83a75677a27d3388b4b837e6e6fa8d186710b6f076257268",
+    "passage.v0.3.json": "b17536a4bcbc045f7cac1b1c9104e2a3866f9fd2ea069b1148c9daf54720fafd",
+    "local-document.v0.3.json": "5b6d20e45fea7e3dfa7750868d82d1ba571ba346ac387341a956f323ee14e9fa",
     "selection-tool.v0.1.json": "021d58f1a7e36cbfb47cf25e37c720366a8242d2e512c5d24ceb610aa7ce59f9",
     "import-job.v0.1.json": "cf38432320ce5f6a736249170f2fe79a97a7e3f15fb8ce7ca746f6229392f669",
     "document-tool.v0.2.json": "d78d87a6fdf836b4ddbd1c41387a7944c14fa7d90136cd4db967d7736f83b5d4",
@@ -126,13 +131,13 @@ _FROZEN_RELEASED = {
     "strategy-config.v0.1.json": "1080ed4b28d0455766ed5789535c8d4d075eb73b78d167d18c79ed582cd5c0b2",
 }
 _UNRELEASED = {
-    "import-job.v0.2.json",
+    "import-job.v0.3.json",
     "document-tool.v0.1.json",
-    "document-tool.v0.3.json",
+    "document-tool.v0.4.json",
     "selection-tool.v0.2.json",
-    "local-document.v0.3.json",
-    "passage.v0.3.json",
-    "agent-document-tool.v0.3.json",
+    "local-document.v0.4.json",
+    "passage.v0.4.json",
+    "agent-document-tool.v0.4.json",
     "response.v0.3.json",
     "adapter-descriptor.v0.3.json",
     "comparison-report.v0.2.json",

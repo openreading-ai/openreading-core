@@ -65,10 +65,14 @@ class LocalDoclingClient:
         self._converter = None
         self._ocr_mode: OcrMode | None = None
 
-    def convert(self, data: bytes, *, ocr_mode: OcrMode | None = None) -> dict:
+    def convert(
+        self, data: bytes, *, ocr_mode: OcrMode | None = None, filename: str = "source.pdf"
+    ) -> dict:
         from docling.datamodel.base_models import DocumentStream
 
-        return self._convert(DocumentStream(name="source.pdf", stream=io.BytesIO(data)), ocr_mode)
+        return self._convert(
+            DocumentStream(name=Path(filename).name, stream=io.BytesIO(data)), ocr_mode
+        )
 
     def convert_path(
         self, path: Path, *, ocr_mode: OcrMode | None = None, page_completed=None
@@ -130,10 +134,17 @@ class LocalDoclingClient:
                 else "mixed"
             )
         document = result.document.export_to_dict()
+        source_format = getattr(getattr(result, "input", None), "format", None)
+        unpaginated = source_format is not None and source_format.value not in {"pdf", "image"}
         furniture = result.document.iterate_items(
             included_content_layers={ContentLayer.FURNITURE}, traverse_pictures=True
         )
         return {
+            **(
+                {"document_text": result.document.export_to_text(), "unpaginated": True}
+                if unpaginated
+                else {}
+            ),
             "partial": result.status.value == "partial_success",
             "pages": document["pages"],
             "items": [
@@ -164,7 +175,12 @@ class _SharedClient:
             gc.collect()
 
     def convert(
-        self, config: LocalDoclingConfig, data: bytes, *, ocr_mode: OcrMode | None = None
+        self,
+        config: LocalDoclingConfig,
+        data: bytes,
+        *,
+        ocr_mode: OcrMode | None = None,
+        filename: str | None = None,
     ) -> dict:
         if self.pid != os.getpid():
             # A fork can inherit a locked mutex and a session owned by the parent process.
@@ -183,6 +199,8 @@ class _SharedClient:
                     self._discard()
                     self.client = LocalDoclingClient(config)
                 self.assets = {**(self.assets or {}), **assets}
+                if filename is not None:
+                    return self.client.convert(data, ocr_mode=ocr_mode, filename=filename)
                 if ocr_mode is None:
                     return self.client.convert(data)
                 return self.client.convert(data, ocr_mode=ocr_mode)
@@ -195,7 +213,11 @@ _shared = _SharedClient()
 
 
 def convert_shared(
-    config: LocalDoclingConfig, data: bytes, *, ocr_mode: OcrMode | None = None
+    config: LocalDoclingConfig,
+    data: bytes,
+    *,
+    ocr_mode: OcrMode | None = None,
+    filename: str | None = None,
 ) -> dict:
     """Convert through the process's single bounded, serialized native session."""
-    return _shared.convert(config, data, ocr_mode=ocr_mode)
+    return _shared.convert(config, data, ocr_mode=ocr_mode, filename=filename)

@@ -158,6 +158,7 @@ def search(
                 SearchHit(
                     evidence_id=passage.evidence_id,
                     page=passage.page,
+                    source_pointer=passage.source_pointer,
                     text_origin=passage.text_origin,
                     matched_terms=found,
                     excerpt_start=start,
@@ -167,7 +168,7 @@ def search(
             )
         )
     matches.sort(
-        key=lambda item: (-item[0], item[1].page, item[1].block_index, item[1].segment_index)
+        key=lambda item: (-item[0], item[1].page or 0, item[1].block_index, item[1].segment_index)
     )
     hits = [item[2] for item in matches]
     binding = _binding(["search", RETRIEVER_REVISION, manifest.artifact_id, terms, limit])

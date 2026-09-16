@@ -26,7 +26,7 @@ MESSAGES: dict[ErrorCode, str] = {
     "configuration_required": "Configure separate absolute input and artifact directories.",
     "access_denied": "This path is outside the configured grant or is not a regular file.",
     "input_not_found": "The requested input file does not exist.",
-    "unsupported_format": "The local proof profile requires a readable PDF document.",
+    "unsupported_format": "The configured adapter cannot read this document format.",
     "password_required": "This document requires a password. The agent profile cannot unlock it.",
     "input_too_large": "The document exceeds the profile's byte or page limit.",
     "extraction_too_large": "The extraction exceeds the profile's serialized byte limit.",

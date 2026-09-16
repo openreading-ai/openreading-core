@@ -24,7 +24,7 @@ def test_delivery_discloses_origins_and_gaps_without_changing_export(tmp_path, m
             service, identifier, mode=mode, budget=1_000_000, root=None, request_id=1
         )
         receipt = json.loads(result.content[0].text)
-        assert receipt["schema_version"] == "0.3"
+        assert receipt["schema_version"] == "0.4"
         assert receipt["text_origins"] == {
             "native": 1,
             "ocr": 1,

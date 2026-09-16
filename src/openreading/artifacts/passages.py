@@ -3,6 +3,10 @@
 A page origin agrees with retained text: none exactly when the page has nothing to cite.
 Page origins live in the manifest, outside the artifact identity and file hashes. This check,
 run again on every load, is what stops a stored label from describing an empty page.
+Without physical attribution, text retains exact spans into its normalized JSON location.
+The page_attribution_unavailable warning marks synthetic containers, such as unpaginated blocks.
+Without block containers, document text uses /document/text instead.
+Those references carry no physical page, geometry, or measured extraction origin.
 """
 
 from collections.abc import Iterator
@@ -15,6 +19,38 @@ from openreading.types.response import NormalizedResponse
 def iter_passages(
     response: NormalizedResponse, origins: dict[str, PageOrigin] | None = None
 ) -> Iterator[Passage]:
+    unpaginated = any(w.code == "page_attribution_unavailable" for w in response.warnings or [])
+    if not response.document.pages or unpaginated:
+        sources = []
+        if unpaginated:
+            for page_index, page in enumerate(response.document.pages or []):
+                for block_index, block in enumerate(page.blocks or []):
+                    if block.text:
+                        sources.append(
+                            (
+                                block.text,
+                                f"/document/pages/{page_index}/blocks/{block_index}/text",
+                                block.id,
+                            )
+                        )
+                if not page.blocks and page.text:
+                    sources.append((page.text, f"/document/pages/{page_index}/text", None))
+        if not sources and response.document.text:
+            sources = [(response.document.text, "/document/text", None)]
+        for index, (text, pointer, block_id) in enumerate(sources):
+            for segment, (start, end) in enumerate(_spans(text)):
+                yield Passage(
+                    evidence_id=f"d0000-b{index:04d}-s{segment:04d}",
+                    block_index=index,
+                    segment_index=segment,
+                    source_kind="document_text",
+                    source_pointer=pointer,
+                    source_block_id=block_id,
+                    text_start=start,
+                    text_end=end,
+                    text=text[start:end],
+                )
+        return
     for page in sorted(response.document.pages or [], key=lambda p: p.page_number):
         origin = (origins or {}).get(str(page.page_number))
         has_text = bool((page.text or "").strip()) or any(
@@ -38,13 +74,7 @@ def iter_passages(
             sources = [(page.text, None, None, "page_text")]
         for index, (text, bbox, block_id, kind) in enumerate(sources):
             assert text is not None
-            start = segment = 0
-            while start < len(text):
-                end = min(start + MAX_PASSAGE_CHARS, len(text))
-                if end < len(text):
-                    whitespace = [i for i in range(start, end) if text[i].isspace()]
-                    if whitespace:
-                        end = whitespace[-1] + 1
+            for segment, (start, end) in enumerate(_spans(text)):
                 yield Passage(
                     evidence_id=f"p{page.page_number:04d}-b{index:04d}-s{segment:04d}",
                     page=page.page_number,
@@ -58,5 +88,15 @@ def iter_passages(
                     bbox=bbox,
                     source_block_id=block_id,
                 )
-                start = end
-                segment += 1
+
+
+def _spans(text: str) -> Iterator[tuple[int, int]]:
+    start = 0
+    while start < len(text):
+        end = min(start + MAX_PASSAGE_CHARS, len(text))
+        if end < len(text):
+            whitespace = [i for i in range(start, end) if text[i].isspace()]
+            if whitespace:
+                end = whitespace[-1] + 1
+        yield start, end
+        start = end

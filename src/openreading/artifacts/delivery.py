@@ -82,17 +82,21 @@ class PagePreview(WireModel):
 
 
 class DeliveryReceipt(WireModel):
-    schema_version: Literal["0.3"] = "0.3"
+    schema_version: Literal["0.4"] = "0.4"
     scope: Literal["retained_normalized_response"] = "retained_normalized_response"
     artifact_id: ArtifactId
     display_name: str
     content_bytes: int = Field(ge=1)
     content_sha256: Digest
-    page_count: int = Field(ge=0)
+    page_count: int | None = Field(default=None, ge=0)
     passage_count: int = Field(ge=0)
     parser_warnings: WarningSummary
-    text_origins: TextOriginCounts
-    empty_text_pages: PagePreview
+    text_origins: TextOriginCounts | None
+    empty_text_pages: PagePreview | None
+
+    def wire(self) -> dict:
+        # Null distinguishes unavailable physical-page metadata from an observed empty set.
+        return self.model_dump(mode="json")
 
 
 class CompleteResult(DeliveryReceipt):
@@ -112,7 +116,7 @@ class FileResult(DeliveryReceipt):
 
 DeliveryPayload = Annotated[
     DeliveryRequest | DocumentResult | CompleteResult | FileResult | ErrorEnvelope,
-    Field(title="OpenReading Document Tool v0.3"),
+    Field(title="OpenReading Document Tool v0.4"),
 ]
 
 
@@ -142,6 +146,8 @@ def warning_summary(response: dict) -> WarningSummary:
 
 
 def text_metadata(manifest: ArtifactManifest, response: dict) -> dict:
+    if manifest.page_count is None:
+        return {"text_origins": None, "empty_text_pages": None}
     origins = TextOriginCounts(
         **Counter(manifest.page_origins.values()),
         unmeasured=manifest.page_count - len(manifest.page_origins),

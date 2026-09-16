@@ -12,6 +12,8 @@ Upstream typography normalization still handles ligatures and quotation marks.
 Serialized requests select disabled, selective, or full-page OCR inside one initialized pipeline.
 The Tesseract stage initializes on first use and retains separate options from the converter cache key.
 Changing OCR mode therefore keeps the CPU layout session and restores the requested behavior each time.
+Model-free formats use the pinned provider SimplePipeline and its disabled external-resource fetch defaults.
+No document reference grants access to another local file or enables remote retrieval.
 All native imports occur inside create_converter when conversion starts.
 An optional observer sees successful page assembly after upstream resource release.
 Document-wide reading order still follows assembly, so this observation never means import completion.
@@ -22,6 +24,7 @@ from __future__ import annotations
 import importlib.metadata
 
 from openreading.adapters.docling_local.config import LocalDoclingConfig
+from openreading.adapters.docling_local.formats import SIMPLE_FORMATS
 
 
 def create_converter(config: LocalDoclingConfig):
@@ -41,7 +44,12 @@ def create_converter(config: LocalDoclingConfig):
         PdfPipelineOptions,
         TesseractCliOcrOptions,
     )
-    from docling.document_converter import DocumentConverter, PdfFormatOption
+    from docling.document_converter import (
+        DocumentConverter,
+        ImageFormatOption,
+        PdfFormatOption,
+        _get_default_option,
+    )
     from docling.models.inference_engines.object_detection.onnxruntime_engine import (
         OnnxRuntimeObjectDetectionEngine,
     )
@@ -65,6 +73,7 @@ def create_converter(config: LocalDoclingConfig):
         ReadingOrderModel,
         ReadingOrderOptions,
     )
+    from docling.pipeline.simple_pipeline import SimplePipeline
     from docling.pipeline.standard_pdf_pipeline import StandardPdfPipeline
 
     class CpuEngine(OnnxRuntimeObjectDetectionEngine):
@@ -213,8 +222,8 @@ def create_converter(config: LocalDoclingConfig):
         def set_page_completed(self, callback):
             self._page_completed = callback
             for active in self.initialized_pipelines.values():
-                assert isinstance(active, LocalPdfPipeline)
-                active._page_completed = callback
+                if isinstance(active, LocalPdfPipeline):
+                    active._page_completed = callback
 
         def set_ocr_mode(self, mode):
             if mode not in {"auto", "force", "off"}:
@@ -223,10 +232,11 @@ def create_converter(config: LocalDoclingConfig):
 
         def _get_pipeline(self, doc_format):
             active = super()._get_pipeline(doc_format)
-            if active is not None:
-                assert isinstance(active, LocalPdfPipeline)
+            if isinstance(active, LocalPdfPipeline):
                 active.select_ocr(self._ocr_mode)
                 active._page_completed = self._page_completed
+            elif active is not None and self._ocr_mode == "force":
+                raise ValueError("Forced OCR requires a raster input pipeline.")
             return active
 
     options = PdfPipelineOptions(
@@ -248,11 +258,19 @@ def create_converter(config: LocalDoclingConfig):
             tesseract_cmd=str(config.tesseract_cmd),
             path=str(config.tessdata_path),
         )
+    simple = {InputFormat(name): _get_default_option(InputFormat(name)) for name in SIMPLE_FORMATS}
+    if any(option.pipeline_cls is not SimplePipeline for option in simple.values()):
+        raise ValueError("The provider changed a declared model-free pipeline.")
     return LocalConverter(
-        allowed_formats=[InputFormat.PDF],
+        allowed_formats=[InputFormat.PDF, InputFormat.IMAGE, *simple],
         format_options={
+            **simple,
             InputFormat.PDF: PdfFormatOption(
                 backend=DoclingParseDocumentBackend,
+                pipeline_cls=LocalPdfPipeline,
+                pipeline_options=options,
+            ),
+            InputFormat.IMAGE: ImageFormatOption(
                 pipeline_cls=LocalPdfPipeline,
                 pipeline_options=options,
             ),

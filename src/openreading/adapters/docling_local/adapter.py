@@ -6,8 +6,11 @@ configuration. Automatic OCR uses that configuration's OCR default, which enviro
 when both Tesseract paths are supplied. Otherwise automatic requests disclose skipped OCR.
 The force setting rasterizes every page for OCR and requires both Tesseract paths.
 The off setting disables OCR even when the adapter's configured default enables it.
-Text and physical-page blocks are supported. Table structure, confidence, typed fields,
-and markdown are omitted with warnings because this profile cannot establish them.
+Each input format uses its configured provider pipeline, declared in openreading.adapters.docling_local.formats.
+Raster inputs retain the CPU layout and Tesseract stages without enabling table recognition.
+Model-free inputs preserve provider blocks and reported table cells in a synthetic container.
+Their page_attribution_unavailable warning prevents that container from claiming physical pagination.
+Confidence, typed fields, and markdown remain unavailable through this adapter.
 Running headers, footers, and page numbers are Docling furniture, omitted with a warning.
 Sources: https://docling-project.github.io/docling/usage/advanced_options/ (2026-09-10).
 """
@@ -21,6 +24,7 @@ from typing import Protocol
 
 from openreading.adapters.base import BackendAdapter
 from openreading.adapters.docling_local.config import LocalDoclingConfig
+from openreading.adapters.docling_local.formats import INPUT_FORMATS, extension_for_mime
 from openreading.adapters.docling_local.projection import project_document
 from openreading.types.cost import infra_only
 from openreading.types.descriptor import (
@@ -56,7 +60,7 @@ def _descriptor():
             ocr="verified",
             layout="verified",
             reading_order="claimed",
-            input_formats=["pdf"],
+            input_formats=list(INPUT_FORMATS),
             page_range_selection=False,
         ),
         runtime=RuntimeProfile(
@@ -64,7 +68,10 @@ def _descriptor():
             license="MIT",
             sandbox="in_process",
             version_pin="docling-slim==2.126.0",
-            system_deps=["Tesseract when OCR is enabled"],
+            system_deps=[
+                "Tesseract when OCR is enabled",
+                "LibreOffice for provider legacy Office conversion",
+            ],
         ),
         output=Output(
             channels=OutputChannels(
@@ -72,7 +79,7 @@ def _descriptor():
                 blocks=ChannelGrade.NATIVE,
                 block_bbox=ChannelGrade.NATIVE,
                 markdown=x,
-                table_cells=x,
+                table_cells=ChannelGrade.NATIVE,
                 block_confidence=x,
                 typed_fields=x,
             )
@@ -156,7 +163,13 @@ class DoclingLocalAdapter(BackendAdapter):
                 if mode != "off" and not (config.tesseract_cmd and config.tessdata_path):
                     missing_ocr_setup = True
                     raise ValueError("Missing local OCR setup.")
-                raw = convert_shared(config, data, ocr_mode=mode)
+                filename = req.document.filename or (
+                    Path(req.document.path).name if req.document.path else None
+                )
+                if filename is None and req.document.mime_type:
+                    suffix = extension_for_mime(req.document.mime_type)
+                    filename = "source" + suffix if suffix else None
+                raw = convert_shared(config, data, ocr_mode=mode, filename=filename)
                 if requested == "auto" and mode == "off":
                     raw = {**raw, "ocr_skipped": True}
             else:

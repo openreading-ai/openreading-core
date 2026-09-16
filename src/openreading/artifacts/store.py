@@ -170,18 +170,24 @@ class Store:
             raw = json.loads(safe_read(root / "manifest.json", self.config.limits.extraction_bytes))
             if not isinstance(raw, dict):
                 raise ValueError("Manifest is not an object")
-            if raw.get("format") != "local-document.v0.3":
+            if raw.get("format") not in {"local-document.v0.3", "local-document.v0.4"}:
                 raise ArtifactError("artifact_version_unsupported")
             manifest = ArtifactManifest.model_validate(raw)
             if (
                 manifest.artifact_id != identifier
-                or artifact_id(manifest.document_sha256, manifest.engine) != identifier
+                or artifact_id(
+                    manifest.document_sha256,
+                    manifest.engine,
+                    version=manifest.format.rsplit("v", 1)[1],
+                    source_file=manifest.source_file,
+                )
+                != identifier
                 or manifest.input_grant_sha256 != self.grant
             ):
                 raise ValueError("Identity mismatch")
-            measured = file_record(root / "source.pdf", self.config.limits.source_bytes)
+            measured = file_record(root / manifest.source_file, self.config.limits.source_bytes)
             if (
-                measured != manifest.files["source.pdf"]
+                measured != manifest.files[manifest.source_file]
                 or measured.sha256 != manifest.document_sha256
             ):
                 raise ValueError("Source mismatch")

@@ -2,7 +2,9 @@
 
 The parent creates the job file and owns its deadline, process group, lock, and cleanup.
 The parent selects PyMuPDF or the explicit local Docling profile. No job names an endpoint.
-Docling checks PDFium page limits before conversion and preserves the warm converter.
+Docling checks PDFium page limits for PDF inputs and preserves the warm converter.
+Other formats retain their source suffix and use provider conversion without PDF preflight.
+Provider-reported model-free table cells survive without enabling raster table recognition.
 Missing physical pages reject the entire conversion rather than retaining incomplete evidence.
 A partial result is retained only when its page count still matches the source preflight.
 Its private control pipe carries bounded stage, observed page and completion records, never extracted text.
@@ -16,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -50,15 +53,26 @@ def extract(job: dict, *, client=None, progress=None, page_progress=None) -> dic
         from openreading.adapters.pymupdf.intake import preflight_pdf
 
     root = Path(job["directory"])
+    source_file = job.get("source_file", "source.pdf")
+    if (
+        not isinstance(source_file, str)
+        or re.fullmatch(r"source\.[a-z0-9]{1,16}", source_file) is None
+    ):
+        raise ArtifactError("unsupported_format")
+    source = root / source_file
     if progress is not None:
         progress("preflight")
     try:
-        page_count, protected = preflight_pdf(root / "source.pdf")
+        page_count, protected = (
+            preflight_pdf(source)
+            if source.suffix == ".pdf" or job.get("docling") is None
+            else (None, False)
+        )
     except Exception:
         raise ArtifactError("unsupported_format") from None
     if protected:
         raise ArtifactError("password_required")
-    if job["pages"] is not None and page_count > job["pages"]:
+    if job["pages"] is not None and page_count is not None and page_count > job["pages"]:
         raise ArtifactError("input_too_large")
     if progress is not None:
         progress("conversion")
@@ -74,8 +88,8 @@ def extract(job: dict, *, client=None, progress=None, page_progress=None) -> dic
             raise ArtifactError("engine_identity_unavailable")
         if client is None:
             client = LocalDoclingClient(configuration)
-        if page_progress is None:
-            raw = client.convert_path(root / "source.pdf")
+        if page_progress is None or page_count is None:
+            raw = client.convert_path(source)
         else:
             assembled = set()
             last_count, last_time = -1, 0.0
@@ -96,23 +110,33 @@ def extract(job: dict, *, client=None, progress=None, page_progress=None) -> dic
 
             publish(force=True)
             try:
-                raw = client.convert_path(root / "source.pdf", page_completed=completed)
+                raw = client.convert_path(source, page_completed=completed)
             finally:
                 publish(force=True)
-        response, page_origins = project_document(raw, Outputs(**SETTINGS["outputs"]))
+        outputs = dict(SETTINGS["outputs"])
+        if raw.get("unpaginated"):
+            # Model-free formats already provide cells without running a table model.
+            outputs["tables"] = "cells"
+        response, page_origins = project_document(raw, Outputs(**outputs))
         origins = {str(page): origin for page, origin in page_origins.items()}
     else:
         response = NormalizedResponse.model_validate(
             run(
-                str(root / "source.pdf"),
+                str(source),
                 backend="pymupdf",
                 config={"version": 1},
                 outputs=SETTINGS["outputs"],
                 features=SETTINGS["features"],
             )
         )
-    if response.document.page_count != page_count:
+    if page_count is not None and response.document.page_count != page_count:
         raise ArtifactError("parse_failed")
+    if (
+        job["pages"] is not None
+        and response.document.page_count is not None
+        and response.document.page_count > job["pages"]
+    ):
+        raise ArtifactError("input_too_large")
     if response.status.state not in {"succeeded", "partial"}:
         raise ArtifactError("parse_failed")
     passages = list(iter_passages(response, origins))

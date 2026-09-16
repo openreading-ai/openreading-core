@@ -4,7 +4,7 @@
 
 ## What this gives you
 
-Your agent can import a local document once, then read its normalized result with physical page citations.
+Your agent can import a local document once, then read its normalized result with exact evidence citations.
 Full-document access returns the retained JSON in bounded replies; search remains available for focused questions.
 MCP is the protocol your client uses to discover these tools and call them over standard input and output.
 For example, search for a renewal clause, read its passage, and cite the returned page and evidence identifier.
@@ -42,6 +42,8 @@ A fitting result contains intact `content.response`, with page origins and citat
 Otherwise, the receipt reports a complete local JSON file, byte count, SHA-256, and warning-code summary.
 The summary counts warning records, not affected pages or regions; full details remain inside the exported content.
 Measured text origins count physical pages, including missing measurements separately from recorded unknown origins.
+Unpaginated documents report null page counts and null physical-page summaries.
+Their evidence uses exact JSON locations instead of physical pages; always pair evidence identifiers with their artifact identifier.
 The empty-text preview lists up to 16 physical pages with neither page text nor block text.
 It reports omitted page numbers and does not assign locations to unrelated parser warnings.
 A local path does not prove that the host received the file or can open it.
@@ -90,7 +92,7 @@ Detached imports continue across that restart and can be discovered through the 
 
 ## How it decides
 
-The profile names PyMuPDF explicitly and uses an explicit versioned configuration, preventing ambient routing from changing extraction.
+The profile selects its configured local adapter explicitly, preventing ambient routing from changing extraction.
 Each result contains one JSON text payload, preventing duplicate structured content from spending context twice.
 Invalid arguments produce fixed protocol errors, preventing schema validation from echoing private input values.
 Document text remains untrusted data, preventing a quoted instruction from gaining tool authority.
@@ -99,8 +101,8 @@ Document text remains untrusted data, preventing a quoted instruction from gaini
 
 The process speaks MCP on stdout; configure your client to capture diagnostics separately from that protocol stream.
 Domain errors set `isError` and return fixed codes from `openreading.artifacts.limits` or `openreading.types.selection`.
-Selection uses v0.1; complete delivery uses document-tool v0.3 and preserves the v0.1 fragment result.
-Existing retained artifact payloads remain at v0.3.
+Selection uses v0.2 with compatible single-file receipts; complete delivery uses document-tool v0.4.
+The v0.1 fragment result remains compatible. New artifacts use v0.4; legacy v0.3 artifacts remain readable.
 Full-document access sends retained content to your assistant and does not establish token savings.
 It preserves the stored result, including extraction limitations, rather than promising perfect OCR recognition.
 The import profile decides which channels exist; this tool does not enable disabled table extraction.
