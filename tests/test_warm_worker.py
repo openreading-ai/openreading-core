@@ -269,3 +269,74 @@ def test_exited_leader_is_reaped_before_group_cleanup(command, monkeypatch, tmp_
         assert worker.pid is None and worker._read_fd is None
     finally:
         worker.close()
+
+
+@pytest.mark.parametrize("code", ["parse_failed", "cancelled"])
+def test_leader_exit_between_poll_and_group_signal_preserves_failure(command, monkeypatch, code):
+    import signal
+
+    import psutil
+
+    from openreading.artifacts.supervisor import WarmWorker
+
+    worker = WarmWorker(command, memory_bytes=None, idle_seconds=30)
+    worker.run({}, check=lambda: None)
+    process, control_fd = worker._process, worker._read_fd
+    killpg = os.killpg
+    calls = []
+
+    def exit_during_signal(pid, sig):
+        calls.append((pid, sig))
+        if len(calls) == 1:
+            assert process.returncode is None
+            process.kill()
+            deadline = time.monotonic() + 3
+            while psutil.Process(pid).status() != psutil.STATUS_ZOMBIE:
+                assert time.monotonic() < deadline
+                time.sleep(0.001)
+            # macOS refuses this signal if the leader exits after the preceding poll.
+            raise PermissionError("Unreaped process group")
+        assert process.returncode == -signal.SIGKILL
+        return killpg(pid, sig)
+
+    def fail():
+        raise ArtifactError(code)
+
+    monkeypatch.setattr(os, "killpg", exit_during_signal)
+    error = None
+    try:
+        try:
+            worker.run({}, check=fail)
+        except Exception as caught:
+            error = caught
+        assert isinstance(error, ArtifactError)
+        assert error.code == code
+        assert len(calls) == 2
+        assert process.stdin.closed
+        assert worker.pid is None and worker._read_fd is None
+        with pytest.raises(OSError):
+            os.fstat(control_fd)
+    finally:
+        process.wait()
+        process.stdin.close()
+        worker.close()
+
+
+def test_live_group_permission_failure_is_not_ignored(command, monkeypatch):
+    worker = make_worker(command)
+    worker.run({}, check=lambda: None)
+    process = worker._process
+
+    def denied(pid, sig):
+        raise PermissionError("Live process group denied")
+
+    monkeypatch.setattr(os, "killpg", denied)
+    try:
+        with pytest.raises(PermissionError, match="Live process group denied"):
+            worker.close()
+        assert process.poll() is None
+    finally:
+        process.kill()
+        process.wait()
+        process.stdin.close()
+        worker.close()

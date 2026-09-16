@@ -7,6 +7,8 @@ Idle shutdown reaps the worker; the next explicit job starts a new generation wi
 retrying failures.
 Closing a dead worker's buffered input can fail again after a broken pipe.
 Cleanup discards that pipe error so parser failure or cancellation remains the reported outcome.
+If macOS refuses a group signal after leader exit, cleanup reaps that leader and retries once.
+Permission failures for a leader still running remain errors rather than claiming successful cleanup.
 RSS is a sampled process-tree sum, not a hard operating-system memory reservation.
 The worker starts in a caller-selected private directory. ONNX Runtime 1.30 writes a
 telemetry session file into its working directory, and a client may launch the server anywhere.
@@ -107,7 +109,14 @@ class WarmWorker:
             process.poll()
             # Kill the group even if its leader exited while leaving an OCR child alive.
             with suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGKILL)
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except PermissionError:
+                    # Exit can race the preceding poll. Reap before retrying the group,
+                    # which may still contain OCR children after its leader has gone.
+                    if process.poll() is None:
+                        raise
+                    os.killpg(process.pid, signal.SIGKILL)
             process.wait()
             if process.stdin is not None:
                 # Closing flushes buffered input even after the parser has exited.

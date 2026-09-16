@@ -14,6 +14,8 @@
 
 ## Unreleased retained evidence v0.3
 
+- Preserve parser failure and cancellation when macOS group cleanup races the parser's exit.
+
 - Preserve document-level warning flags in search and exact-read replies, including empty searches.
 
 - Sweep abandoned exports on the next export under the same grant, without removing active writes.
