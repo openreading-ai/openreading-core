@@ -21,7 +21,7 @@ from openreading.artifacts.models import ErrorCode, ErrorEnvelope, ToolError
 MESSAGES: dict[ErrorCode, str] = {
     "memory_limit": "The worker exceeded its sampled process-memory limit.",
     "worker_monitor_failed": "The worker could not be monitored safely.",
-    "os_permission_denied": "Operating-system or volume permissions refused access to the selected file or directory.",
+    "os_permission_denied": "Operating-system permissions refused file access or parser process control.",
     "engine_identity_unavailable": "Installed engine identity is missing or invalid. Reinstall the package or verified runtime.",
     "configuration_required": "Configure separate absolute input and artifact directories.",
     "access_denied": "This path is outside the configured grant or is not a regular file.",

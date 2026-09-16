@@ -54,7 +54,7 @@ def job(tmp_path):
     }
 
 
-@pytest.mark.parametrize("failure_kind", ["dead_parser", "disk_write"])
+@pytest.mark.parametrize("failure_kind", ["dead_parser", "disk_write", "cleanup_permission"])
 def test_service_distinguishes_dead_parser_from_storage_failure(
     tmp_path, monkeypatch, failure_kind
 ):
@@ -78,17 +78,26 @@ def test_service_distinguishes_dead_parser_from_storage_failure(
         extraction_settings={"assets": {}},
     )
     service = ArtifactService(config, identity=identity)
-    if failure_kind == "dead_parser":
+    processes = []
+    if failure_kind in {"dead_parser", "cleanup_permission"}:
         worker = service._warm
         worker.command = [sys.executable, "-c", "import time; time.sleep(60)"]
         start = worker._start
 
         def dead_start():
             start()
+            processes.append(worker._process)
             worker._process.kill()
             worker._process.wait()
 
         monkeypatch.setattr(worker, "_start", dead_start)
+        if failure_kind == "cleanup_permission":
+            import openreading.artifacts.supervisor as supervisor
+
+            def denied(pid, sig):
+                raise PermissionError("private process-control diagnostic")
+
+            monkeypatch.setattr(supervisor.os, "killpg", denied)
     else:
 
         def disk_full(*args, **kwargs):
@@ -98,10 +107,17 @@ def test_service_distinguishes_dead_parser_from_storage_failure(
     try:
         with pytest.raises(ArtifactError) as failure:
             service.import_document("test.pdf")
-        assert failure.value.code == (
-            "parse_failed" if failure_kind == "dead_parser" else "storage_limit"
+        assert (
+            failure.value.code
+            == {
+                "dead_parser": "parse_failed",
+                "disk_write": "storage_limit",
+                "cleanup_permission": "os_permission_denied",
+            }[failure_kind]
         )
         assert service._warm.pid is None
+        assert service._warm._read_fd is None
+        assert all(process.stdin.closed for process in processes)
         assert not list((config.artifact_root / "staging").iterdir())
         assert not list(service.store.documents.iterdir())
     finally:

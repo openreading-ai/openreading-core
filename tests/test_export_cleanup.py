@@ -1,5 +1,6 @@
 """Export recovery removes abandoned writes without touching active or completed files."""
 
+import errno
 import multiprocessing
 import os
 import stat
@@ -9,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from openreading.artifacts.delivery import save_export
+from openreading.artifacts.limits import ArtifactError
 
 
 def paused_export(root, ready, release, checkpoint):
@@ -144,6 +146,7 @@ def test_new_temporary_file_cannot_be_swept_before_writer_locks_it(tmp_path):
             path = future.result(timeout=5)
             assert path.read_bytes() == b"second writer"
         child.join(5)
+
         assert child.exitcode == 0
         assert {p.read_bytes() for p in (root / "grant").glob("*.json")} == {
             b"first writer",
@@ -154,3 +157,27 @@ def test_new_temporary_file_cannot_be_swept_before_writer_locks_it(tmp_path):
         if child.is_alive():
             child.kill()
         child.join(5)
+
+
+@pytest.mark.parametrize("failure", [errno.EACCES, errno.EPERM, errno.EIO])
+def test_unreadable_abandoned_export_does_not_block_publication(tmp_path, monkeypatch, failure):
+    root = tmp_path.resolve() / "exports"
+    folder = root / "grant"
+    folder.mkdir(parents=True)
+    abandoned = folder / (".openreading-export-" + "e" * 32 + ".tmp")
+    abandoned.write_bytes(b"unreadable old write")
+    original = os.open
+
+    def unreadable(path, *args, **kwargs):
+        if path == abandoned.name:
+            raise OSError(failure, "private diagnostic")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", unreadable)
+    if failure == errno.EIO:
+        with pytest.raises(ArtifactError, match="storage_limit"):
+            save_export(root, "grant", b"new content")
+    else:
+        path = save_export(root, "grant", b"new content")
+        assert path.read_bytes() == b"new content"
+    assert abandoned.read_bytes() == b"unreadable old write"

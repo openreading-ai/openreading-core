@@ -2,8 +2,12 @@
 
 The export contains response, page origins, citation mappings, and import warnings.
 Only the response's top-level backend_raw field is removed. Explicit nulls remain intact.
-A warning summary counts provider codes, without inferring causes or affected pages.
+A warning summary counts warning records, never affected pages, regions, or OCR errors.
 Its bounded preview discloses omitted codes; full warning details stay inside the content.
+Receipt origin counts summarize the retained page measurements, not channel_provenance labels.
+Unmeasured pages lack an origin record; unknown pages have an explicit unknown origin.
+Empty-text pages contain neither page text nor block text, regardless of measured origin.
+Their sorted preview discloses omitted page numbers. It does not locate unrelated warnings.
 
 Exports use a trusted operator directory, the input grant, and the content digest.
 Model arguments never choose a destination, filename, callback, or executable.
@@ -13,6 +17,7 @@ Completed exports remain until explicitly removed. Removing an artifact retains 
 The next export sweeps abandoned .openreading-export-<uuid>.tmp files under the same grant.
 A short directory lock coordinates creation and sweeping; each writer locks its temporary file.
 Sweeping skips locked files, so an active write never expires or blocks another publisher.
+Inaccessible reserved files are left alone; their permissions cannot prevent another export.
 Legacy temporary names lack this lock protocol and require manual removal after writers exit.
 """
 
@@ -55,13 +60,29 @@ class WarningCount(WireModel):
 
 
 class WarningSummary(WireModel):
+    count_unit: Literal["warning_records"] = "warning_records"
     total: int = Field(ge=0)
     codes: list[WarningCount] = Field(max_length=16)
     omitted: int = Field(ge=0)
 
 
+class TextOriginCounts(WireModel):
+    native: int = Field(default=0, ge=0)
+    ocr: int = Field(default=0, ge=0)
+    mixed: int = Field(default=0, ge=0)
+    unknown: int = Field(default=0, ge=0)
+    none: int = Field(default=0, ge=0)
+    unmeasured: int = Field(default=0, ge=0)
+
+
+class PagePreview(WireModel):
+    total: int = Field(ge=0)
+    pages: list[Annotated[int, Field(ge=1)]] = Field(max_length=16)
+    omitted: int = Field(ge=0)
+
+
 class DeliveryReceipt(WireModel):
-    schema_version: Literal["0.2"] = "0.2"
+    schema_version: Literal["0.3"] = "0.3"
     scope: Literal["retained_normalized_response"] = "retained_normalized_response"
     artifact_id: ArtifactId
     display_name: str
@@ -70,6 +91,8 @@ class DeliveryReceipt(WireModel):
     page_count: int = Field(ge=0)
     passage_count: int = Field(ge=0)
     parser_warnings: WarningSummary
+    text_origins: TextOriginCounts
+    empty_text_pages: PagePreview
 
 
 class CompleteResult(DeliveryReceipt):
@@ -89,7 +112,7 @@ class FileResult(DeliveryReceipt):
 
 DeliveryPayload = Annotated[
     DeliveryRequest | DocumentResult | CompleteResult | FileResult | ErrorEnvelope,
-    Field(title="OpenReading Document Tool v0.2"),
+    Field(title="OpenReading Document Tool v0.3"),
 ]
 
 
@@ -118,14 +141,29 @@ def warning_summary(response: dict) -> WarningSummary:
     )
 
 
+def text_metadata(manifest: ArtifactManifest, response: dict) -> dict:
+    origins = TextOriginCounts(
+        **Counter(manifest.page_origins.values()),
+        unmeasured=manifest.page_count - len(manifest.page_origins),
+    )
+    empty = sorted(
+        page["page_number"]
+        for page in response["document"].get("pages") or []
+        if not (page.get("text") or "").strip()
+        and not any((block.get("text") or "").strip() for block in page.get("blocks") or [])
+    )
+    preview = PagePreview(total=len(empty), pages=empty[:16], omitted=max(0, len(empty) - 16))
+    return {"text_origins": origins, "empty_text_pages": preview}
+
+
 def _sweep_exports(fd: int) -> None:
     with os.scandir(fd) as entries:
         for entry in entries:
             if not re.fullmatch(r"\.openreading-export-[0-9a-f]{32}\.tmp", entry.name):
                 continue
-            if not entry.is_file(follow_symlinks=False):
-                continue
             try:
+                if not entry.is_file(follow_symlinks=False):
+                    continue
                 opened = os.open(entry.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
                 with os.fdopen(opened, "rb") as stream:
                     metadata = os.fstat(stream.fileno())
@@ -141,7 +179,7 @@ def _sweep_exports(fd: int) -> None:
             except FileNotFoundError:
                 continue
             except OSError as error:
-                if error.errno != errno.ELOOP:
+                if error.errno not in {errno.ELOOP, errno.EACCES, errno.EPERM}:
                     raise
 
 

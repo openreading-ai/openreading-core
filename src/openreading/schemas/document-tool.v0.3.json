@@ -1,0 +1,564 @@
+{
+  "$defs": {
+    "CompleteResult": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.3",
+          "default": "0.3",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "scope": {
+          "const": "retained_normalized_response",
+          "default": "retained_normalized_response",
+          "title": "Scope",
+          "type": "string"
+        },
+        "artifact_id": {
+          "pattern": "^or1_[0-9a-f]{64}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "display_name": {
+          "title": "Display Name",
+          "type": "string"
+        },
+        "content_bytes": {
+          "minimum": 1,
+          "title": "Content Bytes",
+          "type": "integer"
+        },
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "page_count": {
+          "minimum": 0,
+          "title": "Page Count",
+          "type": "integer"
+        },
+        "passage_count": {
+          "minimum": 0,
+          "title": "Passage Count",
+          "type": "integer"
+        },
+        "parser_warnings": {
+          "$ref": "#/$defs/WarningSummary"
+        },
+        "text_origins": {
+          "$ref": "#/$defs/TextOriginCounts"
+        },
+        "empty_text_pages": {
+          "$ref": "#/$defs/PagePreview"
+        },
+        "delivery": {
+          "const": "tool_result",
+          "default": "tool_result",
+          "title": "Delivery",
+          "type": "string"
+        },
+        "content": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Content",
+          "type": "object"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "display_name",
+        "content_bytes",
+        "content_sha256",
+        "page_count",
+        "passage_count",
+        "parser_warnings",
+        "text_origins",
+        "empty_text_pages",
+        "content"
+      ],
+      "title": "CompleteResult",
+      "type": "object"
+    },
+    "DeliveryRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "pattern": "^or1_[0-9a-f]{64}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cursor"
+        },
+        "delivery": {
+          "default": "fragments",
+          "enum": [
+            "fragments",
+            "auto",
+            "file"
+          ],
+          "title": "Delivery",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id"
+      ],
+      "title": "DeliveryRequest",
+      "type": "object"
+    },
+    "DocumentResult": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.1",
+          "default": "0.1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "scope": {
+          "const": "retained_normalized_response",
+          "default": "retained_normalized_response",
+          "title": "Scope",
+          "type": "string"
+        },
+        "artifact_id": {
+          "pattern": "^or1_[0-9a-f]{64}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "display_name": {
+          "title": "Display Name",
+          "type": "string"
+        },
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "fragment_start": {
+          "minimum": 0,
+          "title": "Fragment Start",
+          "type": "integer"
+        },
+        "fragment_count": {
+          "minimum": 1,
+          "title": "Fragment Count",
+          "type": "integer"
+        },
+        "fragments": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ValueFragment"
+              },
+              {
+                "$ref": "#/$defs/TextFragment"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Fragments",
+          "type": "array"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Cursor"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "display_name",
+        "content_sha256",
+        "fragment_start",
+        "fragment_count",
+        "fragments"
+      ],
+      "title": "DocumentResult",
+      "type": "object"
+    },
+    "ErrorEnvelope": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.3",
+          "default": "0.3",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "error": {
+          "$ref": "#/$defs/ToolError"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "title": "ErrorEnvelope",
+      "type": "object"
+    },
+    "FileResult": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.3",
+          "default": "0.3",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "scope": {
+          "const": "retained_normalized_response",
+          "default": "retained_normalized_response",
+          "title": "Scope",
+          "type": "string"
+        },
+        "artifact_id": {
+          "pattern": "^or1_[0-9a-f]{64}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "display_name": {
+          "title": "Display Name",
+          "type": "string"
+        },
+        "content_bytes": {
+          "minimum": 1,
+          "title": "Content Bytes",
+          "type": "integer"
+        },
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "page_count": {
+          "minimum": 0,
+          "title": "Page Count",
+          "type": "integer"
+        },
+        "passage_count": {
+          "minimum": 0,
+          "title": "Passage Count",
+          "type": "integer"
+        },
+        "parser_warnings": {
+          "$ref": "#/$defs/WarningSummary"
+        },
+        "text_origins": {
+          "$ref": "#/$defs/TextOriginCounts"
+        },
+        "empty_text_pages": {
+          "$ref": "#/$defs/PagePreview"
+        },
+        "delivery": {
+          "const": "local_file",
+          "default": "local_file",
+          "title": "Delivery",
+          "type": "string"
+        },
+        "local_path": {
+          "title": "Local Path",
+          "type": "string"
+        },
+        "next_action": {
+          "title": "Next Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "display_name",
+        "content_bytes",
+        "content_sha256",
+        "page_count",
+        "passage_count",
+        "parser_warnings",
+        "text_origins",
+        "empty_text_pages",
+        "local_path",
+        "next_action"
+      ],
+      "title": "FileResult",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "PagePreview": {
+      "additionalProperties": false,
+      "properties": {
+        "total": {
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        },
+        "pages": {
+          "items": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maxItems": 16,
+          "title": "Pages",
+          "type": "array"
+        },
+        "omitted": {
+          "minimum": 0,
+          "title": "Omitted",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "total",
+        "pages",
+        "omitted"
+      ],
+      "title": "PagePreview",
+      "type": "object"
+    },
+    "TextFragment": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "end": {
+          "minimum": 1,
+          "title": "End",
+          "type": "integer"
+        },
+        "length": {
+          "minimum": 1,
+          "title": "Length",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "text",
+        "start",
+        "end",
+        "length"
+      ],
+      "title": "TextFragment",
+      "type": "object"
+    },
+    "TextOriginCounts": {
+      "additionalProperties": false,
+      "properties": {
+        "native": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Native",
+          "type": "integer"
+        },
+        "ocr": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Ocr",
+          "type": "integer"
+        },
+        "mixed": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Mixed",
+          "type": "integer"
+        },
+        "unknown": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Unknown",
+          "type": "integer"
+        },
+        "none": {
+          "default": 0,
+          "minimum": 0,
+          "title": "None",
+          "type": "integer"
+        },
+        "unmeasured": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Unmeasured",
+          "type": "integer"
+        }
+      },
+      "title": "TextOriginCounts",
+      "type": "object"
+    },
+    "ToolError": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "memory_limit",
+            "worker_monitor_failed",
+            "os_permission_denied",
+            "configuration_required",
+            "engine_identity_unavailable",
+            "access_denied",
+            "input_not_found",
+            "unsupported_format",
+            "password_required",
+            "input_too_large",
+            "extraction_too_large",
+            "no_readable_text",
+            "busy",
+            "timeout",
+            "cancelled",
+            "storage_limit",
+            "parse_failed",
+            "artifact_not_found",
+            "artifact_corrupt",
+            "artifact_version_unsupported",
+            "evidence_not_found",
+            "invalid_cursor",
+            "response_too_large"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 256,
+          "title": "Message",
+          "type": "string"
+        },
+        "retryable": {
+          "title": "Retryable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "title": "ToolError",
+      "type": "object"
+    },
+    "ValueFragment": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/JsonValue"
+        }
+      },
+      "required": [
+        "path",
+        "value"
+      ],
+      "title": "ValueFragment",
+      "type": "object"
+    },
+    "WarningCount": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "maxLength": 128,
+          "title": "Code",
+          "type": "string"
+        },
+        "count": {
+          "minimum": 1,
+          "title": "Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "code",
+        "count"
+      ],
+      "title": "WarningCount",
+      "type": "object"
+    },
+    "WarningSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "count_unit": {
+          "const": "warning_records",
+          "default": "warning_records",
+          "title": "Count Unit",
+          "type": "string"
+        },
+        "total": {
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        },
+        "codes": {
+          "items": {
+            "$ref": "#/$defs/WarningCount"
+          },
+          "maxItems": 16,
+          "title": "Codes",
+          "type": "array"
+        },
+        "omitted": {
+          "minimum": 0,
+          "title": "Omitted",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "total",
+        "codes",
+        "omitted"
+      ],
+      "title": "WarningSummary",
+      "type": "object"
+    }
+  },
+  "anyOf": [
+    {
+      "$ref": "#/$defs/DeliveryRequest"
+    },
+    {
+      "$ref": "#/$defs/DocumentResult"
+    },
+    {
+      "$ref": "#/$defs/CompleteResult"
+    },
+    {
+      "$ref": "#/$defs/FileResult"
+    },
+    {
+      "$ref": "#/$defs/ErrorEnvelope"
+    }
+  ],
+  "title": "OpenReading Document Tool v0.3",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/document-tool.v0.3.json"
+}

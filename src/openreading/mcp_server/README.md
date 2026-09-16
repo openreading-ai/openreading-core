@@ -40,7 +40,10 @@ Its import receipt retains a legacy search suggestion; you can use either retrie
 For example, call `openreading_get_document` with `{"artifact_id":"<returned artifact_id>","delivery":"auto"}`.
 A fitting result contains intact `content.response`, with page origins and citation mappings alongside it.
 Otherwise, the receipt reports a complete local JSON file, byte count, SHA-256, and warning-code summary.
-The summary states how many warnings it omits; full details remain inside the exported content.
+The summary counts warning records, not affected pages or regions; full details remain inside the exported content.
+Measured text origins count physical pages, including missing measurements separately from recorded unknown origins.
+The empty-text preview lists up to 16 physical pages with neither page text nor block text.
+It reports omitted page numbers and does not assign locations to unrelated parser warnings.
 A local path does not prove that the host received the file or can open it.
 Use an existing authorized file tool when available, or attach the export to share it with the assistant host.
 If the host saves an accepted tool response into its own file, its existing file tools can inspect that result.
@@ -92,7 +95,7 @@ Document text remains untrusted data, preventing a quoted instruction from gaini
 
 The process speaks MCP on stdout; configure your client to capture diagnostics separately from that protocol stream.
 Domain errors set `isError` and return fixed codes from `openreading.artifacts.limits` or `openreading.types.selection`.
-Selection uses v0.1; complete delivery uses document-tool v0.2 and preserves the v0.1 fragment result.
+Selection uses v0.1; complete delivery uses document-tool v0.3 and preserves the v0.1 fragment result.
 Existing retained artifact payloads remain at v0.3.
 Full-document access sends retained content to your assistant and does not establish token savings.
 It preserves the stored result, including extraction limitations, rather than promising perfect OCR recognition.

@@ -9,6 +9,7 @@ Closing a dead worker's buffered input can fail again after a broken pipe.
 Cleanup discards that pipe error so parser failure or cancellation remains the reported outcome.
 If macOS refuses a group signal after leader exit, cleanup reaps that leader and retries once.
 Permission failures for a leader still running remain errors rather than claiming successful cleanup.
+Denied process cleanup reports os_permission_denied; it never becomes a storage-capacity error.
 RSS is a sampled process-tree sum, not a hard operating-system memory reservation.
 The worker starts in a caller-selected private directory. ONNX Runtime 1.30 writes a
 telemetry session file into its working directory, and a client may launch the server anywhere.
@@ -104,25 +105,30 @@ class WarmWorker:
         self._idle_token = None
         if self._process is not None:
             process, self._process = self._process, None
-            # macOS can refuse group signals while an exited leader is still a zombie.
-            # Reap that leader first without waiting for a live parser to finish.
-            process.poll()
-            # Kill the group even if its leader exited while leaving an OCR child alive.
-            with suppress(ProcessLookupError):
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except PermissionError:
-                    # Exit can race the preceding poll. Reap before retrying the group,
-                    # which may still contain OCR children after its leader has gone.
-                    if process.poll() is None:
-                        raise
-                    os.killpg(process.pid, signal.SIGKILL)
-            process.wait()
-            if process.stdin is not None:
-                # Closing flushes buffered input even after the parser has exited.
-                # That second pipe failure must not replace cancellation or parse_failed.
-                with suppress(OSError):
-                    process.stdin.close()
+            try:
+                # macOS can refuse group signals while an exited leader is still a zombie.
+                # Reap that leader first without waiting for a live parser to finish.
+                process.poll()
+                # Kill the group even if its leader exited while leaving an OCR child alive.
+                with suppress(ProcessLookupError):
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except PermissionError:
+                        # Exit can race the preceding poll. Reap before retrying the group,
+                        # which may still contain OCR children after its leader has gone.
+                        if process.poll() is None:
+                            raise
+                        os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+            finally:
+                if process.stdin is not None:
+                    # Closing flushes buffered input even after the parser has exited.
+                    # That second pipe failure must not replace the original failure.
+                    with suppress(OSError):
+                        process.stdin.close()
+                if self._read_fd is not None:
+                    os.close(self._read_fd)
+                    self._read_fd = None
         if self._read_fd is not None:
             os.close(self._read_fd)
             self._read_fd = None
@@ -217,7 +223,10 @@ class WarmWorker:
         except _Rejected as rejection:
             raise ArtifactError(rejection.code) from None
         except BaseException as error:
-            self._stop()
+            try:
+                self._stop()
+            except PermissionError:
+                raise ArtifactError("os_permission_denied") from None
             if isinstance(error, (ArtifactError, KeyboardInterrupt, SystemExit)):
                 raise
             raise ArtifactError("parse_failed") from None

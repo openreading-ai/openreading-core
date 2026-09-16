@@ -107,6 +107,7 @@ def test_response_envelope_tolerates_unknown_future_fields():
 # extra="forbid" (openreading.types.request). request.v0.1.json is untouched and stays frozen
 # above — this is a new file, not an edit to the old one.
 _FROZEN_RELEASED = {
+    "document-tool.v0.2.json": "d78d87a6fdf836b4ddbd1c41387a7944c14fa7d90136cd4db967d7736f83b5d4",
     "local-document.v0.1.json": "626ed168340d2ecf0410d3321bed573cd2a1003ba834dfb04c121453ffb3c1b5",
     "local-document.v0.2.json": "77615561a24b5f7fa8ff2e5a93b24c003ac2a37f0999c2b4b473ea2ae246bfe2",
     "passage.v0.1.json": "4eebac39056b9e0072d08d61bad04b9cd717d3a657cb3bc488d40feb38e25ae9",
@@ -125,7 +126,7 @@ _FROZEN_RELEASED = {
 _UNRELEASED = {
     "import-job.v0.1.json",
     "document-tool.v0.1.json",
-    "document-tool.v0.2.json",
+    "document-tool.v0.3.json",
     "selection-tool.v0.1.json",
     "local-document.v0.3.json",
     "passage.v0.3.json",

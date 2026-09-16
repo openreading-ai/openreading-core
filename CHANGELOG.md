@@ -14,6 +14,11 @@
 
 ## Unreleased retained evidence v0.3
 
+- Add document-tool v0.3 receipts with measured page-origin counts and bounded empty-text page previews.
+  Label warning counts as warning records without changing the exported normalized content.
+- Report denied parser cleanup as an operating-system permission error, preserving descriptor cleanup.
+  Inaccessible abandoned export files no longer prevent publication of a new export.
+
 - Preserve parser failure and cancellation when macOS group cleanup races the parser's exit.
 
 - Preserve document-level warning flags in search and exact-read replies, including empty searches.

@@ -25,6 +25,7 @@ from openreading.artifacts.delivery import (
     FileResult,
     document_content,
     save_export,
+    text_metadata,
     warning_summary,
 )
 from openreading.artifacts.limits import ArtifactError
@@ -78,6 +79,7 @@ def deliver_document(
         page_count=manifest.page_count,
         passage_count=manifest.passage_count,
         parser_warnings=warning_summary(response),
+        **text_metadata(manifest, response),
     ).wire()
     # JSON escaping and the response envelope cannot shrink the canonical content bytes.
     if mode == "auto" and len(data) <= budget:
