@@ -26,6 +26,11 @@ Without an explicitly supplied provider, it returns selection_unavailable and op
 Every successful call returns one JSON TextContent payload without
 structuredContent duplication. Domain failures set isError; malformed arguments receive
 sanitized protocol errors. The server never loads ambient routing files or credentials.
+Call openreading_route for the shared router plan under operator-owned backend scope.
+The optional --routing-config snapshots explicit YAML, while repeated --allow-backend
+flags grant planning access independently. Without those flags, planning stays local.
+For example, a policy listing reducto cannot authorize it outside the allowed set.
+Planning reads no document, checks no readiness and does not change local imports.
 
 Artifact source, response, and passages persist until you remove their store directory.
 Retrieval shares selected document text with the calling agent. Document instructions

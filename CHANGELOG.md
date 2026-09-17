@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased MCP route planning
+
+- Add `openreading_route` over the shared router without source reads or backend execution.
+  Explicit `--routing-config` and repeated `--allow-backend` flags configure ordering and independent scope.
+  Existing local imports and static profile discovery remain unchanged.
+
 ## Unreleased MCP backend discovery
 
 - Enforce caller backend allowlists for directly named execution before adapter lookup or credential resolution.

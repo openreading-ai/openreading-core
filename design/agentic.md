@@ -1,13 +1,14 @@
 # Remaining general agent surface
 
 This proposal covers work beyond the implemented fixed local document profile.
-The [MCP guide](../src/openreading/mcp_server/README.md) documents the implemented import, search, and read tools.
+The [MCP guide](../src/openreading/mcp_server/README.md) documents implemented local evidence tools and scoped route planning.
 The [artifact guide](../src/openreading/artifacts/README.md) documents retention and physical page evidence.
 The [remaining product intent](../product/specs/agentic.product-spec.md) preserves the unbuilt acceptance identifiers.
 
 ## Scope boundary
 
-General parse, batch, route, compare, readiness discovery, and triage tools remain unbuilt.
+General parse, batch, compare, readiness discovery, and triage tools remain unbuilt.
+Scoped backend route planning is documented in the MCP guide; strategy planning remains proposed.
 The local profile does not satisfy those requirements by exposing differently named equivalents.
 It deliberately selects one backend, one explicit input grant, and bounded retained evidence.
 Client packaging and token measurement belong in `openreading-agent-tools`, which depends on core.

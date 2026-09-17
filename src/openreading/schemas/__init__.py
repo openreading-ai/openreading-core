@@ -39,6 +39,7 @@ Families
 - import-job: persistent local import status and background start, status, list, and cancel requests.
 - selection-tool: local copied-file receipts and errors, separate from artifact evidence.
   The empty Request definition excludes model-supplied dialog controls.
+- route-tool: authorized backend ordering without source reads or execution.
 - backend-discovery: static descriptors restricted to the configured local profile.
   The wrapper reports the configured OCR flag and explicitly leaves readiness unchecked.
 - step / journal: the executor step contract and the per-line JSONL journal shape
@@ -549,6 +550,7 @@ SELECTION_TOOL_SCHEMA_FILE = "selection-tool.v0.2.json"
 AGENT_DOCUMENT_TOOL_SCHEMA_FILE = "agent-document-tool.v0.4.json"
 DOCUMENT_TOOL_SCHEMA_FILE = "document-tool.v0.4.json"
 IMPORT_JOB_SCHEMA_FILE = "import-job.v0.3.json"
+ROUTE_TOOL_SCHEMA_FILE = "route-tool.v0.1.json"
 BACKEND_DISCOVERY_SCHEMA_FILE = "backend-discovery.v0.1.json"
 
 
@@ -829,3 +831,8 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def route_tool_schema() -> dict[str, Any]:
+    """Return the strict planning-only MCP route contract."""
+    return _load(ROUTE_TOOL_SCHEMA_FILE)

@@ -36,13 +36,16 @@ from openreading.artifacts.constants import (
 from openreading.artifacts.limits import ArtifactError
 from openreading.artifacts.models import json_bytes
 from openreading.artifacts.service import ArtifactService
+from openreading.mcp_server.routing import RoutingConfig, plan_route
 from openreading.mcp_server.selection import SelectionCoordinator, SelectionProvider
 from openreading.schemas import (
     backend_discovery_schema,
     document_tool_schema,
     import_job_schema,
+    route_tool_schema,
     selection_tool_schema,
 )
+from openreading.types.route_tool import RouteReceipt
 from openreading.types.selection import SelectionFailure
 
 ARTIFACT = {"type": "string", "pattern": "^or1_[0-9a-f]{64}$"}
@@ -87,6 +90,7 @@ INPUTS = {
     },
 }
 INPUTS["openreading_select_document"] = selection_tool_schema()["$defs"]["Request"]
+INPUTS["openreading_route"] = route_tool_schema()["$defs"]["Request"]
 INPUTS["openreading_backends"] = backend_discovery_schema()["$defs"]["Request"]
 INPUTS["openreading_get_document"] = document_tool_schema()["$defs"]["DeliveryRequest"]
 for _name, _definition in {
@@ -98,6 +102,7 @@ for _name, _definition in {
     INPUTS[_name] = import_job_schema()["$defs"][_definition]
 
 DESCRIPTIONS = {
+    "openreading_route": "Plan backend order under the operator-configured scope. No document is read and no provider is called. backend selects an allowed named backend; fallback only reorders the default chain and never adds entries. An empty chain returns a terminal reason with isError. This plan proves neither readiness nor format support and does not change local import behavior. Strategy planning and general execution are not provided by this tool.",
     "openreading_backends": "Describe the backend selected by this server's local profile and its OCR setting. Returns static adapter descriptors with their dated sources, not measured extraction capabilities or configured table output. Readiness is not checked: no dependency, model asset, credential or live reachability test runs. This does not enable other installed backends or general backend selection. No arguments, network calls or document reads.",
     "openreading_list_imports": "Discover retained import jobs under the current input grant, including work from earlier chats. Returns bounded job IDs, states and elapsed times without document text or paths. Follow next_cursor for more jobs. Order is by job ID, not time; restart listing to include concurrent new jobs. Use get_import for details and cancel_import at the user's request. An unavailable state means its status could not be read.",
     "openreading_start_import": "Start a local background import of a selected or granted document. Supported formats follow the configured adapter. Returns a persistent job ID promptly, never document text. Call openreading_get_import for actual progress and the completed artifact receipt. The job continues if this chat disconnects. Do not repeatedly start the same import. No hosted fallback.",
@@ -143,6 +148,7 @@ async def _import(service: ArtifactService, path: str, progress=None):
 def create_server(
     service: ArtifactService,
     *,
+    routing_config: RoutingConfig | None = None,
     selection_provider: SelectionProvider | None = None,
     selection_timeout_seconds: float | None = 120,
     document_response_bytes: int = 1_000_000,
@@ -154,6 +160,9 @@ def create_server(
     # Resolve operator-selected aliases once; later requests cannot redirect the destination.
     if document_export_root is not None:
         document_export_root = document_export_root.resolve()
+    routing_config = routing_config or RoutingConfig.from_operator(
+        "docling_local" if service.config.docling is not None else "pymupdf"
+    )
     selection = SelectionCoordinator(service, selection_provider, selection_timeout_seconds)
     instructions = INSTRUCTIONS
     if selection_provider is not None:
@@ -266,6 +275,8 @@ def create_server(
                     "openreading_list_imports": jobs.list,
                 }[name]
                 result = await run_sync(partial(operation, **arguments))
+            elif name == "openreading_route":
+                result = plan_route(routing_config, **arguments)
             elif name == "openreading_backends":
                 from openreading.mcp_server.discovery import describe_backends
 
@@ -338,7 +349,14 @@ def create_server(
                 }[name]
                 arguments = {k: v for k, v in arguments.items() if k != "delivery"}
                 result = await run_sync(partial(operation, **arguments))
-            payload, failed = result.wire(), isinstance(result, SelectionFailure)
+            payload, failed = (
+                result.wire(),
+                (
+                    isinstance(result, SelectionFailure)
+                    or isinstance(result, RouteReceipt)
+                    and not result.chain
+                ),
+            )
         except JobError as error:
             payload, failed = error.wire(), True
         except ArtifactError as error:

@@ -1233,9 +1233,18 @@ fire after that clean shutdown.
 
 mcp --profile local-document-proof-v1
 ------------------------------------
-Serve ten tools over stdio with openreading[agent,pymupdf].
+Serve eleven tools over stdio with openreading[agent,pymupdf].
 Call openreading_backends with {} for this profile's static descriptor and
 OCR setting. Discovery does not check readiness or enable other backends.
+Call openreading_route with {} to plan the local backend without extraction.
+--routing-config PATH snapshots an explicit openreading.yaml for planning.
+--allow-backend authorizes each planning backend; repeat it for multiple ids.
+For example, --allow-backend pymupdf --allow-backend tesseract permits both.
+The policy orders the chain but cannot widen the independent allowed set.
+The default allowed set contains only this profile's local import backend.
+A named backend must be allowed; fallback only reorders the resolved chain.
+Planning reads no source and checks neither readiness nor compatibility.
+These flags do not change local imports or enable general execution.
 You grant an absolute --input-root and a separate absolute --artifact-root.
 For example, use /absolute/documents and /absolute/evidence respectively.
 The server retains source bytes and page evidence until you remove the store.

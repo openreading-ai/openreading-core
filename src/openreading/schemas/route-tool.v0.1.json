@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/route-tool.v0.1.json",
+  "title": "Authorized backend route v0.1",
+  "description": "Planning only. No source read, readiness check or backend execution.",
+  "$ref": "#/$defs/Result",
+  "$defs": {
+    "Request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "backend": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$", "maxLength": 128},
+        "fallback": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$", "maxLength": 128}}
+      }
+    },
+    "Result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "execution", "allowed_backends", "chain", "dropped", "terminal_reason"],
+      "properties": {
+        "schema_version": {"const": "0.1"},
+        "execution": {"const": "not_started"},
+        "allowed_backends": {"type": "array", "items": {"type": "string"}},
+        "chain": {"type": "array", "items": {"type": "string"}},
+        "dropped": {"type": "array", "items": {"type": "string"}},
+        "terminal_reason": {"enum": [null, "scope_denied", "no_backend_in_scope"]}
+      }
+    }
+  }
+}

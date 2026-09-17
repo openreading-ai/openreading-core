@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from openreading.mcp_server.routing import RoutingConfig
     from openreading.mcp_server.selection import SelectionProvider
 
 from openreading.adapters.docling_local.config import LocalDoclingConfig
@@ -25,6 +26,16 @@ from openreading.artifacts.limits import ArtifactError, DoclingLimits, ProfileCo
 
 
 def arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--routing-config",
+        type=Path,
+        help="explicit openreading.yaml snapshot for route planning; never discovered from the environment",
+    )
+    parser.add_argument(
+        "--allow-backend",
+        action="append",
+        help="authorize a backend for route planning; repeat for each backend (default: local import backend)",
+    )
     parser.add_argument(
         "--document-response-bytes",
         type=int,
@@ -101,6 +112,7 @@ def profile_config(args: argparse.Namespace) -> ProfileConfig:
 async def serve(
     config: ProfileConfig,
     *,
+    routing_config: RoutingConfig | None = None,
     selection_provider: SelectionProvider | None = None,
     selection_timeout_seconds: float | None = 120,
     document_response_bytes: int = 1_000_000,
@@ -130,6 +142,7 @@ async def serve(
         try:
             server = create_server(
                 service,
+                routing_config=routing_config,
                 selection_provider=selection_provider,
                 selection_timeout_seconds=selection_timeout_seconds,
                 document_response_bytes=document_response_bytes,
@@ -207,7 +220,18 @@ def launch(
             args.input_root = args.input_root.resolve()
             args.artifact_root = args.artifact_root.resolve()
             config = profile_config(args)
-        except (OSError, RuntimeError):
+            routing = None
+            route_path = getattr(args, "routing_config", None)
+            allowed_backends = getattr(args, "allow_backend", None)
+            if route_path is not None or allowed_backends is not None:
+                from openreading.mcp_server.routing import RoutingConfig
+
+                routing = RoutingConfig.from_operator(
+                    "docling_local" if config.docling is not None else "pymupdf",
+                    config=route_path,
+                    allowed_backends=allowed_backends,
+                )
+        except (OSError, RuntimeError, ValueError):
             raise ArtifactError("configuration_required") from None
         with _terminate_as_interrupt():
             from functools import partial
@@ -218,8 +242,10 @@ def launch(
                 and selection_timeout_seconds == 120
                 and budget == 1_000_000
                 and export_root is None
+                and routing is None
                 else partial(
                     serve,
+                    routing_config=routing,
                     selection_provider=selection_provider,
                     selection_timeout_seconds=selection_timeout_seconds,
                     document_response_bytes=budget,

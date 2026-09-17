@@ -20,6 +20,13 @@ Call `openreading_backends` with `{}` to inspect the configured backend's descri
 For example, the local Docling profile reports only `docling_local`, regardless of other installed adapters.
 Descriptor claims do not establish configured table output, extraction accuracy, dependency readiness or live reachability.
 Discovery reports `readiness: "not_checked"`; it does not inspect credentials, read documents or contact providers.
+Call `openreading_route` with `{}` to plan the default local backend without reading a source or executing extraction.
+For example, `{"backend":"pymupdf"}` requests that backend only when the operator has allowed it.
+Planning uses the existing router and reports its chain, excluded backends and any terminal reason.
+The optional `--routing-config PATH` snapshots an explicit `openreading.yaml`; repeated `--allow-backend` flags set the independent planning scope.
+The policy supplies order, while the allowed set limits access. Neither tool arguments nor ambient configuration can widen that set.
+These flags do not change local imports, and static `openreading_backends` discovery continues to describe only the local import profile.
+An empty plan sets `isError`. A nonempty plan does not establish backend readiness, format compatibility or completed processing.
 Selection returns `selection_unavailable` unless a trusted launcher explicitly supplies a local chooser.
 
 ## Walkthrough
