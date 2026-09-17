@@ -15,6 +15,11 @@ You start one process with explicit input and artifact directories before the cl
 The input root grants file access, while the separate artifact root retains copies until you remove them.
 The profile exposes `openreading_import`, `openreading_get_document`, `openreading_search`, `openreading_read`, and `openreading_select_document`.
 Long work uses `openreading_start_import`, `openreading_get_import`, and `openreading_cancel_import`.
+Use `openreading_list_imports` to discover retained jobs after reconnecting.
+Call `openreading_backends` with `{}` to inspect the configured backend's descriptor and OCR flag.
+For example, the local Docling profile reports only `docling_local`, regardless of other installed adapters.
+Descriptor claims do not establish configured table output, extraction accuracy, dependency readiness or live reachability.
+Discovery reports `readiness: "not_checked"`; it does not inspect credentials, read documents or contact providers.
 Selection returns `selection_unavailable` unless a trusted launcher explicitly supplies a local chooser.
 
 ## Walkthrough

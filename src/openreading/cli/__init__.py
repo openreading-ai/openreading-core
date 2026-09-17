@@ -1233,7 +1233,9 @@ fire after that clean shutdown.
 
 mcp --profile local-document-proof-v1
 ------------------------------------
-Serve nine document tools over stdio with openreading[agent,pymupdf].
+Serve ten tools over stdio with openreading[agent,pymupdf].
+Call openreading_backends with {} for this profile's static descriptor and
+OCR setting. Discovery does not check readiness or enable other backends.
 You grant an absolute --input-root and a separate absolute --artifact-root.
 For example, use /absolute/documents and /absolute/evidence respectively.
 The server retains source bytes and page evidence until you remove the store.

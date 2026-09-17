@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/backend-discovery.v0.1.json",
+  "title": "Configured local backend discovery v0.1",
+  "description": "Static descriptor claims and the profile OCR setting. No readiness or liveness check is performed.",
+  "$ref": "#/$defs/Result",
+  "$defs": {
+    "Request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "Result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "scope", "readiness", "ocr_enabled", "backends"],
+      "properties": {
+        "schema_version": {"const": "0.1"},
+        "scope": {"const": "configured_local_profile"},
+        "readiness": {"const": "not_checked"},
+        "ocr_enabled": {"type": "boolean"},
+        "backends": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {"$ref": "https://openreading.ai/schemas/adapter-descriptor.v0.8.json"}
+        }
+      }
+    }
+  }
+}

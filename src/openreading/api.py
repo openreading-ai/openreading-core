@@ -678,17 +678,18 @@ def run_request(
     time budget instead.
 
     `backend_allowlist` is the CALLER's ceiling on which backends this request may reach (the
-    server's per-token `OPENREADING_API_KEY_SCOPES` entry); None means unscoped. Every arm that
-    picks its own backends reads it, which is all of them but the directly-named one:
+    server's per-token `OPENREADING_API_KEY_SCOPES` entry); None means unscoped.
+    Every dispatch arm enforces it before resolving credentials or executing an adapter:
 
+    - The directly-named arm refuses an excluded id before adapter lookup.
     - Every strategy arm prunes its compiled choices before execution.
     - The resolved-chain arm prunes the router's full chain before execution.
       A caller gating this one at the door can only ever check the router's first pick; the plan
       is chosen plus every fallback, and `execute_plan` walks all of it, so the backends behind
       the first pick were reachable by a request that named any of them and got 403.
 
-    Only the directly-named arm needs nothing here, because there the id IS the request and the
-    caller can gate it before the call.
+    Callers can also refuse at their transport boundary. That earlier check does not replace
+    this execution boundary, because another transport may call this function directly.
 
     Raises KeyError (unknown backend), UnknownStrategyError, PlanExhaustedError, ScopeRefused,
     ScopeRefused (the caller's allow-list leaves the walk or resolved chain nothing to
@@ -696,9 +697,20 @@ def run_request(
     router.driver's poll loop past its deadline/MAX_CONSECUTIVE_FAULTS. The chain path folds this
     into PlanExhaustedError via execute_plan/D-v2-7.2 instead, since it can fall back to the next
     backend; a named backend has no next rung, so it surfaces here under its own type)."""
+    backend = req.backend.id
+    if (
+        backend
+        and not backend.startswith(_STRATEGY_PREFIX)
+        and backend_allowlist is not None
+        and backend not in backend_allowlist
+    ):
+        raise ScopeRefused(
+            "The requested backend is outside the caller's allowed set.",
+            backend_code=backend,
+            constraint="backend_allowlist",
+        )
     broker = broker or EnvCredentialBroker()
     config = config or RouterConfig()
-    backend = req.backend.id
 
     # `strategy:<name>` runs that strategy. `strategy:none` ignores any configured default.
     strat = (

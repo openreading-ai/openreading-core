@@ -16,8 +16,12 @@ A local export path establishes no host access and performs no upload. Existing 
 uses lossless pagination defined by openreading.artifacts.document.
 Background tools openreading_start_import, openreading_get_import and openreading_cancel_import
 return persistent job status without keeping a tool request open during extraction.
+Call openreading_backends with {} for the selected backend's descriptor and configured OCR flag.
+For example, the Docling profile returns docling_local even when other adapters are installed.
+Discovery preserves descriptor claims and their sources. It does not check dependencies,
+assets, credentials or live reachability, and never enables general backend selection.
 Use openreading_list_imports after reconnecting when the original job ID is unavailable.
-Search remains optional. The openreading_select_document tool accepts only an empty object.
+Search remains optional. The openreading_select_document tool also accepts a receipt cursor.
 Without an explicitly supplied provider, it returns selection_unavailable and opens no UI.
 Every successful call returns one JSON TextContent payload without
 structuredContent duplication. Domain failures set isError; malformed arguments receive

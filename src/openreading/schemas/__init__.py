@@ -39,6 +39,8 @@ Families
 - import-job: persistent local import status and background start, status, list, and cancel requests.
 - selection-tool: local copied-file receipts and errors, separate from artifact evidence.
   The empty Request definition excludes model-supplied dialog controls.
+- backend-discovery: static descriptors restricted to the configured local profile.
+  The wrapper reports the configured OCR flag and explicitly leaves readiness unchecked.
 - step / journal: the executor step contract and the per-line JSONL journal shape
   (internal/design/ledger.md §5.4).
 
@@ -547,6 +549,7 @@ SELECTION_TOOL_SCHEMA_FILE = "selection-tool.v0.2.json"
 AGENT_DOCUMENT_TOOL_SCHEMA_FILE = "agent-document-tool.v0.4.json"
 DOCUMENT_TOOL_SCHEMA_FILE = "document-tool.v0.4.json"
 IMPORT_JOB_SCHEMA_FILE = "import-job.v0.3.json"
+BACKEND_DISCOVERY_SCHEMA_FILE = "backend-discovery.v0.1.json"
 
 
 _PACKAGE = "openreading.schemas"
@@ -750,6 +753,11 @@ def document_tool_schema() -> dict[str, Any]:
 def import_job_schema() -> dict[str, Any]:
     """Persistent local import status and closed background tool requests."""
     return _load(IMPORT_JOB_SCHEMA_FILE)
+
+
+def backend_discovery_schema() -> dict[str, Any]:
+    """Static configured-backend discovery without credential or readiness checks."""
+    return _load(BACKEND_DISCOVERY_SCHEMA_FILE)
 
 
 def _cli_validate() -> int:

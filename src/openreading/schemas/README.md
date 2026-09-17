@@ -601,6 +601,7 @@ entry naming it, so the warning reaches you before the removal does.
 
 | `document-tool.v0.4.json` | `openreading.artifacts.delivery` | Complete delivery with nullable physical-page summaries for unpaginated documents. |
 | `import-job.v0.3.json` | `openreading.types.import_job` | Background status with compatible older receipts and unpaginated import receipts. |
+| `backend-discovery.v0.1.json` | `openreading.types.backend_discovery` | Static selected-backend descriptor and configured OCR flag, without readiness or liveness checks. |
 
 These families wrap retained evidence without changing the normalized extraction response.
 The v0.3 retained artifact reader remains supported without rewriting stored files.

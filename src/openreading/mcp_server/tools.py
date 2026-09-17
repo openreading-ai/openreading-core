@@ -37,7 +37,12 @@ from openreading.artifacts.limits import ArtifactError
 from openreading.artifacts.models import json_bytes
 from openreading.artifacts.service import ArtifactService
 from openreading.mcp_server.selection import SelectionCoordinator, SelectionProvider
-from openreading.schemas import document_tool_schema, import_job_schema, selection_tool_schema
+from openreading.schemas import (
+    backend_discovery_schema,
+    document_tool_schema,
+    import_job_schema,
+    selection_tool_schema,
+)
 from openreading.types.selection import SelectionFailure
 
 ARTIFACT = {"type": "string", "pattern": "^or1_[0-9a-f]{64}$"}
@@ -82,6 +87,7 @@ INPUTS = {
     },
 }
 INPUTS["openreading_select_document"] = selection_tool_schema()["$defs"]["Request"]
+INPUTS["openreading_backends"] = backend_discovery_schema()["$defs"]["Request"]
 INPUTS["openreading_get_document"] = document_tool_schema()["$defs"]["DeliveryRequest"]
 for _name, _definition in {
     "openreading_start_import": "StartRequest",
@@ -92,6 +98,7 @@ for _name, _definition in {
     INPUTS[_name] = import_job_schema()["$defs"][_definition]
 
 DESCRIPTIONS = {
+    "openreading_backends": "Describe the backend selected by this server's local profile and its OCR setting. Returns static adapter descriptors with their dated sources, not measured extraction capabilities or configured table output. Readiness is not checked: no dependency, model asset, credential or live reachability test runs. This does not enable other installed backends or general backend selection. No arguments, network calls or document reads.",
     "openreading_list_imports": "Discover retained import jobs under the current input grant, including work from earlier chats. Returns bounded job IDs, states and elapsed times without document text or paths. Follow next_cursor for more jobs. Order is by job ID, not time; restart listing to include concurrent new jobs. Use get_import for details and cancel_import at the user's request. An unavailable state means its status could not be read.",
     "openreading_start_import": "Start a local background import of a selected or granted document. Supported formats follow the configured adapter. Returns a persistent job ID promptly, never document text. Call openreading_get_import for actual progress and the completed artifact receipt. The job continues if this chat disconnects. Do not repeatedly start the same import. No hosted fallback.",
     "openreading_get_import": "Check a background import by its returned job_id. Reports observed stage and elapsed time, plus page_progress when measured. pages_assembled counts successful page assembly, not whole-import completion. No estimated percent complete. Optional wait_seconds (up to 20) waits for completion. If still running, continue checking when waiting for the requested result. Only succeeded carries an artifact receipt; then use retrieval tools. Host Stop does not cancel this job.",
@@ -259,6 +266,10 @@ def create_server(
                     "openreading_list_imports": jobs.list,
                 }[name]
                 result = await run_sync(partial(operation, **arguments))
+            elif name == "openreading_backends":
+                from openreading.mcp_server.discovery import describe_backends
+
+                result = describe_backends(service.config)
             elif name == "openreading_select_document":
                 result = await selection.select(**arguments)
             elif (

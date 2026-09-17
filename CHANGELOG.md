@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased MCP backend discovery
+
+- Enforce caller backend allowlists for directly named execution before adapter lookup or credential resolution.
+  Existing unscoped calls remain unchanged; transports can retain their earlier access checks.
+
+- Add `openreading_backends` for the configured local profile's descriptor and OCR setting.
+  Discovery preserves descriptor sources without claiming readiness or enabling other backends.
+  The backend-discovery v0.1 schema keeps this metadata separate from extracted document evidence.
+
 ## Unreleased adapter-format evidence
 
 - Route local inputs through the formats claimed by the configured Docling adapter.
