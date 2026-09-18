@@ -2,6 +2,8 @@
 
 ## Unreleased retained-input MCP comparison
 
+- Clarify retained-copy verification and v0.2 reader compatibility in schema descriptions and guides.
+  Add a read-side regression for local subjects claiming zero or multiple verified hashes, independently of publication checks.
 - Attribute comparison source hashes to individual subjects and distinguish verified source bytes from producer assertions.
   Retained-result and result-tool v0.2 preserve earlier schemas and existing v0.1 records without rewriting them.
 - Clarify that receipt recovery requires unchanged arguments, inputs and implementation; guard the documented MCP tool count.

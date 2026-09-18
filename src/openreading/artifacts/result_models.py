@@ -47,7 +47,16 @@ class SubjectSource(WireModel):
     """Source hashes attributed to one subject, with the producer's verification basis."""
 
     source_sha256: list[Digest]
-    verification: Literal["verified_source_bytes", "producer_asserted"]
+    verification: Literal["verified_source_bytes", "producer_asserted"] = Field(
+        description=(
+            "verified_source_bytes means the retained source copy was rehashed against its "
+            "manifest digest when the comparison producer loaded it. It does not check whether "
+            "the user's original file still matches or establish that subjects share a document. "
+            "producer_asserted preserves the normalized-response producer's hash claims without "
+            "independent source-byte verification. Reading a retained comparison does not rehash "
+            "its subjects' source copies again."
+        )
+    )
 
 
 class AttributedResultProvenance(ResultProvenance):

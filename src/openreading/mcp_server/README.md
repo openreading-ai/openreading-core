@@ -123,6 +123,9 @@ The report uses the existing engine without reparsing documents or executing eit
 Its `provenance.subjects` maps report labels to input identifiers; the `adapters` map uses those labels to preserve repeated backend versions.
 For each label, `provenance.subject_sources` reports source hashes and their verification basis.
 For example, an `or1_` subject has one `verified_source_bytes` hash; an `orr1_` subject retains its `producer_asserted` hash list.
+The verified hash describes a retained copy rehashed against its manifest when comparison loads the input.
+It does not establish whether your original file still matches or whether two subjects share the same document.
+Retrieving the retained report does not repeat that source-byte check.
 Earlier comparison records lack that attribution and retain their original bytes without inferred verification claims.
 Report locations describe normalized comparisons, not new source citations or independently verified accuracy.
 For example, read the mapped input artifact before citing a page supporting a reported text disagreement.

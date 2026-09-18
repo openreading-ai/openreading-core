@@ -12,7 +12,8 @@ That field does not identify how a parser originally acquired its document.
 Provenance subjects map each report label to its retained input.
 The report subjects array preserves input order; canonical JSON objects sort their keys.
 The adapters map uses those same labels and the versions reported in normalized inputs.
-Source hashes are inherited assertions for orr1 inputs and verified source hashes for or1 artifacts.
+Source hashes are inherited assertions for orr1 inputs and verified retained-copy hashes for or1 artifacts.
+Verification rehashes the retained copy against its manifest; the user's original file is not rechecked.
 The subject_sources map preserves each subject's hash list and names that verification basis.
 An orr1 input with no asserted hashes keeps an empty list, never an inferred document identity.
 The aggregate source_sha256 list follows report subject order and does not assert equal verification.

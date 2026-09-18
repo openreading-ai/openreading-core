@@ -383,3 +383,37 @@ def test_record_format_refuses_attribution_downgrades_and_legacy_upgrades(result
             ResultRecord.model_validate(record)
         with pytest.raises(jsonschema.ValidationError):
             validator.validate(record)
+
+
+@pytest.mark.parametrize("hash_count", [0, 1, 2])
+def test_read_refuses_local_subject_without_exactly_one_verified_hash(results, hash_count):
+    report = compare([response(text="a"), response(text="b")])
+    labels = [subject["label"] for subject in report["subjects"]]
+    sources = {
+        labels[0]: {
+            "source_sha256": ["c" * 64] * hash_count,
+            "verification": "verified_source_bytes",
+        },
+        labels[1]: {"source_sha256": ["d" * 64], "verification": "verified_source_bytes"},
+    }
+    origin = provenance(
+        subjects=dict(zip(labels, ["or1_" + "a" * 64, "or1_" + "b" * 64], strict=True)),
+        source_sha256=["c" * 64] * hash_count + ["d" * 64],
+    ).model_dump(mode="json")
+    origin["subject_sources"] = sources
+    # Bypass publication so its manifest binding cannot mask the independent read-side rule.
+    record = {
+        "format": "retained-result.v0.2",
+        "input_grant_sha256": results.store.grant,
+        "content": {"kind": "comparison_report", "provenance": origin, "payload": report},
+    }
+    raw = json_bytes(record)
+    identifier = "orr1_" + hashlib.sha256(raw).hexdigest()
+    path = results.path(identifier)
+    path.write_bytes(raw)
+    if hash_count == 1:
+        assert results.load(identifier).wire() == record["content"]
+    else:
+        with pytest.raises(ResultError, match="result_corrupt"):
+            results.load(identifier)
+    assert path.read_bytes() == raw
