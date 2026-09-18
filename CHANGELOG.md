@@ -2,6 +2,9 @@
 
 ## Unreleased scoped resume MCP
 
+- Pin resume admission and worker guards with runnable narrowed scopes, valid retained attempts and mismatched control packets.
+  Clarify that every originally pinned backend must remain authorized, and named batch items cannot resume.
+
 - Add openreading_resume for terminal strategy jobs and individual batch strategy attempts under current operator authority.
   Each continuation snapshots retained input and journal files into a new durable job without rewriting the prior attempt.
 - Add explicit ledger, configuration, credential and backend-scope arguments to the shared resume API.

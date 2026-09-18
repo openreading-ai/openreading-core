@@ -1028,7 +1028,7 @@ def resume_run(
         plain_info=strategy_file.plain_info if strategy_file else None,
         backend_allowlist=original_dispatchable if backend_allowlist is not None else None,
     )
-    # The live caller can narrow authority, but can never grant a backend absent at first arm.
+    # Resume requires every original backend to remain authorized and never adds new backends.
     compiled.backend_allowlist = original_dispatchable
     clock = RealClock()
     executor = _arm_ledger(

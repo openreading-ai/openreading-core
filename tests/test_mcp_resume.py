@@ -245,3 +245,151 @@ def test_resume_child_rechecks_snapshot_before_shared_api(store, monkeypatch):
                 "resume": snapshot,
             }
         )
+
+
+def test_resume_pinned_backends_refuse_narrowed_but_runnable_scope(store, monkeypatch):
+    from openreading.mcp_server import resume_input
+
+    configuration = {
+        "version": 1,
+        "strategies": {"local": {"steps": [{"backend": "pymupdf"}, {"backend": "tesseract"}]}},
+    }
+    authority = ExecutionConfig.from_operator(
+        config=configuration,
+        allowed_backends=["pymupdf", "tesseract"],
+        allowed_strategies=["local"],
+    )
+    manager = ExecutionJobs(store, authority)
+    done = terminal(manager, manager.start(request("strategy:local")).job_id)
+    assert done.state == "succeeded", done.wire()
+    path = Path(_read_bound(manager.root / done.job_id, "attempt.json", store.grant)["directory"])
+    header = json.loads(next((path / "ledger").glob("*.header.json")).read_text())
+    assert set(header["pinned_eligible"]) == {"pymupdf", "tesseract"}
+    restricted = ExecutionJobs(
+        store,
+        ExecutionConfig.from_operator(
+            config=configuration, allowed_backends=["pymupdf"], allowed_strategies=["local"]
+        ),
+    )
+    assert restricted.authority.authorize(request("strategy:local")).backends == ("pymupdf",)
+    reads = []
+    original_read = resume_input.safe_read
+
+    def observed_read(file, cap):
+        reads.append(file)
+        return original_read(file, cap)
+
+    monkeypatch.setattr(resume_input, "safe_read", observed_read)
+    before = inventory(store.config.artifact_root)
+    try:
+        with pytest.raises(ExecutionRefused, match="scope_denied"):
+            restricted.start_resume({"job_id": done.job_id})
+        assert path / "source" not in reads
+        assert inventory(store.config.artifact_root) == before
+    finally:
+        for job in restricted.list().jobs:
+            if job.job_id != done.job_id:
+                restricted.cancel(job.job_id)
+                terminal(restricted, job.job_id)
+
+
+def test_resume_refuses_running_status_with_valid_attempt_and_live_owner(store):
+    import os
+
+    import psutil
+
+    from openreading.mcp_server.execution_jobs import _write_bound
+
+    manager, done, _ = previous(store)
+    root = manager.root / done.job_id
+    saved = {name: (root / name).read_bytes() for name in ("status.json", "process.json")}
+    active = done.model_copy(
+        update={"state": "running", "stage": "executing", "receipt": None, "response_state": None}
+    )
+    _write_bound(root, "status.json", store.grant, active.wire())
+    _write_bound(
+        root,
+        "process.json",
+        store.grant,
+        {"pid": os.getpid(), "created": psutil.Process().create_time()},
+    )
+    try:
+        assert manager.get(done.job_id).state == "running"
+        before = inventory(store.config.artifact_root)
+        with pytest.raises(ExecutionJobError, match="resume_unavailable"):
+            manager.start_resume({"job_id": done.job_id})
+        assert inventory(store.config.artifact_root) == before
+    finally:
+        for name, data in saved.items():
+            (root / name).write_bytes(data)
+        for job in manager.list().jobs:
+            if job.job_id != done.job_id:
+                manager.cancel(job.job_id)
+                terminal(manager, job.job_id)
+
+
+def test_resume_refuses_valid_attempt_under_foreign_grant(store):
+    import shutil
+
+    from openreading.mcp_server.execution_jobs import _write_bound
+    from openreading.mcp_server.resume_input import inspect_attempt
+
+    manager, done, path = previous(store)
+    foreign = path.parent.parent / ("f" * 64) / path.name
+    shutil.copytree(path, foreign)
+    assert inspect_attempt(foreign, manager.authority, request("strategy:local"))["run_id"]
+    root = manager.root / done.job_id
+    _write_bound(root, "attempt.json", store.grant, {"directory": str(foreign)})
+    before = inventory(store.config.artifact_root)
+    try:
+        with pytest.raises(ExecutionJobError, match="resume_unavailable"):
+            manager.start_resume({"job_id": done.job_id})
+        assert inventory(store.config.artifact_root) == before
+    finally:
+        for job in manager.list().jobs:
+            if job.job_id != done.job_id:
+                manager.cancel(job.job_id)
+                terminal(manager, job.job_id)
+
+
+def test_resume_parent_rejects_snapshot_identity_before_child_launch(store, monkeypatch):
+    from openreading.mcp_server import execution_process
+    from openreading.mcp_server.resume_input import inspect_attempt
+
+    manager, _, path = previous(store)
+    snapshot = inspect_attempt(path, manager.authority, request("strategy:local"))
+    snapshot["source_sha256"] = "0" * 64
+    monkeypatch.setattr(
+        execution_process.subprocess,
+        "Popen",
+        lambda *_, **__: pytest.fail("launched child before checking snapshot identity"),
+    )
+    attempt = execution_process.ExecutionAttempt(store, manager.authority)
+    try:
+        with pytest.raises(ValueError, match="Resume snapshot identity mismatch"):
+            attempt.run(snapshot["request"], resume=snapshot)
+    finally:
+        attempt.close()
+
+
+def test_resume_child_refuses_distinct_authorized_packet_request(store, monkeypatch):
+    from openreading.mcp_server import execution_worker
+    from openreading.mcp_server.resume_input import inspect_attempt
+
+    manager, _, path = previous(store)
+    snapshot = inspect_attempt(path, manager.authority, request("strategy:local"))
+    different = request("strategy:local")
+    different["document"]["filename"] = "different.pdf"
+    manager.authority.authorize(different)
+    monkeypatch.chdir(path)
+    with pytest.raises(ValueError, match="Resume request mismatch"):
+        execution_worker.execute(
+            {
+                "configuration": json.loads(manager.authority.configuration),
+                "allowed_backends": ["pymupdf"],
+                "allowed_strategies": ["local"],
+                "request": different,
+                "source_sha256": snapshot["source_sha256"],
+                "resume": snapshot,
+            }
+        )
