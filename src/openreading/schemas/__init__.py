@@ -762,6 +762,11 @@ def backend_discovery_schema() -> dict[str, Any]:
     return _load(BACKEND_DISCOVERY_SCHEMA_FILE)
 
 
+def route_tool_schema() -> dict[str, Any]:
+    """Return the strict planning-only MCP route contract."""
+    return _load(ROUTE_TOOL_SCHEMA_FILE)
+
+
 def _cli_validate() -> int:
     """Validate every vendored schema, then validate any stored normalized fixture.
 
@@ -771,37 +776,13 @@ def _cli_validate() -> int:
     The raw fixtures at ``tests/fixtures/<slug>/*.json`` are vendor payloads rather than
     response envelopes, so this sweep deliberately leaves them alone.
     """
-    # 1. schemas are themselves valid JSON Schema
-    _validator(request_schema())
-    _validator(response_schema())
-    _validator(descriptor_schema())
-    _validator(strategy_config_schema())
-    _validator(comparison_report_schema())
-    _validator(batch_result_schema())
-    _validator(corpus_report_schema())
-    _validator(leaderboard_report_schema())
-    _validator(liveness_report_schema())
-    _validator(step_schema())
-    _validator(journal_schema())
-    for contract in (
-        local_document_schema(),
-        passage_schema(),
-        agent_document_tool_schema(),
-        selection_tool_schema(),
-        document_tool_schema(),
-        import_job_schema(),
-    ):
-        _validator(contract)
-    print(
-        f"schemas: {REQUEST_SCHEMA_FILE} OK, {RESPONSE_SCHEMA_FILE} OK, "
-        f"{DESCRIPTOR_SCHEMA_FILE} OK, {STRATEGY_CONFIG_SCHEMA_FILE} OK, "
-        f"{COMPARISON_REPORT_SCHEMA_FILE} OK, {BATCH_RESULT_SCHEMA_FILE} OK, "
-        f"{CORPUS_REPORT_SCHEMA_FILE} OK, {LEADERBOARD_REPORT_SCHEMA_FILE} OK, "
-        f"{LIVENESS_REPORT_SCHEMA_FILE} OK, {STEP_SCHEMA_FILE} OK, {JOURNAL_SCHEMA_FILE} OK, "
-        f"{LOCAL_DOCUMENT_SCHEMA_FILE} OK, {PASSAGE_SCHEMA_FILE} OK, "
-        f"{AGENT_DOCUMENT_TOOL_SCHEMA_FILE} OK, {SELECTION_TOOL_SCHEMA_FILE} OK, "
-        f"{DOCUMENT_TOOL_SCHEMA_FILE} OK, {IMPORT_JOB_SCHEMA_FILE} OK"
-    )
+    # Discover resources so new families and retained versions cannot miss this gate.
+    validated = []
+    for resource in sorted(resources.files(_PACKAGE).iterdir(), key=lambda item: item.name):
+        if resource.is_file() and resource.name.endswith(".json"):
+            _validator(json.loads(resource.read_text(encoding="utf-8")))
+            validated.append(f"{resource.name} OK")
+    print("schemas: " + ", ".join(validated))
 
     # 2. any stored normalized-response fixtures validate against the response schema
     root = Path(__file__).resolve().parents[3]  # repo root
@@ -831,8 +812,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
-def route_tool_schema() -> dict[str, Any]:
-    """Return the strict planning-only MCP route contract."""
-    return _load(ROUTE_TOOL_SCHEMA_FILE)

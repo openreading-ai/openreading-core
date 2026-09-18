@@ -2,6 +2,9 @@
 
 ## Unreleased MCP route planning
 
+- Validate every vendored schema in the CLI gate, including new families and retained versions.
+  Invalid schema metadata now fails the standalone gate without maintaining a separate family list.
+
 - Add `openreading_route` over the shared router without source reads or backend execution.
   Explicit `--routing-config` and repeated `--allow-backend` flags configure ordering and independent scope.
   Existing local imports and static profile discovery remain unchanged.

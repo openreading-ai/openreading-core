@@ -247,7 +247,7 @@ Handle that operation-level failure before calling this consumer, as [Reading an
 
 ## Validate
 
-One command proves every current schema file is valid. Exit 0 means every file is valid. Exit 1
+One command validates every vendored schema file, including retained versions and newly added families. Exit 0 means every file is valid. Exit 1
 means a schema file or a fixture failed, and a bad schema file also prints a traceback. Exit 2
 means no verb was given.
 
@@ -256,11 +256,11 @@ uv run python -m openreading.schemas validate
 ```
 
 ```text
-schemas: request.v0.3.json OK, response.v0.3.json OK, adapter-descriptor.v0.8.json OK, … journal.v0.1.json OK
+schemas: adapter-descriptor.v0.1.json OK, … backend-discovery.v0.1.json OK, … route-tool.v0.1.json OK, … strategy-config.v0.4.json OK
 fixtures: 0 checked, 0 invalid
 ```
 
-**You should see** every current file marked OK, and `fixtures: 0 checked`, which is expected
+**You should see** every vendored file marked OK, and `fixtures: 0 checked`, which is expected
 today ([Not built yet](#not-built-yet)). From Python, you validate one instance with the function
 named in the validator column of the table below, for example `validate_response`. Two of the
 names do not follow the family name: the adapter-descriptor family uses `validate_descriptor` and
@@ -602,7 +602,7 @@ entry naming it, so the warning reaches you before the removal does.
 | `document-tool.v0.4.json` | `openreading.artifacts.delivery` | Complete delivery with nullable physical-page summaries for unpaginated documents. |
 | `import-job.v0.3.json` | `openreading.types.import_job` | Background status with compatible older receipts and unpaginated import receipts. |
 | `route-tool.v0.1.json` | `openreading.types.route_tool` | Scoped backend chain, excluded entries and terminal reason; no execution. |
-| `backend-discovery.v0.1.json` | `openreading.types.backend_discovery` | Static selected-backend descriptor and configured OCR flag, without readiness or liveness checks. |
+| `backend-discovery.v0.1.json` | `openreading.types.backend_discovery` | Static selected-backend descriptor and configured OCR flag, without readiness or liveness checks. Validation requires the vendored `adapter-descriptor.v0.8.json` resource registered under its `$id`. |
 
 These families wrap retained evidence without changing the normalized extraction response.
 The v0.3 retained artifact reader remains supported without rewriting stored files.
