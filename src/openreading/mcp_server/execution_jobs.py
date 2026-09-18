@@ -10,6 +10,8 @@ A valid failed response is retained unchanged with job state succeeded and respo
 Publication records its expected receipt first, then commits through RetainedResults and writes terminal status.
 After supervisor death, recovery recognizes only an integrity-verified committed result matching that intent.
 An uncommitted attempt becomes interrupted. This does not establish remote-provider cancellation.
+Status lookup and listing persist recovered terminal status, so neither operation is read-only.
+For example, get records interrupted after discovering a dead supervisor without a committed result.
 Cancellation observed before publication prevents retention; committed publication wins a concurrent cancellation request.
 
 Private control records bind the grant and job identity; payload hashes detect accidental byte edits.
@@ -277,6 +279,7 @@ class ExecutionJobs:
         return root
 
     def get(self, job_id: str, wait_seconds: float = 0) -> ExecutionJob:
+        """Return status, persisting recovery when the recorded supervisor has exited."""
         ExecutionJobGet(job_id=job_id, wait_seconds=wait_seconds)
         root = self._root(job_id)
         until = time.monotonic() + wait_seconds
@@ -313,6 +316,7 @@ class ExecutionJobs:
                 content = results.load(receipt.result_id)
             except Exception:
                 content = None
+            # A valid result does not bind the separate intent's claimed size, digest or kind.
             if content is not None and results.receipt(receipt.result_id, content) == receipt:
                 value.state, value.stage = "succeeded", "complete"
                 value.receipt = receipt
@@ -338,6 +342,7 @@ class ExecutionJobs:
         return current
 
     def list(self, limit: int = 20, cursor: str | None = None) -> ExecutionJobList:
+        """Return summaries through get, including its persistent recovery of interrupted jobs."""
         ExecutionJobListRequest(limit=limit, cursor=cursor)
         binding = _binding(["execution_jobs", "0.1", str(self.root), self.store.grant, limit])
         offset = _offset(cursor, binding, (1 << 128) + 1)

@@ -125,6 +125,7 @@ Provider output cannot enter MCP stdout; complete normalized responses return as
 A private liveness pipe terminates the local execution group if its supervisor disappears.
 Control writes remain cancellable when the pipe fills, including on older supported Python versions.
 Its explicit operator environment avoids ambient host credentials and configuration, but provides no operating-system sandbox.
+Reserved directory and configuration overrides fail before an attempt starts, with the five reserved names listed in `execution_process`.
 Private source copies and strategy journals persist under an attempt directory; the internal job records retain its location.
 This primitive adds no callable tool. Receipt budgeting, launcher integration and scoped resume remain separate work.
 
@@ -165,6 +166,7 @@ For example, a retained failed response has job state `succeeded` and separate `
 A `processing` response remains processing; job completion does not certify completed remote work.
 Cancellation before publication yields no receipt; a committed result wins a concurrent cancellation request.
 Recovery verifies a committed receipt after supervisor death and never repeats provider execution automatically.
+Status lookup and listing persist recovery outcomes, which future tool annotations must identify as writes.
 Concurrency defaults to one job per grant; explicit deadlines include time waiting for a slot.
 Job records, snapshots and journals persist until removed. These internal APIs add no callable MCP tools.
 

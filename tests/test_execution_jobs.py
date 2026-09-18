@@ -597,3 +597,69 @@ def test_denied_cleanup_restores_signal_handlers_and_closes_grant(store, monkeyp
     finally:
         for sig, handler in before.items():
             signal.signal(sig, handler)
+
+
+@pytest.mark.parametrize("field", ["content_bytes", "content_sha256", "kind"])
+def test_recovery_refuses_intent_metadata_mismatch_after_valid_result_load(
+    store, monkeypatch, field
+):
+    from openreading.mcp_server import execution_jobs as module
+
+    manager = jobs(store)
+    root = prepared(manager)
+    expected = content()
+    results = RetainedResults(store)
+    receipt = results.publish(expected.kind, expected.payload, expected.provenance)
+    retained_before = results.path(receipt.result_id).read_bytes()
+    claimed = receipt.wire()
+    claimed[field] = {
+        "content_bytes": receipt.content_bytes + 1,
+        "content_sha256": "0" * 64,
+        "kind": "comparison_report",
+    }[field]
+    # Rebind the control checksum so this reaches semantic receipt validation after a valid load.
+    module._write_bound(root, "publication.json", store.grant, {"receipt": claimed})
+    original_load = module.RetainedResults.load
+    loaded = []
+
+    def load(instance, identifier):
+        value = original_load(instance, identifier)
+        loaded.append(identifier)
+        assert value.wire() == expected.wire()
+        return value
+
+    monkeypatch.setattr(module.RetainedResults, "load", load)
+    final = manager.get(root.name)
+    assert loaded == [receipt.result_id]
+    assert final.state == "failed"
+    assert final.error.code == "interrupted"
+    assert final.receipt is None
+    assert results.path(receipt.result_id).read_bytes() == retained_before
+
+
+@pytest.mark.parametrize("lookup", ["get", "list"])
+def test_lookup_persists_recovery_once_after_supervisor_exit(store, lookup):
+    manager = jobs(store)
+    root = prepared(manager)
+    path = root / "status.json"
+    before = path.read_bytes()
+    if lookup == "get":
+        assert manager.get(root.name).state == "failed"
+    else:
+        assert manager.list().jobs[0].state == "failed"
+    after = path.read_bytes()
+    assert before != after
+    assert manager.get(root.name).error.code == "interrupted"
+    assert path.read_bytes() == after
+
+
+@pytest.mark.parametrize(
+    "name", ["HOME", "TMPDIR", "XDG_CACHE_HOME", "OPENREADING_CONFIG", "OPENREADING_LEDGER"]
+)
+def test_job_rejects_reserved_environment_before_creating_records(store, name):
+    from openreading.mcp_server.execution_process import ExecutionError
+
+    before = set(store.config.artifact_root.rglob("*"))
+    with pytest.raises(ExecutionError, match="^invalid_configuration$"):
+        jobs(store, environment={name: "private-operator-value"})
+    assert set(store.config.artifact_root.rglob("*")) == before

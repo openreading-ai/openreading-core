@@ -11,6 +11,8 @@ A journal records strategy steps for replay. Its private location belongs to thi
 Only explicitly supplied operator environment values reach provider SDKs or the credential broker.
 Defaults use the system executable search path; operators must pass custom runtime paths explicitly.
 Core configuration and ledger variables always point at the captured configuration and private journal.
+Operator overrides of HOME, TMPDIR, XDG_CACHE_HOME, OPENREADING_CONFIG and OPENREADING_LEDGER fail with invalid_configuration.
+For example, supply PATH for a custom executable location instead of replacing the private home directory.
 The parent never mutates its environment. Credential values are not written into control files.
 For example, an ambient cloud key in the MCP host does not silently authorize this child.
 This is process isolation, not an operating-system sandbox or a prohibition on provider network access.
@@ -55,6 +57,10 @@ from openreading.artifacts.result_models import ResultContent, ResultProvenance
 from openreading.artifacts.store import Store, safe_read
 from openreading.mcp_server.execution import ExecutionConfig
 
+_RESERVED_ENVIRONMENT = frozenset(
+    {"HOME", "TMPDIR", "XDG_CACHE_HOME", "OPENREADING_CONFIG", "OPENREADING_LEDGER"}
+)
+
 
 class ExecutionError(Exception):
     """Fixed internal lifecycle errors exclude provider messages, document text and credentials."""
@@ -90,6 +96,7 @@ class ExecutionAttempt:
             not isinstance(k, str)
             or not isinstance(v, str)
             or not k
+            or k in _RESERVED_ENVIRONMENT
             or "=" in k
             or "\0" in k
             or "\0" in v

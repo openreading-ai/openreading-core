@@ -452,3 +452,14 @@ with os.fdopen(fd, 'w') as output:
     assert result.payload == payload
     assert worker.pid is None
     assert json.loads((worker.root / "response.json").read_bytes()) == payload
+
+
+@pytest.mark.parametrize(
+    "name", ["HOME", "TMPDIR", "XDG_CACHE_HOME", "OPENREADING_CONFIG", "OPENREADING_LEDGER"]
+)
+def test_reserved_environment_is_refused_without_an_attempt(store, name):
+    from openreading.mcp_server.execution_process import ExecutionError
+
+    with pytest.raises(ExecutionError, match="^invalid_configuration$"):
+        attempt(store, environment={name: "private-operator-value"})
+    assert not list((store.config.artifact_root / "execution").glob("**/source"))

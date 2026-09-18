@@ -2,6 +2,8 @@
 
 ## Unreleased durable general execution jobs
 
+- Reject reserved environment overrides before job preparation, and document persistent recovery during status lookup and listing.
+- Test publication-intent metadata against independently validated retained results, including mismatched size, digest and kind.
 - Add internal grant-scoped jobs with detached supervision, explicit environment, queued cancellation and optional deadlines.
   Jobs retain complete normalized responses and report provider outcome separately from publication success.
 - Recover only verified committed results after supervisor interruption, without automatically retrying providers.
