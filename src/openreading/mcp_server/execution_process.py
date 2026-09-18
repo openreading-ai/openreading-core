@@ -18,6 +18,8 @@ Installed adapters remain trusted code and may read other files available to the
 
 Cancellation and optional deadlines cover copying, child input, execution and output validation.
 Cleanup kills the owned process group even after its leader exits, then reaps the leader.
+A separate liveness pipe lets the child kill its group if this supervisor exits abruptly.
+Only the supervisor retains the write end; provider children cannot keep their supervisor alive.
 Denied process control preserves the process handle for another explicit close attempt.
 Local termination does not establish cancellation of work already submitted to a remote provider.
 There is no automatic retry, document cap, execution cache, eviction or memory-bound claim.
@@ -37,6 +39,7 @@ import importlib.metadata
 import json
 import math
 import os
+import select
 import signal
 import subprocess
 import sys
@@ -96,6 +99,7 @@ class ExecutionAttempt:
         self.root = store.config.artifact_root / "execution" / store.grant / uuid.uuid4().hex
         self._process: subprocess.Popen | None = None
         self._started = False
+        self._liveness_fd: int | None = None
 
     @property
     def pid(self) -> int | None:
@@ -105,6 +109,7 @@ class ExecutionAttempt:
         """Reap this attempt's group; retain ownership if operating-system control is denied."""
         process = self._process
         if process is None:
+            self._close_liveness()
             return
         try:
             process.poll()
@@ -123,6 +128,13 @@ class ExecutionAttempt:
             if process.stdin is not None:
                 with suppress(OSError):
                     process.stdin.close()
+            if self._process is None:
+                self._close_liveness()
+
+    def _close_liveness(self):
+        if self._liveness_fd is not None:
+            os.close(self._liveness_fd)
+            self._liveness_fd = None
 
     def run(
         self,
@@ -182,24 +194,28 @@ class ExecutionAttempt:
         )
         try:
             observe()
-            self._process = subprocess.Popen(
-                [sys.executable, "-I", "-m", "openreading.mcp_server.execution_worker"],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                cwd=self.root,
-                env=environment,
-                start_new_session=True,
-            )
-            pending: bytes | None = packet
-            while True:
-                observe()
-                try:
-                    self._process.communicate(pending, timeout=0.1)
-                    break
-                except subprocess.TimeoutExpired:
-                    # communicate retains unsent bytes; resubmitting input would duplicate the request.
-                    pending = None
+            parent_fd, self._liveness_fd = os.pipe()
+            try:
+                self._process = subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-I",
+                        "-m",
+                        "openreading.mcp_server.execution_worker",
+                        "--parent-fd",
+                        str(parent_fd),
+                    ],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    cwd=self.root,
+                    env=environment,
+                    start_new_session=True,
+                    pass_fds=(parent_fd,),
+                )
+            finally:
+                os.close(parent_fd)
+            _exchange(self._process, packet, observe)
             if self._process.returncode != 0:
                 raise ExecutionError("execution_failed")
         except (OSError, ValueError):
@@ -226,3 +242,30 @@ class ExecutionAttempt:
             raise ExecutionError("execution_failed") from None
         observe()
         return content
+
+
+def _exchange(process: subprocess.Popen, packet: bytes, check: Callable[[], None]) -> None:
+    """Send complete control bytes while keeping pipe backpressure and process waits cancellable."""
+    assert process.stdin is not None
+    fd = process.stdin.fileno()
+    os.set_blocking(fd, False)
+    pending = memoryview(packet)
+    # Retrying communicate after a timeout can strand partial stdin on older supported Python.
+    # Explicit offsets avoid that dependency while preserving cancellation during backpressure.
+    while pending:
+        check()
+        _, writable, _ = select.select([], [fd], [], 0.1)
+        if writable:
+            try:
+                written = os.write(fd, pending)
+            except BlockingIOError:
+                continue
+            pending = pending[written:]
+    process.stdin.close()
+    while True:
+        check()
+        try:
+            process.wait(timeout=0.1)
+            return
+        except subprocess.TimeoutExpired:
+            pass

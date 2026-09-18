@@ -2,6 +2,11 @@
 
 ## Unreleased general execution worker
 
+- Keep control messages cancellable under pipe backpressure on Python 3.11 through 3.14.
+  Nonblocking writes avoid stalled partial input after repeated communication timeouts.
+- Terminate the local execution group when its supervisor disappears through abrupt OS termination.
+  A private liveness pipe supplements ordinary cancellation; remote provider cancellation is not established.
+
 - Add an internal owned worker for authorized general requests, with descriptor-based source copying and child reauthorization.
   Explicit child environments, private journals and discarded provider stdout keep execution separate from the MCP transport.
 - Preserve complete normalized responses, including partial results, failed statuses and warnings, for later retained-result publication.

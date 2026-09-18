@@ -122,6 +122,8 @@ The internal `ExecutionAttempt` worker runs authorized requests in a disposable 
 It copies from the granted descriptor, reauthorizes in the child, and preserves backend scope through the shared API.
 For example, replacing the original pathname cannot redirect an already opened source descriptor.
 Provider output cannot enter MCP stdout; complete normalized responses return as validated `ResultContent` values.
+A private liveness pipe terminates the local execution group if its supervisor disappears.
+Control writes remain cancellable when the pipe fills, including on older supported Python versions.
 Its explicit operator environment avoids ambient host credentials and configuration, but provides no operating-system sandbox.
 Private source copies and strategy journals persist under an attempt directory; no eviction or discovery is provided yet.
 This primitive adds no callable tool. Durable jobs, receipt budgeting, publication and scoped resume still need integration.

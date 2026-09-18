@@ -7,6 +7,9 @@ For example, replacing source after acquisition refuses before adapter execution
 Filename and MIME metadata survive this replacement so adapter format handling stays shared.
 
 The parent owns process-group cancellation and output validation. This module has no public tool.
+Its private --parent-fd pipe closes when the supervisor disappears, including abrupt OS termination.
+A watcher then terminates this process group. It refuses to arm outside its own group.
+Local process termination does not establish remote-provider cancellation.
 A complete schema-valid response is written privately, including partial or failed provider statuses.
 Only top-level backend_raw is excluded; typed fields, warnings and explicit nulls remain unchanged.
 Exceptions produce exit status 1 with no provider diagnostic or credential written to stdout or disk.
@@ -21,11 +24,15 @@ The child receives no ambient host environment unless the operator explicitly su
 
 from __future__ import annotations
 
+import argparse
 import base64
 import hashlib
 import json
 import os
+import signal
 import sys
+import threading
+from contextlib import suppress
 from pathlib import Path
 
 from openreading.api import run_request
@@ -75,8 +82,30 @@ def execute(packet: dict) -> dict:
     return {key: value for key, value in payload.items() if key != "backend_raw"}
 
 
-def main() -> int:
+def watch_parent(fd: int) -> None:
+    """Kill this owned process group if its supervisor disappears, without retaining diagnostics."""
+    if os.getpgrp() != os.getpid():
+        raise ValueError("Worker must own process group before arming liveness")
+    os.set_inheritable(fd, False)
+
+    def observe():
+        # No data is sent. EOF or a broken control channel means ownership was lost.
+        with suppress(OSError):
+            os.read(fd, 1)
+        with suppress(OSError):
+            os.close(fd)
+        try:
+            os.killpg(os.getpid(), signal.SIGKILL)
+        finally:
+            os._exit(1)
+
+    threading.Thread(target=observe, daemon=True).start()
+
+
+def main(parent_fd: int | None = None) -> int:
     try:
+        if parent_fd is not None:
+            watch_parent(parent_fd)
         payload = execute(json.load(sys.stdin))
         fd = os.open("response.json", os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, "wb") as output:
@@ -89,4 +118,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--parent-fd", required=True, type=int)
+    raise SystemExit(main(parser.parse_args().parent_fd))
