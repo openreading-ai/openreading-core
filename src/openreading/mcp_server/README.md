@@ -34,7 +34,7 @@ These flags do not change local imports, and static `openreading_backends` disco
 An empty plan sets `isError`. A nonempty plan does not establish backend readiness, format compatibility or completed processing.
 Selection returns `selection_unavailable` unless a trusted launcher explicitly supplies a local chooser.
 
-The general profile exposes eight tools without requiring a fixed local parser at startup.
+The general profile exposes nine tools without requiring a fixed local parser at startup.
 Call `openreading_parse` with the shared request shape or `openreading_batch` with an ordered `requests` array, then use `openreading_get_job`, `openreading_list_jobs` and `openreading_cancel_job`.
 For example, `backend.id` set to `strategy:local` selects an operator-authorized strategy with independently authorized backend leaves.
 The other three tools are `openreading_route`, `openreading_get_result` and `openreading_compare`, using the same retained-result contracts.
@@ -70,6 +70,18 @@ Job `state=succeeded` means publication only, including publication of an empty 
 Cancellation or interruption prevents final batch publication.
 Completed private attempts persist, and cancelling a batch cannot undo provider calls already completed.
 This operation accepts explicit granted files; directory expansion and native provider batch dispatch are not implemented here.
+
+Continue a terminal strategy job with `openreading_resume` and its `job_id`; for a batch, supply a zero-based `item_index`.
+For example, `{"job_id":"ej1_0123456789abcdef0123456789abcdef","item_index":0}` selects the first batch attempt.
+Resume creates a new job and snapshots retained source bytes and journal files without changing the prior attempt.
+The original input file need not remain present, but the same input grant and retained strategy attempt must still exist.
+Current authorization must cover the original strategy and every originally pinned backend, with unchanged explicit configuration.
+A named backend has no strategy journal; unavailable attempts refuse with `resume_unavailable` instead of starting fresh work.
+A batch continuation publishes one normalized response, not a reconstructed aggregate for the original batch.
+Terminal steps replay, including recorded failures; a step without a terminal outcome may dispatch again and incur provider charges.
+Repeating resume creates another job from that selected snapshot, so reconnect through job lookup instead of repeating it automatically.
+Use the new job ID for cancellation and complete result retrieval through the existing delivery modes.
+These checks do not establish exactly-once remote execution, extraction accuracy, or native ChatGPT or Claude acceptance.
 
 
 Install the optional dependencies in your development environment, then configure your client to launch this command:
@@ -164,7 +176,7 @@ Control writes remain cancellable when the pipe fills, including on older suppor
 Its explicit operator environment avoids ambient host credentials and configuration, but provides no operating-system sandbox.
 Reserved directory and configuration overrides fail before an attempt starts, with the five reserved names listed in `execution_process`.
 Private source copies and strategy journals persist under an attempt directory; the internal job records retain its location.
-The general tool layer checks admission receipt budgets before launching jobs, while scoped resume remains separate work.
+The general tool layer checks admission receipt budgets before launching jobs, including explicit strategy continuation through openreading_resume.
 
 ## Operations
 
@@ -242,7 +254,7 @@ Client packaging and installation checks belong in the separate `openreading-age
 
 ## Not built yet
 
-Batch execution, scoped resume, readiness and liveness discovery, strategy inspection and proposed triage remain unbuilt MCP operations.
+Readiness and liveness discovery, strategy inspection and proposed triage remain unbuilt MCP operations.
 Comparison covers retained normalized responses; truth scoring and batch-result corpus comparison remain unbuilt MCP operations.
 The remaining agent surface is proposed in [the agent design](../../../design/agentic.md).
 Passing stdio tests does not establish desktop installation compatibility or measured model token savings.

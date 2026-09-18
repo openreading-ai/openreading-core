@@ -180,6 +180,8 @@ Strategies (optional `openreading.yaml` orchestration):
 Resume a journalled run (needs `OPENREADING_LEDGER`, see `openreading.api`):
 
     resp = openreading.resume("7dbf6b71-adb5-4e90-9188-a184fdba9d05")   # a run id is a UUIDv4
+    resp = openreading.resume(run_id, ledger_root=ledger_dir, config=configuration,
+                              backend_allowlist=frozenset({"pymupdf"}))
     # CLI: openreading resume 7dbf6b71-adb5-4e90-9188-a184fdba9d05      (no other flags)
 
 HTTP server (`[server]` extra; binds 127.0.0.1:8787; NO built-in caller auth unless

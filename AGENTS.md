@@ -226,7 +226,7 @@ conformance kit, the thin JSON server, and the benchmark **harness** with one sy
 
 These belong here too, once they are built:
 
-- MCP batch, scoped resume, readiness, truth/corpus comparison and proposed `triage`
+- MCP readiness, truth/corpus comparison and proposed `triage`
 - the decider wire executor, which is the real LLM call behind `DeciderPort` with the caller's
   key, a generic prompt, and offline replay
 - the intent schema and its routing mechanics

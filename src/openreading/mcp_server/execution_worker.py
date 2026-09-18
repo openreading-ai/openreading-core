@@ -10,6 +10,7 @@ The parent owns process-group cancellation and output validation. This module ha
 Its private --parent-fd pipe closes when the supervisor disappears, including abrupt OS termination.
 A watcher then terminates this process group. It refuses to arm outside its own group.
 Local process termination does not establish remote-provider cancellation.
+A resume packet additionally binds the complete retained snapshot before using explicit configuration, ledger and credential arguments.
 A complete schema-valid response is written privately, including partial or failed provider statuses.
 Only top-level backend_raw is excluded; typed fields, warnings and explicit nulls remain unchanged.
 Exceptions produce exit status 1 with no provider diagnostic or credential written to stdout or disk.
@@ -35,7 +36,7 @@ import threading
 from contextlib import suppress
 from pathlib import Path
 
-from openreading.api import run_request
+from openreading.api import resume_run, run_request
 from openreading.artifacts.models import json_bytes
 from openreading.artifacts.store import safe_read
 from openreading.config import router_config
@@ -54,6 +55,23 @@ def execute(packet: dict) -> dict:
         allowed_strategies=packet["allowed_strategies"],
     )
     plan = authority.authorize(packet["request"])
+    if "resume" in packet:
+        from openreading.mcp_server.resume_input import verify_snapshot
+
+        snapshot = packet["resume"]
+        if snapshot["request"] != json.loads(plan.request_json):
+            raise ValueError("Resume request mismatch")
+        verify_snapshot(Path.cwd(), authority, snapshot)
+        payload = resume_run(
+            snapshot["run_id"],
+            ledger_root=Path.cwd() / "ledger",
+            config=json.loads(authority.configuration),
+            broker=EnvCredentialBroker(environ=dict(os.environ)),
+            backend_allowlist=authority.allowed_backends,
+            keep_candidates=True,
+        )
+        validate_response(payload)
+        return {key: value for key, value in payload.items() if key != "backend_raw"}
     raw = safe_read(Path.cwd() / "source", None)
     if hashlib.sha256(raw).hexdigest() != packet["source_sha256"]:
         raise ValueError("Copied source digest mismatch")

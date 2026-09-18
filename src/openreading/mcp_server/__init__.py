@@ -1,6 +1,6 @@
 """Expose local evidence and scoped general execution through separate stdio profiles.
 
-The general-execution-v1 profile serves eight tools without selecting a mandatory local parser.
+The general-execution-v1 profile serves nine tools without selecting a mandatory local parser.
 Use openreading_parse to start authorized backend or strategy work, then inspect persistent ej1 jobs.
 General get_job, list_jobs and cancel_job operate under the original input grant across client reconnects.
 Get and list can persist recovery after supervisor exit, so their tool annotations admit writes.
@@ -52,7 +52,7 @@ An optional baseline selects an existing input or appends another retained respo
 The shared comparison engine never executes either backend; its report retains exact subject-to-input mappings.
 For example, compare two retained runs of Docling without reprocessing their source documents.
 The synchronous call returns a bounded receipt; host cancellation does not undo completed report publication.
-Truth scoring, corpus comparison and scoped resume remain unbuilt MCP operations.
+Truth scoring and corpus comparison remain unbuilt MCP operations.
 
 Internal execution preflight lives in openreading.mcp_server.execution and exposes no additional tool.
 It snapshots explicit configuration with independent backend and strategy entrypoint scopes.
@@ -62,7 +62,9 @@ Internal ExecutionAttempt in openreading.mcp_server.execution_process acquires g
 It returns complete validated content while preserving backend scope at dispatch.
 Internal ExecutionJobs in openreading.mcp_server.execution_jobs persists detached work, cancellation and retained-result receipts.
 It distinguishes successful publication from partial, failed or still-processing provider outcomes.
-General tools still need launcher integration and receipt budgeting before accepting execution requests.
+General tools preflight receipt budgets before accepting execution requests through the standalone launcher.
+Use openreading_resume with a terminal strategy job ID to continue from retained bytes under current authority.
+A batch requires an item_index; the new job retains one normalized response without rewriting the original aggregate.
 
 Artifact source, response, and passages persist until you remove their store directory.
 Retrieval shares selected document text with the calling agent. Document instructions

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased scoped resume MCP
+
+- Add openreading_resume for terminal strategy jobs and individual batch strategy attempts under current operator authority.
+  Each continuation snapshots retained input and journal files into a new durable job without rewriting the prior attempt.
+- Add explicit ledger, configuration, credential and backend-scope arguments to the shared resume API.
+  Replay terminal steps and refuse changed identity; nonterminal steps may dispatch again without an exactly-once guarantee.
+- Add execution-tool v0.3 while preserving every predecessor schema. General tools increase to nine; local tools remain thirteen.
+  Native standalone host acceptance, readiness and truth/corpus comparison remain pending.
+
 ## Unreleased general batch MCP
 
 - Clarify that job success means publication, including empty batches with failed status and an empty_batch warning.

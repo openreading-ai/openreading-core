@@ -1,6 +1,6 @@
 """Persist general execution through a detached supervisor under the original input grant.
 
-Each accepted parse or batch creates one ej1 job; repeating start creates new work rather than reusing output.
+Each accepted parse, batch or resume creates one ej1 job; repeating start creates new work rather than reusing output.
 Batch requests authorize every item before acquiring sources and retain the shared ordered batch-result envelope.
 Each batch holds one concurrency slot; its isolated item attempts execute serially under the same cancellation checks.
 For example, two duplicate source requests produce two batch items instead of a deduplicated import.
@@ -31,7 +31,11 @@ Job history, source snapshots and journals persist without automatic eviction or
 Listing uses job-ID order with grant-bound cursors and fifty summaries per reply at most.
 Concurrent new jobs can sort before a cursor; restart listing to discover them.
 The general MCP profile exposes these jobs without an input-size cap or provider readiness claim.
-Frozen-client dispatch and scoped resume remain separate integration work.
+Resume selects a terminal strategy attempt through a same-grant job ID and an optional batch item index.
+Current strategy and backend scope is rechecked before reading retained source bytes; explicit configuration must remain unchanged.
+Each continuation copies the retained source and journal into its own attempt, preserving the original attempt files.
+Repeating resume creates new work and can redispatch steps without terminal outcomes, so remote exactly-once execution is not established.
+Frozen-client dispatch remains separate integration work.
 """
 
 from __future__ import annotations
@@ -87,7 +91,12 @@ _PATTERN = r"ej1_[0-9a-f]{32}"
 class ExecutionJobError(Exception):
     """Lookup and startup failures carry fixed codes without private exception details."""
 
-    def __init__(self, code: Literal["job_not_found", "job_state_invalid", "job_start_failed"]):
+    def __init__(
+        self,
+        code: Literal[
+            "job_not_found", "job_state_invalid", "job_start_failed", "resume_unavailable"
+        ],
+    ):
         self.code = code
         super().__init__(code)
 
@@ -208,8 +217,56 @@ class ExecutionJobs:
         requests = authorize_batch(self.authority, value)
         return self._start({"requests": requests}, "batch")
 
+    def start_resume(self, value: dict) -> ExecutionJob:
+        """Accept a new continuation of a terminal, same-grant strategy attempt."""
+        from openreading.mcp_server.resume_input import inspect_attempt
+        from openreading.types.execution_tool import ResumeRequest
+
+        request = ResumeRequest.model_validate(value)
+        previous = self.get(request.job_id)
+        if previous.state not in TERMINAL:
+            raise ExecutionJobError("resume_unavailable")
+        root = self._root(request.job_id)
+        try:
+            prior = _read_bound(root, "request.json", self.store.grant, None)
+            if json_bytes(prior["configuration"]) != self.authority.configuration:
+                raise ValueError("Resume configuration changed")
+            operation = prior.get("operation", "parse")
+            original = prior["request"]
+            name = "attempt.json"
+            if operation == "batch":
+                if request.item_index is None:
+                    raise ValueError("Batch resume requires an item index")
+                original = original["requests"][request.item_index]
+                name = f"attempt-{request.item_index}.json"
+            elif request.item_index is not None:
+                raise ValueError("Only batch jobs accept an item index")
+            elif operation == "resume":
+                original = original["request"]
+            elif operation != "parse":
+                raise ValueError("Unknown prior operation")
+            # Authorization precedes reading the retained source or walking its journal.
+            self.authority.authorize(original)
+            retained = Path(_read_bound(root, name, self.store.grant)["directory"])
+            if (
+                not re.fullmatch(r"[0-9a-f]{32}", retained.name)
+                or retained.parent
+                != self.store.config.artifact_root / "execution" / self.store.grant
+            ):
+                raise ValueError("Foreign attempt")
+            snapshot = inspect_attempt(retained, self.authority, original)
+        except ExecutionRefused:
+            raise
+        except Exception:
+            raise ExecutionJobError("resume_unavailable") from None
+        return self._start(snapshot, "resume")
+
     def _start(self, value: dict, operation: str) -> ExecutionJob:
-        requests = value["requests"] if operation == "batch" else [value]
+        requests = (
+            []
+            if operation == "resume"
+            else (value["requests"] if operation == "batch" else [value])
+        )
         for item in requests:
             with self.store.source(item["document"]["path"]):
                 pass
@@ -457,8 +514,10 @@ def run(root: Path) -> int:
         operation = request.get("operation", "parse")
         if operation == "batch":
             authorize_batch(authority, request["request"])
-        elif operation == "parse":
-            authority.authorize(request["request"])
+        elif operation in {"parse", "resume"}:
+            authority.authorize(
+                request["request"]["request"] if operation == "resume" else request["request"]
+            )
         else:
             raise ExecutionRefused("invalid_request")
         while True:
@@ -491,6 +550,10 @@ def run(root: Path) -> int:
                             environment=manager.environment,
                             check=check,
                             on_attempt=record_attempt,
+                        )
+                    elif operation == "resume":
+                        content = attempt.run(
+                            request["request"]["request"], resume=request["request"], check=check
                         )
                     else:
                         content = attempt.run(request["request"], check=check)

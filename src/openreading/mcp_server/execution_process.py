@@ -31,7 +31,9 @@ Documents and JSON are materialized in memory by the shared API and result valid
 Attempt directories remain under execution/<grant>/<random-id>, outside local-import staging.
 The execution_jobs owner records each attempt location; operators remove retained directories deliberately.
 An instance accepts one attempt; a second run refuses instead of overwriting its retained files.
-The general MCP profile exposes this worker through execution_jobs, while scoped resume remains separate work.
+The general MCP profile exposes this worker through execution_jobs for parsing and scoped strategy continuation.
+Resume copies a hash-bound retained source and journal rather than acquiring the original input again.
+The child validates that snapshot before calling the shared resume API under current backend authority.
 """
 
 from __future__ import annotations
@@ -41,6 +43,7 @@ import importlib.metadata
 import json
 import math
 import os
+import re
 import select
 import signal
 import subprocess
@@ -149,6 +152,7 @@ class ExecutionAttempt:
         *,
         check: Callable[[], None] | None = None,
         deadline_seconds: float | None = None,
+        resume: dict | None = None,
     ) -> ResultContent:
         """Authorize before acquisition and return validated content only after child cleanup."""
         if deadline_seconds is not None and (
@@ -172,15 +176,28 @@ class ExecutionAttempt:
         self._started = True
         relative = plan.request.document.path
         assert relative is not None
-        with self.store.source(relative) as fd:
+        if resume is None:
+            with self.store.source(relative) as fd:
+                with directory(self.root.parent, create=True):
+                    pass
+                self.root.mkdir(mode=0o700)
+                digest, changed = copy_source(fd, self.root / "source", None, None, check=observe)
+            if changed:
+                raise ExecutionError("source_changed")
+        else:
+            from openreading.mcp_server.resume_input import copy_snapshot, verify_snapshot
+
+            if not re.fullmatch(r"[0-9a-f]{32}", resume["directory"]):
+                raise ExecutionError("execution_failed")
             with directory(self.root.parent, create=True):
                 pass
             self.root.mkdir(mode=0o700)
-            digest, changed = copy_source(fd, self.root / "source", None, None, check=observe)
-        if changed:
-            raise ExecutionError("source_changed")
+            copy_snapshot(self.root.parent / resume["directory"], self.root, resume, observe)
+            verify_snapshot(self.root, self.authority, resume)
+            digest = resume["source_sha256"]
         for name in ("home", "tmp", "cache", "ledger"):
-            (self.root / name).mkdir(mode=0o700)
+            with directory(self.root / name, create=True):
+                pass
         environment = {
             "PATH": os.defpath,
             **self.environment,
@@ -197,6 +214,7 @@ class ExecutionAttempt:
                 "allowed_strategies": sorted(self.authority.allowed_strategies),
                 "request": json.loads(plan.request_json),
                 "source_sha256": digest,
+                **({"resume": resume} if resume is not None else {}),
             }
         )
         try:

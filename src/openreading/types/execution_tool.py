@@ -3,12 +3,16 @@
 Batch accepts an ordered requests array of the same restricted shared requests, including an empty array.
 Parse accepts the shared request shape restricted to grant-relative paths and operator-owned runtime configuration.
 For example, backend.id strategy:local selects an authorized strategy without accepting caller credentials or document URLs.
+Resume accepts a prior job_id and an optional zero-based batch item_index, never arbitrary ledger paths.
+Version 0.3 adds resume admission while retaining the existing job status wire shape.
 The retained execution-job contract supplies status and lookup shapes without changing historical lifecycle records.
 Successful acceptance starts detached work, while successful publication preserves the separate provider response state.
 """
 
 from copy import deepcopy
 from typing import Literal
+
+from pydantic import Field
 
 from openreading.artifacts.models import ErrorEnvelope
 from openreading.schemas import execution_job_schema, request_schema
@@ -19,6 +23,7 @@ ExecutionToolCode = Literal[
     "job_not_found",
     "job_state_invalid",
     "job_start_failed",
+    "resume_unavailable",
     "response_too_large",
 ]
 
@@ -30,6 +35,11 @@ class ExecutionToolFault(JobWire):
 class ExecutionToolFailure(JobWire):
     schema_version: Literal["0.1"] = "0.1"
     error: ExecutionToolFault
+
+
+class ResumeRequest(JobWire):
+    job_id: str = Field(pattern=r"^ej1_[0-9a-f]{32}$")
+    item_index: int | None = Field(default=None, ge=0, strict=True)
 
 
 def execution_tool_contract() -> dict:
@@ -60,6 +70,7 @@ def execution_tool_contract() -> dict:
     schema["$defs"].update(envelope.pop("$defs"))
     schema["$defs"].update(
         ParseRequest=request,
+        ResumeRequest=ResumeRequest.model_json_schema(),
         BatchRequest={
             "type": "object",
             "additionalProperties": False,
@@ -75,10 +86,11 @@ def execution_tool_contract() -> dict:
         [
             {"$ref": "#/$defs/ParseRequest"},
             {"$ref": "#/$defs/BatchRequest"},
+            {"$ref": "#/$defs/ResumeRequest"},
             {"$ref": "#/$defs/ExecutionToolFailure"},
             {"$ref": "#/$defs/ErrorEnvelope"},
         ]
     )
-    schema["$id"] = "https://openreading.ai/schemas/execution-tool.v0.2.json"
-    schema["title"] = "OpenReading Execution Tool v0.2"
+    schema["$id"] = "https://openreading.ai/schemas/execution-tool.v0.3.json"
+    schema["title"] = "OpenReading Execution Tool v0.3"
     return schema

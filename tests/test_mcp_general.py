@@ -28,6 +28,7 @@ async def test_general_catalog_contract_scope_and_annotations(store, monkeypatch
         assert set(catalog) == {
             "openreading_parse",
             "openreading_batch",
+            "openreading_resume",
             "openreading_get_job",
             "openreading_list_jobs",
             "openreading_cancel_job",
@@ -44,10 +45,13 @@ async def test_general_catalog_contract_scope_and_annotations(store, monkeypatch
             assert not catalog[name].annotations.readOnlyHint
         assert catalog["openreading_parse"].annotations.openWorldHint
         assert not catalog["openreading_parse"].annotations.idempotentHint
+        assert catalog["openreading_resume"].annotations.openWorldHint
+        assert not catalog["openreading_resume"].annotations.idempotentHint
+        assert not catalog["openreading_resume"].annotations.readOnlyHint
         assert all(
             not tool.annotations.openWorldHint
             for name, tool in catalog.items()
-            if name not in {"openreading_parse", "openreading_batch"}
+            if name not in {"openreading_parse", "openreading_batch", "openreading_resume"}
         )
         response = await session.call_tool("openreading_parse", request("reducto"))
         assert response.isError
@@ -229,7 +233,7 @@ async def test_real_stdio_parse_disconnect_reconnect_and_complete_delivery(
             ClientSession(reader, writer) as session,
         ):
             await session.initialize()
-            assert len((await session.list_tools()).tools) == 8
+            assert len((await session.list_tools()).tools) == 9
             accepted = await payload(session, "openreading_parse", request(backend))
             Draft202012Validator(execution_tool_schema()).validate(accepted)
             assert accepted["state"] == "queued"

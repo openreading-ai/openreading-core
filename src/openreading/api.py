@@ -17,7 +17,8 @@ An envelope is the schema-valid JSON object returned by a completed operation.
 - `run(source, backend=None, **options)` returns a `response.v0.3` envelope.
 - `run_batch(sources, backend=None, **options)` returns a `batch-result.v0.2` envelope.
 - `route(source, **options)` returns a `RoutePlan` without executing a backend.
-- `resume_run(run_id)` returns a response and is exported as `openreading.resume`.
+- `resume_run(run_id, *, ledger_root=None, config=None, broker=None, backend_allowlist=None,
+  keep_candidates=False)` returns a response and is exported as `openreading.resume`.
 - `build_request`, `run_request`, `prepare_named_backend`, and `materialize_document` support
   the CLI and server through the same lower-level seams.
 
@@ -97,6 +98,9 @@ Resume rebuilds the request from the header and content-addressed plaintext blob
 Stored bytes are verified against each `BlobRef` digest before they are trusted.
 The live configuration and plan must match the recorded header, or `HeaderMismatch` refuses.
 Recorded terminal steps replay without network access. Previously unreached steps execute normally.
+Explicit ledger_root, config and broker let scoped callers avoid ambient discovery and credentials.
+The current backend_allowlist must include every original pinned backend before reading retained input.
+For example, revoking pymupdf refuses a resume whose header pinned pymupdf, even when its steps already completed.
 Passwords and webhook URLs are excluded from the header and cannot be recovered on resume.
 """
 
@@ -427,6 +431,7 @@ def _arm_ledger_unguarded(
     plan_tree: dict[str, Any] | None = None,
     strategy_name: str = "",
     resume: bool = False,
+    ledger_root: Path | None = None,
 ) -> Executor | None:
     """Constructs T1's real `InlineExecutor` when `OPENREADING_LEDGER` is set (a directory path;
     no flag, per L1). Unset ⇒ `None`, and `run_strategy`'s own default (an unarmed InlineExecutor,
@@ -445,7 +450,7 @@ def _arm_ledger_unguarded(
     disagreement (AC-4) — before touching the journal further — and, on a match, arms the resumed
     `InlineExecutor` WITH `pinned_eligible=` sourced from the header, which is what gives AC-14's
     gate teeth."""
-    root = os.environ.get("OPENREADING_LEDGER")
+    root = ledger_root if ledger_root is not None else os.environ.get("OPENREADING_LEDGER")
     if not root:
         return None
     ledger_root = Path(root)
@@ -963,38 +968,44 @@ def _request_from_header(header: RunHeader, blobs: LocalFsBlobStore) -> OpenRead
     return OpenReadingRequest.model_validate(body)
 
 
-def resume_run(run_id: str) -> dict[str, Any]:
-    """`openreading resume <RUN_ID>` (internal/design/ledger.md §10, plan §4.4): re-derive the run's
-    identity from the LIVE openreading.yaml + registry, compare it against the header written at
-    the run's first arm, and — on a match — re-drive the SAME compiled strategy against the
-    EXISTING journal: every step already terminal there replays byte-identical (§4.3, zero network,
-    AC-3); anything genuinely unreached executes for real. No other input is taken — "every option
-    comes from the ledger" (§10) — the original request is reconstructed from the header's own
-    `document`/`slim_request` fields via `_request_from_header`.
+def resume_run(
+    run_id: str,
+    *,
+    ledger_root: Path | None = None,
+    config: str | os.PathLike[str] | dict | LoadedFile | None = None,
+    broker: EnvCredentialBroker | None = None,
+    backend_allowlist: frozenset[str] | None = None,
+    keep_candidates: bool = False,
+) -> dict[str, Any]:
+    """Replay a strategy journal under its original identity and an optional current backend scope.
 
-    A run the SERVER armed for a scoped caller resumes correctly without the caller's allow-list,
-    which is worth stating because the `compile_strategy` call below deliberately passes none. A
-    resume is a CLI/library action with no token concept, so the scope cannot come from the caller;
-    it comes from the ledger, like every other option:
+    Explicit ledger_root and config bypass their ambient discovery paths independently.
+    For example, config={"version": 1} selects built-in defaults instead of discovering YAML.
+    With no keywords, CLI and library callers retain environment and configuration discovery.
+    The broker supplies credentials for unreached steps; keep_candidates preserves candidate data.
 
-    - A scope that pruned a named rung changed the compiled tree, so `plan_hash` no longer matches
-      and the resume hard-refuses (`plan_hash` is one of the three identity fields, `_HARD_FIELDS`).
-    - A scope that pruned nothing leaves `plan_hash` matching, and correctly so. The header's
-      `pinned_eligible` still carries the set the original run could dispatch, and
-      `_arm_ledger(resume=True)` arms the resumed executor's per-step gate from THIS header rather
-      than a freshly recomputed one, so a policy edit between the two halves of a run cannot let
-      the resume reach a backend the original could not.
+    A current scope must include every originally pinned backend, even for replayed terminal steps.
+    This conservative check runs before document blobs are read or credentials are resolved.
+    Compilation under that original set preserves previously pruned plans without widening dispatch.
+    Unscoped callers retain historical compilation and the original per-dispatch backend ceiling.
+    Strategy entrypoint authorization and filesystem grants belong to the calling surface.
 
-    Raises `LookupError` when `OPENREADING_LEDGER` is unset or no header exists for `run_id`, or
-    `ledger.header.HeaderMismatch` when the live config/plan/journal-version identity no longer
-    matches the run's original header (AC-4) — the CLI maps each to its own printed refusal."""
-    root = os.environ.get("OPENREADING_LEDGER")
+    Header identity changes raise HeaderMismatch. Missing input or recorded output refuses replay.
+    Terminal steps replay; attempted steps without a terminal record may dispatch again.
+    Resume therefore provides neither remote exactly-once execution nor an automatic retry policy.
+    """
+    root = ledger_root if ledger_root is not None else os.environ.get("OPENREADING_LEDGER")
     if not root:
         raise LookupError("OPENREADING_LEDGER is not set, so there is no run to resume from")
     ledger_root = Path(root)
     header = read_header(ledger_root, run_id)
     if header is None:
         raise LookupError(f"no recorded run {run_id!r} under {ledger_root}")
+    original_dispatchable = frozenset(header.pinned_eligible)
+    if backend_allowlist is not None and (
+        not original_dispatchable or not original_dispatchable <= backend_allowlist
+    ):
+        raise ScopeRefused("Recorded backends are outside the current resume scope")
 
     from openreading.strategies import compile_strategy, run_strategy
     from openreading.strategies.loader import build_config
@@ -1002,20 +1013,22 @@ def resume_run(run_id: str) -> dict[str, Any]:
 
     blobs = LocalFsBlobStore(ledger_root / "blobs")
     req = _request_from_header(header, blobs)
-
-    loaded = load_config_file(None)
+    loaded = load_config_file(config)
     strategy_file = build_config(loaded)
     strategy_config = strategy_file.config if strategy_file else StrategyConfig(version=1)
     registry = build_registry()
-    broker = EnvCredentialBroker()
-    # §10: "no other flags" — a resume takes every option from the ledger and the live file.
-    req, config = apply_config(req, loaded.policy if loaded else None, RouterConfig())
-    compiled = compile_strategy(req, header.strategy_name, strategy_config, registry, config)
-    # The resumed walk may dispatch only what the ORIGINAL run could. `pinned_eligible` records
-    # that set, and re-imposing it as the allow-list is what stops a policy edit between the two
-    # halves of a run from widening it. `compiled.eligible` is left alone: it is the chain an
-    # unnamed request would walk today, reported for the operator, and no node resolves against it.
-    original_dispatchable = frozenset(header.pinned_eligible)
+    broker = broker if broker is not None else EnvCredentialBroker()
+    req, routing = apply_config(req, loaded.policy if loaded else None, RouterConfig())
+    compiled = compile_strategy(
+        req,
+        header.strategy_name,
+        strategy_config,
+        registry,
+        routing,
+        plain_info=strategy_file.plain_info if strategy_file else None,
+        backend_allowlist=original_dispatchable if backend_allowlist is not None else None,
+    )
+    # The live caller can narrow authority, but can never grant a backend absent at first arm.
     compiled.backend_allowlist = original_dispatchable
     clock = RealClock()
     executor = _arm_ledger(
@@ -1029,8 +1042,9 @@ def resume_run(run_id: str) -> dict[str, Any]:
         plan_tree=compiled.root,
         strategy_name=header.strategy_name,
         resume=True,
+        ledger_root=ledger_root,
     )
-    assert executor is not None  # OPENREADING_LEDGER was already confirmed set above
+    assert executor is not None
     result = run_strategy(
         compiled,
         req,
@@ -1039,6 +1053,7 @@ def resume_run(run_id: str) -> dict[str, Any]:
         clock=clock,
         run_id=run_id,
         executor=executor,
+        keep_candidates=keep_candidates,
     )
     result.response.orchestration = result.orchestration
     return result.response.to_schema_dict()

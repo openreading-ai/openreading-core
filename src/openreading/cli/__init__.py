@@ -1234,7 +1234,7 @@ fire after that clean shutdown.
 mcp --profile PROFILE
 ---------------------
 Serve document tools over stdio with one explicit local or general profile.
-Select general-execution-v1 for 8 tools with openreading[agent].
+Select general-execution-v1 for 9 tools with openreading[agent].
 Install the adapters you authorize separately before starting document jobs.
 A backend is a registered document processor, such as pymupdf or reducto.
 Each backend reads the formats its descriptor claims.
@@ -1272,6 +1272,15 @@ Empty input retains a batch with status.state=failed and the warning code
 empty_batch. Job state=succeeded means publication only, even for that batch.
 Every request is authorized before acquiring any source for acceptance.
 Both tools return an ej1_ job identifier before processing finishes.
+Call openreading_resume with a terminal strategy job_id to continue its work.
+For a batch strategy item, also supply its zero-based item_index.
+For example, item_index=0 selects the first item, not the entire batch.
+Resume uses retained source bytes and a copied journal under current scope.
+Configuration must remain unchanged, and every pinned backend needs a grant.
+Named backend runs have no strategy journal and return resume_unavailable.
+Terminal steps replay; steps without terminal outcomes may dispatch again.
+Each explicit resume starts a new job and can incur new provider charges.
+The original attempt stays unchanged. Remote exactly-once is not promised.
 Use openreading_get_job and openreading_list_jobs to inspect execution.
 Call openreading_cancel_job to stop unwanted work explicitly.
 Host Stop does not cancel detached work, and local cancellation cannot
