@@ -2,6 +2,8 @@
 
 ## Unreleased general execution MCP profile
 
+- Share the router default with general route planning, and document empty plans as tool errors.
+
 - Add standalone general parsing and strategy jobs through explicit backend, strategy and environment grants.
   Persistent job lookup, listing and cancellation survive client reconnects without starting duplicate provider work.
 - Expose complete retained-result delivery and comparison through the general profile without requiring a fixed local parser.

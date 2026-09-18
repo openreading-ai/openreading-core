@@ -56,6 +56,7 @@ async def test_general_catalog_contract_scope_and_annotations(store, monkeypatch
         assert not list(manager.root.glob("ej1_*"))
         planned = await session.call_tool("openreading_route", {"backend": "reducto"})
         assert json.loads(planned.content[0].text)["chain"] == []
+        assert planned.isError
         for arguments in [
             {**request(), "arbitrary": "secret"},
             {"document": {"url": "https://secret.invalid"}, "backend": {}},
@@ -346,6 +347,7 @@ def test_default_general_route_matches_execution_preflight(store, policy):
         ExecutionJobs(store, authority), "openreading_route", {}, budget=4096, request_id=1
     )
     assert json.loads(result.content[0].text)["chain"] == expected
+    assert result.isError is (not expected)
 
 
 @pytest.mark.asyncio
@@ -367,3 +369,22 @@ def test_help_names_and_count_match_general_catalog():
     count = re.search(r"general-execution-v1 for (\d+) tools", cli.__doc__)
     assert count and int(count[1]) == len(INPUTS)
     assert all(name in cli.__doc__ for name in INPUTS)
+
+
+def test_general_route_uses_router_default(store, monkeypatch):
+    from openreading.mcp_server.execution import ExecutionConfig
+    from openreading.mcp_server.execution_jobs import ExecutionJobs
+    from openreading.mcp_server.general import dispatch
+    from openreading.router.router import Router
+
+    monkeypatch.setattr(Router, "DEFAULT_BACKEND", "tesseract")
+    authority = ExecutionConfig.from_operator(allowed_backends=["tesseract"])
+    expected = list(
+        authority.authorize({"document": {"path": "sample.pdf"}, "backend": {}}).backends
+    )
+    result = dispatch(
+        ExecutionJobs(store, authority), "openreading_route", {}, budget=4096, request_id=1
+    )
+    assert expected == ["tesseract"]
+    assert json.loads(result.content[0].text)["chain"] == expected
+    assert not result.isError
