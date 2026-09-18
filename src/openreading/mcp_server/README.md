@@ -113,6 +113,11 @@ Each result contains one JSON text payload, preventing duplicate structured cont
 Invalid arguments produce fixed protocol errors, preventing schema validation from echoing private input values.
 Document text remains untrusted data, preventing a quoted instruction from gaining tool authority.
 
+Internal general-execution preflight snapshots explicit operator configuration and independent backend and strategy entrypoint scopes.
+For example, a permitted strategy cannot authorize its reducto leaf when the backend scope excludes reducto.
+Read `openreading.mcp_server.execution` for this internal contract and the obligations of future workers.
+Preflight performs no source acquisition, credential resolution or execution, and adds no callable tool.
+
 ## Operations
 
 `openreading_compare` accepts ordered `or1_` artifact or `orr1_` normalized-response identifiers under this input grant.

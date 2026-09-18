@@ -44,6 +44,12 @@ For example, compare two retained runs of Docling without reprocessing their sou
 The synchronous call returns a bounded receipt; host cancellation does not undo completed report publication.
 Truth scoring, corpus comparison and general execution MCP producers remain unbuilt.
 
+Internal execution preflight lives in openreading.mcp_server.execution and exposes no additional tool.
+It snapshots explicit configuration with independent backend and strategy entrypoint scopes.
+For example, allowing a strategy does not authorize a hosted leaf outside the backend scope.
+The shared compiler prunes unauthorized leaves before any document or credential access.
+Owned general workers must still acquire granted inputs and enforce scope at each dispatch.
+
 Artifact source, response, and passages persist until you remove their store directory.
 Retrieval shares selected document text with the calling agent. Document instructions
 remain untrusted data. The server is not an operating-system sandbox.

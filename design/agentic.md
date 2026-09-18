@@ -16,13 +16,16 @@ Its approved scope is [local document proof revision 1](https://github.com/openr
 
 ## Contracts requiring a future design
 
-A general tool surface must define authorization before accepting backend selection or strategy execution.
+Internal execution preflight is documented in `openreading.mcp_server.execution` and the MCP guide.
+General tools must integrate that authority with owned workers before accepting executable requests.
 Current core authorization narrows backend dispatch through configured backend sets and HTTP API-key scope.
 The removed vendor compliance tables and their policy keys must not return through an agent interface.
 No claim about a vendor's training, retention, or agreement can become an unverifiable routing guarantee.
 
 General result retention and bounded retrieval are documented in the artifact and MCP guides.
-General producers still need execution authority and integration with those retained result contracts.
+General producers still need granted source copying, explicit credentials, isolated stdout and private journal/output storage.
+Every dispatch must retain backend scope; preflight cannot replace execution-time enforcement.
+Durable jobs must cover cancellation, reconnect and integration with the retained result contracts.
 Retained normalized-response comparison is documented in the MCP guide.
 Truth scoring and corpus comparison still need their own MCP input contracts.
 A general extraction operation must identify any provider calls before the caller authorizes their execution.

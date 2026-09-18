@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased general MCP execution authorization
+
+- Add internal preflight with immutable operator configuration and independent backend and strategy entrypoint scopes.
+  Reuse shared routing and strategy compilation without reading documents, resolving credentials or executing providers.
+- Refuse caller-controlled acquisition, credential, runtime and storage configuration before general execution can be introduced.
+  General execution tools and owned workers remain unbuilt; the existing tool catalog is unchanged.
+
 ## Unreleased retained-input MCP comparison
 
 - Clarify retained-copy verification and v0.2 reader compatibility in schema descriptions and guides.
