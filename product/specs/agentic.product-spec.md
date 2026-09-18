@@ -27,7 +27,8 @@ Client installation and token measurement belong in the separate `openreading-ag
 
 ## Scope
 
-General parse, batch, compare, readiness, triage, warning registries, and orchestration schemas remain proposed.
+General parse, batch, truth-scored and corpus comparison, readiness, triage, warning registries, and orchestration schemas remain proposed.
+The MCP guide documents implemented symmetric and baseline comparisons of retained normalized responses.
 Existing core processing capabilities require MCP coverage for public v1. Proposed triage intelligence remains a separate scope decision.
 Scoped backend route planning is implemented separately from strategy planning and execution.
 Removed compliance policy keys are excluded; future authorization must use mechanisms current core can actually enforce.

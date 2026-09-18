@@ -23,7 +23,8 @@ This storage primitive adds no document or result-size cap and performs no autom
 It materializes JSON in memory; bounded replies do not imply bounded process memory.
 Fingerprints detect corruption, not malicious rewriting by an actor controlling the entire store.
 Source hashes and implementation identities are assertions of the trusted producer.
-General execution and comparison MCP producers remain separate implementation work.
+The comparison MCP producer is implemented in openreading.mcp_server.comparison.
+General execution producers remain separate implementation work.
 """
 
 from __future__ import annotations

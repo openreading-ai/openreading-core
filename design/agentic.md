@@ -7,7 +7,7 @@ The [remaining product intent](../product/specs/agentic.product-spec.md) preserv
 
 ## Scope boundary
 
-General parse, batch, compare, readiness discovery, and triage tools remain unbuilt.
+General parse, batch, truth-scored and corpus comparison, readiness discovery, and triage tools remain unbuilt.
 Scoped backend route planning is documented in the MCP guide; strategy planning remains proposed.
 The local profile does not satisfy those requirements by exposing differently named equivalents.
 It deliberately selects one backend, one explicit input grant, and bounded retained evidence.
@@ -23,7 +23,8 @@ No claim about a vendor's training, retention, or agreement can become an unveri
 
 General result retention and bounded retrieval are documented in the artifact and MCP guides.
 General producers still need execution authority and integration with those retained result contracts.
-A compare operation over retained results must not execute either backend again.
+Retained normalized-response comparison is documented in the MCP guide.
+Truth scoring and corpus comparison still need their own MCP input contracts.
 A general extraction operation must identify any provider calls before the caller authorizes their execution.
 
 ## Triage remains proposed

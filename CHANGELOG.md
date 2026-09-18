@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased retained-input MCP comparison
+
+- Add `openreading_compare` over authorized retained normalized responses, using the existing comparison engine.
+  Optional baselines share input validation; reports retain subject mappings and use complete result retrieval.
+- Compare-tool v0.1 returns a receipt within the measured MCP response budget before publishing the report.
+  No backend executes; truth scoring and corpus comparison remain separate MCP input-contract work.
+
 ## Unreleased general MCP result retention
 
 - Retain schema-valid responses and comparison reports independently of local citation artifacts.

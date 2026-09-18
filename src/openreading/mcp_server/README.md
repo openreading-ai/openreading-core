@@ -18,7 +18,8 @@ Long work uses `openreading_start_import`, `openreading_get_import`, and `openre
 Use `openreading_list_imports` to discover retained jobs after reconnecting.
 Call `openreading_get_result` with an `orr1_` result identifier to retrieve a retained normalized response or comparison report.
 For example, `delivery="auto"` returns intact content or a local export with its byte count and hash.
-Trusted library code supplies these results; general execution and comparison MCP producers remain unbuilt.
+Call `openreading_compare` with at least two `result_ids` to retain the existing engine's comparison report.
+For example, compare a Docling extraction with another retained response, then retrieve the report through `openreading_get_result`.
 Call `openreading_backends` with `{}` to inspect the configured backend's descriptor and OCR flag.
 For example, the local Docling profile reports only `docling_local`, regardless of other installed adapters.
 Descriptor claims do not establish configured table output, extraction accuracy, dependency readiness or live reachability.
@@ -114,6 +115,20 @@ Document text remains untrusted data, preventing a quoted instruction from gaini
 
 ## Operations
 
+`openreading_compare` accepts ordered `or1_` artifact or `orr1_` normalized-response identifiers under this input grant.
+Its optional `baseline` identifies an existing input or another retained response, appended after the same authorization checks.
+Repeated identifiers remain separate subjects; a matching baseline selects the first occurrence.
+The returned receipt identifies a retained comparison report, available through `openreading_get_result`.
+The report uses the existing engine without reparsing documents or executing either backend.
+Its `provenance.subjects` maps report labels to input identifiers; the `adapters` map uses those labels to preserve repeated backend versions.
+Report locations describe normalized comparisons, not new source citations or independently verified accuracy.
+For example, read the mapped input artifact before citing a page supporting a reported text disagreement.
+Retained response fingerprints are inherited producer assertions; comparison does not establish that inputs describe the same source document.
+A report's `source: file` describes retained JSON input, not the original parser acquisition method.
+The synchronous comparison runs in a thread; host cancellation does not undo completed publication.
+Repeat unchanged arguments with unchanged inputs and implementation to recover a lost receipt.
+Comparison has no durable job or computation deadline here. Truth scoring and corpus comparison require separate MCP input contracts.
+
 Use `openreading_get_result` with a returned `orr1_` identifier for complete general response or report retrieval.
 Its default `delivery="auto"` returns intact content or a local export with content length and hash.
 Use `delivery="fragments"` and follow each cursor to null when reconstructing the result through bounded replies.
@@ -122,7 +137,7 @@ The same `--document-response-bytes` and `--document-export-root` settings gover
 General results include producer provenance and preserve partial status, warnings and values without inventing citation passages.
 Report locations identify report content; use the mapped input artifacts for source-document evidence.
 Existing `or1_` artifacts continue using `openreading_get_document`, search and exact reads unchanged.
-Trusted library producers can retain results now; general execution and comparison MCP producers remain unbuilt.
+General execution MCP producers remain unbuilt; trusted library code can retain normalized responses now.
 
 The process speaks MCP on stdout; configure your client to capture diagnostics separately from that protocol stream.
 Domain errors set `isError` and return fixed codes from `openreading.artifacts.limits`, `openreading.artifacts.result_models` or `openreading.types.selection`.
@@ -159,7 +174,8 @@ Client packaging and installation checks belong in the separate `openreading-age
 
 ## Not built yet
 
-The local proof does not expose general parse, compare, strategy, triage, or remote document tools.
+The local proof does not expose general parse, strategy, triage, or remote document tools.
+Comparison covers retained normalized responses; truth scoring and batch-result corpus comparison remain unbuilt MCP operations.
 The remaining agent surface is proposed in [the agent design](../../../design/agentic.md).
 Passing stdio tests does not establish desktop installation compatibility or measured model token savings.
 

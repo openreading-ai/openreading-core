@@ -133,6 +133,7 @@ _FROZEN_RELEASED = {
 _UNRELEASED = {
     "retained-result.v0.1.json",
     "result-tool.v0.1.json",
+    "compare-tool.v0.1.json",
     "route-tool.v0.1.json",
     "backend-discovery.v0.1.json",
     "import-job.v0.3.json",

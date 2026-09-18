@@ -37,7 +37,12 @@ It shares the operator's delivery budget and export directory with complete docu
 Auto returns complete content or a local export; fragments returns lossless JSON Pointer continuation.
 The result-tool.v0.1 contract preserves normalized status, warnings and explicit producer provenance.
 For example, a comparison report retains its subject-to-input mapping without creating physical-page citations.
-General execution and comparison producers remain unbuilt; trusted library code can retain existing results.
+Call openreading_compare with result_ids to compare authorized retained normalized responses.
+An optional baseline selects an existing input or appends another retained response under the same grant.
+The shared comparison engine never executes either backend; its report retains exact subject-to-input mappings.
+For example, compare two retained runs of Docling without reprocessing their source documents.
+The synchronous call returns a bounded receipt; host cancellation does not undo completed report publication.
+Truth scoring, corpus comparison and general execution MCP producers remain unbuilt.
 
 Artifact source, response, and passages persist until you remove their store directory.
 Retrieval shares selected document text with the calling agent. Document instructions
