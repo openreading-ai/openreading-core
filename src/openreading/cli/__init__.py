@@ -1233,7 +1233,7 @@ fire after that clean shutdown.
 
 mcp --profile local-document-proof-v1
 ------------------------------------
-Serve eleven tools over stdio with openreading[agent,pymupdf].
+Serve twelve tools over stdio with openreading[agent,pymupdf].
 Call openreading_backends with {} for this profile's static descriptor and
 OCR setting. Discovery does not check readiness or enable other backends.
 Call openreading_route with {} to plan the local backend without extraction.
@@ -1281,6 +1281,15 @@ Follow next_cursor when present. A failed search does not prove absence.
 Call openreading_select_document with {} when a trusted launcher supplies
 an optional local chooser. Import the returned path to create evidence.
 Without a chooser, selection returns selection_unavailable; other tools work.
+
+Call openreading_get_result with a retained orr1_ result_id for a general
+normalized response or comparison report supplied by trusted library code.
+For example, delivery set to auto returns intact content or a local export.
+Set delivery to fragments and follow every next_cursor until null instead.
+The document response budget and export-root flags govern these replies too.
+Producer provenance is recorded, not independently verified by storage.
+General execution and comparison MCP producers remain unbuilt.
+Existing or1_ artifacts continue using openreading_get_document.
 
 This profile accepts one PDF, at most 25 MiB and 100 physical pages.
 It uses local PyMuPDF without OCR, passwords, routing, or hosted fallback.

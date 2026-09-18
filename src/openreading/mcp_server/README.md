@@ -16,6 +16,9 @@ The input root grants file access, while the separate artifact root retains copi
 The profile exposes `openreading_import`, `openreading_get_document`, `openreading_search`, `openreading_read`, and `openreading_select_document`.
 Long work uses `openreading_start_import`, `openreading_get_import`, and `openreading_cancel_import`.
 Use `openreading_list_imports` to discover retained jobs after reconnecting.
+Call `openreading_get_result` with an `orr1_` result identifier to retrieve a retained normalized response or comparison report.
+For example, `delivery="auto"` returns intact content or a local export with its byte count and hash.
+Trusted library code supplies these results; general execution and comparison MCP producers remain unbuilt.
 Call `openreading_backends` with `{}` to inspect the configured backend's descriptor and OCR flag.
 For example, the local Docling profile reports only `docling_local`, regardless of other installed adapters.
 Descriptor claims do not establish configured table output, extraction accuracy, dependency readiness or live reachability.
