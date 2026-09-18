@@ -1268,7 +1268,8 @@ Call openreading_parse with the shared request shape and a relative path.
 For example, request document.path as sample.pdf and backend.id as pymupdf.
 Call openreading_batch with requests as an ordered array of those requests.
 Each batch holds one slot and runs items serially, including duplicates.
-An empty requests array retains the shared empty_batch result.
+Empty input retains a batch with status.state=failed and the warning code
+empty_batch. Job state=succeeded means publication only, even for that batch.
 Every request is authorized before acquiring any source for acceptance.
 Both tools return an ej1_ job identifier before processing finishes.
 Use openreading_get_job and openreading_list_jobs to inspect execution.

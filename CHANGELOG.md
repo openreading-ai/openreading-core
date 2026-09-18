@@ -2,6 +2,8 @@
 
 ## Unreleased general batch MCP
 
+- Clarify that job success means publication, including empty batches with failed status and an empty_batch warning.
+
 - Add ordered batch execution through durable general jobs and the shared serial batch runner.
   Every item needs operator authorization before acquisition, and cancellation prevents final batch publication.
 - Retain complete batch envelopes with nested response statuses, fixed item failures and bounded full-result delivery.

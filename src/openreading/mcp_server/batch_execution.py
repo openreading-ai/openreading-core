@@ -3,7 +3,9 @@
 Every request is authorized before any source is acquired, including later items in the batch.
 Each item uses its own ExecutionAttempt, which reauthorizes and checks copied bytes in the child.
 The caller holds one execution slot for the batch; serial items preserve that concurrency bound.
-Duplicate requests remain separate items in input order. An empty batch retains the shared empty_batch warning.
+Duplicate requests remain separate items in input order.
+Empty input retains a batch with status.state=failed and the warning code empty_batch.
+Job state=succeeded means publication only, including publication of an empty batch with a failed aggregate status.
 
 The shared runner distinguishes returned responses from raised failures, without rewriting provider status.
 For example, a returned failed response is a succeeded batch item whose response still says failed.

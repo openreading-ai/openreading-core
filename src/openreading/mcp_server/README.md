@@ -65,7 +65,9 @@ A batch holds one operator concurrency slot and executes every item serially, in
 All request scopes are checked before any input is acquired; missing sources refuse acceptance before provider work.
 Each accepted item uses its own isolated worker, and failures preserve input order through Core's shared batch runner.
 Retrieve its complete `batch_result` through `openreading_get_result`; a succeeded item can still contain a failed extraction response.
-An empty array retains the shared `empty_batch` warning; cancellation or interruption prevents final batch publication.
+Empty input retains a batch with `status.state=failed` and the warning code `empty_batch`.
+Job `state=succeeded` means publication only, including publication of an empty batch with a failed aggregate status.
+Cancellation or interruption prevents final batch publication.
 Completed private attempts persist, and cancelling a batch cannot undo provider calls already completed.
 This operation accepts explicit granted files; directory expansion and native provider batch dispatch are not implemented here.
 

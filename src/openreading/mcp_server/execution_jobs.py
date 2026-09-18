@@ -4,7 +4,8 @@ Each accepted parse or batch creates one ej1 job; repeating start creates new wo
 Batch requests authorize every item before acquiring sources and retain the shared ordered batch-result envelope.
 Each batch holds one concurrency slot; its isolated item attempts execute serially under the same cancellation checks.
 For example, two duplicate source requests produce two batch items instead of a deduplicated import.
-An empty batch retains the shared failed empty_batch result while successful publication makes the job succeeded.
+Empty input retains a batch with status.state=failed and the warning code empty_batch.
+Job state=succeeded means publication only, including publication of an empty batch with a failed aggregate status.
 The supervisor acquires an operator-configured concurrency slot before starting an ExecutionAttempt.
 Disconnecting the MCP client leaves accepted work running. Explicit cancellation and deadlines include queue time.
 No provider is automatically retried after supervisor interruption, even when no receipt was returned.
