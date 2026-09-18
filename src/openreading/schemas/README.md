@@ -600,6 +600,7 @@ entry naming it, so the warning reaches you before the removal does.
 | `agent-document-tool.v0.4.json` | `openreading.mcp_server.tools` | Bounded import, search, read, and error payloads. |
 
 | `document-tool.v0.4.json` | `openreading.artifacts.delivery` | Complete delivery with nullable physical-page summaries for unpaginated documents. |
+| `execution-tool.v0.1.json` | `openreading.types.execution_tool` | General parse admission, lifecycle lookup and fixed failures. Embeds the restricted shared request and existing job definitions. |
 | `execution-job.v0.1.json` | `openreading.types.execution_job` | General job lifecycle and bounded lookup contracts. Publication success preserves the separate provider response state. |
 | `import-job.v0.3.json` | `openreading.types.import_job` | Background status with compatible older receipts and unpaginated import receipts. |
 | `route-tool.v0.1.json` | `openreading.types.route_tool` | Scoped backend chain, excluded entries and terminal reason; no execution. |

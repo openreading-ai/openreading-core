@@ -31,7 +31,7 @@ Documents and JSON are materialized in memory by the shared API and result valid
 Attempt directories remain under execution/<grant>/<random-id>, outside local-import staging.
 The execution_jobs owner records each attempt location; operators remove retained directories deliberately.
 An instance accepts one attempt; a second run refuses instead of overwriting its retained files.
-General MCP tools and scoped resume remain separate integration work.
+The general MCP profile exposes this worker through execution_jobs, while scoped resume remains separate work.
 """
 
 from __future__ import annotations

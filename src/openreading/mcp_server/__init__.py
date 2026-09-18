@@ -1,4 +1,14 @@
-"""Expose local document tools over stdio using the optional agent extra.
+"""Expose local evidence and scoped general execution through separate stdio profiles.
+
+The general-execution-v1 profile serves seven tools without selecting a mandatory local parser.
+Use openreading_parse to start authorized backend or strategy work, then inspect persistent ej1 jobs.
+General get_job, list_jobs and cancel_job operate under the original input grant across client reconnects.
+Get and list can persist recovery after supervisor exit, so their tool annotations admit writes.
+Get_result retrieves complete retained normalized data, while compare consumes retained inputs without provider calls.
+Route plans backend order within the same operator execution scope without checking provider readiness.
+For example, --execute-backend pymupdf authorizes parsing through that adapter when its dependencies are installed.
+The general launcher rejects local planning flags instead of interpreting them as execution authority.
+Read openreading.mcp_server.general for the tool lifecycle and openreading.cli for executable setup instructions.
 
 This profile requires POSIX descriptor and process-group support. Windows startup exits 2.
 The launcher resolves explicit root symlinks once, then intake refuses symlinks below that grant.
@@ -42,7 +52,7 @@ An optional baseline selects an existing input or appends another retained respo
 The shared comparison engine never executes either backend; its report retains exact subject-to-input mappings.
 For example, compare two retained runs of Docling without reprocessing their source documents.
 The synchronous call returns a bounded receipt; host cancellation does not undo completed report publication.
-Truth scoring, corpus comparison and general execution MCP producers remain unbuilt.
+Truth scoring, corpus comparison, batch and scoped resume remain unbuilt MCP operations.
 
 Internal execution preflight lives in openreading.mcp_server.execution and exposes no additional tool.
 It snapshots explicit configuration with independent backend and strategy entrypoint scopes.

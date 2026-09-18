@@ -101,7 +101,7 @@ TOPICS: tuple[Topic, ...] = (
     # when something stops
     Topic("exit-codes", "Exit codes", ("exits", "exit", "exitcodes")),
     Topic("signals", "Signals, and what a stopped run leaves behind", ("ctrl-c", "sigterm")),
-    Topic("mcp", "mcp --profile local-document-proof-v1"),
+    Topic("mcp", "mcp --profile PROFILE"),
     # one command at a time
     Topic("parse", "parse <file|url|dir|glob ...>"),
     Topic("backends", "backends [--check SLUG[,SLUG...]|all] [--timeout SECONDS]", ("check",)),

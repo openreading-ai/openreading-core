@@ -1952,10 +1952,12 @@ EPILOGS = {
     "mcp": r"""Examples:
   openreading mcp --profile local-document-proof-v1 \
     --input-root /absolute/documents --artifact-root /absolute/evidence
+  openreading mcp --profile general-execution-v1 --execute-backend pymupdf \
+    --input-root /absolute/documents --artifact-root /absolute/results
 
 Then:
-  Connect your MCP client and call openreading_import with a relative path.
-  Search the returned artifact, then read evidence and cite its physical page.
+  Connect your MCP client. Use openreading_import for local page evidence.
+  Use openreading_parse for general jobs, then retrieve their retained results.
 
 Exits: 0 transport closed. 2 configuration or dependencies. 130 interrupted.
 
@@ -2600,8 +2602,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     mcp = sub.add_parser(
         "mcp",
-        help="serve bounded local evidence over stdio MCP",
-        description="Import, search, and read retained local evidence with the fixed PyMuPDF profile.",
+        help="serve local evidence or scoped general execution over stdio MCP",
+        description="Select local document evidence or explicitly authorized general execution over stdio MCP.",
     )
     mcp_arguments(mcp)
     mcp.set_defaults(func=cmd_mcp)

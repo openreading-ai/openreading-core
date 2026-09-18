@@ -21,7 +21,7 @@ The internal execution_process worker repeats authorization and copies sources t
 It supplies explicit credentials, private journal/output directories and isolated stdout before provider dispatch.
 The shared API must receive allowed_backends at execution time; preflight never replaces its per-dispatch checks.
 The internal execution_jobs supervisor persists authorized attempts and retained-result receipts.
-General callable tools and launcher integration remain unbuilt.
+The general MCP profile combines this authority with durable execution jobs and bounded tool replies.
 """
 
 from __future__ import annotations

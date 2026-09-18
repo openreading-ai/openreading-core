@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased general execution MCP profile
+
+- Add standalone general parsing and strategy jobs through explicit backend, strategy and environment grants.
+  Persistent job lookup, listing and cancellation survive client reconnects without starting duplicate provider work.
+- Expose complete retained-result delivery and comparison through the general profile without requiring a fixed local parser.
+  Check actual reply envelopes before accepting jobs or cancellation, and preserve existing local profile contracts.
+- Add execution-tool v0.1 for restricted shared requests and fixed failures without rewriting execution-job v0.1.
+  Batch, scoped resume, readiness, truth/corpus comparison and native standalone host acceptance remain pending.
+
 ## Unreleased durable general execution jobs
 
 - Reject reserved environment overrides before job preparation, and document persistent recovery during status lookup and listing.

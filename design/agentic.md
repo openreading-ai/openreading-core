@@ -1,13 +1,13 @@
 # Remaining general agent surface
 
-This proposal covers work beyond the implemented fixed local document profile.
+This proposal covers capabilities beyond implemented general execution and local document profiles.
 The [MCP guide](../src/openreading/mcp_server/README.md) documents implemented local evidence tools and scoped route planning.
 The [artifact guide](../src/openreading/artifacts/README.md) documents retention and physical page evidence.
 The [remaining product intent](../product/specs/agentic.product-spec.md) preserves the unbuilt acceptance identifiers.
 
 ## Scope boundary
 
-General parse, batch, truth-scored and corpus comparison, readiness discovery, and triage tools remain unbuilt.
+Batch, scoped resume, truth-scored and corpus comparison, readiness discovery, and triage tools remain unbuilt.
 Scoped backend route planning is documented in the MCP guide; strategy planning remains proposed.
 The local profile does not satisfy those requirements by exposing differently named equivalents.
 It deliberately selects one backend, one explicit input grant, and bounded retained evidence.
@@ -17,7 +17,7 @@ Its approved scope is [local document proof revision 1](https://github.com/openr
 ## Contracts requiring a future design
 
 Internal execution preflight is documented in `openreading.mcp_server.execution` and the MCP guide.
-General tools must integrate that authority with the internal execution_jobs supervisor before accepting executable requests.
+Remaining execution tools must preserve this authority through admission and every backend dispatch.
 Current core authorization narrows backend dispatch through configured backend sets and HTTP API-key scope.
 The removed vendor compliance tables and their policy keys must not return through an agent interface.
 No claim about a vendor's training, retention, or agreement can become an unverifiable routing guarantee.
@@ -25,7 +25,7 @@ No claim about a vendor's training, retention, or agreement can become an unveri
 General result retention and bounded retrieval are documented in the artifact and MCP guides.
 The internal execution_process module supplies granted source copying, explicit child environments, isolated stdout and private journal/output storage.
 The execution_jobs supervisor documents durable status, cancellation, reconnect and retained-result publication.
-General tools still require receipt budgeting and standalone launcher integration.
+Remaining tools must retain measured reply budgets and the standalone launcher authorization boundary.
 Every dispatch must retain backend scope; preflight cannot replace execution-time enforcement.
 Retained normalized-response comparison is documented in the MCP guide.
 Truth scoring and corpus comparison still need their own MCP input contracts.

@@ -437,9 +437,9 @@ openreading.adapters` instead.
 
 Nothing below exists in the package today. Each line names where the gap is recorded.
 
-- General parse, compare, and strategy MCP tools remain proposed in
-  [design/agentic.md](../../design/agentic.md). The bounded local document profile ships
-  separately through the [MCP guide](mcp_server/README.md).
+- Batch, scoped resume, readiness, and truth/corpus comparison MCP tools remain
+  proposed in [design/agentic.md](../../design/agentic.md). Implemented general
+  processing and local evidence appear in the [MCP guide](mcp_server/README.md).
 - `triage`, a verb that would apply the playbook above for you, does not exist. `uv run
   openreading --help` lists no such verb. The gap is recorded in `AGENTS.md` (Also here when
   built) and designed alongside the tool surface in

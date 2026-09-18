@@ -9,7 +9,7 @@ No source path, document text, provider diagnostic or credential appears in publ
 Stages report observed work rather than estimated progress. Cancellation requests can race publication.
 A committed result wins that race, so cancel_requested does not override a succeeded terminal state.
 Lists contain at most fifty summaries; unavailable means a retained job could not be validated.
-These contracts support the internal supervisor. Callable general execution tools remain separate work.
+These contracts support the supervisor and general MCP tools, with tool failures defined in openreading.types.execution_tool.
 """
 
 from typing import Annotated, Literal

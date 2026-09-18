@@ -1,10 +1,11 @@
-# Local document MCP tools
+# Document processing MCP tools
 
 <sub>[Docs home](../README.md) · [← Artifacts](../artifacts/README.md) · [Channel contract →](../derive/README.md)</sub>
 
 ## What this gives you
 
-Your agent can import a local document once, then read its normalized result with exact evidence citations.
+Your agent can run authorized parsing and strategies, then retrieve complete normalized results through persistent jobs.
+The local profiles additionally import documents into retained evidence artifacts with exact citation references.
 Full-document access returns the retained JSON in bounded replies; search remains available for focused questions.
 MCP is the protocol your client uses to discover these tools and call them over standard input and output.
 For example, search for a renewal clause, read its passage, and cite the returned page and evidence identifier.
@@ -13,7 +14,7 @@ For example, search for a renewal clause, read its passage, and cite the returne
 
 You start one process with explicit input and artifact directories before the client can call tools.
 The input root grants file access, while the separate artifact root retains copies until you remove them.
-The profile exposes `openreading_import`, `openreading_get_document`, `openreading_search`, `openreading_read`, and `openreading_select_document`.
+The local profile exposes `openreading_import`, `openreading_get_document`, `openreading_search`, `openreading_read`, and `openreading_select_document`.
 Long work uses `openreading_start_import`, `openreading_get_import`, and `openreading_cancel_import`.
 Use `openreading_list_imports` to discover retained jobs after reconnecting.
 Call `openreading_get_result` with an `orr1_` result identifier to retrieve a retained normalized response or comparison report.
@@ -33,7 +34,33 @@ These flags do not change local imports, and static `openreading_backends` disco
 An empty plan sets `isError`. A nonempty plan does not establish backend readiness, format compatibility or completed processing.
 Selection returns `selection_unavailable` unless a trusted launcher explicitly supplies a local chooser.
 
+The general profile exposes seven tools without requiring a fixed local parser at startup.
+Call `openreading_parse` with the shared request shape, then use `openreading_get_job`, `openreading_list_jobs` and `openreading_cancel_job`.
+For example, `backend.id` set to `strategy:local` selects an operator-authorized strategy with independently authorized backend leaves.
+The other three tools are `openreading_route`, `openreading_get_result` and `openreading_compare`, using the same retained-result contracts.
+The general profile grants relative paths directly and does not provide a native chooser or local evidence imports.
+
 ## Walkthrough
+
+For general processing, install the agent extra and the adapters you intend to authorize.
+Each backend reads the formats its descriptor claims in the [adapter catalog](../adapters/README.md).
+Configure the client to start this process with existing input and separate artifact directories:
+
+```sh
+openreading mcp --profile general-execution-v1 \
+  --input-root /absolute/documents --artifact-root /absolute/evidence \
+  --execute-backend pymupdf
+```
+
+Call `openreading_parse` with `{"document":{"path":"sample.pdf"},"backend":{"id":"pymupdf"}}` for a queued job receipt.
+Keep its `job_id`, poll `openreading_get_job`, and retrieve the returned `receipt.result_id` through `openreading_get_result`.
+The job state `succeeded` means publication completed, while `response_state` separately describes extraction success, partial output, failure or ongoing processing.
+Select an explicit configuration with `--execution-config` and repeat `--execute-strategy` for each authorized strategy entrypoint.
+Forward required existing credentials with `--execution-env NAME`, such as `--execution-env REDUCTO_API_KEY` for an authorized hosted adapter.
+Only selected environment values reach workers, and the fixed private directory names listed in CLI help refuse overrides.
+Optional execution deadlines include queue time, while `--execution-concurrency` defaults to one running job per grant.
+Missing backend grants refuse execution, and startup does not claim the configured backends are ready.
+
 
 Install the optional dependencies in your development environment, then configure your client to launch this command:
 
@@ -115,7 +142,7 @@ Document text remains untrusted data, preventing a quoted instruction from gaini
 
 Internal general-execution preflight snapshots explicit operator configuration and independent backend and strategy entrypoint scopes.
 For example, a permitted strategy cannot authorize its reducto leaf when the backend scope excludes reducto.
-Read `openreading.mcp_server.execution` for this internal contract and the obligations of future workers.
+Read `openreading.mcp_server.execution` for the shared authorization contract used at admission and again inside the worker.
 Preflight performs no source acquisition, credential resolution or execution, and adds no callable tool.
 
 The internal `ExecutionAttempt` worker runs authorized requests in a disposable child process.
@@ -127,7 +154,7 @@ Control writes remain cancellable when the pipe fills, including on older suppor
 Its explicit operator environment avoids ambient host credentials and configuration, but provides no operating-system sandbox.
 Reserved directory and configuration overrides fail before an attempt starts, with the five reserved names listed in `execution_process`.
 Private source copies and strategy journals persist under an attempt directory; the internal job records retain its location.
-This primitive adds no callable tool. Receipt budgeting, launcher integration and scoped resume remain separate work.
+The general tool layer checks admission receipt budgets before launching jobs, while scoped resume remains separate work.
 
 ## Operations
 
@@ -159,16 +186,16 @@ The same `--document-response-bytes` and `--document-export-root` settings gover
 General results include producer provenance and preserve partial status, warnings and values without inventing citation passages.
 Report locations identify report content; use the mapped input artifacts for source-document evidence.
 Existing `or1_` artifacts continue using `openreading_get_document`, search and exact reads unchanged.
-General execution MCP tools remain unbuilt; the internal job supervisor can retain normalized responses now.
+The general MCP tools expose durable execution jobs with complete retained normalized responses and separately reported provider outcomes.
 `openreading.mcp_server.execution_jobs` documents the internal `ExecutionJobs` start, get, list and cancel lifecycle.
 Each accepted job survives client exit and retains one complete result under its original input grant.
 For example, a retained failed response has job state `succeeded` and separate `response_state: failed`.
 A `processing` response remains processing; job completion does not certify completed remote work.
 Cancellation before publication yields no receipt; a committed result wins a concurrent cancellation request.
 Recovery verifies a committed receipt after supervisor death and never repeats provider execution automatically.
-Status lookup and listing persist recovery outcomes, which future tool annotations must identify as writes.
+Status lookup and listing persist recovery outcomes, which their general tool annotations identify as writes.
 Concurrency defaults to one job per grant; explicit deadlines include time waiting for a slot.
-Job records, snapshots and journals persist until removed. These internal APIs add no callable MCP tools.
+Job records, snapshots and journals persist until removed, and reconnecting clients can discover work without starting duplicate parses.
 
 The process speaks MCP on stdout; configure your client to capture diagnostics separately from that protocol stream.
 Domain errors set `isError` and return fixed codes from `openreading.artifacts.limits`, `openreading.artifacts.result_models` or `openreading.types.selection`.
@@ -205,7 +232,7 @@ Client packaging and installation checks belong in the separate `openreading-age
 
 ## Not built yet
 
-The local proof does not expose general parse, strategy, triage, or remote document tools.
+Batch execution, scoped resume, readiness and liveness discovery, strategy inspection and proposed triage remain unbuilt MCP operations.
 Comparison covers retained normalized responses; truth scoring and batch-result corpus comparison remain unbuilt MCP operations.
 The remaining agent surface is proposed in [the agent design](../../../design/agentic.md).
 Passing stdio tests does not establish desktop installation compatibility or measured model token savings.

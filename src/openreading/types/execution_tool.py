@@ -1,0 +1,72 @@
+"""Define general parse acceptance and fixed job-operation failures for MCP clients.
+
+Parse accepts the shared request shape restricted to grant-relative paths and operator-owned runtime configuration.
+For example, backend.id strategy:local selects an authorized strategy without accepting caller credentials or document URLs.
+The retained execution-job contract supplies status and lookup shapes without changing historical lifecycle records.
+Successful acceptance starts detached work, while successful publication preserves the separate provider response state.
+"""
+
+from copy import deepcopy
+from typing import Literal
+
+from openreading.artifacts.models import ErrorEnvelope
+from openreading.schemas import execution_job_schema, request_schema
+from openreading.types.execution_job import ExecutionFaultCode, JobWire
+
+ExecutionToolCode = Literal[
+    ExecutionFaultCode,
+    "job_not_found",
+    "job_state_invalid",
+    "job_start_failed",
+    "response_too_large",
+]
+
+
+class ExecutionToolFault(JobWire):
+    code: ExecutionToolCode
+
+
+class ExecutionToolFailure(JobWire):
+    schema_version: Literal["0.1"] = "0.1"
+    error: ExecutionToolFault
+
+
+def execution_tool_contract() -> dict:
+    """Restrict acquisition and runtime authority without rewriting the shared request contract."""
+    request = deepcopy(request_schema())
+    for key in ("$schema", "$id"):
+        request.pop(key, None)
+    request["title"] = "ParseRequest"
+    properties = request["properties"]
+    for name in ("async", "idempotency_key"):
+        properties.pop(name, None)
+    document = properties["document"]
+    document.pop("oneOf")
+    document["required"] = ["path"]
+    document["properties"] = {
+        name: value
+        for name, value in document["properties"].items()
+        if name in {"path", "filename", "mime_type"}
+    }
+    document["properties"]["path"] = {"type": "string", "minLength": 1}
+    document["description"] = "A relative source reference beneath the operator's input grant."
+    for name in ("credentials_ref", "runtime"):
+        properties["backend"]["properties"].pop(name, None)
+    schema = deepcopy(execution_job_schema())
+    failure = ExecutionToolFailure.model_json_schema()
+    schema["$defs"].update(failure.pop("$defs"))
+    envelope = ErrorEnvelope.model_json_schema()
+    schema["$defs"].update(envelope.pop("$defs"))
+    schema["$defs"].update(
+        ParseRequest=request, ExecutionToolFailure=failure, ErrorEnvelope=envelope
+    )
+    schema["anyOf"].extend(
+        [
+            {"$ref": "#/$defs/ParseRequest"},
+            {"$ref": "#/$defs/ExecutionToolFailure"},
+            {"$ref": "#/$defs/ErrorEnvelope"},
+        ]
+    )
+    schema["$id"] = "https://openreading.ai/schemas/execution-tool.v0.1.json"
+    schema["title"] = "OpenReading Execution Tool v0.1"
+    return schema

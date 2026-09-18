@@ -25,7 +25,8 @@ The store is trusted against malicious rewriting by its OS owner, as with retain
 Job history, source snapshots and journals persist without automatic eviction or an uninstall hook.
 Listing uses job-ID order with grant-bound cursors and fifty summaries per reply at most.
 Concurrent new jobs can sort before a cursor; restart listing to discover them.
-No input-size cap, provider readiness claim, frozen-client dispatcher or callable MCP tool is added here.
+The general MCP profile exposes these jobs without an input-size cap or provider readiness claim.
+Frozen-client dispatch and scoped resume remain separate integration work.
 """
 
 from __future__ import annotations

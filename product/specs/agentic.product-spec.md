@@ -2,10 +2,10 @@
 spec_format_version: "0.1"
 title: "Remaining General Agent Surface"
 artifact_type: "prd"
-spec_revision: 3
+spec_revision: 4
 author: "Akshay"
 created_at: "2026-08-03T00:00:00Z"
-updated_at: "2026-09-17T00:00:00Z"
+updated_at: "2026-09-18T00:00:00Z"
 ---
 
 ## Problem
@@ -27,10 +27,11 @@ Client installation and token measurement belong in the separate `openreading-ag
 
 ## Scope
 
-General parse, batch, truth-scored and corpus comparison, readiness, triage, warning registries, and orchestration schemas remain proposed.
+Batch, scoped resume, truth-scored and corpus comparison, readiness, triage, warning registries, and orchestration schemas remain proposed.
 The MCP guide documents implemented symmetric and baseline comparisons of retained normalized responses.
 Existing core processing capabilities require MCP coverage for public v1. Proposed triage intelligence remains a separate scope decision.
-Scoped backend route planning is implemented separately from strategy planning and execution.
+General parse and strategy execution are documented beside their scoped routing and retained-result contracts in the MCP guide.
+Strategy inspection remains proposed separately from executing an authorized strategy.
 Removed compliance policy keys are excluded; future authorization must use mechanisms current core can actually enforce.
 No acceptance criterion below is marked complete by the fixed local document profile.
 

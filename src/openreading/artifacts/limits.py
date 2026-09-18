@@ -7,6 +7,8 @@ Full-document continuation payloads default to 65536 UTF-8 bytes, with no silent
 These caps do not promise a hard native-parser memory ceiling or an operating-system sandbox.
 Docling limits accept None for uncapped documents, storage, time, and sampled RSS.
 Explicit positive operator limits remain enforced. Idle shutdown and tool reply caps remain bounded.
+General execution leaves document size, storage, pages, and execution time uncapped by default.
+Its reply limits bound delivery without selecting or initializing a local extraction engine.
 The legacy profile rejects worker settings that its disposable parser cannot enforce.
 Only busy and storage_limit invite retry after the blocking condition is resolved.
 """
@@ -45,7 +47,7 @@ MESSAGES: dict[ErrorCode, str] = {
 }
 
 
-__all__ = ["ArtifactError", "DoclingLimits", "ProfileConfig", "ProfileLimits"]
+__all__ = ["ArtifactError", "DoclingLimits", "GeneralLimits", "ProfileConfig", "ProfileLimits"]
 
 # The worker reports these from preflight or its metered writer, after which it waits for the
 # next job with its converter intact. Restarting it would repeat model initialization for
@@ -130,10 +132,27 @@ class DoclingLimits:
 
 
 @dataclass(frozen=True)
+class GeneralLimits:
+    """Retain complete general results while keeping each retrieval response bounded."""
+
+    source_bytes: int | None = None
+    pages: int | None = None
+    extraction_bytes: int | None = None
+    store_bytes: int | None = None
+    deadline_seconds: float | None = None
+    worker_memory_bytes: int | None = None
+    worker_idle_seconds: float = 60
+    import_bytes: int = 4096
+    search_bytes: int = 8192
+    read_bytes: int = 16384
+    document_bytes: int = 65536
+
+
+@dataclass(frozen=True)
 class ProfileConfig:
     input_root: Path
     artifact_root: Path
-    limits: ProfileLimits | DoclingLimits = field(default_factory=ProfileLimits)
+    limits: ProfileLimits | DoclingLimits | GeneralLimits = field(default_factory=ProfileLimits)
     docling: LocalDoclingConfig | None = None
 
     def __post_init__(self):

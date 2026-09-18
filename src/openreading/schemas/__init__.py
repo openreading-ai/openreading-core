@@ -554,6 +554,7 @@ ROUTE_TOOL_SCHEMA_FILE = "route-tool.v0.1.json"
 BACKEND_DISCOVERY_SCHEMA_FILE = "backend-discovery.v0.1.json"
 RETAINED_RESULT_SCHEMA_FILE = "retained-result.v0.2.json"
 RESULT_TOOL_SCHEMA_FILE = "result-tool.v0.2.json"
+EXECUTION_TOOL_SCHEMA_FILE = "execution-tool.v0.1.json"
 EXECUTION_JOB_SCHEMA_FILE = "execution-job.v0.1.json"
 COMPARE_TOOL_SCHEMA_FILE = "compare-tool.v0.1.json"
 
@@ -784,6 +785,11 @@ def result_tool_schema() -> dict[str, Any]:
 def compare_tool_schema() -> dict[str, Any]:
     """Return the retained-input comparison request and receipt contract."""
     return _load(COMPARE_TOOL_SCHEMA_FILE)
+
+
+def execution_tool_schema() -> dict[str, Any]:
+    """Return general parse acceptance, job lookup and fixed failure contracts."""
+    return _load(EXECUTION_TOOL_SCHEMA_FILE)
 
 
 def execution_job_schema() -> dict[str, Any]:

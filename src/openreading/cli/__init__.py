@@ -1231,9 +1231,56 @@ requests, logs the shutdown, and the process exits 143. `serve` is the one
 command excluded from this CLI's own SIGTERM handling, which would otherwise
 fire after that clean shutdown.
 
-mcp --profile local-document-proof-v1
-------------------------------------
-Serve 13 tools over stdio with openreading[agent,pymupdf].
+mcp --profile PROFILE
+---------------------
+Serve document tools over stdio with one explicit local or general profile.
+Select general-execution-v1 for 7 tools with openreading[agent].
+Install the adapters you authorize separately before starting document jobs.
+A backend is a registered document processor, such as pymupdf or reducto.
+Each backend reads the formats its descriptor claims.
+See src/openreading/adapters/README.md for the adapter catalog.
+You grant an absolute --input-root and a separate absolute --artifact-root.
+For example, use /absolute/documents and /absolute/evidence respectively.
+
+--execute-backend authorizes each general execution backend; repeat per id.
+--execute-strategy authorizes each configured strategy entrypoint by name.
+A strategy is a configured execution tree whose backend leaves need grants.
+--execution-config PATH snapshots an explicit configuration for those jobs.
+For example, allow pymupdf and strategy fast with separate execution flags.
+Without backend grants, all execution requests are refused.
+Policy ordering and strategy grants cannot widen the backend scope.
+The general profile rejects --routing-config and --allow-backend.
+Those flags grant planning access only in local profiles.
+Local profiles reject every execution flag instead of ignoring it.
+
+--execution-env NAME forwards only that existing environment variable.
+For example, --execution-env REDUCTO_API_KEY supplies an operator credential.
+Absent, invalid, and reserved names refuse startup without printing values.
+HOME, TMPDIR, XDG_CACHE_HOME, OPENREADING_CONFIG, and OPENREADING_LEDGER
+are reserved for private worker directories and the captured configuration.
+No ambient credentials or configuration reach workers unless selected.
+--execution-concurrency defaults to one and accepts positive integers.
+--execution-deadline-seconds sets an optional positive deadline per attempt.
+Without that flag, execution has no deadline or arbitrary document caps.
+These controls do not impose a native memory ceiling or OS sandbox.
+
+Call openreading_parse with the shared request shape and a relative path.
+For example, request document.path as sample.pdf and backend.id as pymupdf.
+The tool returns an ej1_ job identifier before document processing finishes.
+Use openreading_get_job and openreading_list_jobs to inspect execution.
+Call openreading_cancel_job to stop unwanted work explicitly.
+Host Stop does not cancel detached work, and local cancellation cannot
+establish cancellation of work already submitted to a remote provider.
+Succeeded jobs carry retained orr1_ result identifiers.
+Call openreading_get_result to retrieve complete normalized content.
+Call openreading_compare to compare at least two retained normalized results.
+Call openreading_route to plan requests under the same execution authority.
+General execution provides no native document chooser or local import tools.
+--document-response-bytes and --document-export-root govern result delivery.
+The delivery modes and retained comparison behavior below apply here too.
+
+Serve 13 tools over stdio with either local profile.
+Select local-document-proof-v1 for 13 tools with openreading[agent,pymupdf].
 Call openreading_backends with {} for this profile's static descriptor and
 OCR setting. Discovery does not check readiness or enable other backends.
 Call openreading_route with {} to plan the local backend without extraction.
@@ -1288,7 +1335,7 @@ For example, delivery set to auto returns intact content or a local export.
 Set delivery to fragments and follow every next_cursor until null instead.
 The document response budget and export-root flags govern these replies too.
 Normalized-response provenance records producer assertions.
-General execution MCP producers remain unbuilt.
+The general profile creates these retained responses through execution jobs.
 Existing or1_ artifacts continue using openreading_get_document.
 Call openreading_compare with result_ids listing at least two retained
 normalized responses. Both or1_ artifacts and orr1_ responses are accepted.
