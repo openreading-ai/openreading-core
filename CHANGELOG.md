@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased durable general execution jobs
+
+- Add internal grant-scoped jobs with detached supervision, explicit environment, queued cancellation and optional deadlines.
+  Jobs retain complete normalized responses and report provider outcome separately from publication success.
+- Recover only verified committed results after supervisor interruption, without automatically retrying providers.
+  Add the execution-job v0.1 lifecycle contract. General callable tools and launcher integration remain unbuilt.
+
 ## Unreleased general execution worker
 
 - Keep control messages cancellable under pipe backpressure on Python 3.11 through 3.14.

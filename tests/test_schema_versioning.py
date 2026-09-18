@@ -21,6 +21,7 @@ from pathlib import Path
 from openreading import schemas
 from openreading.types import NormalizedResponse, OpenReadingRequest
 from openreading.types.batch import BatchResult, CorpusReport
+from openreading.types.execution_job import ExecutionJob
 from openreading.types.leaderboard import BenchmarkReport
 from openreading.types.liveness import LivenessReport
 
@@ -38,6 +39,7 @@ _FAMILY_RE = re.compile(r"^(.*)\.v\d+\.\d+\.json$")
 # ``validate_comparison_report`` inside ``build_report``; descriptor/strategy-config carry no
 # in-band string version at all.
 _PRODUCER_DEFAULT = {
+    "execution-job": lambda: ExecutionJob.model_fields["schema_version"].default,
     "response": lambda: NormalizedResponse.model_fields["schema_version"].default,
     "request": lambda: OpenReadingRequest.model_fields["schema_version"].default,
     "batch-result": lambda: BatchResult.model_fields["schema_version"].default,

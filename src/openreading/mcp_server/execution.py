@@ -20,7 +20,8 @@ The plan is internal preflight, not a durable capability, job receipt or exposed
 The internal execution_process worker repeats authorization and copies sources through Store.source.
 It supplies explicit credentials, private journal/output directories and isolated stdout before provider dispatch.
 The shared API must receive allowed_backends at execution time; preflight never replaces its per-dispatch checks.
-General tools and durable job orchestration remain unbuilt.
+The internal execution_jobs supervisor persists authorized attempts and retained-result receipts.
+General callable tools and launcher integration remain unbuilt.
 """
 
 from __future__ import annotations

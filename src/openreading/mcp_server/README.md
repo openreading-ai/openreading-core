@@ -125,8 +125,8 @@ Provider output cannot enter MCP stdout; complete normalized responses return as
 A private liveness pipe terminates the local execution group if its supervisor disappears.
 Control writes remain cancellable when the pipe fills, including on older supported Python versions.
 Its explicit operator environment avoids ambient host credentials and configuration, but provides no operating-system sandbox.
-Private source copies and strategy journals persist under an attempt directory; no eviction or discovery is provided yet.
-This primitive adds no callable tool. Durable jobs, receipt budgeting, publication and scoped resume still need integration.
+Private source copies and strategy journals persist under an attempt directory; the internal job records retain its location.
+This primitive adds no callable tool. Receipt budgeting, launcher integration and scoped resume remain separate work.
 
 ## Operations
 
@@ -158,7 +158,15 @@ The same `--document-response-bytes` and `--document-export-root` settings gover
 General results include producer provenance and preserve partial status, warnings and values without inventing citation passages.
 Report locations identify report content; use the mapped input artifacts for source-document evidence.
 Existing `or1_` artifacts continue using `openreading_get_document`, search and exact reads unchanged.
-General execution MCP producers remain unbuilt; trusted library code can retain normalized responses now.
+General execution MCP tools remain unbuilt; the internal job supervisor can retain normalized responses now.
+`openreading.mcp_server.execution_jobs` documents the internal `ExecutionJobs` start, get, list and cancel lifecycle.
+Each accepted job survives client exit and retains one complete result under its original input grant.
+For example, a retained failed response has job state `succeeded` and separate `response_state: failed`.
+A `processing` response remains processing; job completion does not certify completed remote work.
+Cancellation before publication yields no receipt; a committed result wins a concurrent cancellation request.
+Recovery verifies a committed receipt after supervisor death and never repeats provider execution automatically.
+Concurrency defaults to one job per grant; explicit deadlines include time waiting for a slot.
+Job records, snapshots and journals persist until removed. These internal APIs add no callable MCP tools.
 
 The process speaks MCP on stdout; configure your client to capture diagnostics separately from that protocol stream.
 Domain errors set `isError` and return fixed codes from `openreading.artifacts.limits`, `openreading.artifacts.result_models` or `openreading.types.selection`.

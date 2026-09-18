@@ -50,7 +50,9 @@ For example, allowing a strategy does not authorize a hosted leaf outside the ba
 The shared compiler prunes unauthorized leaves before any document or credential access.
 Internal ExecutionAttempt in openreading.mcp_server.execution_process acquires granted inputs and owns a disposable worker.
 It returns complete validated content while preserving backend scope at dispatch.
-General tools still need durable jobs, receipt budgeting and publication before accepting execution requests.
+Internal ExecutionJobs in openreading.mcp_server.execution_jobs persists detached work, cancellation and retained-result receipts.
+It distinguishes successful publication from partial, failed or still-processing provider outcomes.
+General tools still need launcher integration and receipt budgeting before accepting execution requests.
 
 Artifact source, response, and passages persist until you remove their store directory.
 Retrieval shares selected document text with the calling agent. Document instructions

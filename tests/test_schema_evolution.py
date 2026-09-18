@@ -133,6 +133,7 @@ _FROZEN_RELEASED = {
     "strategy-config.v0.1.json": "1080ed4b28d0455766ed5789535c8d4d075eb73b78d167d18c79ed582cd5c0b2",
 }
 _UNRELEASED = {
+    "execution-job.v0.1.json",
     "retained-result.v0.2.json",
     "result-tool.v0.2.json",
     "compare-tool.v0.1.json",

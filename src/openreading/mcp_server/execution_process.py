@@ -27,9 +27,9 @@ Copying refuses a source whose metadata changed, rather than reporting a stable 
 Documents and JSON are materialized in memory by the shared API and result validator.
 
 Attempt directories remain under execution/<grant>/<random-id>, outside local-import staging.
-The later persistent job owner must retain, discover and remove these directories deliberately.
+The execution_jobs owner records each attempt location; operators remove retained directories deliberately.
 An instance accepts one attempt; a second run refuses instead of overwriting its retained files.
-General MCP tools, durable job status, reconnect and scoped resume remain separate integration work.
+General MCP tools and scoped resume remain separate integration work.
 """
 
 from __future__ import annotations

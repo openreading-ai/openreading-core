@@ -17,16 +17,16 @@ Its approved scope is [local document proof revision 1](https://github.com/openr
 ## Contracts requiring a future design
 
 Internal execution preflight is documented in `openreading.mcp_server.execution` and the MCP guide.
-General tools must integrate that authority and the internal execution_process worker with durable jobs before accepting executable requests.
+General tools must integrate that authority with the internal execution_jobs supervisor before accepting executable requests.
 Current core authorization narrows backend dispatch through configured backend sets and HTTP API-key scope.
 The removed vendor compliance tables and their policy keys must not return through an agent interface.
 No claim about a vendor's training, retention, or agreement can become an unverifiable routing guarantee.
 
 General result retention and bounded retrieval are documented in the artifact and MCP guides.
 The internal execution_process module supplies granted source copying, explicit child environments, isolated stdout and private journal/output storage.
-General producers must integrate that primitive with receipt budgeting, publication and durable status.
+The execution_jobs supervisor documents durable status, cancellation, reconnect and retained-result publication.
+General tools still require receipt budgeting and standalone launcher integration.
 Every dispatch must retain backend scope; preflight cannot replace execution-time enforcement.
-Durable jobs must cover cancellation, reconnect and integration with the retained result contracts.
 Retained normalized-response comparison is documented in the MCP guide.
 Truth scoring and corpus comparison still need their own MCP input contracts.
 A general extraction operation must identify any provider calls before the caller authorizes their execution.
