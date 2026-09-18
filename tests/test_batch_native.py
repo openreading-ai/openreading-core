@@ -554,3 +554,66 @@ def test_run_native_default_deadline_survives_past_the_old_120s_wall(tmp_path, m
     schemas.validate_batch_result(env)
     assert env["summary"]["succeeded"] == 1
     assert env["items"][0]["transport"] == "native"
+
+
+@pytest.mark.parametrize("native", ["claimed", False])
+@pytest.mark.parametrize("allowed", [None, frozenset({"fake-native"})])
+def test_public_batch_scope_preserves_native_and_platform_results(
+    tmp_path, monkeypatch, native, allowed
+):
+    _register(monkeypatch, _FakeNative(native=native))
+    result = run_batch(
+        [str(_corpus(tmp_path, n=2))],
+        backend="fake-native",
+        config={"version": 1},
+        backend_allowlist=allowed,
+    )
+    schemas.validate_batch_result(result)
+    assert result["summary"]["succeeded"] == 2
+    assert {item["transport"] for item in result["items"]} == {"native" if native else "platform"}
+
+
+@pytest.mark.parametrize("actual_id", ["fake-native", "strategy:unexpected"])
+def test_native_batch_rechecks_actual_adapter_before_source_or_credentials(monkeypatch, actual_id):
+    from openreading import api
+    from openreading.batch.sources import ResolvedSource
+    from openreading.types.batch import SourceRef
+    from openreading.types.errors import ScopeRefused
+
+    adapter = _FakeNative()
+    adapter.descriptor = adapter.descriptor.model_copy(update={"id": actual_id})
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Denied native adapter reached input or credentials")
+
+    monkeypatch.setattr(api, "build_request", forbidden)
+    monkeypatch.setattr(api, "build_run_context", forbidden)
+    with pytest.raises(ScopeRefused) as error:
+        api._run_native(
+            adapter,
+            [ResolvedSource(SourceRef(filename="sample.pdf", format="pdf", path="sample.pdf"))],
+            "allowed-alias",
+            broker=EnvCredentialBroker({}),
+            transport=None,
+            idempotency_key=None,
+            request_echo=None,
+            on_progress=None,
+            backend_allowlist=frozenset({"allowed-alias"}),
+        )
+    assert error.value.backend_code == actual_id
+
+
+def test_public_batch_passes_scope_to_native_dispatch(tmp_path, monkeypatch):
+    from openreading import api
+    from openreading.types.errors import ScopeRefused
+
+    adapter = _FakeNative()
+    monkeypatch.setattr(api, "_native_adapter", lambda *args: adapter)
+    with pytest.raises(ScopeRefused) as error:
+        run_batch(
+            [str(_corpus(tmp_path, n=1))],
+            backend="pymupdf",
+            config={"version": 1},
+            backend_allowlist=frozenset({"pymupdf"}),
+        )
+    assert error.value.backend_code == "fake-native"

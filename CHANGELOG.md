@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased scoped public execution
+
+- Add optional `backend_allowlist` to Python `run` and `run_batch`, preserving unscoped behavior when omitted.
+  Named requests refuse before input/configuration access; routed and strategy dispatch keep the same scope.
+- Check the actual native-batch adapter before input materialization and credentials, independently of its requested alias.
+  Provider request schemas and existing per-item error shapes remain unchanged. General MCP execution tools remain unbuilt.
+
 ## Unreleased general MCP execution authorization
 
 - Add internal preflight with immutable operator configuration and independent backend and strategy entrypoint scopes.

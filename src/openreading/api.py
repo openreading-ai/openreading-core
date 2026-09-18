@@ -21,6 +21,12 @@ An envelope is the schema-valid JSON object returned by a completed operation.
 - `build_request`, `run_request`, `prepare_named_backend`, and `materialize_document` support
   the CLI and server through the same lower-level seams.
 
+`run` and `run_batch` accept `backend_allowlist`, independently of the configured default chain.
+For example, `frozenset({"pymupdf"})` excludes every other backend from named, routed, strategy and batch execution.
+The default `None` preserves unscoped execution; an empty set permits no backend.
+Scope is execution configuration, never a request field sent to a provider.
+It does not grant filesystem access, isolate credentials or authorize strategy entrypoints.
+
 `source` accepts a path, an HTTP URL, or raw bytes. It never accepts a request mapping.
 For the returned dict, `status`, `backend`, and `document` are required response fields.
 Text, pages, tables, confidence, and usage counters depend on what the backend actually produced.
@@ -652,6 +658,21 @@ def prepare_named_backend(
     return adapter, req, ctx
 
 
+def _check_named_backend_scope(backend: str | None, allowed: frozenset[str] | None) -> None:
+    """Refuse a denied named backend before input acquisition, lookup or credential resolution."""
+    if (
+        backend
+        and not backend.startswith(_STRATEGY_PREFIX)
+        and allowed is not None
+        and backend not in allowed
+    ):
+        raise ScopeRefused(
+            "The requested backend is outside the caller's allowed set.",
+            backend_code=backend,
+            constraint="backend_allowlist",
+        )
+
+
 def run_request(
     req: OpenReadingRequest,
     *,
@@ -698,17 +719,7 @@ def run_request(
     into PlanExhaustedError via execute_plan/D-v2-7.2 instead, since it can fall back to the next
     backend; a named backend has no next rung, so it surfaces here under its own type)."""
     backend = req.backend.id
-    if (
-        backend
-        and not backend.startswith(_STRATEGY_PREFIX)
-        and backend_allowlist is not None
-        and backend not in backend_allowlist
-    ):
-        raise ScopeRefused(
-            "The requested backend is outside the caller's allowed set.",
-            backend_code=backend,
-            constraint="backend_allowlist",
-        )
+    _check_named_backend_scope(backend, backend_allowlist)
     broker = broker or EnvCredentialBroker()
     config = config or RouterConfig()
 
@@ -847,6 +858,7 @@ def run(
     keep_candidates: bool = False,
     deadline_ms: int | None = None,
     on_run_armed: Callable[[str], None] | None = None,
+    backend_allowlist: frozenset[str] | None = None,
     **request_overrides: Any,
 ) -> dict[str, Any]:
     """Run one document through a named backend, the resolved chain (`backend=None`), or a
@@ -871,12 +883,17 @@ def run(
     Only a strategy-dispatch path arms one, so a named-backend or resolved-chain run
     never fires it. It mirrors the optional-hook shape of `run_batch`'s own `on_progress` and
     `on_preflight`.
+
+    `backend_allowlist` forwards the caller's scope to every dispatch in `run_request`.
+    A denied named backend refuses before source acquisition, configuration loading or dotenv access.
+    For example, an empty set refuses a named pymupdf run even when policy lists pymupdf.
     """
     _refuse_removed_kwargs(request_overrides)
-    if env_file:
-        load_dotenv(env_file)
     if strategy is not None:
         backend = f"strategy:{strategy}"
+    _check_named_backend_scope(backend, backend_allowlist)
+    if env_file:
+        load_dotenv(env_file)
     # The file is read on every path so a null backend can resolve its configured chain. The
     # strategy half is built only when a strategy could engage through null or `strategy:`.
     loaded = load_config_file(config)  # CLI/Python discover cwd; None uses built-in defaults.
@@ -903,6 +920,7 @@ def run(
         keep_candidates=keep_candidates,
         deadline_ms=deadline_ms,
         on_run_armed=on_run_armed,
+        backend_allowlist=backend_allowlist,
     )
 
 
@@ -1043,6 +1061,7 @@ def run_batch(
     keep_candidates: bool = False,
     on_progress=None,
     on_preflight=None,
+    backend_allowlist: frozenset[str] | None = None,
     **request_overrides: Any,
 ) -> dict[str, Any]:
     """Run many documents (a mix of files / dirs / globs / http(s) URLs) as ONE batch, returning a
@@ -1051,6 +1070,11 @@ def run_batch(
     (done, total, item) and `on_preflight` (resolved, backend) are optional CLI hooks.
     `keep_candidates` is a named parameter, not a request override: it is a per-run execution
     choice `run()` consumes, and the native path would otherwise hand it to `build_request`.
+
+    `backend_allowlist` applies to every platform item and the actual native-batch adapter.
+    A denied named backend refuses before intake; routed or strategy refusals remain per-item failures.
+    For example, an empty scope on a routed two-file batch produces two existing-format item errors.
+    The default None preserves unscoped execution and never adds authorization fields to provider requests.
 
     `jobs` is bounds-checked by the shared `batch.runner.bound_jobs` helper (BL-84) BEFORE intake
     is even resolved: `jobs<=0` clamps to 1 (echoed as the corrected value, never the raw input);
@@ -1081,6 +1105,9 @@ def run_batch(
     from openreading.types.batch import BatchRequestEcho
 
     _refuse_removed_kwargs(request_overrides)
+    if strategy is not None:
+        backend = f"{_STRATEGY_PREFIX}{strategy}"
+    _check_named_backend_scope(backend, backend_allowlist)
     jobs = _batch_runner.bound_jobs(jobs, max_jobs=max_jobs)
     # Like `jobs`, the file is an input to the WHOLE batch, so it is read and its `policy:` block
     # checked before intake rather than per item. On the platform path a per-item failure is
@@ -1091,8 +1118,6 @@ def run_batch(
 
     if env_file:
         load_dotenv(env_file)
-    if strategy is not None:
-        backend = f"{_STRATEGY_PREFIX}{strategy}"
     broker = broker or EnvCredentialBroker()
 
     # No `supported_formats`: intake dispatches every source the caller named, and a backend that
@@ -1132,6 +1157,7 @@ def run_batch(
             on_progress=on_progress,
             config_file=loaded,
             deadline_ms=deadline_ms,
+            backend_allowlist=backend_allowlist,
             **request_overrides,
         )
 
@@ -1147,6 +1173,7 @@ def run_batch(
             transport=transport,
             idempotency_key=idem,
             keep_candidates=keep_candidates,
+            backend_allowlist=backend_allowlist,
             **request_overrides,
         )
 
@@ -1198,12 +1225,14 @@ def _run_native(
     on_progress,
     config_file=None,
     deadline_ms: int | None = None,
+    backend_allowlist: frozenset[str] | None = None,
     **request_overrides: Any,
 ) -> dict[str, Any]:
     """Execute a whole batch through an adapter's native submit and normalize methods.
 
     Per-item results map to succeeded or failed items with `transport="native"`. A batch-level
     failure propagates like any `run()` error. Every item shares the same policy and overrides.
+    The actual adapter must belong to backend_allowlist before source materialization or credential resolution.
 
     `deadline_ms` (BL-135): `run_batch`'s own override, forwarded here. None (the default) means
     `build_run_context` falls back to `DEFAULT_NATIVE_BATCH_DEADLINE_MS` rather than the generic,
@@ -1218,6 +1247,13 @@ def _run_native(
     from openreading.batch.runner import item_idempotency_key
     from openreading.types.batch import BatchItem, BatchItemError
 
+    # Check the selected adapter itself, so a future alias cannot bypass the caller's scope.
+    if backend_allowlist is not None and adapter.descriptor.id not in backend_allowlist:
+        raise ScopeRefused(
+            "The native batch backend is outside the caller's allowed set.",
+            backend_code=adapter.descriptor.id,
+            constraint="backend_allowlist",
+        )
     started = time.perf_counter()
     live = list(resolved)
     file_block = config_file.policy if config_file is not None else None
