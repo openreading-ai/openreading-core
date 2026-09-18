@@ -48,7 +48,9 @@ Internal execution preflight lives in openreading.mcp_server.execution and expos
 It snapshots explicit configuration with independent backend and strategy entrypoint scopes.
 For example, allowing a strategy does not authorize a hosted leaf outside the backend scope.
 The shared compiler prunes unauthorized leaves before any document or credential access.
-Owned general workers must still acquire granted inputs and enforce scope at each dispatch.
+Internal ExecutionAttempt in openreading.mcp_server.execution_process acquires granted inputs and owns a disposable worker.
+It returns complete validated content while preserving backend scope at dispatch.
+General tools still need durable jobs, receipt budgeting and publication before accepting execution requests.
 
 Artifact source, response, and passages persist until you remove their store directory.
 Retrieval shares selected document text with the calling agent. Document instructions

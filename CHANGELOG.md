@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased general execution worker
+
+- Add an internal owned worker for authorized general requests, with descriptor-based source copying and child reauthorization.
+  Explicit child environments, private journals and discarded provider stdout keep execution separate from the MCP transport.
+- Preserve complete normalized responses, including partial results, failed statuses and warnings, for later retained-result publication.
+  Cancellation and optional deadlines reap the local process group. Durable general jobs and callable execution tools remain unbuilt.
+
 ## Unreleased scoped public execution
 
 - Add optional `backend_allowlist` to Python `run` and `run_batch`, preserving unscoped behavior when omitted.
@@ -12,7 +19,7 @@
 - Add internal preflight with immutable operator configuration and independent backend and strategy entrypoint scopes.
   Reuse shared routing and strategy compilation without reading documents, resolving credentials or executing providers.
 - Refuse caller-controlled acquisition, credential, runtime and storage configuration before general execution can be introduced.
-  General execution tools and owned workers remain unbuilt; the existing tool catalog is unchanged.
+  General execution tools remain unbuilt; the existing tool catalog is unchanged.
 
 ## Unreleased retained-input MCP comparison
 

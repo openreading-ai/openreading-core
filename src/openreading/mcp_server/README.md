@@ -118,6 +118,14 @@ For example, a permitted strategy cannot authorize its reducto leaf when the bac
 Read `openreading.mcp_server.execution` for this internal contract and the obligations of future workers.
 Preflight performs no source acquisition, credential resolution or execution, and adds no callable tool.
 
+The internal `ExecutionAttempt` worker runs authorized requests in a disposable child process.
+It copies from the granted descriptor, reauthorizes in the child, and preserves backend scope through the shared API.
+For example, replacing the original pathname cannot redirect an already opened source descriptor.
+Provider output cannot enter MCP stdout; complete normalized responses return as validated `ResultContent` values.
+Its explicit operator environment avoids ambient host credentials and configuration, but provides no operating-system sandbox.
+Private source copies and strategy journals persist under an attempt directory; no eviction or discovery is provided yet.
+This primitive adds no callable tool. Durable jobs, receipt budgeting, publication and scoped resume still need integration.
+
 ## Operations
 
 `openreading_compare` accepts ordered `or1_` artifact or `orr1_` normalized-response identifiers under this input grant.

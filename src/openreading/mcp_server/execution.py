@@ -17,10 +17,10 @@ The module does not filter formats. Each adapter decides whether it can process 
 ExecutionPlan lists possible scoped backends, not observed calls, price estimates or readiness promises.
 A strategy's configured decider backend is included when authorized, even if its branch never runs.
 The plan is internal preflight, not a durable capability, job receipt or exposed MCP tool.
-Future workers must authorize again, acquire sources through Store.source, and copy from its open descriptor.
-They must use explicit credentials, private journal/output directories and isolated stdout before provider dispatch.
+The internal execution_process worker repeats authorization and copies sources through Store.source.
+It supplies explicit credentials, private journal/output directories and isolated stdout before provider dispatch.
 The shared API must receive allowed_backends at execution time; preflight never replaces its per-dispatch checks.
-General execution tools and their owned worker lifecycle remain unbuilt.
+General tools and durable job orchestration remain unbuilt.
 """
 
 from __future__ import annotations
