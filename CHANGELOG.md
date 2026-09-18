@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased general MCP result retention
+
+- Retain schema-valid responses and comparison reports independently of local citation artifacts.
+  New `orr1_` identifiers bind complete normalized content, producer provenance and the configured input grant.
+- Add `openreading_get_result` with complete inline delivery, private export and lossless JSON Pointer fragments.
+  Existing document artifacts remain unchanged; general execution and comparison producers remain separate work.
+
 ## Unreleased MCP route planning
 
 - Validate every vendored schema in the CLI gate, including new families and retained versions.

@@ -32,6 +32,13 @@ flags grant planning access independently. Without those flags, planning stays l
 For example, a policy listing reducto cannot authorize it outside the allowed set.
 Planning reads no document, checks no readiness and does not change local imports.
 
+Call openreading_get_result for complete general results identified by an orr1 result_id.
+It shares the operator's delivery budget and export directory with complete document retrieval.
+Auto returns complete content or a local export; fragments returns lossless JSON Pointer continuation.
+The result-tool.v0.1 contract preserves normalized status, warnings and explicit producer provenance.
+For example, a comparison report retains its subject-to-input mapping without creating physical-page citations.
+General execution and comparison producers remain unbuilt; trusted library code can retain existing results.
+
 Artifact source, response, and passages persist until you remove their store directory.
 Retrieval shares selected document text with the calling agent. Document instructions
 remain untrusted data. The server is not an operating-system sandbox.

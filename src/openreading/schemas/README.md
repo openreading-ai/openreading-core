@@ -602,10 +602,14 @@ entry naming it, so the warning reaches you before the removal does.
 | `document-tool.v0.4.json` | `openreading.artifacts.delivery` | Complete delivery with nullable physical-page summaries for unpaginated documents. |
 | `import-job.v0.3.json` | `openreading.types.import_job` | Background status with compatible older receipts and unpaginated import receipts. |
 | `route-tool.v0.1.json` | `openreading.types.route_tool` | Scoped backend chain, excluded entries and terminal reason; no execution. |
+| `retained-result.v0.1.json` | `openreading.artifacts.result_models` | Grant-bound general responses and comparison reports with producer fingerprints. |
+| `result-tool.v0.1.json` | `openreading.mcp_server.results` | Complete general result delivery, private exports and lossless fragments. |
 | `backend-discovery.v0.1.json` | `openreading.types.backend_discovery` | Static selected-backend descriptor and configured OCR flag, without readiness or liveness checks. Validation requires the vendored `adapter-descriptor.v0.8.json` resource registered under its `$id`. |
 
 These families wrap retained evidence without changing the normalized extraction response.
 The v0.3 retained artifact reader remains supported without rewriting stored files.
+General result validators require the vendored response v0.3 and comparison-report v0.2 resources registered under their respective `$id` values.
+These external references preserve existing payload contracts; neither result family invents new source-document evidence.
 
 ## Not built yet
 

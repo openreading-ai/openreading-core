@@ -552,6 +552,8 @@ DOCUMENT_TOOL_SCHEMA_FILE = "document-tool.v0.4.json"
 IMPORT_JOB_SCHEMA_FILE = "import-job.v0.3.json"
 ROUTE_TOOL_SCHEMA_FILE = "route-tool.v0.1.json"
 BACKEND_DISCOVERY_SCHEMA_FILE = "backend-discovery.v0.1.json"
+RETAINED_RESULT_SCHEMA_FILE = "retained-result.v0.1.json"
+RESULT_TOOL_SCHEMA_FILE = "result-tool.v0.1.json"
 
 
 _PACKAGE = "openreading.schemas"
@@ -765,6 +767,16 @@ def backend_discovery_schema() -> dict[str, Any]:
 def route_tool_schema() -> dict[str, Any]:
     """Return the strict planning-only MCP route contract."""
     return _load(ROUTE_TOOL_SCHEMA_FILE)
+
+
+def retained_result_schema() -> dict[str, Any]:
+    """Grant-bound normalized results with explicit producer provenance."""
+    return _load(RETAINED_RESULT_SCHEMA_FILE)
+
+
+def result_tool_schema() -> dict[str, Any]:
+    """Complete general result retrieval, local export and lossless fragments."""
+    return _load(RESULT_TOOL_SCHEMA_FILE)
 
 
 def _cli_validate() -> int:

@@ -1,0 +1,578 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/result-tool.v0.1.json",
+  "$defs": {
+    "CompleteResult": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.1",
+          "default": "0.1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "result_id": {
+          "pattern": "^orr1_[0-9a-f]{64}$",
+          "title": "Result Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "normalized_response",
+            "comparison_report"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "content_bytes": {
+          "minimum": 1,
+          "title": "Content Bytes",
+          "type": "integer"
+        },
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "delivery": {
+          "const": "tool_result",
+          "default": "tool_result",
+          "title": "Delivery",
+          "type": "string"
+        },
+        "content": {
+          "$ref": "#/$defs/ResultContent"
+        }
+      },
+      "required": [
+        "result_id",
+        "kind",
+        "content_bytes",
+        "content_sha256",
+        "content"
+      ],
+      "title": "CompleteResult",
+      "type": "object"
+    },
+    "ErrorEnvelope": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.3",
+          "default": "0.3",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "error": {
+          "$ref": "#/$defs/ToolError"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "title": "ErrorEnvelope",
+      "type": "object"
+    },
+    "FileResult": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.1",
+          "default": "0.1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "result_id": {
+          "pattern": "^orr1_[0-9a-f]{64}$",
+          "title": "Result Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "normalized_response",
+            "comparison_report"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "content_bytes": {
+          "minimum": 1,
+          "title": "Content Bytes",
+          "type": "integer"
+        },
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "delivery": {
+          "const": "local_file",
+          "default": "local_file",
+          "title": "Delivery",
+          "type": "string"
+        },
+        "local_path": {
+          "title": "Local Path",
+          "type": "string"
+        },
+        "next_action": {
+          "title": "Next Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "result_id",
+        "kind",
+        "content_bytes",
+        "content_sha256",
+        "local_path",
+        "next_action"
+      ],
+      "title": "FileResult",
+      "type": "object"
+    },
+    "FragmentResult": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.1",
+          "default": "0.1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "result_id": {
+          "pattern": "^orr1_[0-9a-f]{64}$",
+          "title": "Result Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "normalized_response",
+            "comparison_report"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "content_bytes": {
+          "minimum": 1,
+          "title": "Content Bytes",
+          "type": "integer"
+        },
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        },
+        "delivery": {
+          "const": "fragments",
+          "default": "fragments",
+          "title": "Delivery",
+          "type": "string"
+        },
+        "fragment_start": {
+          "minimum": 0,
+          "title": "Fragment Start",
+          "type": "integer"
+        },
+        "fragment_count": {
+          "minimum": 1,
+          "title": "Fragment Count",
+          "type": "integer"
+        },
+        "fragments": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ValueFragment"
+              },
+              {
+                "$ref": "#/$defs/TextFragment"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Fragments",
+          "type": "array"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Cursor"
+        }
+      },
+      "required": [
+        "result_id",
+        "kind",
+        "content_bytes",
+        "content_sha256",
+        "fragment_start",
+        "fragment_count",
+        "fragments"
+      ],
+      "title": "FragmentResult",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "ResultContent": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "normalized_response"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "https://openreading.ai/schemas/response/v0.3.json"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "comparison_report"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "https://openreading.ai/schemas/comparison-report.v0.2.json"
+              }
+            }
+          }
+        }
+      ],
+      "description": "Complete normalized values with their producer identity, without backend_raw.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "normalized_response",
+            "comparison_report"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/ResultProvenance"
+        },
+        "payload": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Payload",
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind",
+        "provenance",
+        "payload"
+      ],
+      "title": "ResultContent",
+      "type": "object"
+    },
+    "ResultFailure": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.1",
+          "default": "0.1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "error": {
+          "$ref": "#/$defs/ResultFault"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "title": "ResultFailure",
+      "type": "object"
+    },
+    "ResultFault": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "result_not_found",
+            "result_corrupt",
+            "invalid_result"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "retryable": {
+          "const": false,
+          "default": false,
+          "title": "Retryable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "ResultFault",
+      "type": "object"
+    },
+    "ResultProvenance": {
+      "additionalProperties": false,
+      "description": "Explicit producer assertions, with configuration values represented only by fingerprints.",
+      "properties": {
+        "request_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Request Sha256",
+          "type": "string"
+        },
+        "config_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Config Sha256",
+          "type": "string"
+        },
+        "core_version": {
+          "minLength": 1,
+          "title": "Core Version",
+          "type": "string"
+        },
+        "core_commit": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Core Commit"
+        },
+        "adapters": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Adapters",
+          "type": "object"
+        },
+        "source_sha256": {
+          "items": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "title": "Source Sha256",
+          "type": "array"
+        },
+        "subjects": {
+          "additionalProperties": {
+            "pattern": "^(or1|orr1)_[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "title": "Subjects",
+          "type": "object"
+        }
+      },
+      "required": [
+        "request_sha256",
+        "config_sha256",
+        "core_version",
+        "core_commit",
+        "adapters",
+        "source_sha256",
+        "subjects"
+      ],
+      "title": "ResultProvenance",
+      "type": "object"
+    },
+    "ResultRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "result_id": {
+          "pattern": "^orr1_[0-9a-f]{64}$",
+          "title": "Result Id",
+          "type": "string"
+        },
+        "delivery": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "file",
+            "fragments"
+          ],
+          "title": "Delivery",
+          "type": "string"
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cursor"
+        }
+      },
+      "required": [
+        "result_id"
+      ],
+      "title": "ResultRequest",
+      "type": "object"
+    },
+    "TextFragment": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "end": {
+          "minimum": 1,
+          "title": "End",
+          "type": "integer"
+        },
+        "length": {
+          "minimum": 1,
+          "title": "Length",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "text",
+        "start",
+        "end",
+        "length"
+      ],
+      "title": "TextFragment",
+      "type": "object"
+    },
+    "ToolError": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "memory_limit",
+            "worker_monitor_failed",
+            "os_permission_denied",
+            "configuration_required",
+            "engine_identity_unavailable",
+            "access_denied",
+            "input_not_found",
+            "unsupported_format",
+            "password_required",
+            "input_too_large",
+            "extraction_too_large",
+            "no_readable_text",
+            "busy",
+            "timeout",
+            "cancelled",
+            "storage_limit",
+            "parse_failed",
+            "artifact_not_found",
+            "artifact_corrupt",
+            "artifact_version_unsupported",
+            "evidence_not_found",
+            "invalid_cursor",
+            "response_too_large"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 256,
+          "title": "Message",
+          "type": "string"
+        },
+        "retryable": {
+          "title": "Retryable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "title": "ToolError",
+      "type": "object"
+    },
+    "ValueFragment": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/JsonValue"
+        }
+      },
+      "required": [
+        "path",
+        "value"
+      ],
+      "title": "ValueFragment",
+      "type": "object"
+    }
+  },
+  "anyOf": [
+    {
+      "$ref": "#/$defs/ResultRequest"
+    },
+    {
+      "$ref": "#/$defs/CompleteResult"
+    },
+    {
+      "$ref": "#/$defs/FileResult"
+    },
+    {
+      "$ref": "#/$defs/FragmentResult"
+    },
+    {
+      "$ref": "#/$defs/ResultFailure"
+    },
+    {
+      "$ref": "#/$defs/ErrorEnvelope"
+    }
+  ],
+  "title": "OpenReading Result Tool v0.1"
+}

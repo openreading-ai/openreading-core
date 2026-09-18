@@ -21,8 +21,8 @@ Current core authorization narrows backend dispatch through configured backend s
 The removed vendor compliance tables and their policy keys must not return through an agent interface.
 No claim about a vendor's training, retention, or agreement can become an unverifiable routing guarantee.
 
-General tool results need independently bounded receipts and explicit retained artifact access.
-The existing normalized response remains the extraction contract, while tool receipts use separate schemas.
+General result retention and bounded retrieval are documented in the artifact and MCP guides.
+General producers still need execution authority and integration with those retained result contracts.
 A compare operation over retained results must not execute either backend again.
 A general extraction operation must identify any provider calls before the caller authorizes their execution.
 

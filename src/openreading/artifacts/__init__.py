@@ -4,6 +4,12 @@ Full normalized retrieval is defined in openreading.artifacts.document and exclu
 It preserves stored channels and warnings without reparsing or selecting relevant blocks.
 The profile determines extraction coverage; full retrieval does not recover unavailable channels.
 
+General result retention lives in openreading.artifacts.results and uses independent orr1 identifiers.
+It retains schema-valid responses and comparison reports without requiring citation passages.
+For example, typed fields can survive when no document text was extracted.
+ResultProvenance identifies producer inputs through hashes; storage does not measure those assertions.
+Existing or1 artifacts remain unchanged, including their evidence identifiers and physical-page semantics.
+
 A retained artifact contains exact source bytes, a normalized response, and citation passages.
 Physical pages remain authoritative only when the provider establishes them.
 Unpaginated blocks use exact JSON locations, such as /document/pages/0/blocks/0/text.
@@ -27,6 +33,9 @@ Its wire() preserves explicit nulls within normalized content and provides bound
 ProfileConfig and ArtifactError live in openreading.artifacts.limits. The latter exposes envelope().
 Packagers may use intake.directory (a held directory descriptor context), store.Store, and
 store.safe_read (bounded bytes). worker.SETTINGS and worker.main are supported worker entry points.
+RetainedResults(store).publish(kind, payload, provenance) returns a ResultReceipt for trusted producers.
+Its load(result_id) returns complete ResultContent after grant, digest and schema verification.
+The models and sanitized ResultError codes live in openreading.artifacts.result_models.
 These module-qualified symbols form the integration surface, without eager package imports.
 For example, importing limits on an unsupported platform still permits a useful startup error.
 

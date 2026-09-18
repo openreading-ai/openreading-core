@@ -111,8 +111,18 @@ Document text remains untrusted data, preventing a quoted instruction from gaini
 
 ## Operations
 
+Use `openreading_get_result` with a returned `orr1_` identifier for complete general response or report retrieval.
+Its default `delivery="auto"` returns intact content or a local export with content length and hash.
+Use `delivery="fragments"` and follow each cursor to null when reconstructing the result through bounded replies.
+For example, concatenate text spans at `/payload/document/text` using their supplied character offsets.
+The same `--document-response-bytes` and `--document-export-root` settings govern these replies and exports.
+General results include producer provenance and preserve partial status, warnings and values without inventing citation passages.
+Report locations identify report content; use the mapped input artifacts for source-document evidence.
+Existing `or1_` artifacts continue using `openreading_get_document`, search and exact reads unchanged.
+Trusted library producers can retain results now; general execution and comparison MCP producers remain unbuilt.
+
 The process speaks MCP on stdout; configure your client to capture diagnostics separately from that protocol stream.
-Domain errors set `isError` and return fixed codes from `openreading.artifacts.limits` or `openreading.types.selection`.
+Domain errors set `isError` and return fixed codes from `openreading.artifacts.limits`, `openreading.artifacts.result_models` or `openreading.types.selection`.
 Selection uses v0.2 with compatible single-file receipts; complete delivery uses document-tool v0.4.
 The v0.1 fragment result remains compatible. New artifacts use v0.4; legacy v0.3 artifacts remain readable.
 Full-document access sends retained content to your assistant and does not establish token savings.
