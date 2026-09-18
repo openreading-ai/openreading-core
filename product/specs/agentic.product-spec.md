@@ -27,7 +27,7 @@ Client installation and token measurement belong in the separate `openreading-ag
 
 ## Scope
 
-Batch, scoped resume, truth-scored and corpus comparison, readiness, triage, warning registries, and orchestration schemas remain proposed.
+Scoped resume, truth-scored and corpus comparison, readiness, triage, warning registries, and orchestration schemas remain proposed.
 The MCP guide documents implemented symmetric and baseline comparisons of retained normalized responses.
 Existing core processing capabilities require MCP coverage for public v1. Proposed triage intelligence remains a separate scope decision.
 General parse and strategy execution are documented beside their scoped routing and retained-result contracts in the MCP guide.

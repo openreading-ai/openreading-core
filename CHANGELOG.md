@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased general batch MCP
+
+- Add ordered batch execution through durable general jobs and the shared serial batch runner.
+  Every item needs operator authorization before acquisition, and cancellation prevents final batch publication.
+- Retain complete batch envelopes with nested response statuses, fixed item failures and bounded full-result delivery.
+  Add retained-result/result-tool v0.3 and execution-job/execution-tool v0.2 while preserving historical schemas and records.
+- Keep local tool catalogs unchanged; general execution now exposes eight tools with no native provider batch dispatch.
+
 ## Unreleased general execution MCP profile
 
 - Share the router default with general route planning, and document empty plans as tool errors.

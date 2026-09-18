@@ -1,6 +1,6 @@
 """Expose local evidence and scoped general execution through separate stdio profiles.
 
-The general-execution-v1 profile serves seven tools without selecting a mandatory local parser.
+The general-execution-v1 profile serves eight tools without selecting a mandatory local parser.
 Use openreading_parse to start authorized backend or strategy work, then inspect persistent ej1 jobs.
 General get_job, list_jobs and cancel_job operate under the original input grant across client reconnects.
 Get and list can persist recovery after supervisor exit, so their tool annotations admit writes.
@@ -52,7 +52,7 @@ An optional baseline selects an existing input or appends another retained respo
 The shared comparison engine never executes either backend; its report retains exact subject-to-input mappings.
 For example, compare two retained runs of Docling without reprocessing their source documents.
 The synchronous call returns a bounded receipt; host cancellation does not undo completed report publication.
-Truth scoring, corpus comparison, batch and scoped resume remain unbuilt MCP operations.
+Truth scoring, corpus comparison and scoped resume remain unbuilt MCP operations.
 
 Internal execution preflight lives in openreading.mcp_server.execution and exposes no additional tool.
 It snapshots explicit configuration with independent backend and strategy entrypoint scopes.

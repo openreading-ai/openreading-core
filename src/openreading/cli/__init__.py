@@ -1234,7 +1234,7 @@ fire after that clean shutdown.
 mcp --profile PROFILE
 ---------------------
 Serve document tools over stdio with one explicit local or general profile.
-Select general-execution-v1 for 7 tools with openreading[agent].
+Select general-execution-v1 for 8 tools with openreading[agent].
 Install the adapters you authorize separately before starting document jobs.
 A backend is a registered document processor, such as pymupdf or reducto.
 Each backend reads the formats its descriptor claims.
@@ -1260,19 +1260,25 @@ HOME, TMPDIR, XDG_CACHE_HOME, OPENREADING_CONFIG, and OPENREADING_LEDGER
 are reserved for private worker directories and the captured configuration.
 No ambient credentials or configuration reach workers unless selected.
 --execution-concurrency defaults to one and accepts positive integers.
---execution-deadline-seconds sets an optional positive deadline per attempt.
+--execution-deadline-seconds sets an optional positive deadline per job.
 Without that flag, execution has no deadline or arbitrary document caps.
 These controls do not impose a native memory ceiling or OS sandbox.
 
 Call openreading_parse with the shared request shape and a relative path.
 For example, request document.path as sample.pdf and backend.id as pymupdf.
-The tool returns an ej1_ job identifier before document processing finishes.
+Call openreading_batch with requests as an ordered array of those requests.
+Each batch holds one slot and runs items serially, including duplicates.
+An empty requests array retains the shared empty_batch result.
+Every request is authorized before acquiring any source for acceptance.
+Both tools return an ej1_ job identifier before processing finishes.
 Use openreading_get_job and openreading_list_jobs to inspect execution.
 Call openreading_cancel_job to stop unwanted work explicitly.
 Host Stop does not cancel detached work, and local cancellation cannot
 establish cancellation of work already submitted to a remote provider.
 Succeeded jobs carry retained orr1_ result identifiers.
-Call openreading_get_result to retrieve complete normalized content.
+Call openreading_get_result to retrieve complete normalized or batch content.
+A succeeded batch item returned a response; inspect its nested status too.
+Cancellation prevents batch publication but cannot undo completed calls.
 Call openreading_compare to compare at least two retained normalized results.
 Call openreading_route to plan requests under the same execution authority.
 General execution provides no native document chooser or local import tools.

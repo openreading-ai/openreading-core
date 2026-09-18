@@ -1,8 +1,10 @@
 """Bind complete results to explicit producer provenance without inventing citations.
 
-retained-result.v0.2 owns storage, and result-tool.v0.2 owns retrieval payloads.
-The reader preserves v0.1 records without adding fields or changing their canonical bytes.
-A result contains either a response.v0.3 envelope or a comparison-report.v0.2 report.
+retained-result.v0.3 owns storage, and result-tool.v0.3 owns retrieval payloads.
+The reader preserves v0.1 and v0.2 records without changing their canonical bytes.
+A result contains a response.v0.3 envelope, comparison-report.v0.2 report, or batch-result.v0.2 envelope.
+Batch retention validates each nested response and rejects its direct backend_raw field.
+Typed fields named backend_raw remain intact, including their nested null values.
 Request and configuration fingerprints identify producer inputs without retaining credentials.
 Source hashes and adapter versions are supplied by the trusted producer, not measured here.
 Unknown adapter versions remain null. Normalized-response hashes remain producer assertions.
@@ -11,7 +13,7 @@ Comparison subject labels map to retained identifiers under the same input grant
 For example, synthetic and synthetic#2 can identify two separate runs of the same adapter.
 Attributed comparisons use v0.2 records and map each label to hashes plus a verification basis.
 Legacy aggregates remain unattributed; reading an old record never invents per-subject verification.
-The result-tool v0.2 schema accepts both content shapes; its unchanged receipt fields retain version 0.1.
+The result-tool v0.3 schema accepts every content shape; unchanged receipt fields retain version 0.1.
 Report paths identify report values, never physical source pages or new citation evidence.
 """
 
@@ -20,15 +22,16 @@ from __future__ import annotations
 from typing import Annotated, Literal, cast
 
 from pydantic import ConfigDict, Field, JsonValue, model_validator
+from pydantic.config import JsonDict
 
 from openreading.artifacts.constants import MAX_CURSOR_CHARS
 from openreading.artifacts.document import TextFragment, ValueFragment
 from openreading.artifacts.models import Digest, ErrorEnvelope, WireModel
-from openreading.schemas import validate_comparison_report, validate_response
+from openreading.schemas import validate_batch_result, validate_comparison_report, validate_response
 
 ResultId = Annotated[str, Field(pattern=r"^orr1_[0-9a-f]{64}$")]
 InputResultId = Annotated[str, Field(pattern=r"^(or1|orr1)_[0-9a-f]{64}$")]
-ResultKind = Literal["normalized_response", "comparison_report"]
+ResultKind = Literal["normalized_response", "comparison_report", "batch_result"]
 
 
 class ResultProvenance(WireModel):
@@ -71,21 +74,62 @@ class ResultContent(WireModel):
     model_config = ConfigDict(
         extra="forbid",
         strict=True,
-        json_schema_extra={
-            "allOf": [
-                {
-                    "if": {"properties": {"kind": {"const": kind}}},
-                    "then": {"properties": {"payload": {"$ref": reference}}},
-                }
-                for kind, reference in (
-                    ("normalized_response", "https://openreading.ai/schemas/response/v0.3.json"),
-                    (
-                        "comparison_report",
-                        "https://openreading.ai/schemas/comparison-report.v0.2.json",
-                    ),
-                )
-            ]
-        },
+        json_schema_extra=cast(
+            JsonDict,
+            {
+                "allOf": [
+                    {
+                        "if": {"properties": {"kind": {"const": kind}}},
+                        "then": {"properties": {"payload": {"$ref": reference}}},
+                    }
+                    for kind, reference in (
+                        (
+                            "normalized_response",
+                            "https://openreading.ai/schemas/response/v0.3.json",
+                        ),
+                        (
+                            "comparison_report",
+                            "https://openreading.ai/schemas/comparison-report.v0.2.json",
+                        ),
+                        ("batch_result", "https://openreading.ai/schemas/batch-result.v0.2.json"),
+                    )
+                ]
+                + [
+                    {
+                        "if": {"properties": {"kind": {"const": "batch_result"}}},
+                        "then": {
+                            "properties": {
+                                "provenance": {
+                                    "properties": {"subjects": {"maxProperties": 0}},
+                                    "not": {"required": ["subject_sources"]},
+                                },
+                                "payload": {
+                                    "properties": {
+                                        "items": {
+                                            "items": {
+                                                "properties": {
+                                                    "response": {
+                                                        "anyOf": [
+                                                            {"type": "null"},
+                                                            {
+                                                                "$ref": "https://openreading.ai/schemas/response/v0.3.json",
+                                                                "not": {
+                                                                    "required": ["backend_raw"]
+                                                                },
+                                                            },
+                                                        ]
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                            }
+                        },
+                    }
+                ]
+            },
+        ),
     )
     kind: ResultKind
     provenance: AttributedResultProvenance | ResultProvenance
@@ -101,6 +145,20 @@ class ResultContent(WireModel):
                 or isinstance(self.provenance, AttributedResultProvenance)
             ):
                 raise ValueError("Normalized results exclude raw output and comparison subjects")
+        elif self.kind == "batch_result":
+            validate_batch_result(self.payload)
+            if self.provenance.subjects or isinstance(self.provenance, AttributedResultProvenance):
+                raise ValueError("Batch results exclude comparison subjects")
+            items = self.payload["items"]
+            assert isinstance(items, list)
+            for item in items:
+                assert isinstance(item, dict)
+                response = item.get("response")
+                if response is not None:
+                    assert isinstance(response, dict)
+                    validate_response(response)
+                    if "backend_raw" in response:
+                        raise ValueError("Batch responses exclude raw output")
         else:
             validate_comparison_report(self.payload)
             subjects = self.payload["subjects"]
@@ -154,11 +212,26 @@ class ResultRecord(WireModel):
                             }
                         }
                     },
-                }
+                },
+                {
+                    "if": {"properties": {"format": {"const": "retained-result.v0.3"}}},
+                    "then": {
+                        "properties": {
+                            "content": {"properties": {"kind": {"const": "batch_result"}}}
+                        }
+                    },
+                    "else": {
+                        "properties": {
+                            "content": {"properties": {"kind": {"not": {"const": "batch_result"}}}}
+                        }
+                    },
+                },
             ]
         },
     )
-    format: Literal["retained-result.v0.1", "retained-result.v0.2"] = "retained-result.v0.2"
+    format: Literal["retained-result.v0.1", "retained-result.v0.2", "retained-result.v0.3"] = (
+        "retained-result.v0.3"
+    )
     input_grant_sha256: Digest
     content: ResultContent
 
@@ -167,6 +240,8 @@ class ResultRecord(WireModel):
         attributed = isinstance(self.content.provenance, AttributedResultProvenance)
         if attributed != (self.format == "retained-result.v0.2"):
             raise ValueError("Attributed comparisons require retained-result.v0.2")
+        if (self.content.kind == "batch_result") != (self.format == "retained-result.v0.3"):
+            raise ValueError("Batch results require retained-result.v0.3")
         return self
 
     def wire(self) -> dict:
@@ -242,5 +317,5 @@ class ResultError(Exception):
 
 ResultPayload = Annotated[
     ResultRequest | CompleteResult | FileResult | FragmentResult | ResultFailure | ErrorEnvelope,
-    Field(title="OpenReading Result Tool v0.2"),
+    Field(title="OpenReading Result Tool v0.3"),
 ]

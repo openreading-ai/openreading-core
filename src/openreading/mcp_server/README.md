@@ -34,8 +34,8 @@ These flags do not change local imports, and static `openreading_backends` disco
 An empty plan sets `isError`. A nonempty plan does not establish backend readiness, format compatibility or completed processing.
 Selection returns `selection_unavailable` unless a trusted launcher explicitly supplies a local chooser.
 
-The general profile exposes seven tools without requiring a fixed local parser at startup.
-Call `openreading_parse` with the shared request shape, then use `openreading_get_job`, `openreading_list_jobs` and `openreading_cancel_job`.
+The general profile exposes eight tools without requiring a fixed local parser at startup.
+Call `openreading_parse` with the shared request shape or `openreading_batch` with an ordered `requests` array, then use `openreading_get_job`, `openreading_list_jobs` and `openreading_cancel_job`.
 For example, `backend.id` set to `strategy:local` selects an operator-authorized strategy with independently authorized backend leaves.
 The other three tools are `openreading_route`, `openreading_get_result` and `openreading_compare`, using the same retained-result contracts.
 The general profile grants relative paths directly and does not provide a native chooser or local evidence imports.
@@ -54,12 +54,20 @@ openreading mcp --profile general-execution-v1 \
 
 Call `openreading_parse` with `{"document":{"path":"sample.pdf"},"backend":{"id":"pymupdf"}}` for a queued job receipt.
 Keep its `job_id`, poll `openreading_get_job`, and retrieve the returned `receipt.result_id` through `openreading_get_result`.
-The job state `succeeded` means publication completed, while `response_state` separately describes extraction success, partial output, failure or ongoing processing.
+The job state `succeeded` means publication completed; `response_state` describes the parse provider outcome or batch aggregate outcome.
 Select an explicit configuration with `--execution-config` and repeat `--execute-strategy` for each authorized strategy entrypoint.
 Forward required existing credentials with `--execution-env NAME`, such as `--execution-env REDUCTO_API_KEY` for an authorized hosted adapter.
 Only selected environment values reach workers, and the fixed private directory names listed in CLI help refuse overrides.
 Optional execution deadlines include queue time, while `--execution-concurrency` defaults to one running job per grant.
-Missing backend grants refuse execution, and startup does not claim the configured backends are ready.
+Missing backend grants refuse nonempty execution, and startup does not claim the configured backends are ready.
+For example, `openreading_batch` accepts `{"requests":[{"document":{"path":"sample.pdf"},"backend":{"id":"pymupdf"}}]}`.
+A batch holds one operator concurrency slot and executes every item serially, including duplicate requests.
+All request scopes are checked before any input is acquired; missing sources refuse acceptance before provider work.
+Each accepted item uses its own isolated worker, and failures preserve input order through Core's shared batch runner.
+Retrieve its complete `batch_result` through `openreading_get_result`; a succeeded item can still contain a failed extraction response.
+An empty array retains the shared `empty_batch` warning; cancellation or interruption prevents final batch publication.
+Completed private attempts persist, and cancelling a batch cannot undo provider calls already completed.
+This operation accepts explicit granted files; directory expansion and native provider batch dispatch are not implemented here.
 
 
 Install the optional dependencies in your development environment, then configure your client to launch this command:

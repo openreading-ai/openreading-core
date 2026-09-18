@@ -273,6 +273,7 @@ sys.exit(main(sys.argv[1:]))
             tools = receive()["result"]["tools"]
             assert {tool["name"] for tool in tools} == {
                 "openreading_parse",
+                "openreading_batch",
                 "openreading_get_job",
                 "openreading_list_jobs",
                 "openreading_cancel_job",

@@ -13,10 +13,12 @@ Existing or1 documents and their source files, manifests and passages are never 
 Comparison producers must supply subject labels mapped to readable, same-grant normalized inputs.
 Retention verifies those references but does not rerun comparison or certify report conclusions.
 Attributed v0.2 reports also bind each subject's hashes to its loaded input during publication.
-Legacy v0.1 records remain readable without migration; their original format and bytes stay unchanged.
+Batch envelopes use v0.3 records, with each nested response validated independently.
+Legacy v0.1 and v0.2 records remain readable without migration or changes to their canonical bytes.
 Older readers cannot consume v0.2 records, so downgrading requires keeping the newer reader available.
 
 Only the normalized envelope's top-level backend_raw is excluded before storage.
+Batch producers must omit direct backend_raw values from nested responses before publication.
 Other values, including nulls, warnings and partial or failed statuses, remain unchanged.
 For example, an empty text channel does not prevent retaining a schema-valid failed response.
 Responses still obey the existing response schema; retention never manufactures missing fields.
@@ -69,6 +71,18 @@ class RetainedResults:
             raise ResultError("result_not_found")
         return self.root / (identifier.removeprefix("orr1_") + ".json")
 
+    def record(self, content: ResultContent) -> ResultRecord:
+        """Build the canonical record used for publication and durable publication intents."""
+        return ResultRecord(
+            format="retained-result.v0.3"
+            if content.kind == "batch_result"
+            else "retained-result.v0.2"
+            if isinstance(content.provenance, AttributedResultProvenance)
+            else "retained-result.v0.1",
+            input_grant_sha256=self.store.grant,
+            content=content,
+        )
+
     def publish(
         self, kind: ResultKind, payload: dict, provenance: ResultProvenance
     ) -> ResultReceipt:
@@ -81,17 +95,7 @@ class RetainedResults:
                 else payload,
             )
             # Snapshot caller-owned containers before validation or publication can overlap edits.
-            record = ResultRecord.model_validate_json(
-                json_bytes(
-                    ResultRecord(
-                        format="retained-result.v0.2"
-                        if isinstance(provenance, AttributedResultProvenance)
-                        else "retained-result.v0.1",
-                        input_grant_sha256=self.store.grant,
-                        content=content,
-                    ).wire()
-                )
-            )
+            record = ResultRecord.model_validate_json(json_bytes(self.record(content).wire()))
         except (ValueError, TypeError, ModelError, ValidationError):
             raise ResultError("invalid_result") from None
         for label, reference in record.content.provenance.subjects.items():

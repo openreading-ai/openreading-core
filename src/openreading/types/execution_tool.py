@@ -1,5 +1,6 @@
 """Define general parse acceptance and fixed job-operation failures for MCP clients.
 
+Batch accepts an ordered requests array of the same restricted shared requests, including an empty array.
 Parse accepts the shared request shape restricted to grant-relative paths and operator-owned runtime configuration.
 For example, backend.id strategy:local selects an authorized strategy without accepting caller credentials or document URLs.
 The retained execution-job contract supplies status and lookup shapes without changing historical lifecycle records.
@@ -58,15 +59,26 @@ def execution_tool_contract() -> dict:
     envelope = ErrorEnvelope.model_json_schema()
     schema["$defs"].update(envelope.pop("$defs"))
     schema["$defs"].update(
-        ParseRequest=request, ExecutionToolFailure=failure, ErrorEnvelope=envelope
+        ParseRequest=request,
+        BatchRequest={
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["requests"],
+            "properties": {
+                "requests": {"type": "array", "items": {"$ref": "#/$defs/ParseRequest"}}
+            },
+        },
+        ExecutionToolFailure=failure,
+        ErrorEnvelope=envelope,
     )
     schema["anyOf"].extend(
         [
             {"$ref": "#/$defs/ParseRequest"},
+            {"$ref": "#/$defs/BatchRequest"},
             {"$ref": "#/$defs/ExecutionToolFailure"},
             {"$ref": "#/$defs/ErrorEnvelope"},
         ]
     )
-    schema["$id"] = "https://openreading.ai/schemas/execution-tool.v0.1.json"
-    schema["title"] = "OpenReading Execution Tool v0.1"
+    schema["$id"] = "https://openreading.ai/schemas/execution-tool.v0.2.json"
+    schema["title"] = "OpenReading Execution Tool v0.2"
     return schema

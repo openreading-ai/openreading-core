@@ -1,11 +1,15 @@
 """Persist general execution through a detached supervisor under the original input grant.
 
-Each accepted request creates one ej1 job; repeating start creates new work rather than reusing output.
+Each accepted parse or batch creates one ej1 job; repeating start creates new work rather than reusing output.
+Batch requests authorize every item before acquiring sources and retain the shared ordered batch-result envelope.
+Each batch holds one concurrency slot; its isolated item attempts execute serially under the same cancellation checks.
+For example, two duplicate source requests produce two batch items instead of a deduplicated import.
+An empty batch retains the shared failed empty_batch result while successful publication makes the job succeeded.
 The supervisor acquires an operator-configured concurrency slot before starting an ExecutionAttempt.
 Disconnecting the MCP client leaves accepted work running. Explicit cancellation and deadlines include queue time.
 No provider is automatically retried after supervisor interruption, even when no receipt was returned.
 
-Public status separates successful result retention from the normalized response's extraction outcome.
+Public status separates successful result retention from a normalized response or batch aggregate outcome.
 A valid failed response is retained unchanged with job state succeeded and response_state failed.
 Publication records its expected receipt first, then commits through RetainedResults and writes terminal status.
 After supervisor death, recovery recognizes only an integrity-verified committed result matching that intent.
@@ -57,10 +61,11 @@ from openreading.artifacts.intake import directory
 from openreading.artifacts.jobs import _write
 from openreading.artifacts.limits import ArtifactError, ProfileConfig
 from openreading.artifacts.models import json_bytes
-from openreading.artifacts.result_models import ResultContent, ResultReceipt, ResultRecord
+from openreading.artifacts.result_models import ResultContent, ResultReceipt
 from openreading.artifacts.results import RetainedResults
 from openreading.artifacts.search import _binding, _cursor, _offset
 from openreading.artifacts.store import Store, safe_read
+from openreading.mcp_server.batch_execution import authorize_batch, execute_batch
 from openreading.mcp_server.execution import ExecutionConfig, ExecutionRefused
 from openreading.mcp_server.execution_process import ExecutionAttempt, ExecutionError
 from openreading.types.execution_job import (
@@ -196,9 +201,17 @@ class ExecutionJobs:
 
     def start(self, value: dict) -> ExecutionJob:
         plan = self.authority.authorize(value)
-        assert plan.request.document.path is not None
-        with self.store.source(plan.request.document.path):
-            pass
+        return self._start(json.loads(plan.request_json), "parse")
+
+    def start_batch(self, value: dict) -> ExecutionJob:
+        requests = authorize_batch(self.authority, value)
+        return self._start({"requests": requests}, "batch")
+
+    def _start(self, value: dict, operation: str) -> ExecutionJob:
+        requests = value["requests"] if operation == "batch" else [value]
+        for item in requests:
+            with self.store.source(item["document"]["path"]):
+                pass
         root = self.root / ("ej1_" + uuid.uuid4().hex)
         process = None
         try:
@@ -217,7 +230,8 @@ class ExecutionJobs:
                     "configuration": json.loads(self.authority.configuration),
                     "allowed_backends": sorted(self.authority.allowed_backends),
                     "allowed_strategies": sorted(self.authority.allowed_strategies),
-                    "request": json.loads(plan.request_json),
+                    "request": value,
+                    "operation": operation,
                     "started": time.time(),
                     "deadline_seconds": self.deadline_seconds,
                     "concurrency": self.concurrency,
@@ -439,7 +453,13 @@ def run(root: Path) -> int:
 
     attempt = ExecutionAttempt(store, authority, environment=manager.environment)
     try:
-        authority.authorize(request["request"])
+        operation = request.get("operation", "parse")
+        if operation == "batch":
+            authorize_batch(authority, request["request"])
+        elif operation == "parse":
+            authority.authorize(request["request"])
+        else:
+            raise ExecutionRefused("invalid_request")
         while True:
             check()
             acquired = False
@@ -456,13 +476,27 @@ def run(root: Path) -> int:
                     value.state, value.stage = "running", "executing"
                     save()
                     _write_bound(root, "attempt.json", grant, {"directory": str(attempt.root)})
-                    content = attempt.run(request["request"], check=check)
+                    if operation == "batch":
+
+                        def record_attempt(index: int, path: Path):
+                            _write_bound(
+                                root, f"attempt-{index}.json", grant, {"directory": str(path)}
+                            )
+
+                        content = execute_batch(
+                            store,
+                            authority,
+                            request["request"],
+                            environment=manager.environment,
+                            check=check,
+                            on_attempt=record_attempt,
+                        )
+                    else:
+                        content = attempt.run(request["request"], check=check)
                     check()
                     value.stage = "publishing"
                     save()
-                    record = ResultRecord(
-                        format="retained-result.v0.1", input_grant_sha256=grant, content=content
-                    )
+                    record = RetainedResults(store).record(content)
                     identifier = "orr1_" + hashlib.sha256(json_bytes(record.wire())).hexdigest()
                     results = RetainedResults(store)
                     receipt = results.receipt(identifier, content)

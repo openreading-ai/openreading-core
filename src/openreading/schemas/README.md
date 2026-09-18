@@ -609,11 +609,15 @@ entry naming it, so the warning reaches you before the removal does.
 | `result-tool.v0.1.json` | `openreading.mcp_server.results` | Complete general result delivery, private exports and lossless fragments. |
 | `retained-result.v0.2.json` | `openreading.artifacts.result_models` | Attributed comparison source hashes, with byte-preserving reads of v0.1 records. Readers pinned to v0.1 cannot consume v0.2 records. |
 | `result-tool.v0.2.json` | `openreading.mcp_server.results` | Accepts both provenance shapes; unchanged receipt fields retain version 0.1. |
+| `retained-result.v0.3.json` | `openreading.artifacts.result_models` | Complete batch envelopes with independently validated nested responses; historical records keep their original bytes. |
+| `result-tool.v0.3.json` | `openreading.mcp_server.results` | Response, comparison and batch delivery through complete replies, exports or lossless fragments. |
+| `execution-job.v0.2.json` | `openreading.types.execution_job` | Response and batch receipts with separate provider outcomes; historical version 0.1 statuses remain readable. |
+| `execution-tool.v0.2.json` | `openreading.types.execution_tool` | General parse and batch admission, lifecycle lookup and fixed failures. |
 | `backend-discovery.v0.1.json` | `openreading.types.backend_discovery` | Static selected-backend descriptor and configured OCR flag, without readiness or liveness checks. Validation requires the vendored `adapter-descriptor.v0.8.json` resource registered under its `$id`. |
 
 These families wrap retained evidence without changing the normalized extraction response.
 The v0.3 retained artifact reader remains supported without rewriting stored files.
-General result validators require the vendored response v0.3 and comparison-report v0.2 resources registered under their respective `$id` values.
+General result validators require the vendored response v0.3, comparison-report v0.2 and batch-result v0.2 resources registered under their respective `$id` values.
 These external references preserve existing payload contracts; neither result family invents new source-document evidence.
 `verified_source_bytes` describes the retained copy checked during comparison, not the current state of your original file.
 It does not establish that two subjects share a document, and retrieving a report does not rehash its sources.

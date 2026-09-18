@@ -1,8 +1,10 @@
 """Describe grant-scoped general execution jobs independently of local artifact imports.
 
-A job succeeds when it retains a complete normalized response and returns its result receipt.
-The separate response_state preserves the provider outcome, including partial, failed or still-processing extraction.
+A job succeeds when it retains a complete normalized response or batch and returns its result receipt.
+The separate response_state preserves the provider outcome for parses and the shared aggregate outcome for batches.
+For batches, individual extraction outcomes remain in items[].response.status within the retained batch result.
 For example, a retained failed response has state succeeded and response_state failed.
+Version 0.2 adds batch receipts; historical version 0.1 statuses retain their original wire values.
 Only succeeded jobs carry receipts; failed and cancelled jobs carry fixed lifecycle error codes.
 No source path, document text, provider diagnostic or credential appears in public status.
 
@@ -75,6 +77,16 @@ def _invariants() -> list[dict]:
             "if": {"properties": {"state": {"const": "succeeded"}}},
             "then": {
                 "properties": {
+                    "receipt": {
+                        "properties": {"kind": {"enum": ["normalized_response", "batch_result"]}}
+                    }
+                }
+            },
+        },
+        {
+            "if": {"properties": {"schema_version": {"const": "0.1"}}},
+            "then": {
+                "properties": {
                     "receipt": {"properties": {"kind": {"const": "normalized_response"}}}
                 }
             },
@@ -111,7 +123,7 @@ def _job_schema(schema: dict) -> None:
 class ExecutionJob(JobWire):
     model_config = ConfigDict(extra="forbid", strict=True, json_schema_extra=_job_schema)
 
-    schema_version: Literal["0.1"] = "0.1"
+    schema_version: Literal["0.1", "0.2"] = "0.2"
     job_id: ExecutionJobId
     state: ExecutionState
     stage: ExecutionStage
@@ -135,8 +147,14 @@ class ExecutionJob(JobWire):
         success = self.state == "succeeded"
         if success != (self.receipt is not None) or success != (self.response_state is not None):
             raise ValueError("Only published results carry receipts and response outcomes.")
-        if self.receipt is not None and self.receipt.kind != "normalized_response":
-            raise ValueError("Execution jobs retain normalized responses.")
+        if self.receipt is not None:
+            allowed = {"normalized_response"}
+            if self.schema_version == "0.2":
+                allowed.add("batch_result")
+            if self.receipt.kind not in allowed:
+                raise ValueError(
+                    "Execution jobs retain normalized responses or version 0.2 batches."
+                )
         if (self.state in {"failed", "cancelled"}) != (self.error is not None):
             raise ValueError("Stopped jobs require a lifecycle error.")
         if (self.state == "cancelled") != (
@@ -186,8 +204,8 @@ def execution_job_contract() -> dict:
     schema.update(
         {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "$id": "https://openreading.ai/schemas/execution-job.v0.1.json",
-            "title": "OpenReading Execution Job v0.1",
+            "$id": "https://openreading.ai/schemas/execution-job.v0.2.json",
+            "title": "OpenReading Execution Job v0.2",
         }
     )
     return schema
