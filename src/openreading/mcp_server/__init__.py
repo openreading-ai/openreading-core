@@ -1,10 +1,14 @@
 """Expose local evidence and scoped general execution through separate stdio profiles.
 
-The general-execution-v1 profile serves nine tools without selecting a mandatory local parser.
+The general-execution-v1 profile serves twelve tools without selecting a mandatory local parser.
 Use openreading_parse to start authorized backend or strategy work, then inspect persistent ej1 jobs.
 General get_job, list_jobs and cancel_job operate under the original input grant across client reconnects.
 Get and list can persist recovery after supervisor exit, so their tool annotations admit writes.
 Get_result retrieves complete retained normalized data, while compare consumes retained inputs without provider calls.
+General discovery lists only authorized descriptors without credential or dependency checks.
+Explicit readiness and liveness use owned diagnostic children with the forwarded execution environment.
+Readiness reports configuration, while only a requested liveness probe can establish measured reachability.
+For example, an available credential can satisfy readiness even when the provider later rejects it.
 Route plans backend order within the same operator execution scope without checking provider readiness.
 For example, --execute-backend pymupdf authorizes parsing through that adapter when its dependencies are installed.
 The general launcher rejects local planning flags instead of interpreting them as execution authority.

@@ -34,10 +34,18 @@ These flags do not change local imports, and static `openreading_backends` disco
 An empty plan sets `isError`. A nonempty plan does not establish backend readiness, format compatibility or completed processing.
 Selection returns `selection_unavailable` unless a trusted launcher explicitly supplies a local chooser.
 
-The general profile exposes nine tools without requiring a fixed local parser at startup.
+The general profile exposes twelve tools without requiring a fixed local parser at startup.
 Call `openreading_parse` with the shared request shape or `openreading_batch` with an ordered `requests` array, then use `openreading_get_job`, `openreading_list_jobs` and `openreading_cancel_job`.
 For example, `backend.id` set to `strategy:local` selects an operator-authorized strategy with independently authorized backend leaves.
-The other three tools are `openreading_route`, `openreading_get_result` and `openreading_compare`, using the same retained-result contracts.
+Resume selects a terminal strategy job through `openreading_resume`, including a selected batch strategy item.
+The retained-operation tools are `openreading_route`, `openreading_get_result` and `openreading_compare`, using the same retained-result contracts.
+General `openreading_backends` lists authorized descriptors; its optional `backend` selects one without checking credentials or local dependencies.
+Call `openreading_readiness` with `{"backend":"pymupdf"}` to check local configuration through the explicit execution environment.
+Call `openreading_liveness` with that backend only when you want its diagnostic probe, which can contact configured infrastructure.
+Readiness does not establish credential validity or reachability; liveness preserves the existing measured and inferred states.
+Diagnostics acquire no documents and run outside the document job queue with bounded lifetimes and normally removed scratch.
+They reserve reply space for complete reports up to 65536 JSON bytes, refusing smaller budgets before starting work.
+For example, the default reply budget accommodates diagnostics; reducing it to 4096 bytes refuses even a potentially small report.
 The general profile grants relative paths directly and does not provide a native chooser or local evidence imports.
 
 ## Walkthrough

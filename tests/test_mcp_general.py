@@ -26,6 +26,9 @@ async def test_general_catalog_contract_scope_and_annotations(store, monkeypatch
     async with create_connected_server_and_client_session(create_server(manager)) as session:
         catalog = {t.name: t for t in (await session.list_tools()).tools}
         assert set(catalog) == {
+            "openreading_backends",
+            "openreading_readiness",
+            "openreading_liveness",
             "openreading_parse",
             "openreading_batch",
             "openreading_resume",
@@ -51,7 +54,13 @@ async def test_general_catalog_contract_scope_and_annotations(store, monkeypatch
         assert all(
             not tool.annotations.openWorldHint
             for name, tool in catalog.items()
-            if name not in {"openreading_parse", "openreading_batch", "openreading_resume"}
+            if name
+            not in {
+                "openreading_parse",
+                "openreading_batch",
+                "openreading_resume",
+                "openreading_liveness",
+            }
         )
         response = await session.call_tool("openreading_parse", request("reducto"))
         assert response.isError
@@ -233,7 +242,7 @@ async def test_real_stdio_parse_disconnect_reconnect_and_complete_delivery(
             ClientSession(reader, writer) as session,
         ):
             await session.initialize()
-            assert len((await session.list_tools()).tools) == 9
+            assert len((await session.list_tools()).tools) == 12
             accepted = await payload(session, "openreading_parse", request(backend))
             Draft202012Validator(execution_tool_schema()).validate(accepted)
             assert accepted["state"] == "queued"

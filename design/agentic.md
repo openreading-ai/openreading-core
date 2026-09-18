@@ -7,7 +7,8 @@ The [remaining product intent](../product/specs/agentic.product-spec.md) preserv
 
 ## Scope boundary
 
-Truth-scored and corpus comparison, readiness discovery, and triage tools remain unbuilt.
+Truth-scored and corpus comparison and triage tools remain unbuilt.
+Authorized discovery and explicit readiness/liveness diagnostics are documented in the MCP guide.
 Scoped backend route planning is documented in the MCP guide; strategy planning remains proposed.
 The local profile does not satisfy those requirements by exposing differently named equivalents.
 It deliberately selects one backend, one explicit input grant, and bounded retained evidence.

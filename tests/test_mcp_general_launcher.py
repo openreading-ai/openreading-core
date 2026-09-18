@@ -272,6 +272,9 @@ sys.exit(main(sys.argv[1:]))
             send({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
             tools = receive()["result"]["tools"]
             assert {tool["name"] for tool in tools} == {
+                "openreading_backends",
+                "openreading_readiness",
+                "openreading_liveness",
                 "openreading_parse",
                 "openreading_batch",
                 "openreading_resume",

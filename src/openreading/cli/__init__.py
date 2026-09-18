@@ -1234,7 +1234,7 @@ fire after that clean shutdown.
 mcp --profile PROFILE
 ---------------------
 Serve document tools over stdio with one explicit local or general profile.
-Select general-execution-v1 for 9 tools with openreading[agent].
+Select general-execution-v1 for 12 tools with openreading[agent].
 Install the adapters you authorize separately before starting document jobs.
 A backend is a registered document processor, such as pymupdf or reducto.
 Each backend reads the formats its descriptor claims.
@@ -1263,6 +1263,24 @@ No ambient credentials or configuration reach workers unless selected.
 --execution-deadline-seconds sets an optional positive deadline per job.
 Without that flag, execution has no deadline or arbitrary document caps.
 These controls do not impose a native memory ceiling or OS sandbox.
+
+Call openreading_backends for static descriptors of authorized backends.
+For example, backend=pymupdf narrows discovery without checking dependencies.
+Call openreading_readiness for one backend's offline configuration check.
+It uses the explicit execution environment, not ambient host credentials.
+Ready means configured locally, not credential validity or reachability.
+Call openreading_liveness only when you want an explicit diagnostic probe.
+For example, backend=pymupdf runs its local probe without a document.
+Endpoint and vendor probes may contact the configured infrastructure.
+Liveness preserves the shared measured and inferred outcome distinctions.
+A timeout_s between 0.1 and 30 bounds the probe, plus ten seconds startup.
+Offline readiness has a thirty-second diagnostic process deadline.
+Diagnostics never submit documents or perform billed extraction requests.
+Reports above 65536 JSON bytes refuse instead of losing fields silently.
+Enough reply space for that ceiling is reserved before diagnostic startup.
+The default reply budget fits; a small budget may refuse before any probe.
+Diagnostic scratch is removed after cleanup; abrupt loss can leave files.
+These probes use separate processes, outside the document job queue.
 
 Call openreading_parse with the shared request shape and a relative path.
 For example, request document.path as sample.pdf and backend.id as pymupdf.

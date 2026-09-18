@@ -195,18 +195,6 @@ class ExecutionAttempt:
             copy_snapshot(self.root.parent / resume["directory"], self.root, resume, observe)
             verify_snapshot(self.root, self.authority, resume)
             digest = resume["source_sha256"]
-        for name in ("home", "tmp", "cache", "ledger"):
-            with directory(self.root / name, create=True):
-                pass
-        environment = {
-            "PATH": os.defpath,
-            **self.environment,
-            "HOME": str(self.root / "home"),
-            "TMPDIR": str(self.root / "tmp"),
-            "XDG_CACHE_HOME": str(self.root / "cache"),
-            "OPENREADING_CONFIG": "",
-            "OPENREADING_LEDGER": str(self.root / "ledger"),
-        }
         packet = json_bytes(
             {
                 "configuration": json.loads(self.authority.configuration),
@@ -217,36 +205,7 @@ class ExecutionAttempt:
                 **({"resume": resume} if resume is not None else {}),
             }
         )
-        try:
-            observe()
-            parent_fd, self._liveness_fd = os.pipe()
-            try:
-                self._process = subprocess.Popen(
-                    [
-                        sys.executable,
-                        "-I",
-                        "-m",
-                        "openreading.mcp_server.execution_worker",
-                        "--parent-fd",
-                        str(parent_fd),
-                    ],
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    cwd=self.root,
-                    env=environment,
-                    start_new_session=True,
-                    pass_fds=(parent_fd,),
-                )
-            finally:
-                os.close(parent_fd)
-            _exchange(self._process, packet, observe)
-            if self._process.returncode != 0:
-                raise ExecutionError("execution_failed")
-        except (OSError, ValueError):
-            raise ExecutionError("execution_failed") from None
-        finally:
-            self.close()
+        self._run_child(packet, "openreading.mcp_server.execution_worker", observe)
         observe()
         try:
             payload = json.loads(safe_read(self.root / "response.json", None))
@@ -267,6 +226,51 @@ class ExecutionAttempt:
             raise ExecutionError("execution_failed") from None
         observe()
         return content
+
+    def _run_child(self, packet: bytes, module: str, observe: Callable[[], None]) -> None:
+        """Run a trusted internal module with the same private environment and process ownership."""
+        for name in ("home", "tmp", "cache", "ledger"):
+            with directory(self.root / name, create=True):
+                pass
+        environment = {
+            "PATH": os.defpath,
+            **self.environment,
+            "HOME": str(self.root / "home"),
+            "TMPDIR": str(self.root / "tmp"),
+            "XDG_CACHE_HOME": str(self.root / "cache"),
+            "OPENREADING_CONFIG": "",
+            "OPENREADING_LEDGER": str(self.root / "ledger"),
+        }
+        try:
+            observe()
+            parent_fd, self._liveness_fd = os.pipe()
+            try:
+                self._process = subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-I",
+                        "-m",
+                        module,
+                        "--parent-fd",
+                        str(parent_fd),
+                    ],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    cwd=self.root,
+                    env=environment,
+                    start_new_session=True,
+                    pass_fds=(parent_fd,),
+                )
+            finally:
+                os.close(parent_fd)
+            _exchange(self._process, packet, observe)
+            if self._process.returncode != 0:
+                raise ExecutionError("execution_failed")
+        except (OSError, ValueError):
+            raise ExecutionError("execution_failed") from None
+        finally:
+            self.close()
 
 
 def _exchange(process: subprocess.Popen, packet: bytes, check: Callable[[], None]) -> None:

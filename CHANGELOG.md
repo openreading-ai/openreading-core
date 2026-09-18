@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased general backend diagnostics MCP
+
+- Discover authorized backend descriptors and request offline readiness or explicit liveness through the general MCP profile.
+  Diagnostics reuse shared backend checks in owned children with explicit environments, deadlines and bounded complete replies.
+- Share worker launch isolation and cleanup between document execution and diagnostics, without changing existing processing or local-profile tools.
+
 ## Unreleased scoped resume MCP
 
 - Pin resume admission and worker guards with runnable narrowed scopes, valid retained attempts and mismatched control packets.
