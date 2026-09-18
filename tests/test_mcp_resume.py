@@ -328,9 +328,10 @@ def test_resume_refuses_running_status_with_valid_attempt_and_live_owner(store):
                 terminal(manager, job.job_id)
 
 
-def test_resume_refuses_valid_attempt_under_foreign_grant(store):
+def test_resume_refuses_valid_attempt_under_foreign_grant(store, monkeypatch):
     import shutil
 
+    from openreading.mcp_server import resume_input
     from openreading.mcp_server.execution_jobs import _write_bound
     from openreading.mcp_server.resume_input import inspect_attempt
 
@@ -340,10 +341,19 @@ def test_resume_refuses_valid_attempt_under_foreign_grant(store):
     assert inspect_attempt(foreign, manager.authority, request("strategy:local"))["run_id"]
     root = manager.root / done.job_id
     _write_bound(root, "attempt.json", store.grant, {"directory": str(foreign)})
+    reads = []
+    original_read = resume_input.safe_read
+
+    def observed_read(file, cap):
+        reads.append(file)
+        return original_read(file, cap)
+
+    monkeypatch.setattr(resume_input, "safe_read", observed_read)
     before = inventory(store.config.artifact_root)
     try:
         with pytest.raises(ExecutionJobError, match="resume_unavailable"):
             manager.start_resume({"job_id": done.job_id})
+        assert reads == []
         assert inventory(store.config.artifact_root) == before
     finally:
         for job in manager.list().jobs:
