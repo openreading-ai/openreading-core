@@ -65,6 +65,9 @@ A sampled memory limit includes the worker and its descendants; sampling permits
 
 ## How it decides
 
+Attributed comparisons check each subject's hashes against its retained input, preventing source claims from being assigned to the wrong subject.
+For example, local artifact hashes are verified against source bytes, while normalized-response hashes remain producer assertions.
+
 Line-end dehyphenation lets a search for renewal find re- followed by newal on the next line.
 Returned passages and excerpt offsets still refer to the original text, including the hyphen and newline.
 PyMuPDF stores that line break as a space, so `re- newal` in its passages also matches renewal.

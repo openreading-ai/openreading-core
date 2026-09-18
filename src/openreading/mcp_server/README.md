@@ -121,6 +121,9 @@ Repeated identifiers remain separate subjects; a matching baseline selects the f
 The returned receipt identifies a retained comparison report, available through `openreading_get_result`.
 The report uses the existing engine without reparsing documents or executing either backend.
 Its `provenance.subjects` maps report labels to input identifiers; the `adapters` map uses those labels to preserve repeated backend versions.
+For each label, `provenance.subject_sources` reports source hashes and their verification basis.
+For example, an `or1_` subject has one `verified_source_bytes` hash; an `orr1_` subject retains its `producer_asserted` hash list.
+Earlier comparison records lack that attribution and retain their original bytes without inferred verification claims.
 Report locations describe normalized comparisons, not new source citations or independently verified accuracy.
 For example, read the mapped input artifact before citing a page supporting a reported text disagreement.
 Retained response fingerprints are inherited producer assertions; comparison does not establish that inputs describe the same source document.

@@ -552,8 +552,8 @@ DOCUMENT_TOOL_SCHEMA_FILE = "document-tool.v0.4.json"
 IMPORT_JOB_SCHEMA_FILE = "import-job.v0.3.json"
 ROUTE_TOOL_SCHEMA_FILE = "route-tool.v0.1.json"
 BACKEND_DISCOVERY_SCHEMA_FILE = "backend-discovery.v0.1.json"
-RETAINED_RESULT_SCHEMA_FILE = "retained-result.v0.1.json"
-RESULT_TOOL_SCHEMA_FILE = "result-tool.v0.1.json"
+RETAINED_RESULT_SCHEMA_FILE = "retained-result.v0.2.json"
+RESULT_TOOL_SCHEMA_FILE = "result-tool.v0.2.json"
 COMPARE_TOOL_SCHEMA_FILE = "compare-tool.v0.1.json"
 
 

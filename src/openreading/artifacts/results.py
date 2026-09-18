@@ -12,6 +12,9 @@ Reads reuse store.safe_read and reject symlinks, special files and mismatched re
 Existing or1 documents and their source files, manifests and passages are never rewritten.
 Comparison producers must supply subject labels mapped to readable, same-grant normalized inputs.
 Retention verifies those references but does not rerun comparison or certify report conclusions.
+Attributed v0.2 reports also bind each subject's hashes to its loaded input during publication.
+Legacy v0.1 records remain readable without migration; their original format and bytes stay unchanged.
+Older readers cannot consume v0.2 records, so downgrading requires keeping the newer reader available.
 
 Only the normalized envelope's top-level backend_raw is excluded before storage.
 Other values, including nulls, warnings and partial or failed statuses, remain unchanged.
@@ -22,7 +25,7 @@ No parser, provider, credential resolver or ambient configuration reader runs he
 This storage primitive adds no document or result-size cap and performs no automatic eviction.
 It materializes JSON in memory; bounded replies do not imply bounded process memory.
 Fingerprints detect corruption, not malicious rewriting by an actor controlling the entire store.
-Source hashes and implementation identities are assertions of the trusted producer.
+Normalized-response source hashes and implementation identities are assertions of the trusted producer.
 The comparison MCP producer is implemented in openreading.mcp_server.comparison.
 General execution producers remain separate implementation work.
 """
@@ -41,6 +44,7 @@ from openreading.artifacts.intake import directory
 from openreading.artifacts.limits import ArtifactError
 from openreading.artifacts.models import json_bytes
 from openreading.artifacts.result_models import (
+    AttributedResultProvenance,
     ResultContent,
     ResultError,
     ResultKind,
@@ -79,15 +83,31 @@ class RetainedResults:
             # Snapshot caller-owned containers before validation or publication can overlap edits.
             record = ResultRecord.model_validate_json(
                 json_bytes(
-                    ResultRecord(input_grant_sha256=self.store.grant, content=content).wire()
+                    ResultRecord(
+                        format="retained-result.v0.2"
+                        if isinstance(provenance, AttributedResultProvenance)
+                        else "retained-result.v0.1",
+                        input_grant_sha256=self.store.grant,
+                        content=content,
+                    ).wire()
                 )
             )
         except (ValueError, TypeError, ModelError, ValidationError):
             raise ResultError("invalid_result") from None
-        for reference in record.content.provenance.subjects.values():
+        for label, reference in record.content.provenance.subjects.items():
             if reference.startswith("or1_"):
-                self.store.load_document(reference)
-            elif self.load(reference).kind != "normalized_response":
+                manifest, _, _ = self.store.load_document(reference)
+                hashes = [manifest.document_sha256]
+            else:
+                loaded = self.load(reference)
+                if loaded.kind != "normalized_response":
+                    raise ResultError("invalid_result")
+                hashes = loaded.provenance.source_sha256
+            origin = record.content.provenance
+            if (
+                isinstance(origin, AttributedResultProvenance)
+                and origin.subject_sources[label].source_sha256 != hashes
+            ):
                 raise ResultError("invalid_result")
         data = json_bytes(record.wire())
         identifier = "orr1_" + hashlib.sha256(data).hexdigest()

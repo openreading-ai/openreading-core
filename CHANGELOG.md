@@ -2,6 +2,9 @@
 
 ## Unreleased retained-input MCP comparison
 
+- Attribute comparison source hashes to individual subjects and distinguish verified source bytes from producer assertions.
+  Retained-result and result-tool v0.2 preserve earlier schemas and existing v0.1 records without rewriting them.
+- Clarify that receipt recovery requires unchanged arguments, inputs and implementation; guard the documented MCP tool count.
 - Add `openreading_compare` over authorized retained normalized responses, using the existing comparison engine.
   Optional baselines share input validation; reports retain subject mappings and use complete result retrieval.
 - Measure compare-tool v0.1 receipts against the MCP response budget before publishing the report.

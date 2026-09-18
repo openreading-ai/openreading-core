@@ -13,6 +13,9 @@ Provenance subjects map each report label to its retained input.
 The report subjects array preserves input order; canonical JSON objects sort their keys.
 The adapters map uses those same labels and the versions reported in normalized inputs.
 Source hashes are inherited assertions for orr1 inputs and verified source hashes for or1 artifacts.
+The subject_sources map preserves each subject's hash list and names that verification basis.
+An orr1 input with no asserted hashes keeps an empty list, never an inferred document identity.
+The aggregate source_sha256 list follows report subject order and does not assert equal verification.
 No source-equality, accuracy, winner or new physical-page citation is established by this wrapper.
 
 Request and effective-option fingerprints bind order, baseline and the operation revision.
@@ -24,6 +27,7 @@ The synchronous tool performs CPU work in a thread and returns only a bounded re
 The receipt is measured against the real MCP envelope before atomic report publication.
 Cancellation waits for thread completion and does not roll back an already published report.
 A lost reply can be recovered by repeating the same request with unchanged inputs and implementation.
+An implementation upgrade can change result identity even when the comparison payload stays identical.
 No durable comparison job, computation deadline or bounded-memory claim is provided.
 Truth scoring and batch-result corpus comparison remain separate MCP input-contract work.
 """
@@ -37,7 +41,11 @@ from mcp import types
 
 from openreading.artifacts.limits import ArtifactError
 from openreading.artifacts.models import json_bytes
-from openreading.artifacts.result_models import ResultContent, ResultProvenance
+from openreading.artifacts.result_models import (
+    AttributedResultProvenance,
+    ResultContent,
+    SubjectSource,
+)
 from openreading.artifacts.results import RetainedResults
 from openreading.comparison import CompareInputError, load_subjects
 from openreading.comparison.report import build_report
@@ -57,18 +65,23 @@ def compare_results(
     identifiers = list(request.result_ids)
     if request.baseline is not None and request.baseline not in identifiers:
         identifiers.append(request.baseline)
-    payloads, source_hashes = [], []
+    payloads, sources = [], []
     for identifier in identifiers:
         if identifier.startswith("or1_"):
             manifest, _, payload = store.store.load_document(identifier)
-            source_hashes.append(manifest.document_sha256)
+            source = SubjectSource(
+                source_sha256=[manifest.document_sha256], verification="verified_source_bytes"
+            )
         else:
             content = store.load(identifier)
             if content.kind != "normalized_response":
                 raise CompareError("invalid_comparison")
             payload = content.payload
-            source_hashes.extend(content.provenance.source_sha256)
+            source = SubjectSource(
+                source_sha256=content.provenance.source_sha256, verification="producer_asserted"
+            )
         payloads.append(payload)
+        sources.append(source)
     try:
         subjects = load_subjects(payloads)
         if len({s.label for s in subjects}) != len(subjects):
@@ -83,16 +96,17 @@ def compare_results(
     except Exception:
         # Engine diagnostics can include extracted text. The protocol must not echo that on failure.
         raise CompareError("comparison_failed") from None
-    provenance = ResultProvenance(
+    provenance = AttributedResultProvenance(
         request_sha256=hashlib.sha256(json_bytes(request.model_dump(mode="json"))).hexdigest(),
         config_sha256=hashlib.sha256(
-            json_bytes({"operation": "retained-comparison.v0.1", "baseline_index": index})
+            json_bytes({"operation": "retained-comparison.v0.2", "baseline_index": index})
         ).hexdigest(),
         core_version=importlib.metadata.version("openreading"),
         core_commit=None,
         adapters={s.label: s.response["backend"].get("version") for s in subjects},
-        source_sha256=source_hashes,
+        source_sha256=[digest for source in sources for digest in source.source_sha256],
         subjects={s.label: identifier for s, identifier in zip(subjects, identifiers, strict=True)},
+        subject_sources={s.label: source for s, source in zip(subjects, sources, strict=True)},
     )
     content = ResultContent(kind="comparison_report", payload=report, provenance=provenance)
     # Digests have fixed wire width, so a placeholder measures the eventual receipt exactly.

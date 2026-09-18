@@ -3,6 +3,7 @@
 import copy
 import hashlib
 import json
+import re
 
 import pytest
 from mcp.shared.exceptions import McpError
@@ -52,6 +53,10 @@ async def test_compare_retains_engine_report_and_maps_repeated_backends(
 
         assert "openreading_compare" in catalog
         assert all(name in cli.__doc__ for name in catalog)
+        count = re.search(r"Serve (\d+) tools over stdio", cli.__doc__)
+        assert count and int(count[1]) == len(catalog)
+        assert "unchanged inputs and implementation" in catalog["openreading_compare"].description
+        assert "inputs and implementation must also remain unchanged" in cli.__doc__
         hints = catalog["openreading_compare"].annotations
         assert not hints.readOnlyHint and hints.idempotentHint and not hints.openWorldHint
         reply = await session.call_tool("openreading_compare", {"result_ids": ids})
@@ -166,6 +171,16 @@ def test_compare_mixes_local_artifacts_and_general_results_without_changing_inpu
     assert content.payload == compare([original, other])
     assert list(content.provenance.subjects.values()) == [local.artifact_id, retained]
     assert content.provenance.source_sha256 == [manifest.document_sha256, "c" * 64]
+    assert content.wire()["provenance"]["subject_sources"] == {
+        content.payload["subjects"][0]["label"]: {
+            "source_sha256": [manifest.document_sha256],
+            "verification": "verified_source_bytes",
+        },
+        content.payload["subjects"][1]["label"]: {
+            "source_sha256": ["c" * 64],
+            "verification": "producer_asserted",
+        },
+    }
     assert all(p.read_bytes() == data for p, data in before.items())
 
 
@@ -435,3 +450,26 @@ def test_comparison_keeps_input_order_even_when_mapping_keys_sort(result_service
     assert [s["label"] for s in content.payload["subjects"]] == ["z-backend", "a-backend"]
     assert content.provenance.subjects == {"z-backend": ids[0], "a-backend": ids[1]}
     assert content.payload == compare([store.load(i).payload for i in ids])
+
+
+def test_source_attribution_preserves_multiple_hashes_and_empty_claims(result_service):
+    from openreading.mcp_server.comparison import compare_results
+    from openreading.types.compare_tool import CompareRequest
+
+    _, store = result_service
+    claims = [["a" * 64, "b" * 64], [], ["a" * 64]]
+    ids = [
+        retain(store, response(text=str(index)), source_sha256=hashes)
+        for index, hashes in enumerate(claims)
+    ]
+    reply = compare_results(
+        store, CompareRequest(result_ids=ids[:2], baseline=ids[2]), budget=4096, request_id=1
+    )
+    identifier = json.loads(reply.content[0].text)["result_id"]
+    content = store.load(identifier)
+    assert json.loads(store.path(identifier).read_bytes())["format"] == "retained-result.v0.2"
+    assert content.provenance.source_sha256 == ["a" * 64, "b" * 64, "a" * 64]
+    assert content.wire()["provenance"]["subject_sources"] == {
+        label: {"source_sha256": hashes, "verification": "producer_asserted"}
+        for label, hashes in zip(["synthetic", "synthetic#2", "synthetic#3"], claims, strict=True)
+    }

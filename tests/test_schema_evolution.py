@@ -107,6 +107,8 @@ def test_response_envelope_tolerates_unknown_future_fields():
 # extra="forbid" (openreading.types.request). request.v0.1.json is untouched and stays frozen
 # above — this is a new file, not an edit to the old one.
 _FROZEN_RELEASED = {
+    "result-tool.v0.1.json": "84926707c112555bb9ddab63dd0541b1c99d0d6f5c887d5ba900778f445b301b",
+    "retained-result.v0.1.json": "3358b19a45be89cab1eeb886140ad70b250f2b96e629f6173f81cc26c5db60bd",
     "import-job.v0.2.json": "bfb15572474bbe2598e13f5103bf6c0792aa1e26943f9f7a560c586041e1aaf8",
     "document-tool.v0.3.json": "b41b87e8995e5babf1903e2c8723e42aeb054e4ceb4d0d09f8e2b2f2b99d74ed",
     "agent-document-tool.v0.3.json": "e4a63ce3658626db83a75677a27d3388b4b837e6e6fa8d186710b6f076257268",
@@ -131,8 +133,8 @@ _FROZEN_RELEASED = {
     "strategy-config.v0.1.json": "1080ed4b28d0455766ed5789535c8d4d075eb73b78d167d18c79ed582cd5c0b2",
 }
 _UNRELEASED = {
-    "retained-result.v0.1.json",
-    "result-tool.v0.1.json",
+    "retained-result.v0.2.json",
+    "result-tool.v0.2.json",
     "compare-tool.v0.1.json",
     "route-tool.v0.1.json",
     "backend-discovery.v0.1.json",

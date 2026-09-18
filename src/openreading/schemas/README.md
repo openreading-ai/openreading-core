@@ -605,6 +605,8 @@ entry naming it, so the warning reaches you before the removal does.
 | `retained-result.v0.1.json` | `openreading.artifacts.result_models` | Grant-bound general responses and comparison reports with producer fingerprints. |
 | `compare-tool.v0.1.json` | `openreading.types.compare_tool` | Retained-input symmetric and baseline comparison with a bounded report receipt. |
 | `result-tool.v0.1.json` | `openreading.mcp_server.results` | Complete general result delivery, private exports and lossless fragments. |
+| `retained-result.v0.2.json` | `openreading.artifacts.result_models` | Attributed comparison source hashes, with byte-preserving reads of v0.1 records. |
+| `result-tool.v0.2.json` | `openreading.mcp_server.results` | Accepts both provenance shapes; unchanged receipt fields retain version 0.1. |
 | `backend-discovery.v0.1.json` | `openreading.types.backend_discovery` | Static selected-backend descriptor and configured OCR flag, without readiness or liveness checks. Validation requires the vendored `adapter-descriptor.v0.8.json` resource registered under its `$id`. |
 
 These families wrap retained evidence without changing the normalized extraction response.

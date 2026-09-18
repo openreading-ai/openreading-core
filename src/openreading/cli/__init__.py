@@ -1233,7 +1233,7 @@ fire after that clean shutdown.
 
 mcp --profile local-document-proof-v1
 ------------------------------------
-Serve thirteen tools over stdio with openreading[agent,pymupdf].
+Serve 13 tools over stdio with openreading[agent,pymupdf].
 Call openreading_backends with {} for this profile's static descriptor and
 OCR setting. Discovery does not check readiness or enable other backends.
 Call openreading_route with {} to plan the local backend without extraction.
@@ -1287,7 +1287,7 @@ normalized response or comparison report supplied by trusted library code.
 For example, delivery set to auto returns intact content or a local export.
 Set delivery to fragments and follow every next_cursor until null instead.
 The document response budget and export-root flags govern these replies too.
-Producer provenance is recorded, not independently verified by storage.
+Normalized-response provenance records producer assertions.
 General execution MCP producers remain unbuilt.
 Existing or1_ artifacts continue using openreading_get_document.
 Call openreading_compare with result_ids listing at least two retained
@@ -1298,8 +1298,10 @@ A separate baseline joins the report after its grant and integrity checks.
 The tool never reparses documents or calls providers.
 Agreement is not accuracy.
 Report provenance maps subject labels back to their retained input identifiers.
+The subject_sources map records each subject's hashes and verification basis.
 Comparison is synchronous; cancellation may leave a completed retained report.
-Repeat unchanged arguments after a lost reply to recover its receipt.
+To recover a lost receipt, repeat unchanged arguments.
+The inputs and implementation must also remain unchanged.
 Truth scoring and corpus comparison are not exposed through MCP yet.
 
 This profile accepts one PDF, at most 25 MiB and 100 physical pages.

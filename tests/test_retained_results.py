@@ -263,3 +263,123 @@ def test_schema_models_and_external_payload_validation(results):
     record["content"]["payload"]["status"]["state"] = "invented"
     with pytest.raises(jsonschema.ValidationError):
         validator.validate(record)
+
+
+@pytest.mark.parametrize("kind", ["normalized_response", "comparison_report"])
+def test_legacy_result_bytes_and_delivery_survive_restart(results, kind, tmp_path):
+    from openreading.mcp_server.results import deliver_result
+
+    payload = response() if kind == "normalized_response" else compare([response(), response()])
+    subjects = (
+        {}
+        if kind == "normalized_response"
+        else {"synthetic": "orr1_" + "d" * 64, "synthetic#2": "orr1_" + "e" * 64}
+    )
+    # Build the historical wire shape independently of the current record model and writer.
+    content = {
+        "kind": kind,
+        "payload": payload,
+        "provenance": {
+            "request_sha256": "a" * 64,
+            "config_sha256": "b" * 64,
+            "core_version": "test",
+            "core_commit": None,
+            "adapters": {"synthetic": None},
+            "source_sha256": ["c" * 64],
+            "subjects": subjects,
+        },
+    }
+    raw = json_bytes(
+        {
+            "format": "retained-result.v0.1",
+            "input_grant_sha256": results.store.grant,
+            "content": content,
+        }
+    )
+    identifier = "orr1_" + hashlib.sha256(raw).hexdigest()
+    path = results.path(identifier)
+    path.write_bytes(raw)
+    restarted = RetainedResults(results.store)
+    assert restarted.load(identifier).wire() == content
+    inline = deliver_result(
+        restarted, identifier, mode="auto", budget=100000, root=None, request_id=1
+    )
+    assert json.loads(inline.content[0].text)["content"] == content
+    exported = deliver_result(
+        restarted, identifier, mode="file", budget=4096, root=tmp_path / "export", request_id=1
+    )
+    receipt = json.loads(exported.content[0].text)
+    from pathlib import Path
+
+    assert Path(receipt["local_path"]).read_bytes() == json_bytes(content)
+    assert path.read_bytes() == raw
+
+
+@pytest.mark.parametrize("damage", ["labels", "kind", "aggregate", "hash", "normalized"])
+def test_attribution_rejects_misleading_claims_before_publication(results, damage):
+    from openreading.artifacts.result_models import AttributedResultProvenance
+
+    inputs = [
+        results.publish("normalized_response", response(text=t), provenance()) for t in ["a", "b"]
+    ]
+    payload = compare([response(text="a"), response(text="b")])
+    subjects = dict(zip(["synthetic", "synthetic#2"], [r.result_id for r in inputs], strict=True))
+    sources = {
+        label: {"source_sha256": ["c" * 64], "verification": "producer_asserted"}
+        for label in subjects
+    }
+    values = provenance(subjects=subjects, source_sha256=["c" * 64] * 2).model_dump(mode="json")
+    values["subject_sources"] = sources
+    kind = "comparison_report"
+    if damage == "labels":
+        sources["wrong"] = sources.pop("synthetic")
+    elif damage == "kind":
+        sources["synthetic"]["verification"] = "verified_source_bytes"
+    elif damage == "aggregate":
+        values["source_sha256"] = ["a" * 64]
+    elif damage == "hash":
+        sources["synthetic"]["source_sha256"] = ["a" * 64]
+        values["source_sha256"][0] = "a" * 64
+    else:
+        kind, payload = "normalized_response", response()
+        values["subjects"] = {}
+        values["subject_sources"] = {}
+    origin = AttributedResultProvenance.model_validate(values)
+    before = {p: p.read_bytes() for p in results.root.iterdir()}
+    with pytest.raises(ResultError, match="invalid_result"):
+        results.publish(kind, payload, origin)
+    assert {p: p.read_bytes() for p in results.root.iterdir()} == before
+
+
+def test_record_format_refuses_attribution_downgrades_and_legacy_upgrades(results):
+    import jsonschema
+    from pydantic import ValidationError
+    from referencing import Registry, Resource
+
+    from openreading import schemas
+    from openreading.artifacts.result_models import ResultRecord
+    from openreading.mcp_server.comparison import compare_results
+    from openreading.types.compare_tool import CompareRequest
+
+    ids = [
+        results.publish("normalized_response", response(text=t), provenance()).result_id
+        for t in ["a", "b"]
+    ]
+    reply = compare_results(results, CompareRequest(result_ids=ids), budget=4096, request_id=1)
+    current = json.loads(reply.content[0].text)["result_id"]
+    registry = Registry().with_resources(
+        (doc["$id"], Resource.from_contents(doc))
+        for doc in [schemas.response_schema(), schemas.comparison_report_schema()]
+    )
+    validator = jsonschema.Draft202012Validator(schemas.retained_result_schema(), registry=registry)
+    for identifier, wrong_format in [
+        (ids[0], "retained-result.v0.2"),
+        (current, "retained-result.v0.1"),
+    ]:
+        record = json.loads(results.path(identifier).read_bytes())
+        validator.validate(record)
+        record["format"] = wrong_format
+        with pytest.raises(ValidationError):
+            ResultRecord.model_validate(record)
+        with pytest.raises(jsonschema.ValidationError):
+            validator.validate(record)
