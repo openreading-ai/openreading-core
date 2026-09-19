@@ -2,6 +2,7 @@
 
 ## Unreleased strategy inspection MCP
 
+- Pin judge omission and strategy-specific dispatchable backends, and guard capability dispositions against public surface changes.
 - Add scoped general MCP strategy inspection with bounded structural views and sanitized validation counts.
 - Expose thirteen general tools while preserving the thirteen-tool local catalog and all predecessor schemas.
 - Exercise the complete general catalog across stdio restart and document explicit operator-only capability dispositions.

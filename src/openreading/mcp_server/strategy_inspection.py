@@ -83,7 +83,11 @@ def _view(value: Any) -> tuple[Any, int]:
 
 
 def inspect_strategy(authority: ExecutionConfig, arguments: dict) -> dict:
-    """Return a bounded-delivery candidate after entrypoint authorization, never raw configuration."""
+    """Return a bounded-delivery candidate after entrypoint authorization, never raw configuration.
+
+    The tool dispatcher validates nested request metadata against the wire schema before calling this internal handler.
+    For example, the schema rejects a string backend before this handler reads its identifier.
+    """
     request = StrategyRequest.model_validate(arguments)
     if request.operation == "list":
         return StrategyList(strategies=sorted(authority.allowed_strategies)).wire()

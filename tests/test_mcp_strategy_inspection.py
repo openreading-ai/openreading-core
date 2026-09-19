@@ -255,3 +255,49 @@ def test_validation_preserves_plain_dialect_warnings():
     assert expected > 0
     result = inspect_strategy(config, {"operation": "validate", "strategy": "main"})
     assert result["warning_count"] == expected
+
+
+@pytest.mark.parametrize("operation", ["show", "normalize", "plan"])
+def test_judge_payload_is_omitted_from_strategy_views(operation):
+    from openreading.mcp_server.strategy_inspection import inspect_strategy
+
+    config = ExecutionConfig.from_operator(
+        config={
+            "version": 1,
+            "strategies": {
+                "main": {
+                    "parallel": [{"backend": "pymupdf"}, {"backend": "tesseract"}],
+                    "pick": "best",
+                    "judge": {
+                        "backend": "tesseract",
+                        "intent": "PRIVATE_JUDGE_INSTRUCTIONS",
+                        "excerpt_chars": 4000,
+                    },
+                }
+            },
+        },
+        allowed_backends=["pymupdf", "tesseract"],
+        allowed_strategies=["main"],
+    )
+    result = inspect_strategy(config, {"operation": operation, "strategy": "main"})
+    expected = {
+        "parallel": [{"backend": "pymupdf"}, {"backend": "tesseract"}],
+        "pick": "best",
+    }
+    assert result["tree"] == expected
+    assert result["trees"] == {"main": expected}
+    assert "PRIVATE_JUDGE_INSTRUCTIONS" not in json.dumps(result)
+    assert result["omitted"] == 1
+
+
+@pytest.mark.parametrize("operation", ["show", "normalize", "plan"])
+def test_dispatchable_excludes_authorized_backends_absent_from_strategy(operation):
+    from openreading.mcp_server.strategy_inspection import inspect_strategy
+
+    config = ExecutionConfig.from_operator(
+        config={"version": 1, "strategies": {"main": {"backend": "pymupdf"}}},
+        allowed_backends=["pymupdf", "tesseract"],
+        allowed_strategies=["main"],
+    )
+    result = inspect_strategy(config, {"operation": operation, "strategy": "main"})
+    assert result["dispatchable"] == ["pymupdf"]

@@ -270,6 +270,8 @@ The Python SDK dependency is optional and pinned through the lockfile's supporte
 
 The general profile supports document processing through explicit grants, rather than reproducing every administrative CLI operation.
 The table distinguishes available processing operations from operator workflows with different authority and lifecycle requirements.
+The capability coverage test requires a table disposition for every exported Python function, CLI handler and HTTP route path.
+For example, adding an HTTP route without assigning its disposition fails the offline verification gate.
 
 | Existing capability | MCP v1 disposition | Boundary |
 | --- | --- | --- |

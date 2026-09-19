@@ -1,4 +1,8 @@
-"""Exercise the complete general catalog over real stdio with local processing and restart."""
+"""Exercise the complete general catalog over real stdio with local processing and restart.
+
+A recording wrapper around this test captures protocol evidence, not an independent client implementation.
+The generated PDF can differ between builds; its captured hash identifies that run's bytes only.
+"""
 
 import hashlib
 import json
