@@ -43,7 +43,8 @@ General `openreading_backends` lists authorized descriptors; its optional `backe
 Call `openreading_readiness` with `{"backend":"pymupdf"}` to check local configuration through the explicit execution environment.
 Call `openreading_liveness` with that backend only when you want its diagnostic probe, which can contact configured infrastructure.
 Readiness does not establish credential validity or reachability; liveness preserves the existing measured and inferred states.
-Diagnostics acquire no documents and run outside the document job queue with bounded lifetimes and normally removed scratch.
+Diagnostics acquire no documents and run outside the document job queue with bounded lifetimes.
+Normal cleanup removes per-attempt scratch; the empty `execution/<grant>` parent can remain.
 They reserve reply space for complete reports up to 65536 JSON bytes, refusing smaller budgets before starting work.
 For example, the default reply budget accommodates diagnostics; reducing it to 4096 bytes refuses even a potentially small report.
 The general profile grants relative paths directly and does not provide a native chooser or local evidence imports.

@@ -62,6 +62,8 @@ async def test_diagnostic_tools_registered_without_changing_local_catalog(store)
         tools = {tool.name: tool for tool in (await session.list_tools()).tools}
         assert len(tools) == 12
         assert tools["openreading_backends"].annotations.readOnlyHint
+        assert not tools["openreading_readiness"].annotations.readOnlyHint
+        assert not tools["openreading_liveness"].annotations.readOnlyHint
         assert not tools["openreading_readiness"].annotations.openWorldHint
         assert tools["openreading_liveness"].annotations.openWorldHint
         reply = await session.call_tool("openreading_backends", {})
@@ -349,6 +351,38 @@ def test_parent_refuses_oversized_or_misbound_worker_report(store, monkeypatch, 
         lambda *_: (attempt.root / "diagnostic.json").write_text(json.dumps(payload)),
     )
     with pytest.raises(Exception, match=error):
+        attempt.check_backend("liveness", {"backend": "pymupdf"})
+    assert not attempt.root.exists()
+
+
+@pytest.mark.parametrize("change", ["missing_version", "wrong_version", "missing_probe"])
+def test_parent_rejects_liveness_wire_shape_before_model_defaults(store, monkeypatch, change):
+    from jsonschema import ValidationError
+
+    from openreading.mcp_server.diagnostics import DiagnosticAttempt
+    from openreading.types.liveness import LivenessReport
+
+    payload = {
+        "schema_version": "0.1",
+        "backend": "pymupdf",
+        "status": "live",
+        "measured": True,
+        "probe": "local",
+        "checked_at": "2026-09-18T00:00:00Z",
+    }
+    if change == "wrong_version":
+        payload["schema_version"] = "999"
+    else:
+        payload.pop("schema_version" if change == "missing_version" else "probe")
+    # Model defaults and its unrestricted version string cannot enforce the received wire contract.
+    LivenessReport.model_validate(payload)
+    attempt = DiagnosticAttempt(store, jobs(store).authority)
+    monkeypatch.setattr(
+        attempt,
+        "_run_child",
+        lambda *_: (attempt.root / "diagnostic.json").write_text(json.dumps(payload)),
+    )
+    with pytest.raises(ValidationError):
         attempt.check_backend("liveness", {"backend": "pymupdf"})
     assert not attempt.root.exists()
 

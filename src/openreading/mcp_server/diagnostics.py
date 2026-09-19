@@ -7,7 +7,8 @@ For example, allowing pymupdf does not expose reducto metadata or permit its dia
 Readiness and liveness use execution_process ownership, private environment and process-group cleanup without acquiring documents.
 Readiness has a thirty-second wall-clock bound; liveness allows its requested probe timeout plus ten seconds for startup and validation.
 The parent verifies authorization before creating scratch and the child repeats it before adapter construction.
-Diagnostic scratch is removed after successful cleanup. Abrupt parent loss can leave scratch requiring operator removal.
+Successful cleanup removes the per-attempt scratch directory, but its empty execution/<grant> parent can remain.
+Abrupt parent loss can leave per-attempt scratch requiring operator removal.
 Cleanup denial retains the attempt handle in the caller until the error propagates; no background retry is implied.
 Local termination does not prove remote cancellation, and this process boundary is not an operating-system sandbox.
 

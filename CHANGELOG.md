@@ -2,6 +2,8 @@
 
 ## Unreleased general backend diagnostics MCP
 
+- Pin diagnostic write annotations and liveness wire validation before model defaults can conceal missing fields.
+  Clarify that normal cleanup removes per-attempt scratch while its empty grant parent can remain.
 - Discover authorized backend descriptors and request offline readiness or explicit liveness through the general MCP profile.
   Diagnostics reuse shared backend checks in owned children with explicit environments, deadlines and bounded complete replies.
 - Share worker launch isolation and cleanup between document execution and diagnostics, without changing existing processing or local-profile tools.

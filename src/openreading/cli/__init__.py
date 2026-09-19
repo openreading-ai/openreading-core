@@ -1279,7 +1279,8 @@ Diagnostics never submit documents or perform billed extraction requests.
 Reports above 65536 JSON bytes refuse instead of losing fields silently.
 Enough reply space for that ceiling is reserved before diagnostic startup.
 The default reply budget fits; a small budget may refuse before any probe.
-Diagnostic scratch is removed after cleanup; abrupt loss can leave files.
+Normal cleanup removes per-attempt scratch; its empty grant parent can remain.
+Abrupt parent loss can leave per-attempt files requiring operator removal.
 These probes use separate processes, outside the document job queue.
 
 Call openreading_parse with the shared request shape and a relative path.
