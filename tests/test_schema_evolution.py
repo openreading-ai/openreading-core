@@ -107,6 +107,9 @@ def test_response_envelope_tolerates_unknown_future_fields():
 # extra="forbid" (openreading.types.request). request.v0.1.json is untouched and stays frozen
 # above — this is a new file, not an edit to the old one.
 _FROZEN_RELEASED = {
+    "compare-tool.v0.1.json": "a891c89d68a2cdad2d2d2e8bfaac1c7e3fce5815667e81da457214ecfe511cc1",
+    "result-tool.v0.3.json": "686fb033acf607d3aed3ed471642e83813d2c45e6e34f61ab1a5010f0c83db5f",
+    "retained-result.v0.3.json": "15c76e85cb626bf1f1f1094d61175e58463cb741a9d2766cea501cec50d6bb6c",
     "execution-tool.v0.2.json": "4521c8db6ce007ad71a0958a75f062fcb79d3f8f3c7d272ea1b1ab4e7e99d888",
     "execution-tool.v0.1.json": "8ea719ccbd2280ee9451eead282d6f45adc27aa56eb91efbc2343c7493555fc7",
     "execution-job.v0.1.json": "447ad159d77c5ef21fbe05003e4a0b62226ad7b3cbd4f48afbf0df118008fd8a",
@@ -139,11 +142,11 @@ _FROZEN_RELEASED = {
 }
 _UNRELEASED = {
     "diagnostic-tool.v0.1.json",
-    "retained-result.v0.3.json",
-    "result-tool.v0.3.json",
+    "retained-result.v0.4.json",
+    "result-tool.v0.4.json",
     "execution-job.v0.2.json",
     "execution-tool.v0.3.json",
-    "compare-tool.v0.1.json",
+    "compare-tool.v0.2.json",
     "route-tool.v0.1.json",
     "backend-discovery.v0.1.json",
     "import-job.v0.3.json",

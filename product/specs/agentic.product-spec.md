@@ -27,9 +27,9 @@ Client installation and token measurement belong in the separate `openreading-ag
 
 ## Scope
 
-Truth-scored and corpus comparison, triage, warning registries, and orchestration schemas remain proposed.
+Triage, warning registries, and orchestration schemas remain proposed.
 The MCP guide documents implemented authorized discovery, offline readiness and explicit liveness diagnostics.
-The MCP guide documents implemented symmetric and baseline comparisons of retained normalized responses.
+The MCP guide documents symmetric, baseline, truth-scored and corpus comparisons of retained inputs.
 Existing core processing capabilities require MCP coverage for public v1. Proposed triage intelligence remains a separate scope decision.
 General parse and strategy execution are documented beside their scoped routing and retained-result contracts in the MCP guide.
 Strategy inspection remains proposed separately from executing an authorized strategy.

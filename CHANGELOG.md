@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased truth and corpus comparison MCP
+
+- Extend openreading_compare with inline expected values and retained batch corpus inputs, reusing the shared scoring and comparison engines.
+- Retain exact expected values as caller assertions, and map corpus run labels to authorized batches without claiming source identity.
+- Add compare-tool v0.2 and retained-result/result-tool v0.4, preserving all predecessor schemas, execution receipts and stored records.
+- Keep catalogs at twelve general and thirteen local tools. Native ChatGPT and Claude acceptance remains pending.
+
 ## Unreleased general backend diagnostics MCP
 
 - Pin diagnostic write annotations and liveness wire validation before model defaults can conceal missing fields.

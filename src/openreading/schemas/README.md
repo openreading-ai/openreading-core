@@ -605,6 +605,9 @@ entry naming it, so the warning reaches you before the removal does.
 | `import-job.v0.3.json` | `openreading.types.import_job` | Background status with compatible older receipts and unpaginated import receipts. |
 | `route-tool.v0.1.json` | `openreading.types.route_tool` | Scoped backend chain, excluded entries and terminal reason; no execution. |
 | `retained-result.v0.1.json` | `openreading.artifacts.result_models` | Grant-bound general responses and comparison reports with producer fingerprints. |
+| `compare-tool.v0.2.json` | `openreading.types.compare_tool` | Inline caller-supplied truth and retained batch corpus comparison, using existing report schemas. |
+| `retained-result.v0.4.json` | `openreading.artifacts.result_models` | Exact expected values and attributed corpus subjects; v0.1 through v0.3 records remain byte-preserving. Older readers cannot consume v0.4 records. |
+| `result-tool.v0.4.json` | `openreading.mcp_server.results` | Complete scored and corpus reports, with nested comparison validation and unchanged delivery modes. |
 | `compare-tool.v0.1.json` | `openreading.types.compare_tool` | Retained-input symmetric and baseline comparison with a bounded report receipt. |
 | `result-tool.v0.1.json` | `openreading.mcp_server.results` | Complete general result delivery, private exports and lossless fragments. |
 | `retained-result.v0.2.json` | `openreading.artifacts.result_models` | Attributed comparison source hashes, with byte-preserving reads of v0.1 records. Readers pinned to v0.1 cannot consume v0.2 records. |

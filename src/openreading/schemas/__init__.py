@@ -34,7 +34,7 @@ Families
 - local-document / passage / agent-document-tool: retained evidence and bounded MCP
   payloads owned by ``openreading.artifacts``. These separate families leave the existing
   request and normalized response contracts unchanged.
-- retained-result / result-tool: complete responses, attributed comparisons, and batch envelopes.
+- retained-result / result-tool: complete responses, attributed or scored comparisons, batches and corpus reports.
   Batch records use version 0.3 and validate every nested response without discarding null values.
 - execution-job: version 0.2 accepts response and batch receipts, preserving version 0.1 statuses.
 - document-tool: complete retained normalized JSON with lossless continuation, excluding raw payloads.
@@ -556,11 +556,11 @@ IMPORT_JOB_SCHEMA_FILE = "import-job.v0.3.json"
 ROUTE_TOOL_SCHEMA_FILE = "route-tool.v0.1.json"
 DIAGNOSTIC_TOOL_SCHEMA_FILE = "diagnostic-tool.v0.1.json"
 BACKEND_DISCOVERY_SCHEMA_FILE = "backend-discovery.v0.1.json"
-RETAINED_RESULT_SCHEMA_FILE = "retained-result.v0.3.json"
-RESULT_TOOL_SCHEMA_FILE = "result-tool.v0.3.json"
+RETAINED_RESULT_SCHEMA_FILE = "retained-result.v0.4.json"
+RESULT_TOOL_SCHEMA_FILE = "result-tool.v0.4.json"
 EXECUTION_TOOL_SCHEMA_FILE = "execution-tool.v0.3.json"
 EXECUTION_JOB_SCHEMA_FILE = "execution-job.v0.2.json"
-COMPARE_TOOL_SCHEMA_FILE = "compare-tool.v0.1.json"
+COMPARE_TOOL_SCHEMA_FILE = "compare-tool.v0.2.json"
 
 
 _PACKAGE = "openreading.schemas"

@@ -1384,7 +1384,15 @@ The subject_sources map records each subject's hashes and verification basis.
 Comparison is synchronous; cancellation may leave a completed retained report.
 To recover a lost receipt, repeat unchanged arguments.
 The inputs and implementation must also remain unchanged.
-Truth scoring and corpus comparison are not exposed through MCP yet.
+Supply truth as an inline expected-value object to score normalized inputs.
+For example, {"text": "expected"} scores text and retains the expected value.
+These are caller assertions. An empty object scores no dimensions.
+All-batch result_ids produce a corpus_report, refusing truth and baseline.
+Run labels preserve order and map back to retained batches in provenance.
+The shared index uses relpath, filename, then sha256 among succeeded items.
+Items need responses; the last duplicate key wins and unmatched keys unpair.
+Failure-only documents are omitted. Matching keys do not prove source identity.
+Use get_result for complete reports, exports or lossless fragment delivery.
 
 This profile accepts one PDF, at most 25 MiB and 100 physical pages.
 It uses local PyMuPDF without OCR, passwords, routing, or hosted fallback.

@@ -7,7 +7,7 @@ The [remaining product intent](../product/specs/agentic.product-spec.md) preserv
 
 ## Scope boundary
 
-Truth-scored and corpus comparison and triage tools remain unbuilt.
+Triage tools remain unbuilt.
 Authorized discovery and explicit readiness/liveness diagnostics are documented in the MCP guide.
 Scoped backend route planning is documented in the MCP guide; strategy planning remains proposed.
 The local profile does not satisfy those requirements by exposing differently named equivalents.
@@ -28,8 +28,7 @@ The internal execution_process module supplies granted source copying, explicit 
 The execution_jobs supervisor documents durable status, cancellation, reconnect and retained-result publication.
 Remaining tools must retain measured reply budgets and the standalone launcher authorization boundary.
 Every dispatch must retain backend scope; preflight cannot replace execution-time enforcement.
-Retained normalized-response comparison is documented in the MCP guide.
-Truth scoring and corpus comparison still need their own MCP input contracts.
+Retained normalized-response, truth-scored and corpus comparison are documented in the MCP guide.
 A general extraction operation must identify any provider calls before the caller authorizes their execution.
 
 ## Triage remains proposed

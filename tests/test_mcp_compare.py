@@ -335,7 +335,10 @@ def test_compare_schema_matches_model_and_validates_replies(result_service):
     schema = compare_tool_schema()
     generated = TypeAdapter(ComparePayload).json_schema()
     assert {k: v for k, v in schema.items() if k not in {"$id", "$schema"}} == generated
-    assert INPUTS["openreading_compare"] == schema["$defs"]["CompareRequest"]
+    assert INPUTS["openreading_compare"] == {
+        **schema["$defs"]["CompareRequest"],
+        "$defs": {"JsonValue": schema["$defs"]["JsonValue"]},
+    }
     Draft202012Validator.check_schema(schema)
     validator = Draft202012Validator(schema)
     ids = [retain(store, response(text=t)) for t in ["alpha", "beta"]]

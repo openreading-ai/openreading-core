@@ -10,12 +10,13 @@ Different outputs from identical requests remain distinct results, never automat
 Publication reuses delivery.save_export's locked temporary file and atomic hard-link protocol.
 Reads reuse store.safe_read and reject symlinks, special files and mismatched record hashes.
 Existing or1 documents and their source files, manifests and passages are never rewritten.
-Comparison producers must supply subject labels mapped to readable, same-grant normalized inputs.
+Comparison producers map labels to readable, same-grant normalized inputs, or to batches for corpus reports.
 Retention verifies those references but does not rerun comparison or certify report conclusions.
 Attributed v0.2 reports also bind each subject's hashes to its loaded input during publication.
 Batch envelopes use v0.3 records, with each nested response validated independently.
-Legacy v0.1 and v0.2 records remain readable without migration or changes to their canonical bytes.
-Older readers cannot consume v0.2 records, so downgrading requires keeping the newer reader available.
+Scored comparisons and corpus reports use v0.4 records, preserving exact expected values and batch subject references.
+Legacy v0.1 through v0.3 records remain readable without migration or changes to their canonical bytes.
+Older readers cannot consume newer record formats, so downgrading requires keeping the newer reader available.
 
 Only the normalized envelope's top-level backend_raw is excluded before storage.
 Batch producers must omit direct backend_raw values from nested responses before publication.
@@ -29,7 +30,7 @@ It materializes JSON in memory; bounded replies do not imply bounded process mem
 Fingerprints detect corruption, not malicious rewriting by an actor controlling the entire store.
 Normalized-response source hashes and implementation identities are assertions of the trusted producer.
 The comparison MCP producer is implemented in openreading.mcp_server.comparison.
-General execution producers remain separate implementation work.
+General execution producers live in openreading.mcp_server.execution_jobs.
 """
 
 from __future__ import annotations
@@ -53,6 +54,7 @@ from openreading.artifacts.result_models import (
     ResultProvenance,
     ResultReceipt,
     ResultRecord,
+    RetrievalReceipt,
 )
 from openreading.artifacts.store import Store, safe_read
 
@@ -74,11 +76,7 @@ class RetainedResults:
     def record(self, content: ResultContent) -> ResultRecord:
         """Build the canonical record used for publication and durable publication intents."""
         return ResultRecord(
-            format="retained-result.v0.3"
-            if content.kind == "batch_result"
-            else "retained-result.v0.2"
-            if isinstance(content.provenance, AttributedResultProvenance)
-            else "retained-result.v0.1",
+            format=content.record_format(),
             input_grant_sha256=self.store.grant,
             content=content,
         )
@@ -104,7 +102,11 @@ class RetainedResults:
                 hashes = [manifest.document_sha256]
             else:
                 loaded = self.load(reference)
-                if loaded.kind != "normalized_response":
+                if loaded.kind != (
+                    "batch_result"
+                    if record.content.kind == "corpus_report"
+                    else "normalized_response"
+                ):
                     raise ResultError("invalid_result")
                 hashes = loaded.provenance.source_sha256
             origin = record.content.provenance
@@ -142,9 +144,13 @@ class RetainedResults:
     @staticmethod
     def receipt(identifier: str, content: ResultContent) -> ResultReceipt:
         data = json_bytes(content.wire())
-        return ResultReceipt(
-            result_id=identifier,
-            kind=content.kind,
-            content_bytes=len(data),
-            content_sha256=hashlib.sha256(data).hexdigest(),
+        # Recovery compares model instances, so existing kinds must retain their receipt class.
+        receipt_type = RetrievalReceipt if content.kind == "corpus_report" else ResultReceipt
+        return receipt_type.model_validate(
+            {
+                "result_id": identifier,
+                "kind": content.kind,
+                "content_bytes": len(data),
+                "content_sha256": hashlib.sha256(data).hexdigest(),
+            }
         )

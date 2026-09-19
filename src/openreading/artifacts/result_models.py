@@ -1,8 +1,8 @@
 """Bind complete results to explicit producer provenance without inventing citations.
 
-retained-result.v0.3 owns storage, and result-tool.v0.3 owns retrieval payloads.
-The reader preserves v0.1 and v0.2 records without changing their canonical bytes.
-A result contains a response.v0.3 envelope, comparison-report.v0.2 report, or batch-result.v0.2 envelope.
+retained-result.v0.4 owns storage, and result-tool.v0.4 owns retrieval payloads.
+The reader preserves v0.1 through v0.3 records without changing their canonical bytes.
+A result contains a response.v0.3, comparison-report.v0.2, batch-result.v0.2, or corpus-report.v0.1 payload.
 Batch retention validates each nested response and rejects its direct backend_raw field.
 Typed fields named backend_raw remain intact, including their nested null values.
 Request and configuration fingerprints identify producer inputs without retaining credentials.
@@ -13,7 +13,10 @@ Comparison subject labels map to retained identifiers under the same input grant
 For example, synthetic and synthetic#2 can identify two separate runs of the same adapter.
 Attributed comparisons use v0.2 records and map each label to hashes plus a verification basis.
 Legacy aggregates remain unattributed; reading an old record never invents per-subject verification.
-The result-tool v0.3 schema accepts every content shape; unchanged receipt fields retain version 0.1.
+Scored comparisons and corpus reports use v0.4 records; older readers cannot consume those new shapes.
+Scored provenance retains exact caller-supplied expected values without independently certifying their truth.
+Corpus subjects reference retained batches; nested comparison reports validate independently.
+The result-tool v0.4 schema accepts every content shape; unchanged receipt fields retain version 0.1.
 Report paths identify report values, never physical source pages or new citation evidence.
 """
 
@@ -27,11 +30,16 @@ from pydantic.config import JsonDict
 from openreading.artifacts.constants import MAX_CURSOR_CHARS
 from openreading.artifacts.document import TextFragment, ValueFragment
 from openreading.artifacts.models import Digest, ErrorEnvelope, WireModel
-from openreading.schemas import validate_batch_result, validate_comparison_report, validate_response
+from openreading.schemas import (
+    validate_batch_result,
+    validate_comparison_report,
+    validate_corpus_report,
+    validate_response,
+)
 
 ResultId = Annotated[str, Field(pattern=r"^orr1_[0-9a-f]{64}$")]
 InputResultId = Annotated[str, Field(pattern=r"^(or1|orr1)_[0-9a-f]{64}$")]
-ResultKind = Literal["normalized_response", "comparison_report", "batch_result"]
+ResultKind = Literal["normalized_response", "comparison_report", "batch_result", "corpus_report"]
 
 
 class ResultProvenance(WireModel):
@@ -68,6 +76,17 @@ class AttributedResultProvenance(ResultProvenance):
     subject_sources: dict[str, SubjectSource]
 
 
+class ScoredResultProvenance(AttributedResultProvenance):
+    """Caller-supplied expected values retained exactly, without an independent truth claim."""
+
+    truth: dict[str, JsonValue] = Field(
+        description=(
+            "Exact expected values supplied by the caller to the shared scorer. "
+            "The record digest binds these values; no independent truth verification is claimed."
+        )
+    )
+
+
 class ResultContent(WireModel):
     """Complete normalized values with their producer identity, without backend_raw."""
 
@@ -92,9 +111,39 @@ class ResultContent(WireModel):
                             "https://openreading.ai/schemas/comparison-report.v0.2.json",
                         ),
                         ("batch_result", "https://openreading.ai/schemas/batch-result.v0.2.json"),
+                        ("corpus_report", "https://openreading.ai/schemas/corpus-report.v0.1.json"),
                     )
                 ]
                 + [
+                    {
+                        "if": {"properties": {"kind": {"const": "corpus_report"}}},
+                        "then": {
+                            "properties": {
+                                "provenance": {
+                                    "required": ["subject_sources"],
+                                    "not": {"required": ["truth"]},
+                                },
+                                "payload": {
+                                    "properties": {
+                                        "documents": {
+                                            "items": {
+                                                "properties": {
+                                                    "report": {
+                                                        "anyOf": [
+                                                            {"type": "null"},
+                                                            {
+                                                                "$ref": "https://openreading.ai/schemas/comparison-report.v0.2.json"
+                                                            },
+                                                        ]
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                            }
+                        },
+                    },
                     {
                         "if": {"properties": {"kind": {"const": "batch_result"}}},
                         "then": {
@@ -126,13 +175,13 @@ class ResultContent(WireModel):
                                 },
                             }
                         },
-                    }
+                    },
                 ]
             },
         ),
     )
     kind: ResultKind
-    provenance: AttributedResultProvenance | ResultProvenance
+    provenance: ScoredResultProvenance | AttributedResultProvenance | ResultProvenance
     payload: dict[str, JsonValue]
 
     @model_validator(mode="after")
@@ -160,7 +209,34 @@ class ResultContent(WireModel):
                     if "backend_raw" in response:
                         raise ValueError("Batch responses exclude raw output")
         else:
-            validate_comparison_report(self.payload)
+            if self.kind == "corpus_report":
+                validate_corpus_report(self.payload)
+                documents = self.payload["documents"]
+                assert isinstance(documents, list)
+                for document in documents:
+                    assert isinstance(document, dict)
+                    report = document.get("report")
+                    if report is not None:
+                        assert isinstance(report, dict)
+                        validate_comparison_report(report)
+                if (
+                    not isinstance(self.provenance, AttributedResultProvenance)
+                    or isinstance(self.provenance, ScoredResultProvenance)
+                    or any(ref.startswith("or1_") for ref in self.provenance.subjects.values())
+                ):
+                    raise ValueError(
+                        "Corpus subjects require attributed retained batches without truth"
+                    )
+            else:
+                validate_comparison_report(self.payload)
+                if isinstance(self.provenance, ScoredResultProvenance):
+                    truth = self.payload.get("truth")
+                    if not isinstance(truth, dict) or truth.get("dimensions") != sorted(
+                        self.provenance.truth
+                    ):
+                        raise ValueError(
+                            "Scored reports require dimensions matching supplied expected values"
+                        )
             subjects = self.payload["subjects"]
             assert isinstance(subjects, list)
             labels = [cast(str, s["label"]) for s in subjects if isinstance(s, dict)]
@@ -183,6 +259,23 @@ class ResultContent(WireModel):
                     raise ValueError("Aggregate hashes must preserve report subject order")
         return self
 
+    def record_format(
+        self,
+    ) -> Literal[
+        "retained-result.v0.1",
+        "retained-result.v0.2",
+        "retained-result.v0.3",
+        "retained-result.v0.4",
+    ]:
+        """Preserve historical record identities while assigning new shapes their own version."""
+        if self.kind == "corpus_report" or isinstance(self.provenance, ScoredResultProvenance):
+            return "retained-result.v0.4"
+        if self.kind == "batch_result":
+            return "retained-result.v0.3"
+        if isinstance(self.provenance, AttributedResultProvenance):
+            return "retained-result.v0.2"
+        return "retained-result.v0.1"
+
     def wire(self) -> dict:
         # Null values in payloads and unknown adapter versions are retained facts.
         return self.model_dump(mode="json")
@@ -195,53 +288,62 @@ class ResultRecord(WireModel):
         json_schema_extra={
             "allOf": [
                 {
-                    "if": {"properties": {"format": {"const": "retained-result.v0.2"}}},
-                    "then": {
+                    "if": {"properties": {"format": {"const": version}}},
+                    "then": {"properties": {"content": constraints}},
+                }
+                for version, constraints in {
+                    "retained-result.v0.1": {
                         "properties": {
-                            "content": {
-                                "properties": {"provenance": {"required": ["subject_sources"]}}
-                            }
+                            "kind": {"enum": ["normalized_response", "comparison_report"]},
+                            "provenance": {"not": {"required": ["subject_sources"]}},
                         }
                     },
-                    "else": {
+                    "retained-result.v0.2": {
                         "properties": {
-                            "content": {
+                            "kind": {"const": "comparison_report"},
+                            "provenance": {
+                                "required": ["subject_sources"],
+                                "not": {"required": ["truth"]},
+                            },
+                        }
+                    },
+                    "retained-result.v0.3": {"properties": {"kind": {"const": "batch_result"}}},
+                    "retained-result.v0.4": {
+                        "oneOf": [
+                            {
                                 "properties": {
-                                    "provenance": {"not": {"required": ["subject_sources"]}}
+                                    "kind": {"const": "comparison_report"},
+                                    "provenance": {"required": ["truth", "subject_sources"]},
                                 }
-                            }
-                        }
+                            },
+                            {
+                                "properties": {
+                                    "kind": {"const": "corpus_report"},
+                                    "provenance": {
+                                        "required": ["subject_sources"],
+                                        "not": {"required": ["truth"]},
+                                    },
+                                }
+                            },
+                        ]
                     },
-                },
-                {
-                    "if": {"properties": {"format": {"const": "retained-result.v0.3"}}},
-                    "then": {
-                        "properties": {
-                            "content": {"properties": {"kind": {"const": "batch_result"}}}
-                        }
-                    },
-                    "else": {
-                        "properties": {
-                            "content": {"properties": {"kind": {"not": {"const": "batch_result"}}}}
-                        }
-                    },
-                },
+                }.items()
             ]
         },
     )
-    format: Literal["retained-result.v0.1", "retained-result.v0.2", "retained-result.v0.3"] = (
-        "retained-result.v0.3"
-    )
+    format: Literal[
+        "retained-result.v0.1",
+        "retained-result.v0.2",
+        "retained-result.v0.3",
+        "retained-result.v0.4",
+    ] = "retained-result.v0.4"
     input_grant_sha256: Digest
     content: ResultContent
 
     @model_validator(mode="after")
     def validate_format(self) -> ResultRecord:
-        attributed = isinstance(self.content.provenance, AttributedResultProvenance)
-        if attributed != (self.format == "retained-result.v0.2"):
-            raise ValueError("Attributed comparisons require retained-result.v0.2")
-        if (self.content.kind == "batch_result") != (self.format == "retained-result.v0.3"):
-            raise ValueError("Batch results require retained-result.v0.3")
+        if self.format != self.content.record_format():
+            raise ValueError("Record format must match its content kind and provenance")
         return self
 
     def wire(self) -> dict:
@@ -251,9 +353,15 @@ class ResultRecord(WireModel):
 class ResultReceipt(WireModel):
     schema_version: Literal["0.1"] = "0.1"
     result_id: ResultId
-    kind: ResultKind
+    kind: Literal["normalized_response", "comparison_report", "batch_result"]
     content_bytes: int = Field(ge=1)
     content_sha256: Digest
+
+
+class RetrievalReceipt(ResultReceipt):
+    """Retrieval also serves corpus reports without widening execution-job receipts."""
+
+    kind: ResultKind
 
 
 class ResultRequest(WireModel):
@@ -262,7 +370,7 @@ class ResultRequest(WireModel):
     cursor: str | None = Field(default=None, max_length=MAX_CURSOR_CHARS)
 
 
-class CompleteResult(ResultReceipt):
+class CompleteResult(RetrievalReceipt):
     delivery: Literal["tool_result"] = "tool_result"
     content: ResultContent
 
@@ -270,13 +378,13 @@ class CompleteResult(ResultReceipt):
         return self.model_dump(mode="json")
 
 
-class FileResult(ResultReceipt):
+class FileResult(RetrievalReceipt):
     delivery: Literal["local_file"] = "local_file"
     local_path: str
     next_action: str
 
 
-class FragmentResult(ResultReceipt):
+class FragmentResult(RetrievalReceipt):
     delivery: Literal["fragments"] = "fragments"
     fragment_start: int = Field(ge=0)
     fragment_count: int = Field(ge=1)
@@ -317,5 +425,5 @@ class ResultError(Exception):
 
 ResultPayload = Annotated[
     ResultRequest | CompleteResult | FileResult | FragmentResult | ResultFailure | ErrorEnvelope,
-    Field(title="OpenReading Result Tool v0.3"),
+    Field(title="OpenReading Result Tool v0.4"),
 ]

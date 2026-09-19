@@ -207,7 +207,22 @@ Retained response fingerprints are inherited producer assertions; comparison doe
 A report's `source: file` describes retained JSON input, not the original parser acquisition method.
 The synchronous comparison runs in a thread; host cancellation does not undo completed publication.
 Repeat unchanged arguments with unchanged inputs and implementation to recover a lost receipt.
-Comparison has no durable job or computation deadline here. Truth scoring and corpus comparison require separate MCP input contracts.
+Comparison has no durable job or computation deadline here.
+
+Supply `truth` as an inline expected-value object, such as `{"text": "expected"}`, to use the shared scorer.
+The report retains those exact values in `provenance.truth`, bound by the record digest as caller assertions.
+An empty object scores no dimensions and preserves `overall: null`; it never means perfect accuracy.
+No truth file path is accepted, and the tool does not independently verify expected values.
+
+Supply only retained `batch_result` identifiers for corpus comparison, which refuses both `truth` and `baseline`.
+The shared engine matches `relpath`, then `filename`, then `sha256` among succeeded items carrying responses.
+The last succeeded duplicate key wins, and a key missing from any run becomes unpaired.
+Failure-only documents and empty keys are omitted; corpus reports therefore do not cover every original batch item.
+For example, a document that failed in every run contributes no comparable key to the corpus report.
+Labels `run_1`, `run_2` preserve input order and duplicates, while provenance maps each label to its retained batch.
+No single adapter version describes a batch; run-level versions remain null while nested reports retain reported backend versions.
+Matching filenames do not establish equal source bytes, and source hashes remain producer assertions.
+Scored and corpus reports use retained-result v0.4; older readers cannot consume these new records.
 
 Use `openreading_get_result` with a returned `orr1_` identifier for complete general response or report retrieval.
 Its default `delivery="auto"` returns intact content or a local export with content length and hash.
@@ -264,7 +279,7 @@ Client packaging and installation checks belong in the separate `openreading-age
 ## Not built yet
 
 Readiness and liveness discovery, strategy inspection and proposed triage remain unbuilt MCP operations.
-Comparison covers retained normalized responses; truth scoring and batch-result corpus comparison remain unbuilt MCP operations.
+Comparison covers retained normalized responses, caller-supplied expected values and retained batch corpora using existing shared engines.
 The remaining agent surface is proposed in [the agent design](../../../design/agentic.md).
 Passing stdio tests does not establish desktop installation compatibility or measured model token savings.
 

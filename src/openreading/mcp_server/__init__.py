@@ -49,14 +49,16 @@ Planning reads no document, checks no readiness and does not change local import
 Call openreading_get_result for complete general results identified by an orr1 result_id.
 It shares the operator's delivery budget and export directory with complete document retrieval.
 Auto returns complete content or a local export; fragments returns lossless JSON Pointer continuation.
-The result-tool.v0.1 contract preserves normalized status, warnings and explicit producer provenance.
+The result-tool.v0.4 contract preserves normalized status, warnings and explicit producer provenance.
 For example, a comparison report retains its subject-to-input mapping without creating physical-page citations.
 Call openreading_compare with result_ids to compare authorized retained normalized responses.
 An optional baseline selects an existing input or appends another retained response under the same grant.
 The shared comparison engine never executes either backend; its report retains exact subject-to-input mappings.
 For example, compare two retained runs of Docling without reprocessing their source documents.
 The synchronous call returns a bounded receipt; host cancellation does not undo completed report publication.
-Truth scoring and corpus comparison remain unbuilt MCP operations.
+Inline truth scores caller-supplied expected values and retains them without an independent accuracy claim.
+All-batch inputs produce a corpus report using the shared matching rules; baseline and truth are refused.
+For example, two retained batch_result identifiers map to run_1 and run_2 in report provenance.
 
 Internal execution preflight lives in openreading.mcp_server.execution and exposes no additional tool.
 It snapshots explicit configuration with independent backend and strategy entrypoint scopes.
