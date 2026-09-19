@@ -281,7 +281,7 @@ async def test_protocol_truth_and_corpus_work_in_both_profiles(result_service, p
     server = local_server(service) if profile == "local" else general_server(jobs(service.store))
     async with create_connected_server_and_client_session(server) as session:
         catalog = {t.name: t for t in (await session.list_tools()).tools}
-        assert len(catalog) == (13 if profile == "local" else 12)
+        assert len(catalog) == 13
         for corpus in [False, True]:
             ids, _ = retain_inputs(store, corpus)
             args = {"result_ids": ids, **({} if corpus else {"truth": {"text": "alpha"}})}

@@ -9,7 +9,8 @@ The [remaining product intent](../product/specs/agentic.product-spec.md) preserv
 
 Triage tools remain unbuilt.
 Authorized discovery and explicit readiness/liveness diagnostics are documented in the MCP guide.
-Scoped backend route planning is documented in the MCP guide; strategy planning remains proposed.
+Scoped route planning and strategy inspection are documented in the MCP guide.
+The guide records explicit operator-only dispositions for intake expansion, provider batching, replay and research utilities.
 The local profile does not satisfy those requirements by exposing differently named equivalents.
 It deliberately selects one backend, one explicit input grant, and bounded retained evidence.
 Client packaging and token measurement belong in `openreading-agent-tools`, which depends on core.

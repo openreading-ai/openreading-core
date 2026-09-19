@@ -1,6 +1,8 @@
 """Expose local evidence and scoped general execution through separate stdio profiles.
 
-The general-execution-v1 profile serves twelve tools without selecting a mandatory local parser.
+The general-execution-v1 profile serves thirteen tools without selecting a mandatory local parser.
+Strategy inspection lists authorized entrypoints and returns scoped structural views without configuration payloads.
+The MCP guide maps existing processing capabilities and explicitly separates operator-only workflows.
 Use openreading_parse to start authorized backend or strategy work, then inspect persistent ej1 jobs.
 General get_job, list_jobs and cancel_job operate under the original input grant across client reconnects.
 Get and list can persist recovery after supervisor exit, so their tool annotations admit writes.

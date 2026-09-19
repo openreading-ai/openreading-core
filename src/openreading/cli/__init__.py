@@ -1234,13 +1234,23 @@ fire after that clean shutdown.
 mcp --profile PROFILE
 ---------------------
 Serve document tools over stdio with one explicit local or general profile.
-Select general-execution-v1 for 12 tools with openreading[agent].
+Select general-execution-v1 for 13 tools with openreading[agent].
 Install the adapters you authorize separately before starting document jobs.
 A backend is a registered document processor, such as pymupdf or reducto.
 Each backend reads the formats its descriptor claims.
 See src/openreading/adapters/README.md for the adapter catalog.
 You grant an absolute --input-root and a separate absolute --artifact-root.
 For example, use /absolute/documents and /absolute/evidence respectively.
+
+openreading_strategy lists authorized names and inspects captured strategies.
+Show and normalize return the same scope-pruned structural view.
+Option payloads and free text are omitted with an explicit count.
+For example, a pymupdf leaf remains visible without its extraction schema.
+The view cannot reconstruct executable configuration.
+Validate checks one entrypoint and its helpers, returning sanitized counts.
+Plan accepts restricted parse request metadata and does not read its source.
+For example, planning a missing.pdf reference does not establish it exists.
+An invalid validation result returns isError=true with its error count.
 
 --execute-backend authorizes each general execution backend; repeat per id.
 --execute-strategy authorizes each configured strategy entrypoint by name.

@@ -60,7 +60,7 @@ async def test_diagnostic_tools_registered_without_changing_local_catalog(store)
 
     async with create_connected_server_and_client_session(create_server(jobs(store))) as session:
         tools = {tool.name: tool for tool in (await session.list_tools()).tools}
-        assert len(tools) == 12
+        assert len(tools) == 13
         assert tools["openreading_backends"].annotations.readOnlyHint
         assert not tools["openreading_readiness"].annotations.readOnlyHint
         assert not tools["openreading_liveness"].annotations.readOnlyHint

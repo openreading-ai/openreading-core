@@ -554,6 +554,7 @@ AGENT_DOCUMENT_TOOL_SCHEMA_FILE = "agent-document-tool.v0.4.json"
 DOCUMENT_TOOL_SCHEMA_FILE = "document-tool.v0.4.json"
 IMPORT_JOB_SCHEMA_FILE = "import-job.v0.3.json"
 ROUTE_TOOL_SCHEMA_FILE = "route-tool.v0.1.json"
+STRATEGY_TOOL_SCHEMA_FILE = "strategy-tool.v0.1.json"
 DIAGNOSTIC_TOOL_SCHEMA_FILE = "diagnostic-tool.v0.1.json"
 BACKEND_DISCOVERY_SCHEMA_FILE = "backend-discovery.v0.1.json"
 RETAINED_RESULT_SCHEMA_FILE = "retained-result.v0.4.json"
@@ -842,6 +843,11 @@ def main(argv: list[str] | None = None) -> int:
         return _cli_validate()
     print("usage: python -m openreading.schemas validate", file=sys.stderr)
     return 2
+
+
+def strategy_tool_schema() -> dict[str, Any]:
+    """Return the authorized strategy inspection contract."""
+    return _load(STRATEGY_TOOL_SCHEMA_FILE)
 
 
 def diagnostic_tool_schema() -> dict[str, Any]:

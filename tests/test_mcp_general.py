@@ -26,6 +26,7 @@ async def test_general_catalog_contract_scope_and_annotations(store, monkeypatch
     async with create_connected_server_and_client_session(create_server(manager)) as session:
         catalog = {t.name: t for t in (await session.list_tools()).tools}
         assert set(catalog) == {
+            "openreading_strategy",
             "openreading_backends",
             "openreading_readiness",
             "openreading_liveness",
@@ -242,7 +243,7 @@ async def test_real_stdio_parse_disconnect_reconnect_and_complete_delivery(
             ClientSession(reader, writer) as session,
         ):
             await session.initialize()
-            assert len((await session.list_tools()).tools) == 12
+            assert len((await session.list_tools()).tools) == 13
             accepted = await payload(session, "openreading_parse", request(backend))
             Draft202012Validator(execution_tool_schema()).validate(accepted)
             assert accepted["state"] == "queued"

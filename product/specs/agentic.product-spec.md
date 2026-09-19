@@ -32,7 +32,8 @@ The MCP guide documents implemented authorized discovery, offline readiness and 
 The MCP guide documents symmetric, baseline, truth-scored and corpus comparisons of retained inputs.
 Existing core processing capabilities require MCP coverage for public v1. Proposed triage intelligence remains a separate scope decision.
 General parse and strategy execution are documented beside their scoped routing and retained-result contracts in the MCP guide.
-Strategy inspection remains proposed separately from executing an authorized strategy.
+The MCP guide documents implemented strategy inspection separately from executing an authorized strategy.
+Its capability coverage table records operator-only workflows and transport-specific exclusions.
 Removed compliance policy keys are excluded; future authorization must use mechanisms current core can actually enforce.
 No acceptance criterion below is marked complete by the fixed local document profile.
 

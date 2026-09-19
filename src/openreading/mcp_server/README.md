@@ -34,7 +34,7 @@ These flags do not change local imports, and static `openreading_backends` disco
 An empty plan sets `isError`. A nonempty plan does not establish backend readiness, format compatibility or completed processing.
 Selection returns `selection_unavailable` unless a trusted launcher explicitly supplies a local chooser.
 
-The general profile exposes twelve tools without requiring a fixed local parser at startup.
+The general profile exposes thirteen tools without requiring a fixed local parser at startup.
 Call `openreading_parse` with the shared request shape or `openreading_batch` with an ordered `requests` array, then use `openreading_get_job`, `openreading_list_jobs` and `openreading_cancel_job`.
 For example, `backend.id` set to `strategy:local` selects an operator-authorized strategy with independently authorized backend leaves.
 Resume selects a terminal strategy job through `openreading_resume`, including a selected batch strategy item.
@@ -266,6 +266,34 @@ The local profile requires POSIX support. Explicit root symlinks resolve once be
 The [artifact guide](../artifacts/README.md) explains retention, source hashing, page provenance, and quota behavior.
 The Python SDK dependency is optional and pinned through the lockfile's supported v1 release line.
 
+### General MCP capability coverage
+
+The general profile supports document processing through explicit grants, rather than reproducing every administrative CLI operation.
+The table distinguishes available processing operations from operator workflows with different authority and lifecycle requirements.
+
+| Existing capability | MCP v1 disposition | Boundary |
+| --- | --- | --- |
+| Python `run`, CLI parse, HTTP parse | `openreading_parse` | Authorized named backends, default routing and configured strategy entrypoints run as durable jobs. |
+| Python `route`, CLI route, HTTP route | `openreading_route` | Plans backend ordering without source acquisition or readiness checks. |
+| Python `run_batch`, CLI batch, HTTP batch | `openreading_batch` | Explicit ordered requests run serially. Nested extraction states and duplicate inputs remain intact. |
+| Python `resume`, CLI resume | `openreading_resume` | Terminal strategy jobs or selected batch items use retained sources and copied journals under current authority. |
+| Python `compare`, CLI response/corpus comparison, HTTP comparison | `openreading_compare` | Retained results support baseline, caller truth and batch corpora. Parsing remains a separate authorized operation. |
+| Backend discovery and diagnostics | `openreading_backends`, `openreading_readiness`, `openreading_liveness` | Static discovery, offline configuration and explicit infrastructure probes remain distinct. |
+| Strategy list, show, normalize, validate and plan | `openreading_strategy` | Captured configuration only. Show and normalize return the same scope-pruned structural view with payload omissions counted. |
+| Job status, discovery, cancellation | `openreading_get_job`, `openreading_list_jobs`, `openreading_cancel_job` | Retained grant-scoped jobs support reconnect. Host Stop does not deliver cancellation automatically. |
+| Complete output, traces and comparison findings | `openreading_get_result` | Full retained orchestration and findings support explanations without a separate renderer tool. Preserve observed trace fields rather than inventing reasons. |
+| Local chooser, import, literal search and physical-page evidence | Existing local profile | The general profile uses operator input grants and does not fabricate local artifact evidence for general responses. |
+| Directory and glob expansion | Operator intake before `openreading_batch` | Submit reviewed relative file references. General MCP does not grant recursive enumeration through model-selected directory paths. Local folder selection remains a separate snapshot workflow. |
+| Native provider batch dispatch | Operator Python/CLI workflow | General MCP uses the serial shared runner with isolated attempts. Provider batch submission, polling and remote cancellation are not advertised by this profile. |
+| CLI `replay` | Operator execution workflow | Replay can call backends again using logged decisions. It is neither read-only explanation nor equivalent to journal resume. |
+| Calibration, benchmark, eval datasets, rules and leaderboard | Operator research workflows | Dataset selection, provider spend, tuning and output publication require their existing explicit operator setup. MCP comparison truth does not run a benchmark corpus. |
+| Config authoring, adapter setup, serve, health and upload encoding | Operator administration or transport | Tools do not install dependencies, write configuration, manage daemons or turn HTTP uploads into local grants. |
+| Triage, live decider executor, intent, translation and aggregate usage analytics | Separate unbuilt features | These proposals are not existing processing endpoints and are not prerequisites for this MCP profile. |
+
+These dispositions define the v1 profile, not API parity for every backend-specific transport option.
+For example, HTTP webhooks, caller credential aliases and arbitrary vendor job identifiers are not accepted as MCP arguments.
+Changing a disposition requires its own authorization and retention contract before exposing additional filesystem or provider operations.
+
 ## Reference
 
 Run `openreading help mcp` for the command contract and `openreading mcp --help` for its required arguments.
@@ -278,7 +306,7 @@ Client packaging and installation checks belong in the separate `openreading-age
 
 ## Not built yet
 
-Readiness and liveness discovery, strategy inspection and proposed triage remain unbuilt MCP operations.
+Proposed triage remains unbuilt. Native standalone ChatGPT and Claude acceptance remains a separate host test gate.
 Comparison covers retained normalized responses, caller-supplied expected values and retained batch corpora using existing shared engines.
 The remaining agent surface is proposed in [the agent design](../../../design/agentic.md).
 Passing stdio tests does not establish desktop installation compatibility or measured model token savings.

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased strategy inspection MCP
+
+- Add scoped general MCP strategy inspection with bounded structural views and sanitized validation counts.
+- Expose thirteen general tools while preserving the thirteen-tool local catalog and all predecessor schemas.
+- Exercise the complete general catalog across stdio restart and document explicit operator-only capability dispositions.
+- Keep native standalone ChatGPT and Claude acceptance pending owner-operated host checks.
+
 ## Unreleased truth and corpus comparison MCP
 
 - Pin direct corpus publication refusal for readable local artifacts with otherwise valid source attribution.

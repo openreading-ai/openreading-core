@@ -617,6 +617,7 @@ entry naming it, so the warning reaches you before the removal does.
 | `execution-job.v0.2.json` | `openreading.types.execution_job` | Response and batch receipts with separate provider outcomes; historical version 0.1 statuses remain readable. |
 | `execution-tool.v0.2.json` | `openreading.types.execution_tool` | General parse and batch admission, lifecycle lookup and fixed failures. |
 | `execution-tool.v0.3.json` | `openreading.types.execution_tool` | Adds same-grant strategy resume admission by job ID and optional batch item index. Prior schema bytes remain unchanged. |
+| `strategy-tool.v0.1.json` | `openreading.types.strategy_tool` | Authorized strategy list, validation and scope-pruned structural views. Plan embeds the restricted parse request. Omitted payloads prevent configuration reconstruction. |
 | `diagnostic-tool.v0.1.json` | `openreading.types.diagnostic_tool` | General authorized discovery, offline readiness and explicit liveness requests and reports. Embeds descriptor definitions and the vendored liveness report without external references. |
 | `backend-discovery.v0.1.json` | `openreading.types.backend_discovery` | Static selected-backend descriptor and configured OCR flag, without readiness or liveness checks. Validation requires the vendored `adapter-descriptor.v0.8.json` resource registered under its `$id`. |
 
