@@ -204,7 +204,8 @@ def test_new_reports_deliver_losslessly_and_reject_format_downgrade(result_servi
         assert actual == content.wire()
 
 
-def test_corpus_publication_refuses_valid_local_artifact_subject(result_service):
+@pytest.mark.parametrize("subject_index", [0, 1], ids=["first_subject", "last_subject"])
+def test_corpus_publication_refuses_valid_local_artifact_subject(result_service, subject_index):
     from openreading.artifacts.result_models import AttributedResultProvenance
     from tests.test_artifact_service import pdf
 
@@ -215,12 +216,13 @@ def test_corpus_publication_refuses_valid_local_artifact_subject(result_service)
     ids, _ = retain_inputs(store, corpus=True)
     _, content = run(store, ids)
     origin = content.provenance.model_dump(mode="json")
-    origin["subjects"]["run_1"] = local.artifact_id
-    origin["subject_sources"]["run_1"] = {
+    label = f"run_{subject_index + 1}"
+    origin["subjects"][label] = local.artifact_id
+    origin["subject_sources"][label] = {
         "source_sha256": [manifest.document_sha256],
         "verification": "verified_source_bytes",
     }
-    origin["source_sha256"][0] = manifest.document_sha256
+    origin["source_sha256"][subject_index] = manifest.document_sha256
     attributed = AttributedResultProvenance.model_validate(origin)
     # A real readable artifact and matching hashes leave only the corpus kind rule to refuse.
     before = {p: p.read_bytes() for p in service.config.artifact_root.rglob("*") if p.is_file()}
