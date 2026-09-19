@@ -2,6 +2,7 @@
 
 ## Unreleased truth and corpus comparison MCP
 
+- Pin direct corpus publication refusal for readable local artifacts with otherwise valid source attribution.
 - Extend openreading_compare with inline expected values and retained batch corpus inputs, reusing the shared scoring and comparison engines.
 - Retain exact expected values as caller assertions, and map corpus run labels to authorized batches without claiming source identity.
 - Add compare-tool v0.2 and retained-result/result-tool v0.4, preserving all predecessor schemas, execution receipts and stored records.

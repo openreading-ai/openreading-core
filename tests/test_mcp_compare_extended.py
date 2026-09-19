@@ -204,6 +204,33 @@ def test_new_reports_deliver_losslessly_and_reject_format_downgrade(result_servi
         assert actual == content.wire()
 
 
+def test_corpus_publication_refuses_valid_local_artifact_subject(result_service):
+    from openreading.artifacts.result_models import AttributedResultProvenance
+    from tests.test_artifact_service import pdf
+
+    service, store = result_service
+    pdf(service.config.input_root / "sample.pdf")
+    local = service.import_document("sample.pdf")
+    manifest, _, _ = service.store.load_document(local.artifact_id)
+    ids, _ = retain_inputs(store, corpus=True)
+    _, content = run(store, ids)
+    origin = content.provenance.model_dump(mode="json")
+    origin["subjects"]["run_1"] = local.artifact_id
+    origin["subject_sources"]["run_1"] = {
+        "source_sha256": [manifest.document_sha256],
+        "verification": "verified_source_bytes",
+    }
+    origin["source_sha256"][0] = manifest.document_sha256
+    attributed = AttributedResultProvenance.model_validate(origin)
+    # A real readable artifact and matching hashes leave only the corpus kind rule to refuse.
+    before = {p: p.read_bytes() for p in service.config.artifact_root.rglob("*") if p.is_file()}
+    with pytest.raises(ResultError, match="invalid_result"):
+        store.publish("corpus_report", content.payload, attributed)
+    assert {
+        p: p.read_bytes() for p in service.config.artifact_root.rglob("*") if p.is_file()
+    } == before
+
+
 def test_corpus_publication_refuses_wrong_input_kind_and_hashes(result_service):
     _, store = result_service
     ids, _ = retain_inputs(store, True)
