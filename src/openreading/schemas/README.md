@@ -622,7 +622,7 @@ entry naming it, so the warning reaches you before the removal does.
 
 These families wrap retained evidence without changing the normalized extraction response.
 The v0.3 retained artifact reader remains supported without rewriting stored files.
-General result validators require the vendored response v0.3, comparison-report v0.2 and batch-result v0.2 resources registered under their respective `$id` values.
+General result validators require the vendored response v0.3, comparison-report v0.2, batch-result v0.2 and corpus-report v0.1 resources registered under their respective `$id` values.
 These external references preserve existing payload contracts; neither result family invents new source-document evidence.
 `verified_source_bytes` describes the retained copy checked during comparison, not the current state of your original file.
 It does not establish that two subjects share a document, and retrieving a report does not rehash its sources.
