@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/local-document/v0.2.json",
+  "$defs": {
+    "EngineIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "core_commit": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Core Commit"
+        },
+        "core_version": {
+          "title": "Core Version",
+          "type": "string"
+        },
+        "backend_id": {
+          "default": "pymupdf",
+          "minLength": 1,
+          "title": "Backend Id",
+          "type": "string"
+        },
+        "backend_version": {
+          "title": "Backend Version",
+          "type": "string"
+        },
+        "extraction_settings": {
+          "additionalProperties": true,
+          "title": "Extraction Settings",
+          "type": "object"
+        }
+      },
+      "required": [
+        "core_version",
+        "backend_version",
+        "extraction_settings"
+      ],
+      "title": "EngineIdentity",
+      "type": "object"
+    },
+    "FileRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "length": {
+          "minimum": 0,
+          "title": "Length",
+          "type": "integer"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "length",
+        "sha256"
+      ],
+      "title": "FileRecord",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "const": "local-document.v0.2",
+      "default": "local-document.v0.2",
+      "title": "Format",
+      "type": "string"
+    },
+    "artifact_id": {
+      "pattern": "^or1_[0-9a-f]{64}$",
+      "title": "Artifact Id",
+      "type": "string"
+    },
+    "document_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Document Sha256",
+      "type": "string"
+    },
+    "display_name": {
+      "title": "Display Name",
+      "type": "string"
+    },
+    "source_relative_path": {
+      "title": "Source Relative Path",
+      "type": "string"
+    },
+    "input_grant_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Input Grant Sha256",
+      "type": "string"
+    },
+    "page_count": {
+      "minimum": 1,
+      "title": "Page Count",
+      "type": "integer"
+    },
+    "passage_count": {
+      "minimum": 1,
+      "title": "Passage Count",
+      "type": "integer"
+    },
+    "engine": {
+      "$ref": "#/$defs/EngineIdentity"
+    },
+    "evidence_format": {
+      "const": "passages.v0.2",
+      "default": "passages.v0.2",
+      "title": "Evidence Format",
+      "type": "string"
+    },
+    "created_at": {
+      "title": "Created At",
+      "type": "string"
+    },
+    "page_origins": {
+      "additionalProperties": {
+        "enum": [
+          "native",
+          "ocr",
+          "mixed"
+        ],
+        "type": "string"
+      },
+      "title": "Page Origins",
+      "type": "object"
+    },
+    "files": {
+      "additionalProperties": {
+        "$ref": "#/$defs/FileRecord"
+      },
+      "title": "Files",
+      "type": "object"
+    },
+    "warnings": {
+      "items": {
+        "enum": [
+          "source_changed",
+          "parser_warnings_present",
+          "no_matches"
+        ],
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "artifact_id",
+    "document_sha256",
+    "display_name",
+    "source_relative_path",
+    "input_grant_sha256",
+    "page_count",
+    "passage_count",
+    "engine",
+    "created_at",
+    "files"
+  ],
+  "title": "ArtifactManifest",
+  "type": "object"
+}

@@ -1231,6 +1231,207 @@ requests, logs the shutdown, and the process exits 143. `serve` is the one
 command excluded from this CLI's own SIGTERM handling, which would otherwise
 fire after that clean shutdown.
 
+mcp --profile PROFILE
+---------------------
+Serve document tools over stdio with one explicit local or general profile.
+Select general-execution-v1 for 13 tools with openreading[agent].
+Install the adapters you authorize separately before starting document jobs.
+A backend is a registered document processor, such as pymupdf or reducto.
+Each backend reads the formats its descriptor claims.
+See src/openreading/adapters/README.md for the adapter catalog.
+You grant an absolute --input-root and a separate absolute --artifact-root.
+For example, use /absolute/documents and /absolute/evidence respectively.
+
+openreading_strategy lists authorized names and inspects captured strategies.
+Show and normalize return the same scope-pruned structural view.
+Option payloads and free text are omitted with an explicit count.
+For example, a pymupdf leaf remains visible without its extraction schema.
+The view cannot reconstruct executable configuration.
+Validate checks one entrypoint and its helpers, returning sanitized counts.
+Plan accepts restricted parse request metadata and does not read its source.
+For example, planning a missing.pdf reference does not establish it exists.
+An invalid validation result returns isError=true with its error count.
+
+--execute-backend authorizes each general execution backend; repeat per id.
+--execute-strategy authorizes each configured strategy entrypoint by name.
+A strategy is a configured execution tree whose backend leaves need grants.
+--execution-config PATH snapshots an explicit configuration for those jobs.
+For example, allow pymupdf and strategy fast with separate execution flags.
+Without backend grants, all execution requests are refused.
+Policy ordering and strategy grants cannot widen the backend scope.
+The general profile rejects --routing-config and --allow-backend.
+Those flags grant planning access only in local profiles.
+Local profiles reject every execution flag instead of ignoring it.
+
+--execution-env NAME forwards only that existing environment variable.
+For example, --execution-env REDUCTO_API_KEY supplies an operator credential.
+Absent, invalid, and reserved names refuse startup without printing values.
+HOME, TMPDIR, XDG_CACHE_HOME, OPENREADING_CONFIG, and OPENREADING_LEDGER
+are reserved for private worker directories and the captured configuration.
+No ambient credentials or configuration reach workers unless selected.
+--execution-concurrency defaults to one and accepts positive integers.
+--execution-deadline-seconds sets an optional positive deadline per job.
+Without that flag, execution has no deadline or arbitrary document caps.
+These controls do not impose a native memory ceiling or OS sandbox.
+
+Call openreading_backends for static descriptors of authorized backends.
+For example, backend=pymupdf narrows discovery without checking dependencies.
+Call openreading_readiness for one backend's offline configuration check.
+It uses the explicit execution environment, not ambient host credentials.
+Ready means configured locally, not credential validity or reachability.
+Call openreading_liveness only when you want an explicit diagnostic probe.
+For example, backend=pymupdf runs its local probe without a document.
+Endpoint and vendor probes may contact the configured infrastructure.
+Liveness preserves the shared measured and inferred outcome distinctions.
+A timeout_s between 0.1 and 30 bounds the probe, plus ten seconds startup.
+Offline readiness has a thirty-second diagnostic process deadline.
+Diagnostics never submit documents or perform billed extraction requests.
+Reports above 65536 JSON bytes refuse instead of losing fields silently.
+Enough reply space for that ceiling is reserved before diagnostic startup.
+The default reply budget fits; a small budget may refuse before any probe.
+Normal cleanup removes per-attempt scratch; its empty grant parent can remain.
+Abrupt parent loss can leave per-attempt files requiring operator removal.
+These probes use separate processes, outside the document job queue.
+
+Call openreading_parse with the shared request shape and a relative path.
+For example, request document.path as sample.pdf and backend.id as pymupdf.
+Call openreading_batch with requests as an ordered array of those requests.
+Each batch holds one slot and runs items serially, including duplicates.
+Empty input retains a batch with status.state=failed and the warning code
+empty_batch. Job state=succeeded means publication only, even for that batch.
+Every request is authorized before acquiring any source for acceptance.
+Both tools return an ej1_ job identifier before processing finishes.
+Call openreading_resume with a terminal strategy job_id to continue its work.
+For a batch strategy item, also supply its zero-based item_index.
+For example, item_index=0 selects the first item, not the entire batch.
+Resume uses retained source bytes and a copied journal under current scope.
+Configuration must remain unchanged, and every pinned backend needs a grant.
+Named backend runs have no strategy journal and return resume_unavailable.
+Terminal steps replay; steps without terminal outcomes may dispatch again.
+Each explicit resume starts a new job and can incur new provider charges.
+The original attempt stays unchanged. Remote exactly-once is not promised.
+Use openreading_get_job and openreading_list_jobs to inspect execution.
+Call openreading_cancel_job to stop unwanted work explicitly.
+Host Stop does not cancel detached work, and local cancellation cannot
+establish cancellation of work already submitted to a remote provider.
+Succeeded jobs carry retained orr1_ result identifiers.
+Call openreading_get_result to retrieve complete normalized or batch content.
+A succeeded batch item returned a response; inspect its nested status too.
+Cancellation prevents batch publication but cannot undo completed calls.
+Call openreading_compare to compare at least two retained normalized results.
+Call openreading_route to plan requests under the same execution authority.
+General execution provides no native document chooser or local import tools.
+--document-response-bytes and --document-export-root govern result delivery.
+The delivery modes and retained comparison behavior below apply here too.
+
+Serve 13 tools over stdio with either local profile.
+Select local-document-proof-v1 for 13 tools with openreading[agent,pymupdf].
+Call openreading_backends with {} for this profile's static descriptor and
+OCR setting. Discovery does not check readiness or enable other backends.
+Call openreading_route with {} to plan the local backend without extraction.
+--routing-config PATH snapshots an explicit openreading.yaml for planning.
+--allow-backend authorizes each planning backend; repeat it for multiple ids.
+For example, --allow-backend pymupdf --allow-backend tesseract permits both.
+The policy orders the chain but cannot widen the independent allowed set.
+The default allowed set contains only this profile's local import backend.
+A named backend must be allowed; fallback only reorders the resolved chain.
+Planning reads no source and checks neither readiness nor compatibility.
+These flags do not change local imports or enable general execution.
+You grant an absolute --input-root and a separate absolute --artifact-root.
+For example, use /absolute/documents and /absolute/evidence respectively.
+The server retains source bytes and page evidence until you remove the store.
+Requested document content enters the calling agent. Treat it as untrusted.
+
+Start long work with openreading_start_import and a granted relative path.
+Keep its job_id and check openreading_get_import for stages and elapsed time.
+For example, call status with job_id and wait_seconds set to 20.
+Use openreading_cancel_import to stop that job. Host Stop does not cancel it.
+A succeeded job carries a receipt. Failed or cancelled jobs carry an error.
+Jobs continue after client disconnect; restarting can retrieve their status.
+Use openreading_list_imports with {} to recover job IDs after reconnecting.
+Follow next_cursor for more jobs, then inspect status before cancelling.
+Cancel unwanted jobs before uninstalling. Client removal does not stop them.
+Call openreading_import for synchronous use, then pass its artifact_id to
+openreading_get_document for the complete retained normalized JSON.
+This excludes backend_raw and keeps existing channels, warnings and origins.
+Set delivery to auto for one complete result or a saved local JSON file.
+The response budget counts serialized MCP bytes, including escaping.
+--document-response-bytes defaults to 1000000. It does not limit parsing.
+--document-export-root selects a trusted local export directory.
+Without that flag, exports stay under the private artifact store.
+A local-file receipt includes byte count, SHA-256, and warning-code counts.
+It does not mean the host received a file. Attach it or use authorized access.
+Attaching an export sends its content to the assistant host.
+Set delivery to file to export even when the result fits the budget.
+Omitting delivery retains fragments mode and its ordered JSON Pointer spans.
+Follow every next_cursor in that mode for complete retained content.
+The openreading.artifacts.document docstring defines fragment reconstruction.
+Alternatively, use openreading_search for a focused query.
+Call openreading_read with evidence_ids returned by any retrieval tool.
+Cite the returned filename, physical page, and evidence identifier.
+Follow next_cursor when present. A failed search does not prove absence.
+Call openreading_select_document with {} when a trusted launcher supplies
+an optional local chooser. Import the returned path to create evidence.
+Without a chooser, selection returns selection_unavailable; other tools work.
+
+Call openreading_get_result with a retained orr1_ result_id for a general
+normalized response or comparison report supplied by trusted library code.
+For example, delivery set to auto returns intact content or a local export.
+Set delivery to fragments and follow every next_cursor until null instead.
+The document response budget and export-root flags govern these replies too.
+Normalized-response provenance records producer assertions.
+The general profile creates these retained responses through execution jobs.
+Existing or1_ artifacts continue using openreading_get_document.
+Call openreading_compare with result_ids listing at least two retained
+normalized responses. Both or1_ artifacts and orr1_ responses are accepted.
+For example, compare two extractions, then retrieve the returned result_id.
+An optional baseline identifies an existing subject or another retained input.
+A separate baseline joins the report after its grant and integrity checks.
+The tool never reparses documents or calls providers.
+Agreement is not accuracy.
+Report provenance maps subject labels back to their retained input identifiers.
+The subject_sources map records each subject's hashes and verification basis.
+Comparison is synchronous; cancellation may leave a completed retained report.
+To recover a lost receipt, repeat unchanged arguments.
+The inputs and implementation must also remain unchanged.
+Supply truth as an inline expected-value object to score normalized inputs.
+For example, {"text": "expected"} scores text and retains the expected value.
+These are caller assertions. An empty object scores no dimensions.
+All-batch result_ids produce a corpus_report, refusing truth and baseline.
+Run labels preserve order and map back to retained batches in provenance.
+The shared index uses relpath, filename, then sha256 among succeeded items.
+Items need responses; the last duplicate key wins and unmatched keys unpair.
+Failure-only documents are omitted. Matching keys do not prove source identity.
+Use get_result for complete reports, exports or lossless fragment delivery.
+
+This profile accepts one PDF, at most 25 MiB and 100 physical pages.
+It uses local PyMuPDF without OCR, passwords, routing, or hosted fallback.
+Imports allow 45 seconds and retain at most 512 MiB across the artifact store.
+Import, search, and read allow 4096, 8192, and 16384 UTF-8 bytes.
+Full-document replies allow 65536 UTF-8 bytes per continuation.
+These return the stored result, not a promise of complete OCR recognition.
+The import profile still determines which normalized channels are available.
+These byte limits do not prove token savings or impose a native memory limit.
+Select --profile local-document-proof-v2 for openreading[agent,docling-local].
+That profile requires --profile-config pointing to a local JSON setup file.
+It names pages, deadline_seconds, worker_memory_bytes, worker_idle_seconds,
+and docling. Null page, deadline, and memory fields disable those ceilings.
+Optional source_bytes, extraction_bytes, and store_bytes default to null.
+Explicit positive values still impose operator limits for those resources.
+The docling object names artifacts_path and dependency_lock.
+Optional ocr, tesseract_cmd, tessdata_path, languages, and threads select OCR.
+For example, set ocr to true with absolute executable and language-data paths.
+No model assets download automatically. Invalid or absent setup exits 2.
+The artifact guide demonstrates setup. No measured release defaults exist.
+The warm child reports bounded progress, then shuts down after idle timeout.
+Physical-page text_origin labels identify native, OCR, or mixed extraction.
+These labels are provenance, never measured accuracy or confidence.
+Exit 0 means transport closure, 2 invalid setup, and 130 interruption.
+This POSIX profile resolves root symlinks before establishing its input grant.
+SIGINT and SIGTERM stop synchronous imports before the server exits 130.
+Detached jobs remain active until they finish or receive explicit cancellation.
+The openreading.artifacts package owns storage, provenance, and error codes.
+
 Exit codes
 ----------
   0  success.
@@ -1285,7 +1486,8 @@ Exit codes
      variable is set, so an interrupted `--backend` batch exits 6 and names no
      id, and there is nothing for `resume` to replay. Arm the ledger for the
      strategy runs you mean to resume.
-143  terminated by SIGTERM with no ledger armed: nothing was resumable, so one
+143  terminated by SIGTERM with no ledger armed (MCP instead exits 130).
+     Nothing was resumable, so one
      `[openreading]` line says so and names `OPENREADING_LEDGER`. Unarmed
      Ctrl-C is unchanged -- it stays an ordinary `KeyboardInterrupt`
      (traceback, 130), byte-for-byte the pre-ledger behaviour.

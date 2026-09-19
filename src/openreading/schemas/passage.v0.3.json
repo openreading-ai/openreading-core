@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/passage/v0.3.json",
+  "$defs": {
+    "BBox": {
+      "additionalProperties": false,
+      "description": "CANONICAL geometry emitted by the normalizer (response schema $defs.BBox).",
+      "properties": {
+        "x": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Y",
+          "type": "number"
+        },
+        "w": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "W",
+          "type": "number"
+        },
+        "h": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "H",
+          "type": "number"
+        },
+        "page": {
+          "minimum": 1,
+          "title": "Page",
+          "type": "integer"
+        },
+        "polygon": {
+          "anyOf": [
+            {
+              "items": {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Polygon"
+        },
+        "bbox_native": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NativeGeometry"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "w",
+        "h",
+        "page"
+      ],
+      "title": "BBox",
+      "type": "object"
+    },
+    "NativeGeometry": {
+      "additionalProperties": false,
+      "description": "Raw source geometry, untouched, for round-trip fidelity (response schema BBox.bbox_native).",
+      "properties": {
+        "coords": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Coords",
+          "type": "array"
+        },
+        "origin": {
+          "$ref": "#/$defs/NativeOrigin"
+        },
+        "unit": {
+          "$ref": "#/$defs/NativeUnit"
+        },
+        "dpi": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dpi"
+        }
+      },
+      "required": [
+        "coords",
+        "origin",
+        "unit"
+      ],
+      "title": "NativeGeometry",
+      "type": "object"
+    },
+    "NativeOrigin": {
+      "description": "Origin convention of the RAW source geometry preserved in bbox_native.",
+      "enum": [
+        "top_left",
+        "bottom_left"
+      ],
+      "title": "NativeOrigin",
+      "type": "string"
+    },
+    "NativeUnit": {
+      "description": "Unit of the RAW source geometry preserved in bbox_native.",
+      "enum": [
+        "normalized",
+        "pdf_point",
+        "pixel",
+        "inch"
+      ],
+      "title": "NativeUnit",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "evidence_id": {
+      "pattern": "^p[0-9]{4,}-b[0-9]{4,}-s[0-9]{4,}$",
+      "title": "Evidence Id",
+      "type": "string"
+    },
+    "page": {
+      "minimum": 1,
+      "title": "Page",
+      "type": "integer"
+    },
+    "block_index": {
+      "minimum": 0,
+      "title": "Block Index",
+      "type": "integer"
+    },
+    "segment_index": {
+      "minimum": 0,
+      "title": "Segment Index",
+      "type": "integer"
+    },
+    "text_origin": {
+      "anyOf": [
+        {
+          "enum": [
+            "native",
+            "ocr",
+            "mixed",
+            "unknown"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Text Origin"
+    },
+    "source_kind": {
+      "enum": [
+        "block_text",
+        "page_text"
+      ],
+      "title": "Source Kind",
+      "type": "string"
+    },
+    "text_start": {
+      "minimum": 0,
+      "title": "Text Start",
+      "type": "integer"
+    },
+    "text_end": {
+      "minimum": 1,
+      "title": "Text End",
+      "type": "integer"
+    },
+    "text": {
+      "maxLength": 1024,
+      "minLength": 1,
+      "title": "Text",
+      "type": "string"
+    },
+    "bbox": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BBox"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "source_block_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Block Id"
+    }
+  },
+  "required": [
+    "evidence_id",
+    "page",
+    "block_index",
+    "segment_index",
+    "source_kind",
+    "text_start",
+    "text_end",
+    "text"
+  ],
+  "title": "Passage",
+  "type": "object"
+}

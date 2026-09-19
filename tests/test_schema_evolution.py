@@ -107,6 +107,30 @@ def test_response_envelope_tolerates_unknown_future_fields():
 # extra="forbid" (openreading.types.request). request.v0.1.json is untouched and stays frozen
 # above — this is a new file, not an edit to the old one.
 _FROZEN_RELEASED = {
+    "compare-tool.v0.1.json": "a891c89d68a2cdad2d2d2e8bfaac1c7e3fce5815667e81da457214ecfe511cc1",
+    "result-tool.v0.3.json": "686fb033acf607d3aed3ed471642e83813d2c45e6e34f61ab1a5010f0c83db5f",
+    "retained-result.v0.3.json": "15c76e85cb626bf1f1f1094d61175e58463cb741a9d2766cea501cec50d6bb6c",
+    "execution-tool.v0.2.json": "4521c8db6ce007ad71a0958a75f062fcb79d3f8f3c7d272ea1b1ab4e7e99d888",
+    "execution-tool.v0.1.json": "8ea719ccbd2280ee9451eead282d6f45adc27aa56eb91efbc2343c7493555fc7",
+    "execution-job.v0.1.json": "447ad159d77c5ef21fbe05003e4a0b62226ad7b3cbd4f48afbf0df118008fd8a",
+    "result-tool.v0.2.json": "39b499dd2da1bfcf2095ada79165de61caf11370f8faa926483fb8c3f6cd23d9",
+    "retained-result.v0.2.json": "1469f8e71c2c054702f8f6f7e2a693d580b4d15df2b805d497fd1aa381832a08",
+    "result-tool.v0.1.json": "84926707c112555bb9ddab63dd0541b1c99d0d6f5c887d5ba900778f445b301b",
+    "retained-result.v0.1.json": "3358b19a45be89cab1eeb886140ad70b250f2b96e629f6173f81cc26c5db60bd",
+    "import-job.v0.2.json": "bfb15572474bbe2598e13f5103bf6c0792aa1e26943f9f7a560c586041e1aaf8",
+    "document-tool.v0.3.json": "b41b87e8995e5babf1903e2c8723e42aeb054e4ceb4d0d09f8e2b2f2b99d74ed",
+    "agent-document-tool.v0.3.json": "e4a63ce3658626db83a75677a27d3388b4b837e6e6fa8d186710b6f076257268",
+    "passage.v0.3.json": "b17536a4bcbc045f7cac1b1c9104e2a3866f9fd2ea069b1148c9daf54720fafd",
+    "local-document.v0.3.json": "5b6d20e45fea7e3dfa7750868d82d1ba571ba346ac387341a956f323ee14e9fa",
+    "selection-tool.v0.1.json": "021d58f1a7e36cbfb47cf25e37c720366a8242d2e512c5d24ceb610aa7ce59f9",
+    "import-job.v0.1.json": "cf38432320ce5f6a736249170f2fe79a97a7e3f15fb8ce7ca746f6229392f669",
+    "document-tool.v0.2.json": "d78d87a6fdf836b4ddbd1c41387a7944c14fa7d90136cd4db967d7736f83b5d4",
+    "local-document.v0.1.json": "626ed168340d2ecf0410d3321bed573cd2a1003ba834dfb04c121453ffb3c1b5",
+    "local-document.v0.2.json": "77615561a24b5f7fa8ff2e5a93b24c003ac2a37f0999c2b4b473ea2ae246bfe2",
+    "passage.v0.1.json": "4eebac39056b9e0072d08d61bad04b9cd717d3a657cb3bc488d40feb38e25ae9",
+    "passage.v0.2.json": "ca6771dd18f3c914e471f0d07e4e520a4b8545bc3dcd043f034930d95f07c077",
+    "agent-document-tool.v0.1.json": "1f542ed26c062b262effa222909ec1e899bc319a7510c7a8b3c4c2f36948b900",
+    "agent-document-tool.v0.2.json": "ae35988f90b38af39bd9ab7016b5d3cabda13a7bbe5c71dd777443e11ed82183",
     "request.v0.1.json": "c3fdc3ee4e3fcf5eddc3a7d6be4ef3fb938479f1f982f47d0f72a6b2e4f42a26",
     "request.v0.2.json": "31a32a3b1d1c59a76066477b2565bab39a5fdc197cbbdaf850fb3e7b5d181ad4",
     "response.v0.1.json": "41a1506091027f894508327b50d27f47205dd689f9d5dcfc48b3375ea19d0772",
@@ -117,6 +141,22 @@ _FROZEN_RELEASED = {
     "strategy-config.v0.1.json": "1080ed4b28d0455766ed5789535c8d4d075eb73b78d167d18c79ed582cd5c0b2",
 }
 _UNRELEASED = {
+    "strategy-tool.v0.1.json",
+    "diagnostic-tool.v0.1.json",
+    "retained-result.v0.4.json",
+    "result-tool.v0.4.json",
+    "execution-job.v0.2.json",
+    "execution-tool.v0.3.json",
+    "compare-tool.v0.2.json",
+    "route-tool.v0.1.json",
+    "backend-discovery.v0.1.json",
+    "import-job.v0.3.json",
+    "document-tool.v0.1.json",
+    "document-tool.v0.4.json",
+    "selection-tool.v0.2.json",
+    "local-document.v0.4.json",
+    "passage.v0.4.json",
+    "agent-document-tool.v0.4.json",
     "response.v0.3.json",
     "adapter-descriptor.v0.3.json",
     "comparison-report.v0.2.json",
@@ -150,6 +190,9 @@ _UNRELEASED = {
     # T1 (not yet byte-frozen):
     "step.v0.1.json",
     "journal.v0.1.json",
+    "local-document.v0.1.json",
+    "passage.v0.1.json",
+    "agent-document-tool.v0.1.json",
     # Ledger T4a (AC-8) — additive descriptor bump carrying the optional `protocol_version`
     # integer (not yet byte-frozen):
 }

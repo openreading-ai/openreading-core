@@ -247,7 +247,7 @@ Handle that operation-level failure before calling this consumer, as [Reading an
 
 ## Validate
 
-One command proves every current schema file is valid. Exit 0 means every file is valid. Exit 1
+One command validates every vendored schema file, including retained versions and newly added families. Exit 0 means every file is valid. Exit 1
 means a schema file or a fixture failed, and a bad schema file also prints a traceback. Exit 2
 means no verb was given.
 
@@ -256,11 +256,11 @@ uv run python -m openreading.schemas validate
 ```
 
 ```text
-schemas: request.v0.3.json OK, response.v0.3.json OK, adapter-descriptor.v0.8.json OK, … journal.v0.1.json OK
+schemas: adapter-descriptor.v0.1.json OK, … backend-discovery.v0.1.json OK, … route-tool.v0.1.json OK, … strategy-config.v0.4.json OK
 fixtures: 0 checked, 0 invalid
 ```
 
-**You should see** every current file marked OK, and `fixtures: 0 checked`, which is expected
+**You should see** every vendored file marked OK, and `fixtures: 0 checked`, which is expected
 today ([Not built yet](#not-built-yet)). From Python, you validate one instance with the function
 named in the validator column of the table below, for example `validate_response`. Two of the
 names do not follow the family name: the adapter-descriptor family uses `validate_descriptor` and
@@ -586,6 +586,48 @@ entry naming it, so the warning reaches you before the removal does.
   `false` in a Python `run()` call or an HTTP request body. Every adapter honors the setting, and
   no CLI flag exposes it today.
 
+### Retained local evidence contracts
+
+| Schema | Owner | Result |
+| --- | --- | --- |
+| `local-document.v0.4.json` | `openreading.artifacts.models` | Source hash, engine identity, and retained file inventory. |
+| `passage.v0.4.json` | `openreading.artifacts.passages` | Exact spans with physical pages or normalized JSON locations. |
+| `selection-tool.v0.1.json` | Historical selection | Frozen single-file receipts and empty selection input. |
+| `selection-tool.v0.2.json` | `openreading.mcp_server.selection` | Legacy receipts plus paginated snapshots, skipped-entry counts and cursor continuation. |
+| `document-tool.v0.1.json` | `openreading.artifacts.document` | Complete retained normalized results through lossless JSON continuation. |
+| `document-tool.v0.2.json` | `openreading.artifacts.delivery` | Complete MCP delivery or private file export, retaining the v0.1 fragment interface. |
+| `document-tool.v0.3.json` | `openreading.artifacts.delivery` | Complete delivery with measured page origins, empty-text page previews, and explicit warning-record counts. |
+| `agent-document-tool.v0.4.json` | `openreading.mcp_server.tools` | Bounded import, search, read, and error payloads. |
+
+| `document-tool.v0.4.json` | `openreading.artifacts.delivery` | Complete delivery with nullable physical-page summaries for unpaginated documents. |
+| `execution-tool.v0.1.json` | `openreading.types.execution_tool` | General parse admission, lifecycle lookup and fixed failures. Embeds the restricted shared request and existing job definitions. |
+| `execution-job.v0.1.json` | `openreading.types.execution_job` | General job lifecycle and bounded lookup contracts. Publication success preserves the separate provider response state. |
+| `import-job.v0.3.json` | `openreading.types.import_job` | Background status with compatible older receipts and unpaginated import receipts. |
+| `route-tool.v0.1.json` | `openreading.types.route_tool` | Scoped backend chain, excluded entries and terminal reason; no execution. |
+| `retained-result.v0.1.json` | `openreading.artifacts.result_models` | Grant-bound general responses and comparison reports with producer fingerprints. |
+| `compare-tool.v0.2.json` | `openreading.types.compare_tool` | Inline caller-supplied truth and retained batch corpus comparison, using existing report schemas. |
+| `retained-result.v0.4.json` | `openreading.artifacts.result_models` | Exact expected values and attributed corpus subjects; v0.1 through v0.3 records remain byte-preserving. Older readers cannot consume v0.4 records. |
+| `result-tool.v0.4.json` | `openreading.mcp_server.results` | Complete scored and corpus reports, with nested comparison validation and unchanged delivery modes. |
+| `compare-tool.v0.1.json` | `openreading.types.compare_tool` | Retained-input symmetric and baseline comparison with a bounded report receipt. |
+| `result-tool.v0.1.json` | `openreading.mcp_server.results` | Complete general result delivery, private exports and lossless fragments. |
+| `retained-result.v0.2.json` | `openreading.artifacts.result_models` | Attributed comparison source hashes, with byte-preserving reads of v0.1 records. Readers pinned to v0.1 cannot consume v0.2 records. |
+| `result-tool.v0.2.json` | `openreading.mcp_server.results` | Accepts both provenance shapes; unchanged receipt fields retain version 0.1. |
+| `retained-result.v0.3.json` | `openreading.artifacts.result_models` | Complete batch envelopes with independently validated nested responses; historical records keep their original bytes. |
+| `result-tool.v0.3.json` | `openreading.mcp_server.results` | Response, comparison and batch delivery through complete replies, exports or lossless fragments. |
+| `execution-job.v0.2.json` | `openreading.types.execution_job` | Response and batch receipts with separate provider outcomes; historical version 0.1 statuses remain readable. |
+| `execution-tool.v0.2.json` | `openreading.types.execution_tool` | General parse and batch admission, lifecycle lookup and fixed failures. |
+| `execution-tool.v0.3.json` | `openreading.types.execution_tool` | Adds same-grant strategy resume admission by job ID and optional batch item index. Prior schema bytes remain unchanged. |
+| `strategy-tool.v0.1.json` | `openreading.types.strategy_tool` | Authorized strategy list, validation and scope-pruned structural views. Plan embeds the restricted parse request. Omitted payloads prevent configuration reconstruction. |
+| `diagnostic-tool.v0.1.json` | `openreading.types.diagnostic_tool` | General authorized discovery, offline readiness and explicit liveness requests and reports. Embeds descriptor definitions and the vendored liveness report without external references. |
+| `backend-discovery.v0.1.json` | `openreading.types.backend_discovery` | Static selected-backend descriptor and configured OCR flag, without readiness or liveness checks. Validation requires the vendored `adapter-descriptor.v0.8.json` resource registered under its `$id`. |
+
+These families wrap retained evidence without changing the normalized extraction response.
+The v0.3 retained artifact reader remains supported without rewriting stored files.
+General result validators require the vendored response v0.3, comparison-report v0.2, batch-result v0.2 and corpus-report v0.1 resources registered under their respective `$id` values.
+These external references preserve existing payload contracts; neither result family invents new source-document evidence.
+`verified_source_bytes` describes the retained copy checked during comparison, not the current state of your original file.
+It does not establish that two subjects share a document, and retrieving a report does not rehash its sources.
+
 ## Not built yet
 
 - `openreading.SCHEMA_VERSION` prints `0.1`, a number that matches no current family, because the
@@ -621,3 +663,13 @@ full table of what to update for each kind of change is under *Where a change ge
 [`AGENTS.md`](../../../AGENTS.md).
 
 <sub>[Docs home](../README.md) · [← Evals](../evals/README.md) · [Backend adapters →](../adapters/README.md)</sub>
+
+The retained evidence v0.2 contracts add measured page origins and supervised-worker failure codes.
+The v0.1 files remain unchanged; this runtime refuses older retained artifacts rather than rewriting cited evidence.
+
+Retained evidence v0.3 distinguishes text-less pages (`none`) from unmeasured text origins (`unknown`).
+Passages cannot use `none`; existing v0.1 and v0.2 files remain byte-identical historical contracts.
+
+The `import-job.v0.1.json` contract defines persistent local import progress and closed start, status, list, and cancel requests.
+| `import-job.v0.2.json` | `openreading.types.import_job` | Persistent status with optional observed page-assembly counts; v0.1 job listings remain compatible. |
+Its models live in `openreading.types.import_job`; successful jobs carry the existing artifact receipt.

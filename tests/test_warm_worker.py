@@ -1,0 +1,342 @@
+"""Real child processes prove bounded IPC, reuse, cancellation, and process cleanup."""
+
+import os
+import time
+
+import pytest
+
+from openreading.artifacts.limits import ArtifactError
+
+
+@pytest.fixture
+def command(tmp_path):
+    import sys
+
+    child = tmp_path / "child.py"
+    child.write_text("""import os,sys,json,time
+fd=int(sys.argv[-1])
+for line in sys.stdin:
+ job=json.loads(line)
+ print("native diagnostic",flush=True)
+ if job.get("slow"):time.sleep(20)
+ if job.get("bad"):
+  os.write(fd,b'x'*9000+b'\\n');continue
+ result={"id":job["id"],"ok":True}
+ if job.get("wrong"):result["id"]="wrong"
+ os.write(fd,(json.dumps(result)+"\\n").encode())
+""")
+    return [sys.executable, str(child)]
+
+
+def make_worker(command, **kwargs):
+    from openreading.artifacts.supervisor import WarmWorker
+
+    return WarmWorker(command, memory_bytes=128 * 1024**2, idle_seconds=0.15, **kwargs)
+
+
+def test_worker_reuses_one_process_and_idle_shutdown_reaps_it(command):
+    worker = make_worker(command)
+    try:
+        worker.run({}, check=lambda: None)
+        pid = worker.pid
+        worker.run({}, check=lambda: None)
+        assert worker.pid == pid
+        deadline = time.monotonic() + 3
+        while worker.pid is not None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert worker.pid is None
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+    finally:
+        worker.close()
+
+
+@pytest.mark.parametrize("job", [{"bad": True}, {"wrong": True}])
+def test_invalid_worker_control_data_terminates_the_generation(command, job):
+    worker = make_worker(command)
+    try:
+        with pytest.raises(ArtifactError, match="parse_failed"):
+            worker.run(job, check=lambda: None)
+        assert worker.pid is None
+        worker.run({}, check=lambda: None)
+    finally:
+        worker.close()
+
+
+def test_cancelled_import_reaps_child_before_returning(command):
+    worker = make_worker(command)
+    started = time.monotonic()
+
+    def check():
+        if time.monotonic() - started > 0.1:
+            raise ArtifactError("cancelled")
+
+    try:
+        with pytest.raises(ArtifactError, match="cancelled"):
+            worker.run({"slow": True}, check=check)
+        assert worker.pid is None
+    finally:
+        worker.close()
+
+
+def test_memory_limit_and_monitoring_failure_never_disable_supervision(command):
+    for sample, code in [
+        (lambda pid: 2**40, "memory_limit"),
+        (lambda pid: (_ for _ in ()).throw(OSError()), "worker_monitor_failed"),
+    ]:
+        worker = make_worker(command, rss=sample)
+        try:
+            with pytest.raises(ArtifactError, match=code):
+                worker.run({"slow": True}, check=lambda: None)
+            assert worker.pid is None
+        finally:
+            worker.close()
+
+
+def test_success_flag_requires_boolean(command, tmp_path):
+    child = tmp_path / "child.py"
+    child.write_text(child.read_text().replace('"ok":True', '"ok":1'))
+    worker = make_worker(command)
+    try:
+        with pytest.raises(ArtifactError, match="parse_failed"):
+            worker.run({}, check=lambda: None)
+    finally:
+        worker.close()
+
+
+def test_progress_and_concurrent_request_do_not_replace_active_worker(command, tmp_path):
+    import threading
+
+    child = tmp_path / "child.py"
+    child.write_text(
+        child.read_text().replace(
+            ' if job.get("slow"):',
+            """ for stage in ("preflight","conversion","writing"):
+  os.write(fd,(json.dumps({"id":job["id"],"stage":stage})+"\\n").encode())
+ if job.get("slow"):""",
+        )
+    )
+    worker = make_worker(command)
+    seen = []
+    active = threading.Event()
+    release = threading.Event()
+    errors = []
+
+    def progress(stage):
+        seen.append(stage)
+        active.set()
+        release.wait(3)
+
+    def run():
+        try:
+            worker.run({}, check=lambda: None, progress=progress)
+        except BaseException as error:
+            errors.append(error)
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    try:
+        assert active.wait(3)
+        with pytest.raises(ArtifactError, match="busy"):
+            worker.run({}, check=lambda: None)
+    finally:
+        release.set()
+        thread.join(3)
+        worker.close()
+    assert not errors
+    assert seen == ["preflight", "conversion", "writing"]
+
+
+def test_clean_input_rejection_keeps_the_warm_converter(command, tmp_path):
+    from openreading.artifacts.supervisor import WarmWorker
+
+    child = tmp_path / "child.py"
+    child.write_text(
+        child.read_text().replace(
+            ' if job.get("slow"):',
+            """ if job.get("code"):
+  os.write(fd,(json.dumps({"id":job["id"],"error":job["code"]})+"\\n").encode());continue
+ if job.get("slow"):""",
+        )
+    )
+    worker = WarmWorker(command, memory_bytes=128 * 1024**2, idle_seconds=30)
+    try:
+        worker.run({}, check=lambda: None)
+        pid = worker.pid
+        with pytest.raises(ArtifactError, match="password_required"):
+            worker.run({"code": "password_required"}, check=lambda: None)
+        assert worker.pid == pid
+        worker.run({}, check=lambda: None)
+        assert worker.pid == pid
+        with pytest.raises(ArtifactError, match="parse_failed"):
+            worker.run({"code": "parse_failed"}, check=lambda: None)
+        assert worker.pid is None
+    finally:
+        worker.close()
+
+
+def test_worker_runs_from_its_private_directory(command, tmp_path, monkeypatch):
+    from openreading.artifacts.supervisor import WarmWorker
+
+    # ONNX Runtime writes a telemetry session file relative to its working directory.
+    child = tmp_path / "child.py"
+    child.write_text(
+        child.read_text().replace(
+            " job=json.loads(line)", " job=json.loads(line)\n open('probe','w').close()"
+        )
+    )
+    private, elsewhere = tmp_path / "private", tmp_path / "elsewhere"
+    private.mkdir()
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    worker = WarmWorker(command, memory_bytes=128 * 1024**2, idle_seconds=30, cwd=private)
+    try:
+        worker.run({}, check=lambda: None)
+    finally:
+        worker.close()
+    assert (private / "probe").exists()
+    assert not (elsewhere / "probe").exists()
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_dead_worker_pipe_cleanup_preserves_failure_and_closes_control_fd(
+    command, monkeypatch, cancelled
+):
+    from openreading.artifacts.supervisor import WarmWorker
+
+    worker = WarmWorker(command, memory_bytes=None, idle_seconds=30)
+    worker.run({}, check=lambda: None)
+    process = worker._process
+    control_fd = worker._read_fd
+    process.kill()
+    process.wait()
+    # A pending buffered write must fail both at flush and at close, as with a dead parser.
+    process.stdin.write(b"pending")
+
+    def check():
+        if cancelled:
+            raise ArtifactError("cancelled")
+
+    monkeypatch.setattr(worker, "_start", lambda: None)
+    try:
+        with pytest.raises(ArtifactError) as failure:
+            worker.run({}, check=check)
+        assert failure.value.code == ("cancelled" if cancelled else "parse_failed")
+        assert worker.pid is None
+        assert process.stdin.closed
+        assert worker._read_fd is None
+        with pytest.raises(OSError):
+            os.fstat(control_fd)
+    finally:
+        worker.close()
+
+
+def test_exited_leader_is_reaped_before_group_cleanup(command, monkeypatch, tmp_path):
+    import signal
+
+    from openreading.artifacts.supervisor import WarmWorker
+
+    child = tmp_path / "child.py"
+    child.write_text(
+        "import os,signal,sys\nsys.stdin.readline()\nos.kill(os.getpid(), signal.SIGTERM)\n"
+    )
+    worker = WarmWorker(command, memory_bytes=None, idle_seconds=30)
+    processes = []
+    group_calls = []
+    start = worker._start
+    killpg = os.killpg
+
+    def capture_start():
+        start()
+        processes.append(worker._process)
+
+    def require_reaped_leader(pid, sig):
+        process = processes[-1]
+        group_calls.append((pid, sig))
+        # macOS can refuse a group signal while its only member remains an unreaped zombie.
+        if process.returncode is None:
+            raise PermissionError("Unreaped process group")
+        killpg(pid, sig)
+
+    monkeypatch.setattr(worker, "_start", capture_start)
+    monkeypatch.setattr(os, "killpg", require_reaped_leader)
+    try:
+        with pytest.raises(ArtifactError, match="parse_failed"):
+            worker.run({}, check=lambda: None)
+        assert processes[0].returncode == -signal.SIGTERM
+        assert group_calls == [(processes[0].pid, signal.SIGKILL)]
+        assert processes[0].stdin.closed
+        assert worker.pid is None and worker._read_fd is None
+    finally:
+        worker.close()
+
+
+@pytest.mark.parametrize("code", ["parse_failed", "cancelled"])
+def test_leader_exit_between_poll_and_group_signal_preserves_failure(command, monkeypatch, code):
+    import signal
+
+    import psutil
+
+    from openreading.artifacts.supervisor import WarmWorker
+
+    worker = WarmWorker(command, memory_bytes=None, idle_seconds=30)
+    worker.run({}, check=lambda: None)
+    process, control_fd = worker._process, worker._read_fd
+    killpg = os.killpg
+    calls = []
+
+    def exit_during_signal(pid, sig):
+        calls.append((pid, sig))
+        if len(calls) == 1:
+            assert process.returncode is None
+            process.kill()
+            deadline = time.monotonic() + 3
+            while psutil.Process(pid).status() != psutil.STATUS_ZOMBIE:
+                assert time.monotonic() < deadline
+                time.sleep(0.001)
+            # macOS refuses this signal if the leader exits after the preceding poll.
+            raise PermissionError("Unreaped process group")
+        assert process.returncode == -signal.SIGKILL
+        return killpg(pid, sig)
+
+    def fail():
+        raise ArtifactError(code)
+
+    monkeypatch.setattr(os, "killpg", exit_during_signal)
+    error = None
+    try:
+        try:
+            worker.run({}, check=fail)
+        except Exception as caught:
+            error = caught
+        assert isinstance(error, ArtifactError)
+        assert error.code == code
+        assert len(calls) == 2
+        assert process.stdin.closed
+        assert worker.pid is None and worker._read_fd is None
+        with pytest.raises(OSError):
+            os.fstat(control_fd)
+    finally:
+        process.wait()
+        process.stdin.close()
+        worker.close()
+
+
+def test_live_group_permission_failure_is_not_ignored(command, monkeypatch):
+    worker = make_worker(command)
+    worker.run({}, check=lambda: None)
+    process = worker._process
+
+    def denied(pid, sig):
+        raise PermissionError("Live process group denied")
+
+    monkeypatch.setattr(os, "killpg", denied)
+    try:
+        with pytest.raises(PermissionError, match="Live process group denied"):
+            worker.close()
+        assert process.poll() is None
+    finally:
+        process.kill()
+        process.wait()
+        process.stdin.close()
+        worker.close()

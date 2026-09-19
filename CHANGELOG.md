@@ -1,5 +1,227 @@
 # Changelog
 
+## Unreleased strategy inspection MCP
+
+- Pin judge omission and strategy-specific dispatchable backends, and guard capability dispositions against public surface changes.
+- Add scoped general MCP strategy inspection with bounded structural views and sanitized validation counts.
+- Expose thirteen general tools while preserving the thirteen-tool local catalog and all predecessor schemas.
+- Exercise the complete general catalog across stdio restart and document explicit operator-only capability dispositions.
+- Keep native standalone ChatGPT and Claude acceptance pending owner-operated host checks.
+
+## Unreleased truth and corpus comparison MCP
+
+- Pin direct corpus publication refusal for readable local artifacts with otherwise valid source attribution.
+- Extend openreading_compare with inline expected values and retained batch corpus inputs, reusing the shared scoring and comparison engines.
+- Retain exact expected values as caller assertions, and map corpus run labels to authorized batches without claiming source identity.
+- Add compare-tool v0.2 and retained-result/result-tool v0.4, preserving all predecessor schemas, execution receipts and stored records.
+- Keep catalogs at twelve general and thirteen local tools. Native ChatGPT and Claude acceptance remains pending.
+
+## Unreleased general backend diagnostics MCP
+
+- Pin diagnostic write annotations and liveness wire validation before model defaults can conceal missing fields.
+  Clarify that normal cleanup removes per-attempt scratch while its empty grant parent can remain.
+- Discover authorized backend descriptors and request offline readiness or explicit liveness through the general MCP profile.
+  Diagnostics reuse shared backend checks in owned children with explicit environments, deadlines and bounded complete replies.
+- Share worker launch isolation and cleanup between document execution and diagnostics, without changing existing processing or local-profile tools.
+
+## Unreleased scoped resume MCP
+
+- Pin resume admission and worker guards with runnable narrowed scopes, valid retained attempts and mismatched control packets.
+  Clarify that every originally pinned backend must remain authorized, and named batch items cannot resume.
+
+- Add openreading_resume for terminal strategy jobs and individual batch strategy attempts under current operator authority.
+  Each continuation snapshots retained input and journal files into a new durable job without rewriting the prior attempt.
+- Add explicit ledger, configuration, credential and backend-scope arguments to the shared resume API.
+  Replay terminal steps and refuse changed identity; nonterminal steps may dispatch again without an exactly-once guarantee.
+- Add execution-tool v0.3 while preserving every predecessor schema. General tools increase to nine; local tools remain thirteen.
+  Native standalone host acceptance, readiness and truth/corpus comparison remain pending.
+
+## Unreleased general batch MCP
+
+- Clarify that job success means publication, including empty batches with failed status and an empty_batch warning.
+
+- Add ordered batch execution through durable general jobs and the shared serial batch runner.
+  Every item needs operator authorization before acquisition, and cancellation prevents final batch publication.
+- Retain complete batch envelopes with nested response statuses, fixed item failures and bounded full-result delivery.
+  Add retained-result/result-tool v0.3 and execution-job/execution-tool v0.2 while preserving historical schemas and records.
+- Keep local tool catalogs unchanged; general execution now exposes eight tools with no native provider batch dispatch.
+
+## Unreleased general execution MCP profile
+
+- Share the router default with general route planning, and document empty plans as tool errors.
+
+- Add standalone general parsing and strategy jobs through explicit backend, strategy and environment grants.
+  Persistent job lookup, listing and cancellation survive client reconnects without starting duplicate provider work.
+- Expose complete retained-result delivery and comparison through the general profile without requiring a fixed local parser.
+  Check actual reply envelopes before accepting jobs or cancellation, and preserve existing local profile contracts.
+- Add execution-tool v0.1 for restricted shared requests and fixed failures without rewriting execution-job v0.1.
+  Batch, scoped resume, readiness, truth/corpus comparison and native standalone host acceptance remain pending.
+
+## Unreleased durable general execution jobs
+
+- Reject reserved environment overrides before job preparation, and document persistent recovery during status lookup and listing.
+- Test publication-intent metadata against independently validated retained results, including mismatched size, digest and kind.
+- Add internal grant-scoped jobs with detached supervision, explicit environment, queued cancellation and optional deadlines.
+  Jobs retain complete normalized responses and report provider outcome separately from publication success.
+- Recover only verified committed results after supervisor interruption, without automatically retrying providers.
+  Add the execution-job v0.1 lifecycle contract. General callable tools and launcher integration remain unbuilt.
+
+## Unreleased general execution worker
+
+- Keep control messages cancellable under pipe backpressure on Python 3.11 through 3.14.
+  Nonblocking writes avoid stalled partial input after repeated communication timeouts.
+- Terminate the local execution group when its supervisor disappears through abrupt OS termination.
+  A private liveness pipe supplements ordinary cancellation; remote provider cancellation is not established.
+
+- Add an internal owned worker for authorized general requests, with descriptor-based source copying and child reauthorization.
+  Explicit child environments, private journals and discarded provider stdout keep execution separate from the MCP transport.
+- Preserve complete normalized responses, including partial results, failed statuses and warnings, for later retained-result publication.
+  Cancellation and optional deadlines reap the local process group. Durable general jobs and callable execution tools remain unbuilt.
+
+## Unreleased scoped public execution
+
+- Add optional `backend_allowlist` to Python `run` and `run_batch`, preserving unscoped behavior when omitted.
+  Named requests refuse before input/configuration access; routed and strategy dispatch keep the same scope.
+- Check the actual native-batch adapter before input materialization and credentials, independently of its requested alias.
+  Provider request schemas and existing per-item error shapes remain unchanged. General MCP execution tools remain unbuilt.
+
+## Unreleased general MCP execution authorization
+
+- Add internal preflight with immutable operator configuration and independent backend and strategy entrypoint scopes.
+  Reuse shared routing and strategy compilation without reading documents, resolving credentials or executing providers.
+- Refuse caller-controlled acquisition, credential, runtime and storage configuration before general execution can be introduced.
+  General execution tools remain unbuilt; the existing tool catalog is unchanged.
+
+## Unreleased retained-input MCP comparison
+
+- Clarify retained-copy verification and v0.2 reader compatibility in schema descriptions and guides.
+  Add a read-side regression for local subjects claiming zero or multiple verified hashes, independently of publication checks.
+- Attribute comparison source hashes to individual subjects and distinguish verified source bytes from producer assertions.
+  Retained-result and result-tool v0.2 preserve earlier schemas and existing v0.1 records without rewriting them.
+- Clarify that receipt recovery requires unchanged arguments, inputs and implementation; guard the documented MCP tool count.
+- Add `openreading_compare` over authorized retained normalized responses, using the existing comparison engine.
+  Optional baselines share input validation; reports retain subject mappings and use complete result retrieval.
+- Measure compare-tool v0.1 receipts against the MCP response budget before publishing the report.
+  No backend executes; truth scoring and corpus comparison remain separate MCP input-contract work.
+
+## Unreleased general MCP result retention
+
+- Retain schema-valid responses and comparison reports independently of local citation artifacts.
+  New `orr1_` identifiers bind complete normalized content, producer provenance and the configured input grant.
+- Add `openreading_get_result` with complete inline delivery, private export and lossless JSON Pointer fragments.
+  Existing document artifacts remain unchanged; general execution and comparison producers remain separate work.
+
+## Unreleased MCP route planning
+
+- Validate every vendored schema in the CLI gate, including new families and retained versions.
+  Invalid schema metadata now fails the standalone gate without maintaining a separate family list.
+
+- Add `openreading_route` over the shared router without source reads or backend execution.
+  Explicit `--routing-config` and repeated `--allow-backend` flags configure ordering and independent scope.
+  Existing local imports and static profile discovery remain unchanged.
+
+## Unreleased MCP backend discovery
+
+- Enforce caller backend allowlists for directly named execution before adapter lookup or credential resolution.
+  Existing unscoped calls remain unchanged; transports can retain their earlier access checks.
+
+- Add `openreading_backends` for the configured local profile's descriptor and OCR setting.
+  Discovery preserves descriptor sources without claiming readiness or enabling other backends.
+  The backend-discovery v0.1 schema keeps this metadata separate from extracted document evidence.
+
+## Unreleased adapter-format evidence
+
+- Route local inputs through the formats claimed by the configured Docling adapter.
+  Preserve provider-reported model-free blocks and table cells without enabling raster table recognition.
+- Add v0.4 retained evidence and delivery for unpaginated documents, using exact normalized JSON locations.
+  Keep physical-page citations for measured sources and preserve legacy v0.3 artifact reads.
+- Add import-job v0.3 receipts without inventing physical page counts or conversion progress.
+  Source suffixes enter artifact identity because the provider can interpret identical bytes differently.
+
+## Unreleased selection snapshots
+
+- Accept trusted multi-file snapshot providers with paginated, grant-scoped selection receipts.
+  Receipt continuations survive restart and never reopen a chooser. Legacy single-file providers remain supported.
+  Each copied reference uses its own existing import job and artifact; no document relationships are inferred.
+
+## Unreleased LiteParse and LlamaParse adapters
+
+- Add persistent local MCP import jobs with status and explicit cancellation. Docling profiles can omit document and resource ceilings; source hashing and file handoff avoid full-PDF Python buffers.
+
+- Add the optional `liteparse` adapter for PDF and image parsing in a supervised local worker.
+  OCR runs only with pinned, hash-verified English language data, so LiteParse never downloads it.
+- Add four hosted LlamaParse v2 backends, one per tier, each pinned to a dated release.
+  Automatic cost optimization stays off, and no option that adds credits is sent.
+- Preserve every LiteParse form widget when field names and fallback identifiers collide.
+- Request LlamaParse's billed usage metadata and honor disabled table output while preserving
+  table text.
+
+## Unreleased retained evidence v0.3
+
+- Add observed Docling page-assembly counts to background import status, without changing normalized output.
+  Older jobs remain readable without invented counters. Assembly completion does not imply import success.
+
+- Add document-tool v0.3 receipts with measured page-origin counts and bounded empty-text page previews.
+  Label warning counts as warning records without changing the exported normalized content.
+- Report denied parser cleanup as an operating-system permission error, preserving descriptor cleanup.
+  Inaccessible abandoned export files no longer prevent publication of a new export.
+
+- Preserve parser failure and cancellation when macOS group cleanup races the parser's exit.
+
+- Preserve document-level warning flags in search and exact-read replies, including empty searches.
+
+- Sweep abandoned exports on the next export under the same grant, without removing active writes.
+  Completed JSON exports and legacy temporary names remain until explicitly removed.
+
+- Distinguish preserved Docling text fragments from omitted text in provenance warnings.
+  Existing artifacts keep their recorded warnings until reimported.
+
+- Preserve Docling numbered-list text using its provider original and unchanged page spans.
+  Reimport existing documents to recover list items omitted by older artifacts.
+
+- Resolve trusted export directory aliases at server startup and skip inline construction
+  when complete content already exceeds the response budget.
+
+- Add complete MCP delivery with a configurable serialized-response budget and private JSON export fallback.
+  Preserve normalized values, parser warnings, page origins, and citation mappings without raw provider payloads.
+  Keep fragment retrieval compatible; local export receipts never claim automatic host file access.
+
+- Add an optional local selection provider and empty-argument MCP selection tool.
+  Standalone core stays headless and returns an explicit refusal without a provider.
+- Require shielded asynchronous selection cleanup, including cancellation during acquisition.
+  Reject invalid selection deadlines before opening stores or computing engine identity.
+
+- Tell MCP clients to reuse returned evidence identifiers and avoid guessing extraction failures from block offsets.
+
+- Distinguish empty-page and unknown text origins without fabricating mixed extraction.
+- Add lexical-v4-unicode-wraps retrieval. Wrapped words also match closed up, each half stays
+  searchable, and quotes and offsets stay exact.
+- Recognize ASCII, soft, and Unicode hyphens at search wrap points.
+- Preserve and byte-pin historical retained evidence schemas.
+
+## Unreleased local Docling profile
+
+- Retain provider text nested inside picture regions, including its physical-page provenance.
+  Count nested furniture in the existing omission warning. Reimport earlier artifacts to recover this text.
+- Honor local request OCR modes: configured automatic OCR, forced full-page OCR, and explicit off.
+  Automatic requests disclose skipped OCR, while enabled OCR requires explicit Tesseract paths.
+- Reuse the loaded layout pipeline when requests alternate OCR modes without reallocating ONNX sessions.
+- Preserve wrapped compounds during local assembly so searches find their component words.
+  Reimport earlier Docling artifacts to recover these words in retained evidence.
+- Reuse one serialized local converter per process across API and HTTP requests.
+  Revalidate assets on every request and release the converter after failures or configuration changes.
+- Record the installed dependency closure and Tesseract output configuration in engine identity.
+- Refuse source-free identity discovery and disclose omitted running headers and footers.
+- Preserve warm workers after clean input rejections and contain their relative file writes.
+- Add opt-in real Docling conversion tests with local model and OCR assets.
+
+- Pin CPU ONNX Runtime explicitly and use the upstream PIL preprocessor with audited Transformers 5.16.1.
+
+- Add the optional `docling_local` adapter with verified local ONNX assets and explicit OCR setup.
+- Add the v2 MCP profile with supervised warm workers and required resource limits.
+- Add v0.2 retained evidence contracts carrying measured physical-page text origins.
+
+
 All notable changes to OpenReading are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -17,6 +239,26 @@ All notable changes to OpenReading are documented here. The format follows
 > carries and says which one to pin.
 
 ## [Unreleased]
+
+- Preserve parser failures and cancellation when closing a dead worker raises a pipe error.
+- Reap exited parser leaders before group cleanup to avoid macOS zombie permission errors.
+- Add grant-scoped `openreading_list_imports` to recover job identifiers after reconnecting.
+- Stream retained passage verification and remove duplicate response decoding during retrieval.
+  Server memory still grows with normalized document size; no resource cutoff is introduced.
+
+- Allow trusted MCP launchers to disable the local selection deadline while preserving cancellation cleanup.
+
+- Deliver retrieval-scope guidance through MCP initialization so focused questions do not imply a complete read.
+
+- Pack complete-document MCP replies by bytes to reduce continuation calls without truncation.
+
+- Add `openreading_get_document` for complete retained normalized JSON without raw provider payloads.
+  Bounded continuation preserves existing structure, OCR origins, warnings and citation references.
+  Search remains optional; extraction coverage still depends on the import profile.
+
+- Add a fixed local document MCP profile with retained source bytes, physical page citations,
+  bounded lexical search, exact passage reads, and cancellable PyMuPDF imports.
+- Add separate v0.1 schemas for retained manifests, passages, and agent tool payloads.
 
 **This repository is `openreading-core`.** The open-core engine (library, CLI, thin JSON server,
 tests) lives here from commit `bd5ee43`, dated 2026-08-28. Its history before that commit is

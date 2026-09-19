@@ -1,0 +1,86 @@
+{
+  "job": {
+    "id": "pjb_agentic_1",
+    "project_id": "prj_fixture",
+    "status": "COMPLETED",
+    "tier": "agentic",
+    "error_message": null,
+    "usage": {"credits": 45.0}
+  },
+  "text": {
+    "pages": [
+      {"page_number": 1, "text": "ACME\nInvoice\nInvoice total 1,250.00\nName Qty\nWidget 2\nPage 1"},
+      {"page_number": 2, "text": "Terms\nPayable within 45 days.\nNET45\nterms"}
+    ]
+  },
+  "markdown": {
+    "pages": [
+      {
+        "page_number": 1,
+        "success": true,
+        "markdown": "# Invoice\n\nInvoice total 1,250.00\n\n| Name | Qty |\n|---|---|\n| Widget | 2 |",
+        "header": "ACME",
+        "footer": "Page 1"
+      },
+      {
+        "page_number": 2,
+        "success": true,
+        "markdown": "## Terms\n\n- Payable within 45 days.\n\n```\nNET45\n```\n\n[terms](https://example.invalid/terms)"
+      }
+    ]
+  },
+  "items": {
+    "pages": [
+      {
+        "page_number": 1,
+        "success": true,
+        "page_width": 612.0,
+        "page_height": 792.0,
+        "items": [
+          {"type": "header", "md": "ACME", "items": [{"type": "text", "md": "ACME", "value": "ACME"}]},
+          {
+            "type": "heading",
+            "level": 1,
+            "md": "# Invoice",
+            "value": "Invoice",
+            "bbox": [{"x": 72.0, "y": 72.0, "w": 100.0, "h": 20.0, "confidence": 0.99}]
+          },
+          {"type": "text", "md": "Invoice total 1,250.00", "value": "Invoice total 1,250.00"},
+          {
+            "type": "table",
+            "md": "| Name | Qty |\n|---|---|\n| Widget | 2 |",
+            "csv": "Name,Qty\nWidget,2",
+            "html": "<table><tr><th>Name</th><th>Qty</th></tr><tr><td>Widget</td><td>2</td></tr></table>",
+            "rows": [["Name", "Qty"], ["Widget", 2], [null, 2.5]],
+            "parse_concerns": []
+          },
+          {"type": "image", "md": "![Company logo](https://example.invalid/logo.png)", "caption": "Company logo", "url": "https://example.invalid/logo.png"},
+          {"type": "footer", "md": "Page 1", "items": [{"type": "text", "md": "Page 1", "value": "Page 1"}]}
+        ]
+      },
+      {
+        "page_number": 2,
+        "success": true,
+        "page_width": 612.0,
+        "page_height": 792.0,
+        "items": [
+          {"type": "heading", "level": 2, "md": "## Terms", "value": "Terms"},
+          {
+            "type": "list",
+            "md": "- Payable within 45 days.",
+            "ordered": false,
+            "items": [{"type": "text", "md": "Payable within 45 days.", "value": "Payable within 45 days."}]
+          },
+          {"type": "code", "md": "```\nNET45\n```", "value": "NET45", "language": null},
+          {"type": "link", "md": "[terms](https://example.invalid/terms)", "text": "terms", "url": "https://example.invalid/terms"}
+        ]
+      }
+    ]
+  },
+  "metadata": {
+    "pages": [
+      {"page_number": 1, "confidence": 0.93, "cost_optimized": false},
+      {"page_number": 2, "confidence": 0.88, "cost_optimized": false}
+    ]
+  }
+}
