@@ -29,6 +29,12 @@ EXPECTED_CRED_KEYS = {
     "pymupdf": set(),
     "tesseract": set(),
     "docling": set(),
+    "docling_local": set(),
+    "liteparse": set(),
+    "llamaparse-fast": {"api_key"},
+    "llamaparse-cost-effective": {"api_key"},
+    "llamaparse-agentic": {"api_key"},
+    "llamaparse-agentic-plus": {"api_key"},
 }
 EXPECTED_CONFIG_KEYS = {
     "aws-textract": {"region", "s3_bucket"},
@@ -37,6 +43,12 @@ EXPECTED_CONFIG_KEYS = {
     "google-gemini": {"model"},
     "anthropic-claude": {"model"},
     "docling": {"endpoint"},
+    "docling_local": {"assets_path", "tesseract_cmd", "tessdata_path"},
+    "liteparse": {"tessdata_path", "worker_memory_bytes"},
+    "llamaparse-fast": {"base_url"},
+    "llamaparse-cost-effective": {"base_url"},
+    "llamaparse-agentic": {"base_url"},
+    "llamaparse-agentic-plus": {"base_url"},
     "qwen-vl": {"endpoint", "model"},
     "chunkr": {"base_url"},
     "nuextract": {"base_url"},
@@ -145,6 +157,10 @@ def test_accepts_url_only_for_native_url_backends():
         "pulse",
         "open-ocr",
         "mistral-ocr",
+        "llamaparse-fast",
+        "llamaparse-cost-effective",
+        "llamaparse-agentic",
+        "llamaparse-agentic-plus",
     }
 
 

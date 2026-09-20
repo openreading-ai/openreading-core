@@ -55,7 +55,10 @@ pulse = ["httpx>=0.27"]                  # dev-first extract API; dual inline/is
 nuextract = ["httpx>=0.27"]              # NuMind platform: typed-template extraction + NuMarkdown
 open-ocr = ["httpx>=0.27"]               # OCR aggregator: ~20 engines behind one API, billed per page
 tesseract = ["pytesseract>=0.3.13", "pillow>=10"]  # requires system `tesseract` binary
+docling_local = ["docling-slim[convert-core,format-pdf,format-office,format-web,format-opendocument,format-email,format-iwork,format-latex,format-xml-jats,format-xml-uspto,format-xml-xbrl]==2.126.0", "transformers==5.16.1", "onnxruntime==1.30.0", "psutil>=7.2,<8"]
 docling = ["httpx>=0.27"]               # talks to docling-serve over HTTP
+liteparse = ["liteparse==2.14.4", "psutil>=7.2,<8"]  # Apache-2.0 native parser; psutil samples its worker
+llamaparse = ["httpx>=0.27"]            # LlamaParse v2 over HTTP; one extra for all four tier slugs
 qwen-vl = ["httpx>=0.27"]               # OpenAI-compatible endpoint (user-run vLLM/Ollama)
 google-document-ai = ["google-cloud-documentai>=2.29"]
 google-gemini = ["httpx>=0.27"]           # Gemini Developer API Interactions document processing
@@ -80,10 +83,16 @@ extractbench = ["extract-bench @ git+https://github.com/run-llama/ExtractBench.g
 # `server` extra, so the install that covers everything is `.[all,server]`.
 # `scripts/check_extras_parity.py` fails if an adapter extra's package is missing from this list.
 all = [
+    "docling-slim[convert-core,format-pdf,format-office,format-web,format-opendocument,format-email,format-iwork,format-latex,format-xml-jats,format-xml-uspto,format-xml-xbrl]==2.126.0", "transformers==5.16.1", "onnxruntime==1.30.0", "psutil>=7.2,<8",
+    "liteparse==2.14.4",
     "pymupdf>=1.24.3", "boto3>=1.34", "httpx>=0.27",
     "pytesseract>=0.3.13", "pillow>=10",
     "google-cloud-documentai>=2.29", "anthropic>=0.39",
     "svix>=1.0",  # reducto's second dep — webhook signature verification, see `reducto` extra
+]
+agent = [
+    "mcp>=1.28,<2",
+    "psutil>=7.2,<8",  # verifies detached import process identity
 ]
 
 [project.scripts]
@@ -109,6 +118,8 @@ dev = [
     "pymupdf>=1.24.3",
     "pytesseract>=0.3.13",  # tesseract adapter (also needs the system `tesseract` binary)
     "pillow>=10",
+    "liteparse==2.14.4",  # liteparse adapter: bundled PDFium and Tesseract, no Python deps
+    "psutil>=7.2,<8",  # samples the isolated liteparse worker's memory
     "starlette>=1.3.1",  # upload parser hooks and cleanup tested at this floor
     "python-multipart>=0.0.22",  # server multipart uploads
     "fastapi>=0.110",  # server: TestClient drives the ASGI app offline

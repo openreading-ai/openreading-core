@@ -97,9 +97,22 @@ def _consuming_modules() -> list[Path]:
 def test_no_module_reads_a_vendor_claim_off_a_descriptor(field: str) -> None:
     readers = []
     for path in _consuming_modules():
+        # Passage order consumes measured response Block.reading_order, not a descriptor claim.
+        if field == "reading_order" and path.relative_to(SRC).as_posix() == "artifacts/passages.py":
+            continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Attribute) and node.attr == field:
+                # Explicit local setup is caller input, never a vendor capability claim.
+                local_setup = {
+                    "adapters/docling_local/config.py": {"self.ocr", "self.languages"},
+                    "adapters/docling_local/client.py": {"self.config.ocr"},
+                    "adapters/docling_local/pipeline.py": {"config.ocr", "config.languages"},
+                    "artifacts/service.py": {"config.docling.ocr", "config.docling.languages"},
+                    "mcp_server/tools.py": {"service.config.docling.ocr"},
+                }
+                if ast.unparse(node) in local_setup.get(path.relative_to(SRC).as_posix(), set()):
+                    continue
                 readers.append(f"{path.relative_to(SRC)}:{node.lineno}")
 
     assert readers == [], (

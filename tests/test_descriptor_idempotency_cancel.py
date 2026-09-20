@@ -79,6 +79,10 @@ _HONESTLY_UNSUPPORTED = frozenset(
         "chunkr",
         "google-document-ai",
         "google-gemini",
+        "llamaparse-fast",
+        "llamaparse-cost-effective",
+        "llamaparse-agentic",
+        "llamaparse-agentic-plus",
         "mistral-ocr",
         "nuextract",
         "pulse",
@@ -112,7 +116,19 @@ def test_idempotency_supported_matrix_matches_researched_vendor_reality():
 # local/self-hosted exemption above uses, just for a `hosted_api`-typed adapter.
 # `google-gemini`/`mistral-ocr` decline for that same INLINE-only reason: one synchronous POST,
 # no vendor job resource to cancel.
-_CANCEL_SUPPORTED = frozenset({"chunkr", "nuextract", "pulse", "reducto"})
+# The four LlamaParse tiers call `POST /api/v2/parse/{job_id}/cancel`, a real vendor mechanism.
+_CANCEL_SUPPORTED = frozenset(
+    {
+        "chunkr",
+        "llamaparse-fast",
+        "llamaparse-cost-effective",
+        "llamaparse-agentic",
+        "llamaparse-agentic-plus",
+        "nuextract",
+        "pulse",
+        "reducto",
+    }
+)
 _HOSTED_NO_CANCEL = frozenset(
     {
         "anthropic-claude",

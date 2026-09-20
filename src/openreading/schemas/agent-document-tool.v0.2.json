@@ -1,0 +1,573 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/agent-document-tool/v0.2.json",
+  "$defs": {
+    "BBox": {
+      "additionalProperties": false,
+      "description": "CANONICAL geometry emitted by the normalizer (response schema $defs.BBox).",
+      "properties": {
+        "x": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Y",
+          "type": "number"
+        },
+        "w": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "W",
+          "type": "number"
+        },
+        "h": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "H",
+          "type": "number"
+        },
+        "page": {
+          "minimum": 1,
+          "title": "Page",
+          "type": "integer"
+        },
+        "polygon": {
+          "anyOf": [
+            {
+              "items": {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Polygon"
+        },
+        "bbox_native": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NativeGeometry"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "w",
+        "h",
+        "page"
+      ],
+      "title": "BBox",
+      "type": "object"
+    },
+    "ErrorEnvelope": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.2",
+          "default": "0.2",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "error": {
+          "$ref": "#/$defs/ToolError"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "title": "ErrorEnvelope",
+      "type": "object"
+    },
+    "ImportReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.2",
+          "default": "0.2",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "artifact_id": {
+          "pattern": "^or1_[0-9a-f]{64}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "display_name": {
+          "title": "Display Name",
+          "type": "string"
+        },
+        "document_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Document Sha256",
+          "type": "string"
+        },
+        "page_count": {
+          "minimum": 1,
+          "title": "Page Count",
+          "type": "integer"
+        },
+        "passage_count": {
+          "minimum": 1,
+          "title": "Passage Count",
+          "type": "integer"
+        },
+        "reused": {
+          "title": "Reused",
+          "type": "boolean"
+        },
+        "warnings": {
+          "items": {
+            "enum": [
+              "source_changed",
+              "parser_warnings_present",
+              "no_matches"
+            ],
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        },
+        "next_action": {
+          "const": "search",
+          "default": "search",
+          "title": "Next Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "display_name",
+        "document_sha256",
+        "page_count",
+        "passage_count",
+        "reused",
+        "warnings"
+      ],
+      "title": "ImportReceipt",
+      "type": "object"
+    },
+    "NativeGeometry": {
+      "additionalProperties": false,
+      "description": "Raw source geometry, untouched, for round-trip fidelity (response schema BBox.bbox_native).",
+      "properties": {
+        "coords": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Coords",
+          "type": "array"
+        },
+        "origin": {
+          "$ref": "#/$defs/NativeOrigin"
+        },
+        "unit": {
+          "$ref": "#/$defs/NativeUnit"
+        },
+        "dpi": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dpi"
+        }
+      },
+      "required": [
+        "coords",
+        "origin",
+        "unit"
+      ],
+      "title": "NativeGeometry",
+      "type": "object"
+    },
+    "NativeOrigin": {
+      "description": "Origin convention of the RAW source geometry preserved in bbox_native.",
+      "enum": [
+        "top_left",
+        "bottom_left"
+      ],
+      "title": "NativeOrigin",
+      "type": "string"
+    },
+    "NativeUnit": {
+      "description": "Unit of the RAW source geometry preserved in bbox_native.",
+      "enum": [
+        "normalized",
+        "pdf_point",
+        "pixel",
+        "inch"
+      ],
+      "title": "NativeUnit",
+      "type": "string"
+    },
+    "Passage": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence_id": {
+          "pattern": "^p[0-9]{4,}-b[0-9]{4,}-s[0-9]{4,}$",
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "page": {
+          "minimum": 1,
+          "title": "Page",
+          "type": "integer"
+        },
+        "block_index": {
+          "minimum": 0,
+          "title": "Block Index",
+          "type": "integer"
+        },
+        "segment_index": {
+          "minimum": 0,
+          "title": "Segment Index",
+          "type": "integer"
+        },
+        "text_origin": {
+          "anyOf": [
+            {
+              "enum": [
+                "native",
+                "ocr",
+                "mixed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text Origin"
+        },
+        "source_kind": {
+          "enum": [
+            "block_text",
+            "page_text"
+          ],
+          "title": "Source Kind",
+          "type": "string"
+        },
+        "text_start": {
+          "minimum": 0,
+          "title": "Text Start",
+          "type": "integer"
+        },
+        "text_end": {
+          "minimum": 1,
+          "title": "Text End",
+          "type": "integer"
+        },
+        "text": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "bbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BBox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source_block_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Block Id"
+        }
+      },
+      "required": [
+        "evidence_id",
+        "page",
+        "block_index",
+        "segment_index",
+        "source_kind",
+        "text_start",
+        "text_end",
+        "text"
+      ],
+      "title": "Passage",
+      "type": "object"
+    },
+    "ReadResult": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.2",
+          "default": "0.2",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "artifact_id": {
+          "pattern": "^or1_[0-9a-f]{64}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "display_name": {
+          "title": "Display Name",
+          "type": "string"
+        },
+        "passages": {
+          "items": {
+            "$ref": "#/$defs/Passage"
+          },
+          "title": "Passages",
+          "type": "array"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Cursor"
+        },
+        "warnings": {
+          "items": {
+            "enum": [
+              "source_changed",
+              "parser_warnings_present",
+              "no_matches"
+            ],
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "display_name",
+        "passages"
+      ],
+      "title": "ReadResult",
+      "type": "object"
+    },
+    "SearchHit": {
+      "additionalProperties": false,
+      "properties": {
+        "text_origin": {
+          "anyOf": [
+            {
+              "enum": [
+                "native",
+                "ocr",
+                "mixed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text Origin"
+        },
+        "evidence_id": {
+          "pattern": "^p[0-9]{4,}-b[0-9]{4,}-s[0-9]{4,}$",
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "page": {
+          "minimum": 1,
+          "title": "Page",
+          "type": "integer"
+        },
+        "matched_terms": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Matched Terms",
+          "type": "array"
+        },
+        "excerpt_start": {
+          "minimum": 0,
+          "title": "Excerpt Start",
+          "type": "integer"
+        },
+        "excerpt_end": {
+          "minimum": 1,
+          "title": "Excerpt End",
+          "type": "integer"
+        },
+        "excerpt": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Excerpt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "evidence_id",
+        "page",
+        "matched_terms",
+        "excerpt_start",
+        "excerpt_end",
+        "excerpt"
+      ],
+      "title": "SearchHit",
+      "type": "object"
+    },
+    "SearchResult": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "0.2",
+          "default": "0.2",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "artifact_id": {
+          "pattern": "^or1_[0-9a-f]{64}$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "query": {
+          "maxLength": 256,
+          "title": "Query",
+          "type": "string"
+        },
+        "hits": {
+          "items": {
+            "$ref": "#/$defs/SearchHit"
+          },
+          "title": "Hits",
+          "type": "array"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Cursor"
+        },
+        "warnings": {
+          "items": {
+            "enum": [
+              "source_changed",
+              "parser_warnings_present",
+              "no_matches"
+            ],
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "query",
+        "hits"
+      ],
+      "title": "SearchResult",
+      "type": "object"
+    },
+    "ToolError": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "memory_limit",
+            "worker_monitor_failed",
+            "os_permission_denied",
+            "configuration_required",
+            "engine_identity_unavailable",
+            "access_denied",
+            "input_not_found",
+            "unsupported_format",
+            "password_required",
+            "input_too_large",
+            "extraction_too_large",
+            "no_readable_text",
+            "busy",
+            "timeout",
+            "cancelled",
+            "storage_limit",
+            "parse_failed",
+            "artifact_not_found",
+            "artifact_corrupt",
+            "artifact_version_unsupported",
+            "evidence_not_found",
+            "invalid_cursor",
+            "response_too_large"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 256,
+          "title": "Message",
+          "type": "string"
+        },
+        "retryable": {
+          "title": "Retryable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "title": "ToolError",
+      "type": "object"
+    }
+  },
+  "anyOf": [
+    {
+      "$ref": "#/$defs/ImportReceipt"
+    },
+    {
+      "$ref": "#/$defs/SearchResult"
+    },
+    {
+      "$ref": "#/$defs/ReadResult"
+    },
+    {
+      "$ref": "#/$defs/ErrorEnvelope"
+    }
+  ]
+}

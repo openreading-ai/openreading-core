@@ -31,6 +31,14 @@ Families
 - liveness-report: one backend's liveness answer — ``openreading backends --check``,
   ``POST /v1/backends/{id}/liveness`` (``openreading.liveness``,
   internal/design/liveness.md §5).
+- local-document / passage / agent-document-tool: retained evidence and bounded MCP
+  payloads owned by ``openreading.artifacts``. These separate families leave the existing
+  request and normalized response contracts unchanged.
+- document-tool: complete retained normalized JSON with lossless continuation, excluding raw payloads.
+  The response keeps existing structure, warnings and page origins without a search requirement.
+- import-job: persistent local import status and background start, status, list, and cancel requests.
+- selection-tool: local copied-file receipts and errors, separate from artifact evidence.
+  The empty Request definition excludes model-supplied dialog controls.
 - step / journal: the executor step contract and the per-line JSONL journal shape
   (internal/design/ledger.md §5.4).
 
@@ -185,11 +193,16 @@ readers the field paths, optional-value rules, and distinctions between outer re
     and ``typed_fields_unsupported`` (the backend has no such capability at all),
     ``channel_unavailable_in_mode`` and ``channel_not_produced_by_operation`` (the capability
     exists, the operation or mode this run chose does not carry it), ``typed_fields_empty``,
-    ``confidence_unavailable``, ``page_attribution_unavailable``, ``cost_unavailable``.
+    ``confidence_unavailable``, ``page_attribution_unavailable``, ``cost_unavailable``,
+    ``ocr_skipped`` (automatic local OCR disabled or missing its configured, verified assets).
   - the output is degraded: ``typed_fields_malformed`` (the vendor's structured output was not
     a JSON object, so the response is PARTIAL), ``typed_fields_unverified``,
     ``output_truncated``, ``interaction_incomplete`` (the vendor stopped before finishing),
-    ``bbox_space_approximate``.
+    ``partial_conversion`` (the converter or service returned some pages as failed), ``bbox_space_approximate``, ``ambiguous_page_provenance`` (unattributable text omitted),
+    ``text_provenance_fragmented`` (same-page text spans preserved separately without provider separator spaces),
+    ``unreadable_pages`` (no page-addressable text), ``table_text_unavailable``
+    (table text absent while structured table extraction is disabled), and
+    ``furniture_text_omitted`` (running headers and footers excluded from page evidence).
   - the run took a detour: ``fallback_used`` (the router's attempt trail),
     ``idempotent_replay``, ``quality_below_threshold`` (every rung gated, best result
     retained), ``quality_escalated`` (a rung gated and a later rung answered, so the walk
@@ -528,6 +541,12 @@ LIVENESS_REPORT_SCHEMA_FILE = "liveness-report.v0.1.json"
 # (StepRequest/StepResult) and the per-line shape of a run's JSONL journal. Two new families.
 STEP_SCHEMA_FILE = "step.v0.1.json"
 JOURNAL_SCHEMA_FILE = "journal.v0.1.json"
+LOCAL_DOCUMENT_SCHEMA_FILE = "local-document.v0.4.json"
+PASSAGE_SCHEMA_FILE = "passage.v0.4.json"
+SELECTION_TOOL_SCHEMA_FILE = "selection-tool.v0.2.json"
+AGENT_DOCUMENT_TOOL_SCHEMA_FILE = "agent-document-tool.v0.4.json"
+DOCUMENT_TOOL_SCHEMA_FILE = "document-tool.v0.4.json"
+IMPORT_JOB_SCHEMA_FILE = "import-job.v0.3.json"
 
 
 _PACKAGE = "openreading.schemas"
@@ -703,6 +722,36 @@ def validate_journal_record(instance: dict[str, Any]) -> None:
     _validator(journal_schema()).validate(instance)
 
 
+def local_document_schema() -> dict[str, Any]:
+    """The retained source and extraction identity contract."""
+    return _load(LOCAL_DOCUMENT_SCHEMA_FILE)
+
+
+def passage_schema() -> dict[str, Any]:
+    """Exact source spans and physical page provenance."""
+    return _load(PASSAGE_SCHEMA_FILE)
+
+
+def agent_document_tool_schema() -> dict[str, Any]:
+    """Bounded import, search, read, and error payloads."""
+    return _load(AGENT_DOCUMENT_TOOL_SCHEMA_FILE)
+
+
+def selection_tool_schema() -> dict[str, Any]:
+    """Closed local selection inputs, receipts, and sanitized errors."""
+    return _load(SELECTION_TOOL_SCHEMA_FILE)
+
+
+def document_tool_schema() -> dict[str, Any]:
+    """Whole retained normalized results with lossless continuation and existing artifact errors."""
+    return _load(DOCUMENT_TOOL_SCHEMA_FILE)
+
+
+def import_job_schema() -> dict[str, Any]:
+    """Persistent local import status and closed background tool requests."""
+    return _load(IMPORT_JOB_SCHEMA_FILE)
+
+
 def _cli_validate() -> int:
     """Validate every vendored schema, then validate any stored normalized fixture.
 
@@ -712,25 +761,25 @@ def _cli_validate() -> int:
     The raw fixtures at ``tests/fixtures/<slug>/*.json`` are vendor payloads rather than
     response envelopes, so this sweep deliberately leaves them alone.
     """
-    # 1. schemas are themselves valid JSON Schema
-    _validator(request_schema())
-    _validator(response_schema())
-    _validator(descriptor_schema())
-    _validator(strategy_config_schema())
-    _validator(comparison_report_schema())
-    _validator(batch_result_schema())
-    _validator(corpus_report_schema())
-    _validator(leaderboard_report_schema())
-    _validator(liveness_report_schema())
-    _validator(step_schema())
-    _validator(journal_schema())
-    print(
-        f"schemas: {REQUEST_SCHEMA_FILE} OK, {RESPONSE_SCHEMA_FILE} OK, "
-        f"{DESCRIPTOR_SCHEMA_FILE} OK, {STRATEGY_CONFIG_SCHEMA_FILE} OK, "
-        f"{COMPARISON_REPORT_SCHEMA_FILE} OK, {BATCH_RESULT_SCHEMA_FILE} OK, "
-        f"{CORPUS_REPORT_SCHEMA_FILE} OK, {LEADERBOARD_REPORT_SCHEMA_FILE} OK, "
-        f"{LIVENESS_REPORT_SCHEMA_FILE} OK, {STEP_SCHEMA_FILE} OK, {JOURNAL_SCHEMA_FILE} OK"
-    )
+    from jsonschema.exceptions import SchemaError
+    from jsonschema.validators import validator_for
+
+    schema_failures = 0
+    checked = []
+    # Discover files so historical contracts and new families cannot bypass the gate.
+    for path in sorted(resources.files(_PACKAGE).iterdir(), key=lambda item: item.name):
+        if not path.is_file() or not path.name.endswith(".json"):
+            continue
+        try:
+            with path.open("r", encoding="utf-8") as stream:
+                contract = json.load(stream)
+            validator_for(contract).check_schema(contract)
+        except (OSError, ValueError, SchemaError) as exc:
+            schema_failures += 1
+            print(f"SCHEMA INVALID: {path.name}\n    {exc}", file=sys.stderr)
+        else:
+            checked.append(f"{path.name} OK")
+    print("schemas: " + ", ".join(checked))
 
     # 2. any stored normalized-response fixtures validate against the response schema
     root = Path(__file__).resolve().parents[3]  # repo root
@@ -744,12 +793,12 @@ def _cli_validate() -> int:
             failures += 1
             print(f"FIXTURE INVALID: {f.relative_to(root)}\n    {exc}", file=sys.stderr)
     print(f"fixtures: {len(fixtures)} checked, {failures} invalid")
-    return 1 if failures else 0
+    return 1 if schema_failures or failures else 0
 
 
 def main(argv: list[str] | None = None) -> int:
     """Entry point for ``python -m openreading.schemas validate``. Exit 0 when every schema and
-    fixture validates, 1 when a fixture fails, 2 on a usage error.
+    fixture validates, 1 when a schema or fixture fails, 2 on a usage error.
     """
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] == "validate":

@@ -4,8 +4,12 @@ These pin its exit codes and that it validates the vendored schemas + any stored
 
 from __future__ import annotations
 
+import json
 import runpy
+import shutil
 import sys
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,13 +17,32 @@ from openreading.schemas import main as schemas_main
 
 
 def test_validate_reports_ok_and_exits_0(capsys):
-    # repo is green under `make verify` (which runs this), so all four schemas + every stored
-    # fixture validate → exit 0 with an OK line naming each schema file.
+    import openreading.schemas as schemas
+
     rc = schemas_main(["validate"])
     out = capsys.readouterr().out
     assert rc == 0
     assert "schemas:" in out and "OK" in out
     assert "fixtures:" in out  # the fixture sweep ran (0 or more checked, 0 invalid)
+    for path in Path(schemas.__file__).parent.glob("*.json"):
+        assert f"{path.name} OK" in out
+
+
+@pytest.mark.parametrize("name", ["request.v0.1.json", "new-family.v0.1.json"])
+def test_validate_rejects_invalid_historical_and_new_schema_metadata(
+    tmp_path, monkeypatch, capsys, name
+):
+    import openreading.schemas as schemas
+
+    root = tmp_path / "schemas"
+    shutil.copytree(Path(schemas.__file__).parent, root)
+    path = root / name
+    value = json.loads(path.read_text()) if path.exists() else {"type": "object"}
+    value["title"] = 42
+    path.write_text(json.dumps(value))
+    monkeypatch.setattr(schemas, "resources", SimpleNamespace(files=lambda package: root))
+    assert schemas_main(["validate"]) == 1
+    assert name in capsys.readouterr().err
 
 
 def test_no_subcommand_prints_usage_and_exits_2(capsys):

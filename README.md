@@ -531,6 +531,7 @@ command.
 | how `policy.backends` chooses the default chain and where each key comes from | [Routing and keys](src/openreading/router/README.md) |
 | how to run a folder of documents and read one result | [Batch runs](src/openreading/batch/README.md) |
 | how to resume an interrupted run, replay one offline, or erase what it recorded | [The run ledger](src/openreading/ledger/README.md) |
+| how to retrieve local page evidence from an agent | [Local MCP tools](src/openreading/mcp_server/README.md) |
 | how to put the same engine behind an HTTP API on your own machine | [The HTTP server](src/openreading/server/README.md) |
 | how to run public benchmarks or rank backends on documents you labeled | [Evals](src/openreading/evals/README.md) |
 | every command, its flags, and the exit code your script branches on | `uv run openreading help` for the manual's topic index, `uv run openreading help <topic>` for one chapter, and [The command line](src/openreading/cli/README.md) for the walkthrough |

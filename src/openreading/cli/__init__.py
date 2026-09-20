@@ -1231,6 +1231,74 @@ requests, logs the shutdown, and the process exits 143. `serve` is the one
 command excluded from this CLI's own SIGTERM handling, which would otherwise
 fire after that clean shutdown.
 
+mcp --profile local-document-proof-v1
+------------------------------------
+Serve nine document tools over stdio with openreading[agent,pymupdf].
+You grant an absolute --input-root and a separate absolute --artifact-root.
+For example, use /absolute/documents and /absolute/evidence respectively.
+The server retains source bytes and page evidence until you remove the store.
+Requested document content enters the calling agent. Treat it as untrusted.
+
+Start long work with openreading_start_import and a granted relative path.
+Keep its job_id and check openreading_get_import for stages and elapsed time.
+For example, call status with job_id and wait_seconds set to 20.
+Use openreading_cancel_import to stop that job. Host Stop does not cancel it.
+A succeeded job carries a receipt. Failed or cancelled jobs carry an error.
+Jobs continue after client disconnect; restarting can retrieve their status.
+Use openreading_list_imports with {} to recover job IDs after reconnecting.
+Follow next_cursor for more jobs, then inspect status before cancelling.
+Cancel unwanted jobs before uninstalling. Client removal does not stop them.
+Call openreading_import for synchronous use, then pass its artifact_id to
+openreading_get_document for the complete retained normalized JSON.
+This excludes backend_raw and keeps existing channels, warnings and origins.
+Set delivery to auto for one complete result or a saved local JSON file.
+The response budget counts serialized MCP bytes, including escaping.
+--document-response-bytes defaults to 1000000. It does not limit parsing.
+--document-export-root selects a trusted local export directory.
+Without that flag, exports stay under the private artifact store.
+A local-file receipt includes byte count, SHA-256, and warning-code counts.
+It does not mean the host received a file. Attach it or use authorized access.
+Attaching an export sends its content to the assistant host.
+Set delivery to file to export even when the result fits the budget.
+Omitting delivery retains fragments mode and its ordered JSON Pointer spans.
+Follow every next_cursor in that mode for complete retained content.
+The openreading.artifacts.document docstring defines fragment reconstruction.
+Alternatively, use openreading_search for a focused query.
+Call openreading_read with evidence_ids returned by any retrieval tool.
+Cite the returned filename, physical page, and evidence identifier.
+Follow next_cursor when present. A failed search does not prove absence.
+Call openreading_select_document with {} when a trusted launcher supplies
+an optional local chooser. Import the returned path to create evidence.
+Without a chooser, selection returns selection_unavailable; other tools work.
+
+This profile accepts one PDF, at most 25 MiB and 100 physical pages.
+It uses local PyMuPDF without OCR, passwords, routing, or hosted fallback.
+Imports allow 45 seconds and retain at most 512 MiB across the artifact store.
+Import, search, and read allow 4096, 8192, and 16384 UTF-8 bytes.
+Full-document replies allow 65536 UTF-8 bytes per continuation.
+These return the stored result, not a promise of complete OCR recognition.
+The import profile still determines which normalized channels are available.
+These byte limits do not prove token savings or impose a native memory limit.
+Select --profile local-document-proof-v2 for openreading[agent,docling-local].
+That profile requires --profile-config pointing to a local JSON setup file.
+It names pages, deadline_seconds, worker_memory_bytes, worker_idle_seconds,
+and docling. Null page, deadline, and memory fields disable those ceilings.
+Optional source_bytes, extraction_bytes, and store_bytes default to null.
+Explicit positive values still impose operator limits for those resources.
+The docling object names artifacts_path and dependency_lock.
+Optional ocr, tesseract_cmd, tessdata_path, languages, and threads select OCR.
+For example, set ocr to true with absolute executable and language-data paths.
+No model assets download automatically. Invalid or absent setup exits 2.
+The artifact guide demonstrates setup. No measured release defaults exist.
+The warm child reports bounded progress, then shuts down after idle timeout.
+Physical-page text_origin labels identify native, OCR, or mixed extraction.
+These labels are provenance, never measured accuracy or confidence.
+Exit 0 means transport closure, 2 invalid setup, and 130 interruption.
+This POSIX profile resolves root symlinks before establishing its input grant.
+SIGINT and SIGTERM stop synchronous imports before the server exits 130.
+Detached jobs remain active until they finish or receive explicit cancellation.
+The openreading.artifacts package owns storage, provenance, and error codes.
+
 Exit codes
 ----------
   0  success.
@@ -1285,7 +1353,8 @@ Exit codes
      variable is set, so an interrupted `--backend` batch exits 6 and names no
      id, and there is nothing for `resume` to replay. Arm the ledger for the
      strategy runs you mean to resume.
-143  terminated by SIGTERM with no ledger armed: nothing was resumable, so one
+143  terminated by SIGTERM with no ledger armed (MCP instead exits 130).
+     Nothing was resumable, so one
      `[openreading]` line says so and names `OPENREADING_LEDGER`. Unarmed
      Ctrl-C is unchanged -- it stays an ordinary `KeyboardInterrupt`
      (traceback, 130), byte-for-byte the pre-ledger behaviour.

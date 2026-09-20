@@ -586,6 +586,25 @@ entry naming it, so the warning reaches you before the removal does.
   `false` in a Python `run()` call or an HTTP request body. Every adapter honors the setting, and
   no CLI flag exposes it today.
 
+### Retained local evidence contracts
+
+| Schema | Owner | Result |
+| --- | --- | --- |
+| `local-document.v0.4.json` | `openreading.artifacts.models` | Source hash, engine identity, and retained file inventory. |
+| `passage.v0.4.json` | `openreading.artifacts.passages` | Exact spans with physical pages or normalized JSON locations. |
+| `selection-tool.v0.1.json` | Historical selection | Frozen single-file receipts and empty selection input. |
+| `selection-tool.v0.2.json` | `openreading.mcp_server.selection` | Legacy receipts plus paginated snapshots, skipped-entry counts and cursor continuation. |
+| `document-tool.v0.1.json` | `openreading.artifacts.document` | Complete retained normalized results through lossless JSON continuation. |
+| `document-tool.v0.2.json` | `openreading.artifacts.delivery` | Complete MCP delivery or private file export, retaining the v0.1 fragment interface. |
+| `document-tool.v0.3.json` | `openreading.artifacts.delivery` | Complete delivery with measured page origins, empty-text page previews, and explicit warning-record counts. |
+| `agent-document-tool.v0.4.json` | `openreading.mcp_server.tools` | Bounded import, search, read, and error payloads. |
+
+| `document-tool.v0.4.json` | `openreading.artifacts.delivery` | Complete delivery with nullable physical-page summaries for unpaginated documents. |
+| `import-job.v0.3.json` | `openreading.types.import_job` | Background status with compatible older receipts and unpaginated import receipts. |
+
+These families wrap retained evidence without changing the normalized extraction response.
+The v0.3 retained artifact reader remains supported without rewriting stored files.
+
 ## Not built yet
 
 - `openreading.SCHEMA_VERSION` prints `0.1`, a number that matches no current family, because the
@@ -621,3 +640,13 @@ full table of what to update for each kind of change is under *Where a change ge
 [`AGENTS.md`](../../../AGENTS.md).
 
 <sub>[Docs home](../README.md) · [← Evals](../evals/README.md) · [Backend adapters →](../adapters/README.md)</sub>
+
+The retained evidence v0.2 contracts add measured page origins and supervised-worker failure codes.
+The v0.1 files remain unchanged; this runtime refuses older retained artifacts rather than rewriting cited evidence.
+
+Retained evidence v0.3 distinguishes text-less pages (`none`) from unmeasured text origins (`unknown`).
+Passages cannot use `none`; existing v0.1 and v0.2 files remain byte-identical historical contracts.
+
+The `import-job.v0.1.json` contract defines persistent local import progress and closed start, status, list, and cancel requests.
+| `import-job.v0.2.json` | `openreading.types.import_job` | Persistent status with optional observed page-assembly counts; v0.1 job listings remain compatible. |
+Its models live in `openreading.types.import_job`; successful jobs carry the existing artifact receipt.

@@ -1,5 +1,106 @@
 # Changelog
 
+## Unreleased local MCP review fixes
+
+- Mark import status and listing tools as potentially writing interrupted-job recovery.
+- Ignore default export symlinks during quota accounting while retaining artifact and export access checks.
+  Regular exports still consume storage quota and require manual removal when no longer needed.
+- Validate every vendored schema, including historical versions, without changing any schema bytes.
+- Pin source-edit warnings and cross-grant artifact rejection with regression tests.
+
+## Unreleased adapter-format evidence
+
+- Route local inputs through the formats claimed by the configured Docling adapter.
+  Preserve provider-reported model-free blocks and table cells without enabling raster table recognition.
+- Add v0.4 retained evidence and delivery for unpaginated documents, using exact normalized JSON locations.
+  Keep physical-page citations for measured sources and preserve legacy v0.3 artifact reads.
+- Add import-job v0.3 receipts without inventing physical page counts or conversion progress.
+  Source suffixes enter artifact identity because the provider can interpret identical bytes differently.
+
+## Unreleased selection snapshots
+
+- Accept trusted multi-file snapshot providers with paginated, grant-scoped selection receipts.
+  Receipt continuations survive restart and never reopen a chooser. Legacy single-file providers remain supported.
+  Each copied reference uses its own existing import job and artifact; no document relationships are inferred.
+
+## Unreleased LiteParse and LlamaParse adapters
+
+- Add persistent local MCP import jobs with status and explicit cancellation. Docling profiles can omit document and resource ceilings; source hashing and file handoff avoid full-PDF Python buffers.
+
+- Add the optional `liteparse` adapter for PDF and image parsing in a supervised local worker.
+  OCR runs only with pinned, hash-verified English language data, so LiteParse never downloads it.
+- Add four hosted LlamaParse v2 backends, one per tier, each pinned to a dated release.
+  Automatic cost optimization stays off, and no option that adds credits is sent.
+- Preserve every LiteParse form widget when field names and fallback identifiers collide.
+- Request LlamaParse's billed usage metadata and honor disabled table output while preserving
+  table text.
+
+## Unreleased retained evidence v0.3
+
+- Add observed Docling page-assembly counts to background import status, without changing normalized output.
+  Older jobs remain readable without invented counters. Assembly completion does not imply import success.
+
+- Add document-tool v0.3 receipts with measured page-origin counts and bounded empty-text page previews.
+  Label warning counts as warning records without changing the exported normalized content.
+- Report denied parser cleanup as an operating-system permission error, preserving descriptor cleanup.
+  Inaccessible abandoned export files no longer prevent publication of a new export.
+
+- Preserve parser failure and cancellation when macOS group cleanup races the parser's exit.
+
+- Preserve document-level warning flags in search and exact-read replies, including empty searches.
+
+- Sweep abandoned exports on the next export under the same grant, without removing active writes.
+  Completed JSON exports and legacy temporary names remain until explicitly removed.
+
+- Distinguish preserved Docling text fragments from omitted text in provenance warnings.
+  Existing artifacts keep their recorded warnings until reimported.
+
+- Preserve Docling numbered-list text using its provider original and unchanged page spans.
+  Reimport existing documents to recover list items omitted by older artifacts.
+
+- Resolve trusted export directory aliases at server startup and skip inline construction
+  when complete content already exceeds the response budget.
+
+- Add complete MCP delivery with a configurable serialized-response budget and private JSON export fallback.
+  Preserve normalized values, parser warnings, page origins, and citation mappings without raw provider payloads.
+  Keep fragment retrieval compatible; local export receipts never claim automatic host file access.
+
+- Add an optional local selection provider and empty-argument MCP selection tool.
+  Standalone core stays headless and returns an explicit refusal without a provider.
+- Require shielded asynchronous selection cleanup, including cancellation during acquisition.
+  Reject invalid selection deadlines before opening stores or computing engine identity.
+
+- Tell MCP clients to reuse returned evidence identifiers and avoid guessing extraction failures from block offsets.
+
+- Distinguish empty-page and unknown text origins without fabricating mixed extraction.
+- Add lexical-v4-unicode-wraps retrieval. Wrapped words also match closed up, each half stays
+  searchable, and quotes and offsets stay exact.
+- Recognize ASCII, soft, and Unicode hyphens at search wrap points.
+- Preserve and byte-pin historical retained evidence schemas.
+
+## Unreleased local Docling profile
+
+- Retain provider text nested inside picture regions, including its physical-page provenance.
+  Count nested furniture in the existing omission warning. Reimport earlier artifacts to recover this text.
+- Honor local request OCR modes: configured automatic OCR, forced full-page OCR, and explicit off.
+  Automatic requests disclose skipped OCR, while enabled OCR requires explicit Tesseract paths.
+- Reuse the loaded layout pipeline when requests alternate OCR modes without reallocating ONNX sessions.
+- Preserve wrapped compounds during local assembly so searches find their component words.
+  Reimport earlier Docling artifacts to recover these words in retained evidence.
+- Reuse one serialized local converter per process across API and HTTP requests.
+  Revalidate assets on every request and release the converter after failures or configuration changes.
+- Record the installed dependency closure and Tesseract output configuration in engine identity.
+- Refuse source-free identity discovery and disclose omitted running headers and footers.
+- Preserve warm workers after clean input rejections and contain their relative file writes.
+- Add opt-in real Docling conversion tests with local model and OCR assets.
+
+- Pin CPU ONNX Runtime explicitly and use the upstream PIL preprocessor with audited Transformers 5.16.1.
+
+- Add the optional `docling_local` adapter with verified local ONNX assets and explicit OCR setup.
+- Add the v2 MCP profile with supervised warm workers and required resource limits.
+- Add v0.2 retained evidence contracts carrying measured physical-page text origins.
+
+
 All notable changes to OpenReading are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -17,6 +118,26 @@ All notable changes to OpenReading are documented here. The format follows
 > carries and says which one to pin.
 
 ## [Unreleased]
+
+- Preserve parser failures and cancellation when closing a dead worker raises a pipe error.
+- Reap exited parser leaders before group cleanup to avoid macOS zombie permission errors.
+- Add grant-scoped `openreading_list_imports` to recover job identifiers after reconnecting.
+- Stream retained passage verification and remove duplicate response decoding during retrieval.
+  Server memory still grows with normalized document size; no resource cutoff is introduced.
+
+- Allow trusted MCP launchers to disable the local selection deadline while preserving cancellation cleanup.
+
+- Deliver retrieval-scope guidance through MCP initialization so focused questions do not imply a complete read.
+
+- Pack complete-document MCP replies by bytes to reduce continuation calls without truncation.
+
+- Add `openreading_get_document` for complete retained normalized JSON without raw provider payloads.
+  Bounded continuation preserves existing structure, OCR origins, warnings and citation references.
+  Search remains optional; extraction coverage still depends on the import profile.
+
+- Add a fixed local document MCP profile with retained source bytes, physical page citations,
+  bounded lexical search, exact passage reads, and cancellable PyMuPDF imports.
+- Add separate v0.1 schemas for retained manifests, passages, and agent tool payloads.
 
 **This repository is `openreading-core`.** The open-core engine (library, CLI, thin JSON server,
 tests) lives here from commit `bd5ee43`, dated 2026-08-28. Its history before that commit is

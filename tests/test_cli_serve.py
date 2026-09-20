@@ -37,7 +37,8 @@ def test_serve_missing_server_extra_exits_3_not_1(monkeypatch, capsys):
 def test_serve_warns_only_when_host_is_not_loopback(monkeypatch, capsys):
     monkeypatch.setattr("uvicorn.Server.run", lambda self, sockets=None: None)
 
-    rc = main(["serve"])  # default --host 127.0.0.1
+    # Warning behavior must not depend on whether another process owns the default port.
+    rc = main(["serve", "--port", "0"])  # default --host 127.0.0.1
     assert rc == 0
     assert "warning" not in capsys.readouterr().err
 
@@ -48,7 +49,7 @@ def test_serve_warns_only_when_host_is_not_loopback(monkeypatch, capsys):
     assert rc == 0
     assert "warning" not in capsys.readouterr().err
 
-    rc = main(["serve", "--host", "0.0.0.0"])
+    rc = main(["serve", "--host", "0.0.0.0", "--port", "0"])
     assert rc == 0
     err = capsys.readouterr().err
     assert "warning" in err
