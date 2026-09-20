@@ -233,7 +233,11 @@
             "conversion",
             "writing",
             "complete",
-            "stopped"
+            "stopped",
+            "uploading",
+            "waiting",
+            "receiving",
+            "retaining"
           ],
           "title": "Stage",
           "type": "string"

@@ -1,9 +1,11 @@
 """Expose local import progress without transferring input paths or document contents.
 
-An import-job.v0.2 status names persistent work under the current input grant.
+An import-job.v0.4 status names persistent work under the current input grant.
 Only succeeded jobs carry an artifact receipt. Cancellation requests can race with
 publication, so the terminal state decides whether an artifact was committed.
 Stages are observations, not percentages or predictions of remaining time.
+External execution adds uploading, waiting, receiving, and retaining without server page estimates.
+For example, waiting means the local client awaits a response, not that server processing stopped.
 Optional page_progress counts successfully assembled physical pages against source preflight.
 Assembly precedes document-wide reading order, normalization and publication, so all pages need not mean success.
 Absent progress means no observation, including cache reuse and older retained jobs.
@@ -19,7 +21,19 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from openreading.artifacts.models import ImportReceipt, ToolError
 
 JobState = Literal["queued", "running", "succeeded", "failed", "cancelled"]
-JobStage = Literal["queued", "copying", "preflight", "conversion", "writing", "complete", "stopped"]
+JobStage = Literal[
+    "queued",
+    "copying",
+    "preflight",
+    "conversion",
+    "writing",
+    "complete",
+    "stopped",
+    "uploading",
+    "waiting",
+    "receiving",
+    "retaining",
+]
 
 
 class PageProgress(BaseModel):
@@ -57,7 +71,11 @@ class ImportJob(BaseModel):
         return self
 
     def wire(self) -> dict:
-        return self.model_dump(mode="json")
+        value = self.model_dump(mode="json")
+        if self.receipt is not None and self.receipt.extraction_state is None:
+            # Earlier receipt versions do not declare the external acquisition field.
+            value["receipt"].pop("extraction_state", None)
+        return value
 
 
 class ImportJobSummary(BaseModel):

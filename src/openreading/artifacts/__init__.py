@@ -52,6 +52,12 @@ Background imports
 ------------------
 ImportJobs in openreading.artifacts.jobs exposes start(path), get(job_id), and cancel(job_id).
 Each returns an ImportJob with wire() data defined by import-job.v0.4.json. Older persisted job records remain readable.
+ImportExecution selects a trusted child command and nonsecret snapshot before tools are served.
+Its launcher passes a fixed service_factory to jobs.main; ordinary dispatch refuses external jobs.
+External imports report uploading before submission, followed by waiting, receiving, and retaining.
+For example, a busy store after uploading fails rather than silently submitting the request twice.
+The MCP serve library accepts the matching service_factory and execution descriptor.
+Network annotations and cancellation guidance change only when that trusted descriptor is present.
 Detached supervisors preserve work after client disconnect and publish existing artifact receipts.
 Frozen launchers dispatch --internal-artifact-job to jobs.main after verifying their inventory.
 The supervisor retains its own profile and closes its parser before a terminal status is written.

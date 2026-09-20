@@ -6,6 +6,8 @@
   Preserve partial status, explicit nulls, additive envelope fields, and structured-only results without invented passages.
 - Add local-document v0.5, agent-document-tool v0.5, and import-job v0.4 contracts.
   Keep preceding schemas byte-identical and retain existing local artifact readers.
+- Add trusted launcher hooks for detached external imports, with explicit network annotations and transfer stages.
+  Refuse ordinary child dispatch for external jobs and never retry a busy import after upload begins.
 
 ## Unreleased local MCP review fixes
 

@@ -3,6 +3,9 @@
 Exit 0 means normal transport closure, 2 means invalid configuration or missing extras,
 and 130 means interruption. No environment variable selects roots or backend behavior.
 The launcher supplies all configuration through arguments before accepting tool calls.
+The serve library entry point also accepts a trusted service_factory and ImportExecution.
+These Python-only hooks let a packager own external imports without model-selected code.
+For example, its fixed child dispatch can reconstruct a validated destination snapshot.
 """
 
 from __future__ import annotations
@@ -13,11 +16,14 @@ import os
 import signal
 import sys
 import threading
+from collections.abc import Callable
 from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from openreading.artifacts.jobs import ImportExecution
+    from openreading.artifacts.service import ArtifactService
     from openreading.mcp_server.selection import SelectionProvider
 
 from openreading.adapters.docling_local.config import LocalDoclingConfig
@@ -105,6 +111,8 @@ async def serve(
     selection_timeout_seconds: float | None = 120,
     document_response_bytes: int = 1_000_000,
     document_export_root: Path | None = None,
+    service_factory: Callable[[ProfileConfig], ArtifactService] | None = None,
+    execution: ImportExecution | None = None,
 ) -> None:
     import anyio
 
@@ -126,7 +134,7 @@ async def serve(
         ]
     receiver = anyio.open_signal_receiver(*signals) if signals else nullcontext()
     with receiver as received:
-        service = ArtifactService(config)
+        service = service_factory(config) if service_factory else ArtifactService(config)
         try:
             server = create_server(
                 service,
@@ -134,6 +142,7 @@ async def serve(
                 selection_timeout_seconds=selection_timeout_seconds,
                 document_response_bytes=document_response_bytes,
                 document_export_root=document_export_root,
+                **({"execution": execution} if execution is not None else {}),
             )
             async with anyio.create_task_group() as group, cancellable_stdio() as (reader, writer):
 
