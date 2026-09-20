@@ -230,7 +230,10 @@ def engine_identity(config: ProfileConfig | None = None) -> EngineIdentity:
 
 def _display_name(relative: str) -> str:
     name = "".join(
-        c for c in relative.split("/")[-1] if not unicodedata.category(c).startswith("C")
+        c
+        for c in relative.split("/")[-1]
+        if not unicodedata.category(c).startswith("C")
+        and unicodedata.category(c) not in {"Zl", "Zp"}
     )
     return name.encode("utf-8")[:255].decode("utf-8", errors="ignore") or "document.pdf"
 

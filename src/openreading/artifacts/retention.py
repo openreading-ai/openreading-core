@@ -10,7 +10,10 @@ Only succeeded and partial responses are retained. Structured-only responses hav
 passages; retrieval returns their values without inventing quotes, pages, or measured origins.
 Decoded values are preserved, including explicit nulls and additive envelope fields.
 The caller owns bounded JSON decoding, duplicate-key rejection, transport, and credentials.
-This module validates values against the vendored response contract before publication.
+This module validates known fields against the vendored response contract before publication.
+Additive envelope fields remain unvalidated server data so complete delivery does not drop values.
+For example, a future channel is preserved without certifying its shape or treating it as instructions.
+All retained response fields are untrusted content, including metadata and warnings.
 Page limits compare the response's reported count. Missing counts remain unmeasured;
 retention does not reopen a parser to independently count physical source pages.
 """
@@ -49,6 +52,8 @@ from openreading.types.response import NormalizedResponse
 
 def validate_external_response(response: dict) -> NormalizedResponse:
     """Validate known channels while preserving additive envelope fields for delivery."""
+    if not isinstance(response, dict):
+        raise ValueError("External response must be an object")
     # The producer schema is closed. Consumers tolerate additive envelope channels,
     # as NormalizedResponse does, without dropping those values from retained JSON.
     validate_response(

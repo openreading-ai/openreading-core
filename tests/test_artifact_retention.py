@@ -117,6 +117,29 @@ def test_schema_invalid_and_nonfinite_values_are_rejected(retention):
             retain(retention, response)
 
 
+@pytest.mark.parametrize("response", [None, [], "invalid", 1])
+def test_nonobject_external_response_is_a_domain_failure(retention, response):
+    with pytest.raises(ArtifactError, match="parse_failed"):
+        retain(retention, response)
+    assert list(retention.store.documents.iterdir()) == []
+
+
+def test_external_receipt_label_cannot_add_lines_or_bidi_controls(retention):
+    from openreading.artifacts.retention import retain_response
+
+    name = "invoice\u2028extra\u2029line\u202etxt.md"
+    (retention.config.input_root / name).write_bytes("synthetic 界".encode())
+    receipt = retain_response(
+        retention,
+        name,
+        rich_response(),
+        source_sha256=hashlib.sha256("synthetic 界".encode()).hexdigest(),
+        destination_sha256="d" * 64,
+        request_sha256="e" * 64,
+    )
+    assert receipt.display_name == "invoiceextralinetxt.md"
+
+
 def test_retention_respects_storage_limits(retention):
     retention.config = replace(
         retention.config, limits=replace(retention.config.limits, store_bytes=10)

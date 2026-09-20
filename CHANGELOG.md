@@ -1,5 +1,8 @@
 # Changelog
 
+- Handle external MCP progress stages without aborting imports; ignore unknown advisory stages.
+- Refuse nonobject external responses and remove Unicode line separators from artifact labels.
+
 ## Unreleased external response retention
 
 - Retain validated normalized responses with exact uploaded-source and acquisition bindings, without parsing again.
