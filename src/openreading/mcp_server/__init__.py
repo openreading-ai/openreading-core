@@ -1,20 +1,4 @@
-"""Expose local evidence and scoped general execution through separate stdio profiles.
-
-The general-execution-v1 profile serves thirteen tools without selecting a mandatory local parser.
-Strategy inspection lists authorized entrypoints and returns scoped structural views without configuration payloads.
-The MCP guide maps existing processing capabilities and explicitly separates operator-only workflows.
-Use openreading_parse to start authorized backend or strategy work, then inspect persistent ej1 jobs.
-General get_job, list_jobs and cancel_job operate under the original input grant across client reconnects.
-Get and list can persist recovery after supervisor exit, so their tool annotations admit writes.
-Get_result retrieves complete retained normalized data, while compare consumes retained inputs without provider calls.
-General discovery lists only authorized descriptors without credential or dependency checks.
-Explicit readiness and liveness use owned diagnostic children with the forwarded execution environment.
-Readiness reports configuration, while only a requested liveness probe can establish measured reachability.
-For example, an available credential can satisfy readiness even when the provider later rejects it.
-Route plans backend order within the same operator execution scope without checking provider readiness.
-For example, --execute-backend pymupdf authorizes parsing through that adapter when its dependencies are installed.
-The general launcher rejects local planning flags instead of interpreting them as execution authority.
-Read openreading.mcp_server.general for the tool lifecycle and openreading.cli for executable setup instructions.
+"""Expose local document tools over stdio using the optional agent extra.
 
 This profile requires POSIX descriptor and process-group support. Windows startup exits 2.
 The launcher resolves explicit root symlinks once, then intake refuses symlinks below that grant.
@@ -32,47 +16,12 @@ A local export path establishes no host access and performs no upload. Existing 
 uses lossless pagination defined by openreading.artifacts.document.
 Background tools openreading_start_import, openreading_get_import and openreading_cancel_import
 return persistent job status without keeping a tool request open during extraction.
-Call openreading_backends with {} for the selected backend's descriptor and configured OCR flag.
-For example, the Docling profile returns docling_local even when other adapters are installed.
-Discovery preserves descriptor claims and their sources. It does not check dependencies,
-assets, credentials or live reachability, and never enables general backend selection.
 Use openreading_list_imports after reconnecting when the original job ID is unavailable.
-Search remains optional. The openreading_select_document tool also accepts a receipt cursor.
+Search remains optional. The openreading_select_document tool accepts only an empty object.
 Without an explicitly supplied provider, it returns selection_unavailable and opens no UI.
 Every successful call returns one JSON TextContent payload without
 structuredContent duplication. Domain failures set isError; malformed arguments receive
 sanitized protocol errors. The server never loads ambient routing files or credentials.
-Call openreading_route for the shared router plan under operator-owned backend scope.
-The optional --routing-config snapshots explicit YAML, while repeated --allow-backend
-flags grant planning access independently. Without those flags, planning stays local.
-For example, a policy listing reducto cannot authorize it outside the allowed set.
-Planning reads no document, checks no readiness and does not change local imports.
-
-Call openreading_get_result for complete general results identified by an orr1 result_id.
-It shares the operator's delivery budget and export directory with complete document retrieval.
-Auto returns complete content or a local export; fragments returns lossless JSON Pointer continuation.
-The result-tool.v0.4 contract preserves normalized status, warnings and explicit producer provenance.
-For example, a comparison report retains its subject-to-input mapping without creating physical-page citations.
-Call openreading_compare with result_ids to compare authorized retained normalized responses.
-An optional baseline selects an existing input or appends another retained response under the same grant.
-The shared comparison engine never executes either backend; its report retains exact subject-to-input mappings.
-For example, compare two retained runs of Docling without reprocessing their source documents.
-The synchronous call returns a bounded receipt; host cancellation does not undo completed report publication.
-Inline truth scores caller-supplied expected values and retains them without an independent accuracy claim.
-All-batch inputs produce a corpus report using the shared matching rules; baseline and truth are refused.
-For example, two retained batch_result identifiers map to run_1 and run_2 in report provenance.
-
-Internal execution preflight lives in openreading.mcp_server.execution and exposes no additional tool.
-It snapshots explicit configuration with independent backend and strategy entrypoint scopes.
-For example, allowing a strategy does not authorize a hosted leaf outside the backend scope.
-The shared compiler prunes unauthorized leaves before any document or credential access.
-Internal ExecutionAttempt in openreading.mcp_server.execution_process acquires granted inputs and owns a disposable worker.
-It returns complete validated content while preserving backend scope at dispatch.
-Internal ExecutionJobs in openreading.mcp_server.execution_jobs persists detached work, cancellation and retained-result receipts.
-It distinguishes successful publication from partial, failed or still-processing provider outcomes.
-General tools preflight receipt budgets before accepting execution requests through the standalone launcher.
-Use openreading_resume with a terminal strategy job ID to continue from retained bytes under current authority.
-A batch requires an item_index; the new job retains one normalized response without rewriting the original aggregate.
 
 Artifact source, response, and passages persist until you remove their store directory.
 Retrieval shares selected document text with the calling agent. Document instructions

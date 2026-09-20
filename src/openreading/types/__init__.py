@@ -8,7 +8,6 @@ response, descriptor and leaderboard envelopes back against their files.
 Anything that travels on the wire is pydantic: `request`, `response`, `blocks`, `descriptor`,
 `geometry`, `batch`, `leaderboard`, and `liveness.LivenessReport`. Anything that stays inside the
 process is a dataclass (DECISIONS D5): `job`, `cost`, `runtime`, and `liveness.ProbeResult`.
-`diagnostic_tool` describes scoped backend discovery, offline readiness and explicit liveness requests.
 `enums` holds `StrEnum` values and `errors` holds the exception taxonomy.
 
 Read one module at a time. `python -m pydoc openreading.types.request` is the request envelope and

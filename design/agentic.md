@@ -1,16 +1,13 @@
 # Remaining general agent surface
 
-This proposal covers capabilities beyond implemented general execution and local document profiles.
-The [MCP guide](../src/openreading/mcp_server/README.md) documents implemented local evidence tools and scoped route planning.
+This proposal covers work beyond the implemented fixed local document profile.
+The [MCP guide](../src/openreading/mcp_server/README.md) documents the implemented import, search, and read tools.
 The [artifact guide](../src/openreading/artifacts/README.md) documents retention and physical page evidence.
 The [remaining product intent](../product/specs/agentic.product-spec.md) preserves the unbuilt acceptance identifiers.
 
 ## Scope boundary
 
-Triage tools remain unbuilt.
-Authorized discovery and explicit readiness/liveness diagnostics are documented in the MCP guide.
-Scoped route planning and strategy inspection are documented in the MCP guide.
-The guide records explicit operator-only dispositions for intake expansion, provider batching, replay and research utilities.
+General parse, batch, route, compare, readiness discovery, and triage tools remain unbuilt.
 The local profile does not satisfy those requirements by exposing differently named equivalents.
 It deliberately selects one backend, one explicit input grant, and bounded retained evidence.
 Client packaging and token measurement belong in `openreading-agent-tools`, which depends on core.
@@ -18,18 +15,14 @@ Its approved scope is [local document proof revision 1](https://github.com/openr
 
 ## Contracts requiring a future design
 
-Internal execution preflight is documented in `openreading.mcp_server.execution` and the MCP guide.
-Remaining execution tools must preserve this authority through admission and every backend dispatch.
+A general tool surface must define authorization before accepting backend selection or strategy execution.
 Current core authorization narrows backend dispatch through configured backend sets and HTTP API-key scope.
 The removed vendor compliance tables and their policy keys must not return through an agent interface.
 No claim about a vendor's training, retention, or agreement can become an unverifiable routing guarantee.
 
-General result retention and bounded retrieval are documented in the artifact and MCP guides.
-The internal execution_process module supplies granted source copying, explicit child environments, isolated stdout and private journal/output storage.
-The execution_jobs supervisor documents durable status, cancellation, reconnect and retained-result publication.
-Remaining tools must retain measured reply budgets and the standalone launcher authorization boundary.
-Every dispatch must retain backend scope; preflight cannot replace execution-time enforcement.
-Retained normalized-response, truth-scored and corpus comparison are documented in the MCP guide.
+General tool results need independently bounded receipts and explicit retained artifact access.
+The existing normalized response remains the extraction contract, while tool receipts use separate schemas.
+A compare operation over retained results must not execute either backend again.
 A general extraction operation must identify any provider calls before the caller authorizes their execution.
 
 ## Triage remains proposed

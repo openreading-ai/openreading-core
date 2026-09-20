@@ -34,17 +34,11 @@ Families
 - local-document / passage / agent-document-tool: retained evidence and bounded MCP
   payloads owned by ``openreading.artifacts``. These separate families leave the existing
   request and normalized response contracts unchanged.
-- retained-result / result-tool: complete responses, attributed or scored comparisons, batches and corpus reports.
-  Batch records use version 0.3 and validate every nested response without discarding null values.
-- execution-job: version 0.2 accepts response and batch receipts, preserving version 0.1 statuses.
 - document-tool: complete retained normalized JSON with lossless continuation, excluding raw payloads.
   The response keeps existing structure, warnings and page origins without a search requirement.
 - import-job: persistent local import status and background start, status, list, and cancel requests.
 - selection-tool: local copied-file receipts and errors, separate from artifact evidence.
   The empty Request definition excludes model-supplied dialog controls.
-- route-tool: authorized backend ordering without source reads or execution.
-- backend-discovery: static descriptors restricted to the configured local profile.
-  The wrapper reports the configured OCR flag and explicitly leaves readiness unchecked.
 - step / journal: the executor step contract and the per-line JSONL journal shape
   (internal/design/ledger.md §5.4).
 
@@ -553,15 +547,6 @@ SELECTION_TOOL_SCHEMA_FILE = "selection-tool.v0.2.json"
 AGENT_DOCUMENT_TOOL_SCHEMA_FILE = "agent-document-tool.v0.4.json"
 DOCUMENT_TOOL_SCHEMA_FILE = "document-tool.v0.4.json"
 IMPORT_JOB_SCHEMA_FILE = "import-job.v0.3.json"
-ROUTE_TOOL_SCHEMA_FILE = "route-tool.v0.1.json"
-STRATEGY_TOOL_SCHEMA_FILE = "strategy-tool.v0.1.json"
-DIAGNOSTIC_TOOL_SCHEMA_FILE = "diagnostic-tool.v0.1.json"
-BACKEND_DISCOVERY_SCHEMA_FILE = "backend-discovery.v0.1.json"
-RETAINED_RESULT_SCHEMA_FILE = "retained-result.v0.4.json"
-RESULT_TOOL_SCHEMA_FILE = "result-tool.v0.4.json"
-EXECUTION_TOOL_SCHEMA_FILE = "execution-tool.v0.3.json"
-EXECUTION_JOB_SCHEMA_FILE = "execution-job.v0.2.json"
-COMPARE_TOOL_SCHEMA_FILE = "compare-tool.v0.2.json"
 
 
 _PACKAGE = "openreading.schemas"
@@ -767,41 +752,6 @@ def import_job_schema() -> dict[str, Any]:
     return _load(IMPORT_JOB_SCHEMA_FILE)
 
 
-def backend_discovery_schema() -> dict[str, Any]:
-    """Static configured-backend discovery without credential or readiness checks."""
-    return _load(BACKEND_DISCOVERY_SCHEMA_FILE)
-
-
-def route_tool_schema() -> dict[str, Any]:
-    """Return the strict planning-only MCP route contract."""
-    return _load(ROUTE_TOOL_SCHEMA_FILE)
-
-
-def retained_result_schema() -> dict[str, Any]:
-    """Grant-bound normalized results with explicit producer provenance."""
-    return _load(RETAINED_RESULT_SCHEMA_FILE)
-
-
-def result_tool_schema() -> dict[str, Any]:
-    """Complete general result retrieval, local export and lossless fragments."""
-    return _load(RESULT_TOOL_SCHEMA_FILE)
-
-
-def compare_tool_schema() -> dict[str, Any]:
-    """Return the retained-input comparison request and receipt contract."""
-    return _load(COMPARE_TOOL_SCHEMA_FILE)
-
-
-def execution_tool_schema() -> dict[str, Any]:
-    """Return general parse acceptance, job lookup and fixed failure contracts."""
-    return _load(EXECUTION_TOOL_SCHEMA_FILE)
-
-
-def execution_job_schema() -> dict[str, Any]:
-    """Return general execution lifecycle status and closed job lookup requests."""
-    return _load(EXECUTION_JOB_SCHEMA_FILE)
-
-
 def _cli_validate() -> int:
     """Validate every vendored schema, then validate any stored normalized fixture.
 
@@ -811,13 +761,37 @@ def _cli_validate() -> int:
     The raw fixtures at ``tests/fixtures/<slug>/*.json`` are vendor payloads rather than
     response envelopes, so this sweep deliberately leaves them alone.
     """
-    # Discover resources so new families and retained versions cannot miss this gate.
-    validated = []
-    for resource in sorted(resources.files(_PACKAGE).iterdir(), key=lambda item: item.name):
-        if resource.is_file() and resource.name.endswith(".json"):
-            _validator(json.loads(resource.read_text(encoding="utf-8")))
-            validated.append(f"{resource.name} OK")
-    print("schemas: " + ", ".join(validated))
+    # 1. schemas are themselves valid JSON Schema
+    _validator(request_schema())
+    _validator(response_schema())
+    _validator(descriptor_schema())
+    _validator(strategy_config_schema())
+    _validator(comparison_report_schema())
+    _validator(batch_result_schema())
+    _validator(corpus_report_schema())
+    _validator(leaderboard_report_schema())
+    _validator(liveness_report_schema())
+    _validator(step_schema())
+    _validator(journal_schema())
+    for contract in (
+        local_document_schema(),
+        passage_schema(),
+        agent_document_tool_schema(),
+        selection_tool_schema(),
+        document_tool_schema(),
+        import_job_schema(),
+    ):
+        _validator(contract)
+    print(
+        f"schemas: {REQUEST_SCHEMA_FILE} OK, {RESPONSE_SCHEMA_FILE} OK, "
+        f"{DESCRIPTOR_SCHEMA_FILE} OK, {STRATEGY_CONFIG_SCHEMA_FILE} OK, "
+        f"{COMPARISON_REPORT_SCHEMA_FILE} OK, {BATCH_RESULT_SCHEMA_FILE} OK, "
+        f"{CORPUS_REPORT_SCHEMA_FILE} OK, {LEADERBOARD_REPORT_SCHEMA_FILE} OK, "
+        f"{LIVENESS_REPORT_SCHEMA_FILE} OK, {STEP_SCHEMA_FILE} OK, {JOURNAL_SCHEMA_FILE} OK, "
+        f"{LOCAL_DOCUMENT_SCHEMA_FILE} OK, {PASSAGE_SCHEMA_FILE} OK, "
+        f"{AGENT_DOCUMENT_TOOL_SCHEMA_FILE} OK, {SELECTION_TOOL_SCHEMA_FILE} OK, "
+        f"{DOCUMENT_TOOL_SCHEMA_FILE} OK, {IMPORT_JOB_SCHEMA_FILE} OK"
+    )
 
     # 2. any stored normalized-response fixtures validate against the response schema
     root = Path(__file__).resolve().parents[3]  # repo root
@@ -843,16 +817,6 @@ def main(argv: list[str] | None = None) -> int:
         return _cli_validate()
     print("usage: python -m openreading.schemas validate", file=sys.stderr)
     return 2
-
-
-def strategy_tool_schema() -> dict[str, Any]:
-    """Return the authorized strategy inspection contract."""
-    return _load(STRATEGY_TOOL_SCHEMA_FILE)
-
-
-def diagnostic_tool_schema() -> dict[str, Any]:
-    """Return the general discovery, offline readiness and explicit liveness tool contract."""
-    return _load(DIAGNOSTIC_TOOL_SCHEMA_FILE)
 
 
 if __name__ == "__main__":

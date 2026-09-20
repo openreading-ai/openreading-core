@@ -97,8 +97,6 @@ Parse one document. `source` is a path, an http(s) URL, or raw bytes (NOT a requ
     import openreading
     resp = openreading.run("doc.pdf", backend="pymupdf")   # -> dict, the response envelope
     resp = openreading.run("doc.pdf")                      # the policy's chain, else pymupdf
-    resp = openreading.run("doc.pdf", backend="pymupdf",
-                           backend_allowlist=frozenset({"pymupdf"}))
     resp = openreading.run("scan.png", backend="tesseract",
                            pages={"ranges": [{"start": 1, "end": 2}]})
     # CLI: openreading parse doc.pdf --backend pymupdf     (URL sources work; --pages 1 2)
@@ -120,7 +118,6 @@ batch, a single file is single-doc. A file the backend cannot take is a `failed`
 backend's own reason, never a crash; a per-item failure never aborts the batch:
 
     env = openreading.run_batch(["invoices/"], backend="pymupdf", jobs=4)   # -> batch-result dict
-    env = openreading.run_batch(["invoices/"], backend_allowlist=frozenset({"pymupdf"}))
     # CLI: openreading parse invoices/ --backend pymupdf > run.json
     #      openreading parse 'scans/**/*.png' --backend tesseract --jobs 4
     #      openreading parse invoices/ extra/w2.png --no-strategy      # routed per file
@@ -180,8 +177,6 @@ Strategies (optional `openreading.yaml` orchestration):
 Resume a journalled run (needs `OPENREADING_LEDGER`, see `openreading.api`):
 
     resp = openreading.resume("7dbf6b71-adb5-4e90-9188-a184fdba9d05")   # a run id is a UUIDv4
-    resp = openreading.resume(run_id, ledger_root=ledger_dir, config=configuration,
-                              backend_allowlist=frozenset({"pymupdf"}))
     # CLI: openreading resume 7dbf6b71-adb5-4e90-9188-a184fdba9d05      (no other flags)
 
 HTTP server (`[server]` extra; binds 127.0.0.1:8787; NO built-in caller auth unless

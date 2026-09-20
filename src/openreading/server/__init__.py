@@ -88,11 +88,6 @@ Multipart parts with duplicate names fail, while duplicate JSON keys keep Python
 ``/docs`` and ``/openapi.json`` describe both encodings from the vendored request schema.
 Folder traversal belongs on the client, as demonstrated by ``scripts/upload_folder.py``.
 Neither multipart batch intake nor archive extraction is provided by these endpoints.
-
-Known gaps
-----------
-HTTP MCP inside this server remains designed, not built, in ``design/serve-mcp.md``.
-The proposal connects native assistant clients through ngrok while preserving the existing standalone STDIO profiles.
 """
 
 from __future__ import annotations

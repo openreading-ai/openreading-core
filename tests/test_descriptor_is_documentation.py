@@ -110,7 +110,6 @@ def test_no_module_reads_a_vendor_claim_off_a_descriptor(field: str) -> None:
                     "adapters/docling_local/pipeline.py": {"config.ocr", "config.languages"},
                     "artifacts/service.py": {"config.docling.ocr", "config.docling.languages"},
                     "mcp_server/tools.py": {"service.config.docling.ocr"},
-                    "mcp_server/discovery.py": {"config.docling.ocr"},
                 }
                 if ast.unparse(node) in local_setup.get(path.relative_to(SRC).as_posix(), set()):
                     continue

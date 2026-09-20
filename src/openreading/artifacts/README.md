@@ -65,10 +65,6 @@ A sampled memory limit includes the worker and its descendants; sampling permits
 
 ## How it decides
 
-Attributed comparisons check each subject's hashes against its retained input, preventing source claims from being assigned to the wrong subject.
-For example, local artifact hashes are verified against retained source copies, while normalized-response hashes remain producer assertions.
-That check does not establish whether your original file still matches or whether subjects share the same document.
-
 Line-end dehyphenation lets a search for renewal find re- followed by newal on the next line.
 Returned passages and excerpt offsets still refer to the original text, including the hyphen and newline.
 PyMuPDF stores that line break as a space, so `re- newal` in its passages also matches renewal.
@@ -100,16 +96,6 @@ Retrieved text can enter the calling agent's cloud context, even though extracti
 Repeated retrieval can disclose a whole document; bounded individual results do not enforce a cumulative disclosure limit.
 
 ## Reference
-
-General results use `RetainedResults` from `openreading.artifacts.results`, with `ResultProvenance` supplied by trusted processing code.
-Call `publish(kind, payload, provenance)` with `normalized_response` or `comparison_report`, then retain the returned `result_id`.
-Call `load(result_id)` after restart to verify and retrieve the complete normalized content.
-For example, a response containing only typed fields needs no invented citation passage.
-Records use `orr1_` identifiers beneath `results/INPUT_GRANT_SHA256/`, separately from existing `or1_` document directories.
-Request and configuration hashes identify producer assertions; they do not establish independent verification of execution.
-Comparison subjects must map to readable normalized inputs under the same grant, using retained result or existing artifact identifiers.
-Storage verifies those references without rerunning comparison or certifying its conclusions.
-This primitive has no result-size cap or automatic eviction; JSON memory use grows with retained content.
 
 Read `openreading.artifacts.models` for field definitions and `openreading.artifacts.service` for the import lifecycle.
 The [schema guide](../schemas/README.md#retained-local-evidence-contracts) names the three independent wire contracts.

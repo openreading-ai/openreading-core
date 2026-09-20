@@ -2,10 +2,10 @@
 spec_format_version: "0.1"
 title: "Remaining General Agent Surface"
 artifact_type: "prd"
-spec_revision: 4
+spec_revision: 2
 author: "Akshay"
 created_at: "2026-08-03T00:00:00Z"
-updated_at: "2026-09-18T00:00:00Z"
+updated_at: "2026-09-10T00:00:00Z"
 ---
 
 ## Problem
@@ -21,19 +21,13 @@ That hypothesis requires evidence beyond successful local document retrieval and
 ## Product Summary
 
 This revision preserves the unbuilt general surface while separating the implemented local document proof.
-The [MCP guide](../../src/openreading/mcp_server/README.md) documents implemented local evidence tools and scoped route planning.
+The [MCP guide](../../src/openreading/mcp_server/README.md) documents the actual three-tool local profile.
 The [remaining design](../../design/agentic.md) identifies future authorization and triage work.
 Client installation and token measurement belong in the separate `openreading-agent-tools` repository.
 
 ## Scope
 
-Triage, warning registries, and orchestration schemas remain proposed.
-The MCP guide documents implemented authorized discovery, offline readiness and explicit liveness diagnostics.
-The MCP guide documents symmetric, baseline, truth-scored and corpus comparisons of retained inputs.
-Existing core processing capabilities require MCP coverage for public v1. Proposed triage intelligence remains a separate scope decision.
-General parse and strategy execution are documented beside their scoped routing and retained-result contracts in the MCP guide.
-The MCP guide documents implemented strategy inspection separately from executing an authorized strategy.
-Its capability coverage table records operator-only workflows and transport-specific exclusions.
+General parse, batch, route, compare, readiness, triage, warning registries, and orchestration schemas remain proposed.
 Removed compliance policy keys are excluded; future authorization must use mechanisms current core can actually enforce.
 No acceptance criterion below is marked complete by the fixed local document profile.
 

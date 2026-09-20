@@ -17,16 +17,9 @@ An envelope is the schema-valid JSON object returned by a completed operation.
 - `run(source, backend=None, **options)` returns a `response.v0.3` envelope.
 - `run_batch(sources, backend=None, **options)` returns a `batch-result.v0.2` envelope.
 - `route(source, **options)` returns a `RoutePlan` without executing a backend.
-- `resume_run(run_id, *, ledger_root=None, config=None, broker=None, backend_allowlist=None,
-  keep_candidates=False)` returns a response and is exported as `openreading.resume`.
+- `resume_run(run_id)` returns a response and is exported as `openreading.resume`.
 - `build_request`, `run_request`, `prepare_named_backend`, and `materialize_document` support
   the CLI and server through the same lower-level seams.
-
-`run` and `run_batch` accept `backend_allowlist`, independently of the configured default chain.
-For example, `frozenset({"pymupdf"})` excludes every other backend from named, routed, strategy and batch execution.
-The default `None` preserves unscoped execution; an empty set permits no backend.
-Scope is execution configuration, never a request field sent to a provider.
-It does not grant filesystem access, isolate credentials or authorize strategy entrypoints.
 
 `source` accepts a path, an HTTP URL, or raw bytes. It never accepts a request mapping.
 For the returned dict, `status`, `backend`, and `document` are required response fields.
@@ -98,9 +91,6 @@ Resume rebuilds the request from the header and content-addressed plaintext blob
 Stored bytes are verified against each `BlobRef` digest before they are trusted.
 The live configuration and plan must match the recorded header, or `HeaderMismatch` refuses.
 Recorded terminal steps replay without network access. Previously unreached steps execute normally.
-Explicit ledger_root, config and broker let scoped callers avoid ambient discovery and credentials.
-The current backend_allowlist must include every original pinned backend before reading retained input.
-For example, revoking pymupdf refuses a resume whose header pinned pymupdf, even when its steps already completed.
 Passwords and webhook URLs are excluded from the header and cannot be recovered on resume.
 """
 
@@ -431,7 +421,6 @@ def _arm_ledger_unguarded(
     plan_tree: dict[str, Any] | None = None,
     strategy_name: str = "",
     resume: bool = False,
-    ledger_root: Path | None = None,
 ) -> Executor | None:
     """Constructs T1's real `InlineExecutor` when `OPENREADING_LEDGER` is set (a directory path;
     no flag, per L1). Unset ⇒ `None`, and `run_strategy`'s own default (an unarmed InlineExecutor,
@@ -450,7 +439,7 @@ def _arm_ledger_unguarded(
     disagreement (AC-4) — before touching the journal further — and, on a match, arms the resumed
     `InlineExecutor` WITH `pinned_eligible=` sourced from the header, which is what gives AC-14's
     gate teeth."""
-    root = ledger_root if ledger_root is not None else os.environ.get("OPENREADING_LEDGER")
+    root = os.environ.get("OPENREADING_LEDGER")
     if not root:
         return None
     ledger_root = Path(root)
@@ -663,21 +652,6 @@ def prepare_named_backend(
     return adapter, req, ctx
 
 
-def _check_named_backend_scope(backend: str | None, allowed: frozenset[str] | None) -> None:
-    """Refuse a denied named backend before input acquisition, lookup or credential resolution."""
-    if (
-        backend
-        and not backend.startswith(_STRATEGY_PREFIX)
-        and allowed is not None
-        and backend not in allowed
-    ):
-        raise ScopeRefused(
-            "The requested backend is outside the caller's allowed set.",
-            backend_code=backend,
-            constraint="backend_allowlist",
-        )
-
-
 def run_request(
     req: OpenReadingRequest,
     *,
@@ -704,18 +678,17 @@ def run_request(
     time budget instead.
 
     `backend_allowlist` is the CALLER's ceiling on which backends this request may reach (the
-    server's per-token `OPENREADING_API_KEY_SCOPES` entry); None means unscoped.
-    Every dispatch arm enforces it before resolving credentials or executing an adapter:
+    server's per-token `OPENREADING_API_KEY_SCOPES` entry); None means unscoped. Every arm that
+    picks its own backends reads it, which is all of them but the directly-named one:
 
-    - The directly-named arm refuses an excluded id before adapter lookup.
     - Every strategy arm prunes its compiled choices before execution.
     - The resolved-chain arm prunes the router's full chain before execution.
       A caller gating this one at the door can only ever check the router's first pick; the plan
       is chosen plus every fallback, and `execute_plan` walks all of it, so the backends behind
       the first pick were reachable by a request that named any of them and got 403.
 
-    Callers can also refuse at their transport boundary. That earlier check does not replace
-    this execution boundary, because another transport may call this function directly.
+    Only the directly-named arm needs nothing here, because there the id IS the request and the
+    caller can gate it before the call.
 
     Raises KeyError (unknown backend), UnknownStrategyError, PlanExhaustedError, ScopeRefused,
     ScopeRefused (the caller's allow-list leaves the walk or resolved chain nothing to
@@ -723,10 +696,9 @@ def run_request(
     router.driver's poll loop past its deadline/MAX_CONSECUTIVE_FAULTS. The chain path folds this
     into PlanExhaustedError via execute_plan/D-v2-7.2 instead, since it can fall back to the next
     backend; a named backend has no next rung, so it surfaces here under its own type)."""
-    backend = req.backend.id
-    _check_named_backend_scope(backend, backend_allowlist)
     broker = broker or EnvCredentialBroker()
     config = config or RouterConfig()
+    backend = req.backend.id
 
     # `strategy:<name>` runs that strategy. `strategy:none` ignores any configured default.
     strat = (
@@ -863,7 +835,6 @@ def run(
     keep_candidates: bool = False,
     deadline_ms: int | None = None,
     on_run_armed: Callable[[str], None] | None = None,
-    backend_allowlist: frozenset[str] | None = None,
     **request_overrides: Any,
 ) -> dict[str, Any]:
     """Run one document through a named backend, the resolved chain (`backend=None`), or a
@@ -888,17 +859,12 @@ def run(
     Only a strategy-dispatch path arms one, so a named-backend or resolved-chain run
     never fires it. It mirrors the optional-hook shape of `run_batch`'s own `on_progress` and
     `on_preflight`.
-
-    `backend_allowlist` forwards the caller's scope to every dispatch in `run_request`.
-    A denied named backend refuses before source acquisition, configuration loading or dotenv access.
-    For example, an empty set refuses a named pymupdf run even when policy lists pymupdf.
     """
     _refuse_removed_kwargs(request_overrides)
-    if strategy is not None:
-        backend = f"strategy:{strategy}"
-    _check_named_backend_scope(backend, backend_allowlist)
     if env_file:
         load_dotenv(env_file)
+    if strategy is not None:
+        backend = f"strategy:{strategy}"
     # The file is read on every path so a null backend can resolve its configured chain. The
     # strategy half is built only when a strategy could engage through null or `strategy:`.
     loaded = load_config_file(config)  # CLI/Python discover cwd; None uses built-in defaults.
@@ -925,7 +891,6 @@ def run(
         keep_candidates=keep_candidates,
         deadline_ms=deadline_ms,
         on_run_armed=on_run_armed,
-        backend_allowlist=backend_allowlist,
     )
 
 
@@ -968,44 +933,38 @@ def _request_from_header(header: RunHeader, blobs: LocalFsBlobStore) -> OpenRead
     return OpenReadingRequest.model_validate(body)
 
 
-def resume_run(
-    run_id: str,
-    *,
-    ledger_root: Path | None = None,
-    config: str | os.PathLike[str] | dict | LoadedFile | None = None,
-    broker: EnvCredentialBroker | None = None,
-    backend_allowlist: frozenset[str] | None = None,
-    keep_candidates: bool = False,
-) -> dict[str, Any]:
-    """Replay a strategy journal under its original identity and an optional current backend scope.
+def resume_run(run_id: str) -> dict[str, Any]:
+    """`openreading resume <RUN_ID>` (internal/design/ledger.md §10, plan §4.4): re-derive the run's
+    identity from the LIVE openreading.yaml + registry, compare it against the header written at
+    the run's first arm, and — on a match — re-drive the SAME compiled strategy against the
+    EXISTING journal: every step already terminal there replays byte-identical (§4.3, zero network,
+    AC-3); anything genuinely unreached executes for real. No other input is taken — "every option
+    comes from the ledger" (§10) — the original request is reconstructed from the header's own
+    `document`/`slim_request` fields via `_request_from_header`.
 
-    Explicit ledger_root and config bypass their ambient discovery paths independently.
-    For example, config={"version": 1} selects built-in defaults instead of discovering YAML.
-    With no keywords, CLI and library callers retain environment and configuration discovery.
-    The broker supplies credentials for unreached steps; keep_candidates preserves candidate data.
+    A run the SERVER armed for a scoped caller resumes correctly without the caller's allow-list,
+    which is worth stating because the `compile_strategy` call below deliberately passes none. A
+    resume is a CLI/library action with no token concept, so the scope cannot come from the caller;
+    it comes from the ledger, like every other option:
 
-    A current scope must include every originally pinned backend, even for replayed terminal steps.
-    This conservative check runs before document blobs are read or credentials are resolved.
-    Compilation under that original set preserves previously pruned plans without widening dispatch.
-    Unscoped callers retain historical compilation and the original per-dispatch backend ceiling.
-    Strategy entrypoint authorization and filesystem grants belong to the calling surface.
+    - A scope that pruned a named rung changed the compiled tree, so `plan_hash` no longer matches
+      and the resume hard-refuses (`plan_hash` is one of the three identity fields, `_HARD_FIELDS`).
+    - A scope that pruned nothing leaves `plan_hash` matching, and correctly so. The header's
+      `pinned_eligible` still carries the set the original run could dispatch, and
+      `_arm_ledger(resume=True)` arms the resumed executor's per-step gate from THIS header rather
+      than a freshly recomputed one, so a policy edit between the two halves of a run cannot let
+      the resume reach a backend the original could not.
 
-    Header identity changes raise HeaderMismatch. Missing input or recorded output refuses replay.
-    Terminal steps replay; attempted steps without a terminal record may dispatch again.
-    Resume therefore provides neither remote exactly-once execution nor an automatic retry policy.
-    """
-    root = ledger_root if ledger_root is not None else os.environ.get("OPENREADING_LEDGER")
+    Raises `LookupError` when `OPENREADING_LEDGER` is unset or no header exists for `run_id`, or
+    `ledger.header.HeaderMismatch` when the live config/plan/journal-version identity no longer
+    matches the run's original header (AC-4) — the CLI maps each to its own printed refusal."""
+    root = os.environ.get("OPENREADING_LEDGER")
     if not root:
         raise LookupError("OPENREADING_LEDGER is not set, so there is no run to resume from")
     ledger_root = Path(root)
     header = read_header(ledger_root, run_id)
     if header is None:
         raise LookupError(f"no recorded run {run_id!r} under {ledger_root}")
-    original_dispatchable = frozenset(header.pinned_eligible)
-    if backend_allowlist is not None and (
-        not original_dispatchable or not original_dispatchable <= backend_allowlist
-    ):
-        raise ScopeRefused("Recorded backends are outside the current resume scope")
 
     from openreading.strategies import compile_strategy, run_strategy
     from openreading.strategies.loader import build_config
@@ -1013,22 +972,20 @@ def resume_run(
 
     blobs = LocalFsBlobStore(ledger_root / "blobs")
     req = _request_from_header(header, blobs)
-    loaded = load_config_file(config)
+
+    loaded = load_config_file(None)
     strategy_file = build_config(loaded)
     strategy_config = strategy_file.config if strategy_file else StrategyConfig(version=1)
     registry = build_registry()
-    broker = broker if broker is not None else EnvCredentialBroker()
-    req, routing = apply_config(req, loaded.policy if loaded else None, RouterConfig())
-    compiled = compile_strategy(
-        req,
-        header.strategy_name,
-        strategy_config,
-        registry,
-        routing,
-        plain_info=strategy_file.plain_info if strategy_file else None,
-        backend_allowlist=original_dispatchable if backend_allowlist is not None else None,
-    )
-    # Resume requires every original backend to remain authorized and never adds new backends.
+    broker = EnvCredentialBroker()
+    # §10: "no other flags" — a resume takes every option from the ledger and the live file.
+    req, config = apply_config(req, loaded.policy if loaded else None, RouterConfig())
+    compiled = compile_strategy(req, header.strategy_name, strategy_config, registry, config)
+    # The resumed walk may dispatch only what the ORIGINAL run could. `pinned_eligible` records
+    # that set, and re-imposing it as the allow-list is what stops a policy edit between the two
+    # halves of a run from widening it. `compiled.eligible` is left alone: it is the chain an
+    # unnamed request would walk today, reported for the operator, and no node resolves against it.
+    original_dispatchable = frozenset(header.pinned_eligible)
     compiled.backend_allowlist = original_dispatchable
     clock = RealClock()
     executor = _arm_ledger(
@@ -1042,9 +999,8 @@ def resume_run(
         plan_tree=compiled.root,
         strategy_name=header.strategy_name,
         resume=True,
-        ledger_root=ledger_root,
     )
-    assert executor is not None
+    assert executor is not None  # OPENREADING_LEDGER was already confirmed set above
     result = run_strategy(
         compiled,
         req,
@@ -1053,7 +1009,6 @@ def resume_run(
         clock=clock,
         run_id=run_id,
         executor=executor,
-        keep_candidates=keep_candidates,
     )
     result.response.orchestration = result.orchestration
     return result.response.to_schema_dict()
@@ -1076,7 +1031,6 @@ def run_batch(
     keep_candidates: bool = False,
     on_progress=None,
     on_preflight=None,
-    backend_allowlist: frozenset[str] | None = None,
     **request_overrides: Any,
 ) -> dict[str, Any]:
     """Run many documents (a mix of files / dirs / globs / http(s) URLs) as ONE batch, returning a
@@ -1085,11 +1039,6 @@ def run_batch(
     (done, total, item) and `on_preflight` (resolved, backend) are optional CLI hooks.
     `keep_candidates` is a named parameter, not a request override: it is a per-run execution
     choice `run()` consumes, and the native path would otherwise hand it to `build_request`.
-
-    `backend_allowlist` applies to every platform item and the actual native-batch adapter.
-    A denied named backend refuses before intake; routed or strategy refusals remain per-item failures.
-    For example, an empty scope on a routed two-file batch produces two existing-format item errors.
-    The default None preserves unscoped execution and never adds authorization fields to provider requests.
 
     `jobs` is bounds-checked by the shared `batch.runner.bound_jobs` helper (BL-84) BEFORE intake
     is even resolved: `jobs<=0` clamps to 1 (echoed as the corrected value, never the raw input);
@@ -1120,9 +1069,6 @@ def run_batch(
     from openreading.types.batch import BatchRequestEcho
 
     _refuse_removed_kwargs(request_overrides)
-    if strategy is not None:
-        backend = f"{_STRATEGY_PREFIX}{strategy}"
-    _check_named_backend_scope(backend, backend_allowlist)
     jobs = _batch_runner.bound_jobs(jobs, max_jobs=max_jobs)
     # Like `jobs`, the file is an input to the WHOLE batch, so it is read and its `policy:` block
     # checked before intake rather than per item. On the platform path a per-item failure is
@@ -1133,6 +1079,8 @@ def run_batch(
 
     if env_file:
         load_dotenv(env_file)
+    if strategy is not None:
+        backend = f"{_STRATEGY_PREFIX}{strategy}"
     broker = broker or EnvCredentialBroker()
 
     # No `supported_formats`: intake dispatches every source the caller named, and a backend that
@@ -1172,7 +1120,6 @@ def run_batch(
             on_progress=on_progress,
             config_file=loaded,
             deadline_ms=deadline_ms,
-            backend_allowlist=backend_allowlist,
             **request_overrides,
         )
 
@@ -1188,7 +1135,6 @@ def run_batch(
             transport=transport,
             idempotency_key=idem,
             keep_candidates=keep_candidates,
-            backend_allowlist=backend_allowlist,
             **request_overrides,
         )
 
@@ -1240,14 +1186,12 @@ def _run_native(
     on_progress,
     config_file=None,
     deadline_ms: int | None = None,
-    backend_allowlist: frozenset[str] | None = None,
     **request_overrides: Any,
 ) -> dict[str, Any]:
     """Execute a whole batch through an adapter's native submit and normalize methods.
 
     Per-item results map to succeeded or failed items with `transport="native"`. A batch-level
     failure propagates like any `run()` error. Every item shares the same policy and overrides.
-    The actual adapter must belong to backend_allowlist before source materialization or credential resolution.
 
     `deadline_ms` (BL-135): `run_batch`'s own override, forwarded here. None (the default) means
     `build_run_context` falls back to `DEFAULT_NATIVE_BATCH_DEADLINE_MS` rather than the generic,
@@ -1262,13 +1206,6 @@ def _run_native(
     from openreading.batch.runner import item_idempotency_key
     from openreading.types.batch import BatchItem, BatchItemError
 
-    # Check the selected adapter itself, so a future alias cannot bypass the caller's scope.
-    if backend_allowlist is not None and adapter.descriptor.id not in backend_allowlist:
-        raise ScopeRefused(
-            "The native batch backend is outside the caller's allowed set.",
-            backend_code=adapter.descriptor.id,
-            constraint="backend_allowlist",
-        )
     started = time.perf_counter()
     live = list(resolved)
     file_block = config_file.policy if config_file is not None else None

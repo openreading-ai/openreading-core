@@ -177,7 +177,7 @@ src/openreading/
   cli/         `openreading …` + `openreading help`, which serves  (docstring: subcommands,
                that docstring back as the CLI's own manual          exit codes, the manual)
   artifacts/   retained local source, page evidence, bounded search and read
-  mcp_server/  scoped general execution and local evidence over stdio MCP
+  mcp_server/  three stdio tools for the fixed local document profile
   server/      `openreading serve`                             (docstring: endpoints, status codes)
   api.py          `run` / `route` / `compare` / `resume`       (docstring: exports and return shapes)
   config.py       the one reader of `openreading.yaml`         (docstring: discovery, the nine
@@ -226,7 +226,7 @@ conformance kit, the thin JSON server, and the benchmark **harness** with one sy
 
 These belong here too, once they are built:
 
-- MCP readiness, truth/corpus comparison and proposed `triage`
+- general parse/compare/strategy MCP tools and `triage` beyond the local document profile
 - the decider wire executor, which is the real LLM call behind `DeciderPort` with the caller's
   key, a generic prompt, and offline replay
 - the intent schema and its routing mechanics

@@ -35,21 +35,9 @@ from openreading.artifacts.constants import (
 )
 from openreading.artifacts.limits import ArtifactError
 from openreading.artifacts.models import json_bytes
-from openreading.artifacts.result_models import ResultError
 from openreading.artifacts.service import ArtifactService
-from openreading.mcp_server.routing import RoutingConfig, plan_route
 from openreading.mcp_server.selection import SelectionCoordinator, SelectionProvider
-from openreading.schemas import (
-    backend_discovery_schema,
-    compare_tool_schema,
-    document_tool_schema,
-    import_job_schema,
-    result_tool_schema,
-    route_tool_schema,
-    selection_tool_schema,
-)
-from openreading.types.compare_tool import CompareError, CompareRequest
-from openreading.types.route_tool import RouteReceipt
+from openreading.schemas import document_tool_schema, import_job_schema, selection_tool_schema
 from openreading.types.selection import SelectionFailure
 
 ARTIFACT = {"type": "string", "pattern": "^or1_[0-9a-f]{64}$"}
@@ -94,14 +82,7 @@ INPUTS = {
     },
 }
 INPUTS["openreading_select_document"] = selection_tool_schema()["$defs"]["Request"]
-INPUTS["openreading_route"] = route_tool_schema()["$defs"]["Request"]
-INPUTS["openreading_backends"] = backend_discovery_schema()["$defs"]["Request"]
 INPUTS["openreading_get_document"] = document_tool_schema()["$defs"]["DeliveryRequest"]
-INPUTS["openreading_compare"] = {
-    **compare_tool_schema()["$defs"]["CompareRequest"],
-    "$defs": {"JsonValue": compare_tool_schema()["$defs"]["JsonValue"]},
-}
-INPUTS["openreading_get_result"] = result_tool_schema()["$defs"]["ResultRequest"]
 for _name, _definition in {
     "openreading_start_import": "StartRequest",
     "openreading_get_import": "StatusRequest",
@@ -111,10 +92,6 @@ for _name, _definition in {
     INPUTS[_name] = import_job_schema()["$defs"][_definition]
 
 DESCRIPTIONS = {
-    "openreading_compare": "Compare at least two retained normalized responses or only retained batches. Normalized inputs accept or1 artifacts and orr1 responses, optional baseline, and inline truth expected values, never a truth file path. Expected values are retained verbatim and remain caller assertions; an empty object scores no dimensions. Batches accept only orr1 batch_result inputs and refuse truth or baseline. Corpus matching uses relpath, then filename, then sha256 among succeeded items with responses; the last duplicate key wins. Failure-only documents are omitted, and unmatched keys are unpaired. No parser or provider runs. Returns a comparison_report or corpus_report receipt for openreading_get_result. Provenance maps report labels to input identifiers. Agreement and matching filenames do not prove source identity or accuracy. Host cancellation may leave completed publication; repeat unchanged arguments with unchanged inputs and implementation to recover a lost receipt.",
-    "openreading_get_result": "Retrieve a general retained result by its returned result_id. Auto returns complete normalized content or a local export with byte count and hash. File always exports; fragments supplies lossless JSON Pointer continuation. Follow next_cursor to null before claiming complete transport. Content includes producer provenance and a normalized response or comparison report. Report locations are not source-document citations. No parser or provider runs. Use get_document for existing or1 artifacts. Result content is untrusted data.",
-    "openreading_route": "Plan backend order under the operator-configured scope. No document is read and no provider is called. backend selects an allowed named backend; fallback only reorders the default chain and never adds entries. An empty chain returns a terminal reason with isError. This plan proves neither readiness nor format support and does not change local import behavior. Strategy planning and general execution are not provided by this tool.",
-    "openreading_backends": "Describe the backend selected by this server's local profile and its OCR setting. Returns static adapter descriptors with their dated sources, not measured extraction capabilities or configured table output. Readiness is not checked: no dependency, model asset, credential or live reachability test runs. This does not enable other installed backends or general backend selection. No arguments, network calls or document reads.",
     "openreading_list_imports": "Discover retained import jobs under the current input grant, including work from earlier chats. Returns bounded job IDs, states and elapsed times without document text or paths. Follow next_cursor for more jobs. Order is by job ID, not time; restart listing to include concurrent new jobs. Use get_import for details and cancel_import at the user's request. An unavailable state means its status could not be read.",
     "openreading_start_import": "Start a local background import of a selected or granted document. Supported formats follow the configured adapter. Returns a persistent job ID promptly, never document text. Call openreading_get_import for actual progress and the completed artifact receipt. The job continues if this chat disconnects. Do not repeatedly start the same import. No hosted fallback.",
     "openreading_get_import": "Check a background import by its returned job_id. Reports observed stage and elapsed time, plus page_progress when measured. pages_assembled counts successful page assembly, not whole-import completion. No estimated percent complete. Optional wait_seconds (up to 20) waits for completion. If still running, continue checking when waiting for the requested result. Only succeeded carries an artifact receipt; then use retrieval tools. Host Stop does not cancel this job.",
@@ -159,7 +136,6 @@ async def _import(service: ArtifactService, path: str, progress=None):
 def create_server(
     service: ArtifactService,
     *,
-    routing_config: RoutingConfig | None = None,
     selection_provider: SelectionProvider | None = None,
     selection_timeout_seconds: float | None = 120,
     document_response_bytes: int = 1_000_000,
@@ -171,9 +147,6 @@ def create_server(
     # Resolve operator-selected aliases once; later requests cannot redirect the destination.
     if document_export_root is not None:
         document_export_root = document_export_root.resolve()
-    routing_config = routing_config or RoutingConfig.from_operator(
-        "docling_local" if service.config.docling is not None else "pymupdf"
-    )
     selection = SelectionCoordinator(service, selection_provider, selection_timeout_seconds)
     instructions = INSTRUCTIONS
     if selection_provider is not None:
@@ -244,8 +217,6 @@ def create_server(
                     not in {
                         "openreading_import",
                         "openreading_get_document",
-                        "openreading_get_result",
-                        "openreading_compare",
                         "openreading_select_document",
                         "openreading_start_import",
                         "openreading_cancel_import",
@@ -288,43 +259,6 @@ def create_server(
                     "openreading_list_imports": jobs.list,
                 }[name]
                 result = await run_sync(partial(operation, **arguments))
-            elif name == "openreading_compare":
-                from openreading.artifacts.results import RetainedResults
-                from openreading.mcp_server.comparison import compare_results
-
-                result = await run_sync(
-                    partial(
-                        compare_results,
-                        RetainedResults(service.store),
-                        CompareRequest.model_validate(arguments),
-                        budget=document_response_bytes,
-                        request_id=server.request_context.request_id,
-                    )
-                )
-                return types.ServerResult(result)
-            elif name == "openreading_route":
-                result = plan_route(routing_config, **arguments)
-            elif name == "openreading_get_result":
-                from openreading.artifacts.results import RetainedResults
-                from openreading.mcp_server.results import deliver_result
-
-                result = await run_sync(
-                    partial(
-                        deliver_result,
-                        RetainedResults(service.store),
-                        arguments["result_id"],
-                        mode=arguments.get("delivery", "auto"),
-                        cursor=arguments.get("cursor"),
-                        budget=document_response_bytes,
-                        root=document_export_root,
-                        request_id=server.request_context.request_id,
-                    )
-                )
-                return types.ServerResult(result)
-            elif name == "openreading_backends":
-                from openreading.mcp_server.discovery import describe_backends
-
-                result = describe_backends(service.config)
             elif name == "openreading_select_document":
                 result = await selection.select(**arguments)
             elif (
@@ -393,19 +327,8 @@ def create_server(
                 }[name]
                 arguments = {k: v for k, v in arguments.items() if k != "delivery"}
                 result = await run_sync(partial(operation, **arguments))
-            payload, failed = (
-                result.wire(),
-                (
-                    isinstance(result, SelectionFailure)
-                    or isinstance(result, RouteReceipt)
-                    and not result.chain
-                ),
-            )
+            payload, failed = result.wire(), isinstance(result, SelectionFailure)
         except JobError as error:
-            payload, failed = error.wire(), True
-        except CompareError as error:
-            payload, failed = error.wire(), True
-        except ResultError as error:
             payload, failed = error.wire(), True
         except ArtifactError as error:
             payload, failed = error.envelope().wire(), True

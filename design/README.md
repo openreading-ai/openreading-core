@@ -37,12 +37,11 @@ The product spec defines what you get, while the design record defines the propo
 | [`decider-executor.md`](decider-executor.md) | the wire executor behind `DeciderPort` — the real LLM call, the caller's key, offline replay | `decider.product-spec.md` |
 | [`intent.md`](intent.md) | the intent schema and its routing mechanics | `intent.product-spec.md` |
 | [`run-stats-analytics.md`](run-stats-analytics.md) | run stats and routing analytics over the journal | `run-stats-analytics.product-spec.md` |
-| [`serve-mcp.md`](serve-mcp.md) | HTTP MCP inside the operator's running server, with ngrok connection and owner authorization | [`serve-mcp.product-spec.md`](../product/specs/serve-mcp.product-spec.md) |
 
 `product/specs/hallucination-detection.product-spec.md` has product intent and no design record
 yet.
 
-**The four earlier records predate the removal set and have not been re-scoped since.** Every one was written
+**The four records predate the removal set and have not been re-scoped since.** Every one was written
 against a router with three stages, and there is one lookup now. `intent.md` is the worst
 affected: its central lock reads "intent is read only by stage-3 scoring", and there is no stage
 3 to read it. Each file carries a dated warning at its head saying so. Re-scope before

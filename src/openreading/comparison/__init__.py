@@ -239,12 +239,6 @@ no second execution API to maintain. Fan-out exists only as CLI sugar (L1).
 Server: ``POST /v1/compare`` with ``{"responses": [...], "baseline"?, "truth"?}`` returns the
 report. It is pure (L1) and never executes a backend. Fan-out over the JSON API is not offered.
 
-MCP: ``openreading_compare`` accepts retained normalized-response identifiers under an input grant.
-An optional baseline identifies an existing subject or another retained response.
-The tool retains the shared engine report and returns a receipt for ``openreading_get_result``.
-It never executes a backend; ``openreading.mcp_server.comparison`` defines authorization and receipt bounds.
-Truth scoring and corpus comparison are not exposed through this MCP request yet.
-
 Corpus compare -- two batch runs
 --------------------------------
 When EVERY subject is a batch-result envelope (from ``parse <dir>``), ``compare`` switches to
