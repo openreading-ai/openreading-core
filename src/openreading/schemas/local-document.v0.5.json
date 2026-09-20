@@ -1,0 +1,253 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreading.ai/schemas/local-document/v0.5.json",
+  "$defs": {
+    "AcquisitionProvenance": {
+      "additionalProperties": false,
+      "description": "Bind returned values to an upload without asserting the server's configuration.",
+      "properties": {
+        "kind": {
+          "const": "external_response",
+          "default": "external_response",
+          "title": "Kind",
+          "type": "string"
+        },
+        "destination_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Destination Sha256",
+          "type": "string"
+        },
+        "request_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Request Sha256",
+          "type": "string"
+        },
+        "response_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Response Sha256",
+          "type": "string"
+        },
+        "retention_revision": {
+          "const": "1",
+          "default": "1",
+          "title": "Retention Revision",
+          "type": "string"
+        },
+        "extraction_state": {
+          "enum": [
+            "succeeded",
+            "partial"
+          ],
+          "title": "Extraction State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "destination_sha256",
+        "request_sha256",
+        "response_sha256",
+        "extraction_state"
+      ],
+      "title": "AcquisitionProvenance",
+      "type": "object"
+    },
+    "EngineIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "core_commit": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Core Commit"
+        },
+        "core_version": {
+          "title": "Core Version",
+          "type": "string"
+        },
+        "backend_id": {
+          "default": "pymupdf",
+          "minLength": 1,
+          "title": "Backend Id",
+          "type": "string"
+        },
+        "backend_version": {
+          "title": "Backend Version",
+          "type": "string"
+        },
+        "extraction_settings": {
+          "additionalProperties": true,
+          "title": "Extraction Settings",
+          "type": "object"
+        }
+      },
+      "required": [
+        "core_version",
+        "backend_version",
+        "extraction_settings"
+      ],
+      "title": "EngineIdentity",
+      "type": "object"
+    },
+    "FileRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "length": {
+          "minimum": 0,
+          "title": "Length",
+          "type": "integer"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "length",
+        "sha256"
+      ],
+      "title": "FileRecord",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "default": "local-document.v0.4",
+      "enum": [
+        "local-document.v0.3",
+        "local-document.v0.4",
+        "local-document.v0.5"
+      ],
+      "title": "Format",
+      "type": "string"
+    },
+    "artifact_id": {
+      "pattern": "^or1_[0-9a-f]{64}$",
+      "title": "Artifact Id",
+      "type": "string"
+    },
+    "document_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Document Sha256",
+      "type": "string"
+    },
+    "display_name": {
+      "title": "Display Name",
+      "type": "string"
+    },
+    "source_relative_path": {
+      "title": "Source Relative Path",
+      "type": "string"
+    },
+    "source_file": {
+      "default": "source.pdf",
+      "pattern": "^source\\.[a-z0-9]{1,16}$",
+      "title": "Source File",
+      "type": "string"
+    },
+    "input_grant_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Input Grant Sha256",
+      "type": "string"
+    },
+    "page_count": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Page Count"
+    },
+    "passage_count": {
+      "minimum": 0,
+      "title": "Passage Count",
+      "type": "integer"
+    },
+    "engine": {
+      "$ref": "#/$defs/EngineIdentity"
+    },
+    "evidence_format": {
+      "default": "passages.v0.4",
+      "enum": [
+        "passages.v0.3",
+        "passages.v0.4"
+      ],
+      "title": "Evidence Format",
+      "type": "string"
+    },
+    "created_at": {
+      "title": "Created At",
+      "type": "string"
+    },
+    "page_origins": {
+      "additionalProperties": {
+        "enum": [
+          "native",
+          "ocr",
+          "mixed",
+          "unknown",
+          "none"
+        ],
+        "type": "string"
+      },
+      "title": "Page Origins",
+      "type": "object"
+    },
+    "files": {
+      "additionalProperties": {
+        "$ref": "#/$defs/FileRecord"
+      },
+      "title": "Files",
+      "type": "object"
+    },
+    "warnings": {
+      "items": {
+        "enum": [
+          "source_changed",
+          "parser_warnings_present",
+          "no_matches"
+        ],
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    },
+    "acquisition": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AcquisitionProvenance"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "artifact_id",
+    "document_sha256",
+    "display_name",
+    "source_relative_path",
+    "input_grant_sha256",
+    "passage_count",
+    "engine",
+    "created_at",
+    "files"
+  ],
+  "title": "ArtifactManifest",
+  "type": "object"
+}

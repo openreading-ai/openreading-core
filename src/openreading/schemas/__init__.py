@@ -541,12 +541,12 @@ LIVENESS_REPORT_SCHEMA_FILE = "liveness-report.v0.1.json"
 # (StepRequest/StepResult) and the per-line shape of a run's JSONL journal. Two new families.
 STEP_SCHEMA_FILE = "step.v0.1.json"
 JOURNAL_SCHEMA_FILE = "journal.v0.1.json"
-LOCAL_DOCUMENT_SCHEMA_FILE = "local-document.v0.4.json"
+LOCAL_DOCUMENT_SCHEMA_FILE = "local-document.v0.5.json"
 PASSAGE_SCHEMA_FILE = "passage.v0.4.json"
 SELECTION_TOOL_SCHEMA_FILE = "selection-tool.v0.2.json"
-AGENT_DOCUMENT_TOOL_SCHEMA_FILE = "agent-document-tool.v0.4.json"
+AGENT_DOCUMENT_TOOL_SCHEMA_FILE = "agent-document-tool.v0.5.json"
 DOCUMENT_TOOL_SCHEMA_FILE = "document-tool.v0.4.json"
-IMPORT_JOB_SCHEMA_FILE = "import-job.v0.3.json"
+IMPORT_JOB_SCHEMA_FILE = "import-job.v0.4.json"
 
 
 _PACKAGE = "openreading.schemas"

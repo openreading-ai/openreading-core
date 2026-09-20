@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased external response retention
+
+- Retain validated normalized responses with exact uploaded-source and acquisition bindings, without parsing again.
+  Preserve partial status, explicit nulls, additive envelope fields, and structured-only results without invented passages.
+- Add local-document v0.5, agent-document-tool v0.5, and import-job v0.4 contracts.
+  Keep preceding schemas byte-identical and retain existing local artifact readers.
+
 ## Unreleased local MCP review fixes
 
 - Mark import status and listing tools as potentially writing interrupted-job recovery.

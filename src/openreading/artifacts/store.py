@@ -27,6 +27,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+import jsonschema
 from pydantic import ValidationError
 
 from openreading.artifacts.intake import InputGrant, ancestor_identities, directory
@@ -178,7 +179,11 @@ class Store:
             raw = json.loads(safe_read(root / "manifest.json", self.config.limits.extraction_bytes))
             if not isinstance(raw, dict):
                 raise ValueError("Manifest is not an object")
-            if raw.get("format") not in {"local-document.v0.3", "local-document.v0.4"}:
+            if raw.get("format") not in {
+                "local-document.v0.3",
+                "local-document.v0.4",
+                "local-document.v0.5",
+            }:
                 raise ArtifactError("artifact_version_unsupported")
             manifest = ArtifactManifest.model_validate(raw)
             if (
@@ -188,6 +193,7 @@ class Store:
                     manifest.engine,
                     version=manifest.format.rsplit("v", 1)[1],
                     source_file=manifest.source_file,
+                    acquisition=manifest.acquisition,
                 )
                 != identifier
                 or manifest.input_grant_sha256 != self.grant
@@ -209,6 +215,12 @@ class Store:
             data = json.loads(contents)
             del contents
             response = NormalizedResponse.model_validate(data)
+            if manifest.acquisition is not None:
+                from openreading.artifacts.retention import validate_external_response
+
+                validate_external_response(data)
+                if response.status.state.value != manifest.acquisition.extraction_state:
+                    raise ValueError("Acquisition status differs from the response")
             if not include_response:
                 data = {}
             expected = iter_passages(response, manifest.page_origins)
@@ -233,5 +245,12 @@ class Store:
             if error.code == "artifact_version_unsupported":
                 raise
             raise ArtifactError("artifact_corrupt") from None
-        except (OSError, ValueError, ValidationError, TypeError, KeyError):
+        except (
+            OSError,
+            ValueError,
+            ValidationError,
+            TypeError,
+            KeyError,
+            jsonschema.ValidationError,
+        ):
             raise ArtifactError("artifact_corrupt") from None

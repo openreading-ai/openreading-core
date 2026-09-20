@@ -591,6 +591,9 @@ entry naming it, so the warning reaches you before the removal does.
 | Schema | Owner | Result |
 | --- | --- | --- |
 | `local-document.v0.4.json` | `openreading.artifacts.models` | Source hash, engine identity, and retained file inventory. |
+| `local-document.v0.5.json` | `openreading.artifacts.retention` | External-response acquisition binding with zero-passage structured results and unchanged v0.4 passage geometry. |
+| `agent-document-tool.v0.5.json` | `openreading.artifacts.models` | External import receipts disclose partial extraction and support complete retrieval without textual passages. |
+| `import-job.v0.4.json` | `openreading.types.import_job` | Background status accepts external-response receipts while preserving earlier receipt shapes. |
 | `passage.v0.4.json` | `openreading.artifacts.passages` | Exact spans with physical pages or normalized JSON locations. |
 | `selection-tool.v0.1.json` | Historical selection | Frozen single-file receipts and empty selection input. |
 | `selection-tool.v0.2.json` | `openreading.mcp_server.selection` | Legacy receipts plus paginated snapshots, skipped-entry counts and cursor continuation. |

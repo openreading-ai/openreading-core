@@ -30,6 +30,16 @@ store.safe_read (bounded bytes). worker.SETTINGS and worker.main are supported w
 These module-qualified symbols form the integration surface, without eager package imports.
 For example, importing limits on an unsupported platform still permits a useful startup error.
 
+Import retain_response from openreading.artifacts.retention to retain an externally acquired
+normalized result. Supply the upload's source hash, destination digest, and request digest.
+For example, a launcher can retain an HTTP response after sending a selected source snapshot.
+The operation returns an ImportReceipt and never uploads, routes, or reparses the document.
+It copies the granted source and verifies its hash before committing a v0.5 artifact.
+The manifest's engine describes the local retaining runtime, not the remote server version.
+Acquisition records the returned extraction state and preserves partial results explicitly.
+Structured-only results contain zero passages and direct callers to get_document.
+No page origins are fabricated. Local v0.3 and v0.4 artifacts remain readable unchanged.
+
 The ledger records execution history for replay and resume. Artifacts retain retrieval evidence
 under an input grant, verify every retained file, and commit the complete document atomically.
 Reusing ledger blobs would bypass that grant and integrity boundary during later evidence reads.
@@ -41,7 +51,7 @@ in openreading.artifacts.models and the vendored v0.4 artifact schemas. Legacy v
 Background imports
 ------------------
 ImportJobs in openreading.artifacts.jobs exposes start(path), get(job_id), and cancel(job_id).
-Each returns an ImportJob with wire() data defined by import-job.v0.3.json. Older persisted job records remain readable.
+Each returns an ImportJob with wire() data defined by import-job.v0.4.json. Older persisted job records remain readable.
 Detached supervisors preserve work after client disconnect and publish existing artifact receipts.
 Frozen launchers dispatch --internal-artifact-job to jobs.main after verifying their inventory.
 The supervisor retains its own profile and closes its parser before a terminal status is written.

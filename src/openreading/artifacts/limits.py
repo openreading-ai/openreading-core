@@ -37,7 +37,7 @@ MESSAGES: dict[ErrorCode, str] = {
     "timeout": "The import exceeded its time limit.",
     "cancelled": "The import was cancelled.",
     "storage_limit": "Local storage could not retain this document. Check free disk space and any configured storage limit.",
-    "parse_failed": "The local parser could not complete this document.",
+    "parse_failed": "Document processing could not complete.",
     "artifact_not_found": "This artifact is unavailable under the current input grant.",
     "artifact_corrupt": "The retained artifact failed integrity validation. Import the source again after removing it.",
     "artifact_version_unsupported": "This artifact format is not supported by this runtime.",

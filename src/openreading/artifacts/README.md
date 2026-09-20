@@ -65,6 +65,10 @@ A sampled memory limit includes the worker and its descendants; sampling permits
 
 ## How it decides
 
+External results can be retained through `openreading.artifacts.retention.retain_response` without invoking a local parser.
+The upload's source hash binds the result to the selected bytes, preventing an edited file from inheriting earlier evidence.
+Structured-only results remain retrievable through `get_document`; they produce no invented source quotes.
+
 Line-end dehyphenation lets a search for renewal find re- followed by newal on the next line.
 Returned passages and excerpt offsets still refer to the original text, including the hyphen and newline.
 PyMuPDF stores that line break as a space, so `re- newal` in its passages also matches renewal.

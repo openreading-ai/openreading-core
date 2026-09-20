@@ -38,7 +38,7 @@ class PageProgress(BaseModel):
 class ImportJob(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    schema_version: Literal["0.2", "0.3"] = "0.3"
+    schema_version: Literal["0.2", "0.3", "0.4"] = "0.3"
     job_id: str = Field(pattern=r"^j1_[0-9a-f]{32}$")
     state: JobState
     stage: JobStage

@@ -469,6 +469,7 @@ class ArtifactService:
 
     def _receipt(self, manifest: ArtifactManifest, *, reused: bool) -> ImportReceipt:
         result = ImportReceipt(
+            schema_version="0.5" if manifest.acquisition is not None else "0.4",
             artifact_id=manifest.artifact_id,
             display_name=manifest.display_name,
             document_sha256=manifest.document_sha256,
@@ -476,6 +477,10 @@ class ArtifactService:
             passage_count=manifest.passage_count,
             reused=reused,
             warnings=manifest.warnings,
+            extraction_state=manifest.acquisition.extraction_state
+            if manifest.acquisition
+            else None,
+            next_action="search" if manifest.passage_count else "get_document",
         )
         if len(json_bytes(result.wire())) > self.config.limits.import_bytes:
             raise ArtifactError("response_too_large")
