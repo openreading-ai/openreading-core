@@ -3,6 +3,8 @@
 The source descriptor stays open while bytes are copied and hashed into private staging.
 This avoids the check-then-reopen race of resolving a pathname before parser dispatch.
 Concurrent source edits produce a warning when descriptor metadata changes during copying.
+Hard links inside the grant remain regular files, even when another name exists outside it.
+The grant constrains path traversal, not inode origin or links created by the same OS user.
 """
 
 from __future__ import annotations

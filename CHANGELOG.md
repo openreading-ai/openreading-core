@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased local MCP review fixes
+
+- Mark import status and listing tools as potentially writing interrupted-job recovery.
+- Ignore default export symlinks during quota accounting while retaining artifact and export access checks.
+  Regular exports still consume storage quota and require manual removal when no longer needed.
+- Validate every vendored schema, including historical versions, without changing any schema bytes.
+- Pin source-edit warnings and cross-grant artifact rejection with regression tests.
+
 ## Unreleased adapter-format evidence
 
 - Route local inputs through the formats claimed by the configured Docling adapter.

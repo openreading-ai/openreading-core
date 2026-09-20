@@ -14,6 +14,8 @@ Jobs are not retried automatically, including after an interrupted supervisor. P
 identity includes its creation time so a reused PID cannot appear to own an older job.
 Abrupt OS termination can leave staging; the next importer sweeps it under the store lock.
 Listing discovers retained job IDs after reconnecting, including completed or unreadable records.
+Status reads persist failed/stopped recovery when a nonterminal job's supervisor has exited.
+Listing performs the same recovery for each returned job, so neither operation is read-only.
 Pages follow job-ID order, not creation order. Concurrent new jobs can sort before a cursor;
 restart listing to discover them. Each reply contains at most fifty summaries without source paths.
 Uninstalling a client has no cancellation hook here. Cancel jobs before uninstalling and

@@ -9,6 +9,8 @@ An accepted result may enter context or become a host-created file. Core guarant
 An oversized result becomes a local export receipt, never truncated normalized content.
 Content already larger than the budget skips inline construction and its additional copies.
 The server resolves trusted export directory aliases once before accepting requests.
+Default exports under artifact_root/exports consume the configured storage quota and persist without eviction.
+Stop clients before removing unwanted export files; deletion leaves the retained document evidence intact.
 No network transfer, host filesystem staging, or code execution occurs in this module.
 """
 

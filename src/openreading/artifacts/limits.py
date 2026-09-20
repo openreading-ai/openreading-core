@@ -2,6 +2,8 @@
 
 The historical v1 profile permits one import per store, 25 MiB input, 100 physical pages, 64 MiB
 serialized extraction, 512 MiB retained storage, and 45 seconds per import.
+That storage quota includes default exports under artifact_root/exports, which persist without eviction.
+Stop clients before manually removing unwanted exports to reclaim space for later imports.
 Import, search, and read payloads permit 4096, 8192, and 16384 UTF-8 bytes respectively.
 Full-document continuation payloads default to 65536 UTF-8 bytes, with no silent truncation.
 These caps do not promise a hard native-parser memory ceiling or an operating-system sandbox.

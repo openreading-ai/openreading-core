@@ -220,6 +220,8 @@ def create_server(
                         "openreading_select_document",
                         "openreading_start_import",
                         "openreading_cancel_import",
+                        "openreading_get_import",
+                        "openreading_list_imports",
                     },
                     destructiveHint=False,
                     idempotentHint=name

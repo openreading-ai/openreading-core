@@ -224,7 +224,8 @@ async def test_mcp_job_contract_survives_transport_close(service):
         tools = {tool.name: tool for tool in (await session.list_tools()).tools}
         assert not tools["openreading_start_import"].annotations.readOnlyHint
         assert not tools["openreading_start_import"].annotations.idempotentHint
-        assert tools["openreading_get_import"].annotations.readOnlyHint
+        assert not tools["openreading_get_import"].annotations.readOnlyHint
+        assert not tools["openreading_list_imports"].annotations.readOnlyHint
         start = await session.call_tool("openreading_start_import", {"path": "test.pdf"})
         assert not start.isError
         job = json.loads(start.content[0].text)
@@ -280,7 +281,8 @@ def test_cancel_during_real_conversion_reaps_parser_before_terminal_state(servic
         expanded.close()
 
 
-def test_dead_supervisor_does_not_leave_status_running_forever(service):
+@pytest.mark.parametrize("lookup", ["get", "list"])
+def test_dead_supervisor_does_not_leave_status_running_forever(service, lookup):
     import signal
 
     import psutil
@@ -293,9 +295,14 @@ def test_dead_supervisor_does_not_leave_status_running_forever(service):
         assert process.create_time() == owner["created"]
         process.send_signal(signal.SIGKILL)
         process.wait(timeout=5)
-        result = terminal(jobs, job.job_id)
+        status = jobs.root / job.job_id / "status.json"
+        before = status.read_bytes()
+        result = jobs.get(job.job_id) if lookup == "get" else jobs.list().jobs[0]
         assert result.state == "failed"
-        assert result.error.code == "parse_failed"
+        assert status.read_bytes() != before
+        assert json.loads(status.read_bytes())["error"]["code"] == "parse_failed"
+        assert json.loads(status.read_bytes())["state"] == "failed"
+        assert json.loads(status.read_bytes())["stage"] == "stopped"
 
 
 @pytest.mark.asyncio

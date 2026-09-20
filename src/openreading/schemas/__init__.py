@@ -761,37 +761,25 @@ def _cli_validate() -> int:
     The raw fixtures at ``tests/fixtures/<slug>/*.json`` are vendor payloads rather than
     response envelopes, so this sweep deliberately leaves them alone.
     """
-    # 1. schemas are themselves valid JSON Schema
-    _validator(request_schema())
-    _validator(response_schema())
-    _validator(descriptor_schema())
-    _validator(strategy_config_schema())
-    _validator(comparison_report_schema())
-    _validator(batch_result_schema())
-    _validator(corpus_report_schema())
-    _validator(leaderboard_report_schema())
-    _validator(liveness_report_schema())
-    _validator(step_schema())
-    _validator(journal_schema())
-    for contract in (
-        local_document_schema(),
-        passage_schema(),
-        agent_document_tool_schema(),
-        selection_tool_schema(),
-        document_tool_schema(),
-        import_job_schema(),
-    ):
-        _validator(contract)
-    print(
-        f"schemas: {REQUEST_SCHEMA_FILE} OK, {RESPONSE_SCHEMA_FILE} OK, "
-        f"{DESCRIPTOR_SCHEMA_FILE} OK, {STRATEGY_CONFIG_SCHEMA_FILE} OK, "
-        f"{COMPARISON_REPORT_SCHEMA_FILE} OK, {BATCH_RESULT_SCHEMA_FILE} OK, "
-        f"{CORPUS_REPORT_SCHEMA_FILE} OK, {LEADERBOARD_REPORT_SCHEMA_FILE} OK, "
-        f"{LIVENESS_REPORT_SCHEMA_FILE} OK, {STEP_SCHEMA_FILE} OK, {JOURNAL_SCHEMA_FILE} OK, "
-        f"{LOCAL_DOCUMENT_SCHEMA_FILE} OK, {PASSAGE_SCHEMA_FILE} OK, "
-        f"{AGENT_DOCUMENT_TOOL_SCHEMA_FILE} OK, {SELECTION_TOOL_SCHEMA_FILE} OK, "
-        f"{DOCUMENT_TOOL_SCHEMA_FILE} OK, {IMPORT_JOB_SCHEMA_FILE} OK"
-    )
+    from jsonschema.exceptions import SchemaError
+    from jsonschema.validators import validator_for
+
+    schema_failures = 0
+    checked = []
+    # Discover files so historical contracts and new families cannot bypass the gate.
+    for path in sorted(resources.files(_PACKAGE).iterdir(), key=lambda item: item.name):
+        if not path.is_file() or not path.name.endswith(".json"):
+            continue
+        try:
+            with path.open("r", encoding="utf-8") as stream:
+                contract = json.load(stream)
+            validator_for(contract).check_schema(contract)
+        except (OSError, ValueError, SchemaError) as exc:
+            schema_failures += 1
+            print(f"SCHEMA INVALID: {path.name}\n    {exc}", file=sys.stderr)
+        else:
+            checked.append(f"{path.name} OK")
+    print("schemas: " + ", ".join(checked))
 
     # 2. any stored normalized-response fixtures validate against the response schema
     root = Path(__file__).resolve().parents[3]  # repo root
@@ -805,12 +793,12 @@ def _cli_validate() -> int:
             failures += 1
             print(f"FIXTURE INVALID: {f.relative_to(root)}\n    {exc}", file=sys.stderr)
     print(f"fixtures: {len(fixtures)} checked, {failures} invalid")
-    return 1 if failures else 0
+    return 1 if schema_failures or failures else 0
 
 
 def main(argv: list[str] | None = None) -> int:
     """Entry point for ``python -m openreading.schemas validate``. Exit 0 when every schema and
-    fixture validates, 1 when a fixture fails, 2 on a usage error.
+    fixture validates, 1 when a schema or fixture fails, 2 on a usage error.
     """
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] == "validate":

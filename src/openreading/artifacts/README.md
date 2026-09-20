@@ -86,6 +86,8 @@ A completed job returns the ordinary artifact receipt; disconnecting the host le
 Optional Docling limits and historical PyMuPDF defaults live in `openreading.artifacts.limits`, including the source, extraction, storage, deadline, and payload caps.
 Cancellation terminates the parser process before staging cleanup and lock release complete.
 Stop all clients using this store before manual cleanup; no MCP tool deletes retained evidence.
+Default exports under `--artifact-root/exports` count toward the storage quota and persist without eviction.
+Remove unwanted export files to reclaim space; retained source documents and evidence remain available.
 Under your configured `--artifact-root`, each document lives at `documents/INPUT_GRANT_SHA256/ARTIFACT_ID/`.
 Delete that complete document directory to repair a corrupt artifact, then import the source again.
 Delete the artifact-root directory to remove all retained documents, including artifacts from older grants.

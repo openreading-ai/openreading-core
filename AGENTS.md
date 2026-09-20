@@ -177,7 +177,7 @@ src/openreading/
   cli/         `openreading …` + `openreading help`, which serves  (docstring: subcommands,
                that docstring back as the CLI's own manual          exit codes, the manual)
   artifacts/   retained local source, page evidence, bounded search and read
-  mcp_server/  three stdio tools for the fixed local document profile
+  mcp_server/  nine stdio tools for the fixed local document profile
   server/      `openreading serve`                             (docstring: endpoints, status codes)
   api.py          `run` / `route` / `compare` / `resume`       (docstring: exports and return shapes)
   config.py       the one reader of `openreading.yaml`         (docstring: discovery, the nine

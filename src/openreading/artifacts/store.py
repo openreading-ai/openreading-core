@@ -3,6 +3,9 @@
 One advisory lock serializes imports across processes. Reads only observe committed
 artifact directories. Hashes detect corruption, not malicious rewriting by the same OS user.
 No eviction occurs automatically. Administrators remove retained directories to reclaim space.
+Storage accounting includes regular files throughout the root, including completed exports.
+Links within the default exports directory are ignored by accounting, never followed.
+Managed artifact storage still refuses links, and export access validates its own destination.
 The private worker directory is the working directory of parser processes, which keeps
 their relative writes inside the artifact root instead of wherever a client started the server.
 Passages are decoded and checked against the normalized response one line at a time.
@@ -120,10 +123,15 @@ class Store:
 
     def size(self) -> int:
         total = 0
+        exports = self.config.artifact_root / "exports"
         for root, dirs, files in os.walk(self.config.artifact_root, followlinks=False):
             for name in dirs + files:
-                metadata = (Path(root) / name).lstat()
+                path = Path(root) / name
+                metadata = path.lstat()
                 if stat.S_ISLNK(metadata.st_mode):
+                    # Export links must not poison unrelated imports or charge their targets.
+                    if path == exports or path.is_relative_to(exports):
+                        continue
                     raise ArtifactError("artifact_corrupt")
                 if stat.S_ISREG(metadata.st_mode):
                     total += metadata.st_size

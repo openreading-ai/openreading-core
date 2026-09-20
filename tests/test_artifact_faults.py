@@ -137,6 +137,34 @@ def test_source_growth_is_capped_before_extra_write(tmp_path, monkeypatch):
     assert (tmp_path / "copy").stat().st_size == 0
 
 
+def test_source_edit_during_copy_is_reported_in_receipt_search_and_read(service, monkeypatch):
+    from openreading.artifacts import service as module
+
+    path = service.config.input_root / "test.pdf"
+    pdf(path)
+
+    def editing_copy(*args, check, **kwargs):
+        edited = False
+
+        def edit_once():
+            nonlocal edited
+            check()
+            if not edited:
+                edited = True
+                with path.open("ab") as stream:
+                    stream.write(b"\n% concurrent edit\n")
+
+        return copy_source(*args, check=edit_once, **kwargs)
+
+    monkeypatch.setattr(module, "copy_source", editing_copy)
+    receipt = service.import_document("test.pdf")
+    assert "source_changed" in receipt.warnings
+    search = service.search(receipt.artifact_id, "notice")
+    assert "source_changed" in search.warnings
+    read = service.read(receipt.artifact_id, [search.hits[0].evidence_id])
+    assert "source_changed" in read.warnings
+
+
 def test_passage_invariants_cannot_invent_provenance():
     values = dict(
         evidence_id="p0001-b0000-s0000",

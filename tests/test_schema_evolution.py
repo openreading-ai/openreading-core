@@ -171,9 +171,6 @@ _UNRELEASED = {
     # T1 (not yet byte-frozen):
     "step.v0.1.json",
     "journal.v0.1.json",
-    "local-document.v0.1.json",
-    "passage.v0.1.json",
-    "agent-document-tool.v0.1.json",
     # Ledger T4a (AC-8) — additive descriptor bump carrying the optional `protocol_version`
     # integer (not yet byte-frozen):
 }
@@ -191,6 +188,7 @@ def test_released_schema_files_are_byte_frozen(name, digest):
 def test_every_versioned_schema_file_is_either_frozen_or_unreleased():
     """No released version can slip in unpinned: every vendored vX.Y.json is either in the frozen
     set or explicitly on the unreleased list."""
+    assert not (_FROZEN_RELEASED.keys() & _UNRELEASED)
     for p in SCHEMA_DIR.glob("*.v*.json"):
         assert p.name in _FROZEN_RELEASED or p.name in _UNRELEASED, (
             f"{p.name} is neither frozen-released nor listed unreleased — pin it or list it."
