@@ -8,6 +8,7 @@
   Keep preceding schemas byte-identical and retain existing local artifact readers.
 - Add trusted launcher hooks for detached external imports, with explicit network annotations and transfer stages.
   Refuse ordinary child dispatch for external jobs and never retry a busy import after upload begins.
+- Let external retention configure optional limits without constructing a local parser profile.
 
 ## Unreleased local MCP review fixes
 

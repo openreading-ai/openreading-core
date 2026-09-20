@@ -163,3 +163,23 @@ def test_acquisition_tampering_is_detected(retention):
     path.write_text(json.dumps(value))
     with pytest.raises(ArtifactError, match="artifact_corrupt"):
         retention.load_artifact(receipt.artifact_id)
+
+
+def test_external_retention_limits_do_not_require_a_local_parser(tmp_path):
+    from openreading.artifacts import limits
+
+    assert hasattr(limits, "ExternalLimits"), "External retention needs explicit optional limits"
+    configured = limits.ExternalLimits(source_bytes=100 * 1024**2)
+    config = limits.ProfileConfig(tmp_path / "input", tmp_path / "artifacts", configured)
+    assert config.docling is None
+    assert configured.deadline_seconds is None
+    assert configured.store_bytes is None
+    assert configured.pages is None
+    assert limits.ProfileLimits().deadline_seconds == 45
+    for field in ("source_bytes", "extraction_bytes", "store_bytes", "pages"):
+        for value in (0, -1, True, 1.5):
+            with pytest.raises(ValueError):
+                limits.ExternalLimits(**{field: value})
+    for value in (0, -1, True, float("inf")):
+        with pytest.raises(ValueError):
+            limits.ExternalLimits(deadline_seconds=value)
