@@ -183,3 +183,11 @@ def test_external_retention_limits_do_not_require_a_local_parser(tmp_path):
     for value in (0, -1, True, float("inf")):
         with pytest.raises(ValueError):
             limits.ExternalLimits(deadline_seconds=value)
+
+
+def test_external_retention_respects_reported_page_limit(retention):
+    from openreading.artifacts.limits import ExternalLimits
+
+    retention.config = replace(retention.config, limits=ExternalLimits(pages=1))
+    with pytest.raises(ArtifactError, match="input_too_large"):
+        retain(retention, rich_response())

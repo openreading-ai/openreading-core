@@ -11,6 +11,8 @@ passages; retrieval returns their values without inventing quotes, pages, or mea
 Decoded values are preserved, including explicit nulls and additive envelope fields.
 The caller owns bounded JSON decoding, duplicate-key rejection, transport, and credentials.
 This module validates values against the vendored response contract before publication.
+Page limits compare the response's reported count. Missing counts remain unmeasured;
+retention does not reopen a parser to independently count physical source pages.
 """
 
 from __future__ import annotations
@@ -85,6 +87,13 @@ def retain_response(
     cap = service.config.limits.extraction_bytes
     if cap is not None and len(encoded) > cap:
         raise ArtifactError("extraction_too_large")
+    pages = service.config.limits.pages
+    if (
+        pages is not None
+        and parsed.document.page_count is not None
+        and parsed.document.page_count > pages
+    ):
+        raise ArtifactError("input_too_large")
     suffix = Path(path).suffix.lower()
     source_file = "source" + (suffix if re.fullmatch(r"\.[a-z0-9]{1,16}", suffix) else ".bin")
     with service.store.source(path) as fd, service.store.import_lock():
