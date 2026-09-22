@@ -169,7 +169,9 @@ def test_status_retains_progress_and_reads_legacy_jobs(tmp_path, monkeypatch, ou
             return receipt
 
         monkeypatch.setattr(service, "import_document", parse)
-        monkeypatch.setattr(jobs, "ArtifactService", lambda config: service)
+        monkeypatch.setattr(
+            "openreading.artifacts.local_jobs.local_service", lambda request: service
+        )
         assert jobs.run(root) == 0
         assert seen[0]["state"] == "running" and seen[0]["page_progress"]["pages_assembled"] == 1
         if outcome == "succeeded":

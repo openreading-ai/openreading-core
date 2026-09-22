@@ -47,7 +47,7 @@ import anyio
 from anyio.lowlevel import checkpoint
 from anyio.to_thread import run_sync
 
-from openreading.artifacts.service import ArtifactService
+from openreading.artifacts.retained import RetainedService as ArtifactService
 from openreading.mcp_server.selection_pages import SelectionPages
 from openreading.types.selection import (
     SelectionBatch,

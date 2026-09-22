@@ -488,19 +488,61 @@ from __future__ import annotations
 
 import json
 import sys
-from functools import cache
 from importlib import resources
 from pathlib import Path
 from typing import Any
+
+from openreading.schemas._validation import _PACKAGE, _load, _validator
+from openreading.schemas.client import (
+    AGENT_DOCUMENT_TOOL_SCHEMA_FILE as AGENT_DOCUMENT_TOOL_SCHEMA_FILE,
+)
+from openreading.schemas.client import (
+    DOCUMENT_TOOL_SCHEMA_FILE as DOCUMENT_TOOL_SCHEMA_FILE,
+)
+from openreading.schemas.client import (
+    IMPORT_JOB_SCHEMA_FILE as IMPORT_JOB_SCHEMA_FILE,
+)
+from openreading.schemas.client import (
+    LOCAL_DOCUMENT_SCHEMA_FILE as LOCAL_DOCUMENT_SCHEMA_FILE,
+)
+from openreading.schemas.client import (
+    PASSAGE_SCHEMA_FILE as PASSAGE_SCHEMA_FILE,
+)
+from openreading.schemas.client import (
+    RESPONSE_SCHEMA_FILE as RESPONSE_SCHEMA_FILE,
+)
+from openreading.schemas.client import (
+    SELECTION_TOOL_SCHEMA_FILE as SELECTION_TOOL_SCHEMA_FILE,
+)
+from openreading.schemas.client import (
+    agent_document_tool_schema as agent_document_tool_schema,
+)
+from openreading.schemas.client import (
+    document_tool_schema as document_tool_schema,
+)
+from openreading.schemas.client import (
+    import_job_schema as import_job_schema,
+)
+from openreading.schemas.client import (
+    local_document_schema as local_document_schema,
+)
+from openreading.schemas.client import (
+    passage_schema as passage_schema,
+)
+from openreading.schemas.client import (
+    response_schema as response_schema,
+)
+from openreading.schemas.client import (
+    selection_tool_schema as selection_tool_schema,
+)
+from openreading.schemas.client import (
+    validate_response as validate_response,
+)
 
 # v0.2 (Security review, M12): additionalProperties:false now closes every nested object node,
 # not only the top level, matching the pydantic mirrors' extra="forbid" — additive+Changed over
 # v0.1 (§6/§8; see "Schema version history" above for the full rationale).
 REQUEST_SCHEMA_FILE = "request.v0.3.json"
-# v0.3 (Canon): named channel invariants (C1-C11 in $defs descriptions), confidence bounds [0,1]
-# on TableCell/Page/doc_type/Citation, + document.confidence / channel_provenance / schema_url,
-# and the const-fix for the v0.1/0.2 version-identity drift. Additive+Changed over v0.2 (§6/§8).
-RESPONSE_SCHEMA_FILE = "response.v0.3.json"
 # v0.3 adds the optional output.block_granularity hint (§4.3); additive over v0.2.
 # v0.4 (Manifest v0.6) adds the optional `batch` block (native-batch declaration); additive over
 # v0.3.
@@ -541,31 +583,11 @@ LIVENESS_REPORT_SCHEMA_FILE = "liveness-report.v0.1.json"
 # (StepRequest/StepResult) and the per-line shape of a run's JSONL journal. Two new families.
 STEP_SCHEMA_FILE = "step.v0.1.json"
 JOURNAL_SCHEMA_FILE = "journal.v0.1.json"
-LOCAL_DOCUMENT_SCHEMA_FILE = "local-document.v0.5.json"
-PASSAGE_SCHEMA_FILE = "passage.v0.4.json"
-SELECTION_TOOL_SCHEMA_FILE = "selection-tool.v0.2.json"
-AGENT_DOCUMENT_TOOL_SCHEMA_FILE = "agent-document-tool.v0.5.json"
-DOCUMENT_TOOL_SCHEMA_FILE = "document-tool.v0.4.json"
-IMPORT_JOB_SCHEMA_FILE = "import-job.v0.4.json"
-
-
-_PACKAGE = "openreading.schemas"
-
-
-@cache
-def _load(name: str) -> dict[str, Any]:
-    with resources.files(_PACKAGE).joinpath(name).open("r", encoding="utf-8") as fh:
-        return json.load(fh)
 
 
 def request_schema() -> dict[str, Any]:
     """The vendored ``REQUEST_SCHEMA_FILE`` file as a dict, loaded once and cached."""
     return _load(REQUEST_SCHEMA_FILE)
-
-
-def response_schema() -> dict[str, Any]:
-    """The vendored ``RESPONSE_SCHEMA_FILE`` file as a dict, loaded once and cached."""
-    return _load(RESPONSE_SCHEMA_FILE)
 
 
 def descriptor_schema() -> dict[str, Any]:
@@ -642,39 +664,9 @@ def experimental_fields(schema: dict[str, Any] | None = None) -> set[str]:
     return found
 
 
-_VALIDATOR_CACHE: dict[int, tuple[dict[str, Any], Any]] = {}
-
-
-def _validator(schema: dict[str, Any]):
-    # Cached per (family, version) — i.e. per schema object identity. `_load` (above) is `@cache`d
-    # per filename, so every `*_schema()` call site returns the SAME dict object for its family;
-    # keying on `id(schema)` here is therefore stable for the process lifetime, and storing the
-    # schema itself alongside its validator keeps that object referenced so its id can never be
-    # reused by something else. Without this, `cls.check_schema(schema)` re-validated the schema
-    # itself against the 2020-12 metaschema on every single call (BL-167): ~15ms per call, paid in
-    # full by every request the tiniest envelope included. This correctness depends on `_load`
-    # never returning a fresh object for the same filename — do not add `_load.cache_clear()` or a
-    # defensive copy there without re-deriving this cache's keying strategy too.
-    cached = _VALIDATOR_CACHE.get(id(schema))
-    if cached is not None:
-        return cached[1]
-    from jsonschema.validators import validator_for
-
-    cls = validator_for(schema)
-    cls.check_schema(schema)  # raises if the schema itself is not a valid JSON Schema
-    validator = cls(schema)
-    _VALIDATOR_CACHE[id(schema)] = (schema, validator)
-    return validator
-
-
 def validate_request(instance: dict[str, Any]) -> None:
     """Raise ``jsonschema.ValidationError`` unless ``instance`` is a valid request."""
     _validator(request_schema()).validate(instance)
-
-
-def validate_response(instance: dict[str, Any]) -> None:
-    """Raise ``jsonschema.ValidationError`` unless ``instance`` is a valid response."""
-    _validator(response_schema()).validate(instance)
 
 
 def validate_descriptor(instance: dict[str, Any]) -> None:
@@ -720,36 +712,6 @@ def validate_step(instance: dict[str, Any]) -> None:
 def validate_journal_record(instance: dict[str, Any]) -> None:
     """Raise ``jsonschema.ValidationError`` unless ``instance`` is a valid journal record."""
     _validator(journal_schema()).validate(instance)
-
-
-def local_document_schema() -> dict[str, Any]:
-    """The retained source and extraction identity contract."""
-    return _load(LOCAL_DOCUMENT_SCHEMA_FILE)
-
-
-def passage_schema() -> dict[str, Any]:
-    """Exact source spans and physical page provenance."""
-    return _load(PASSAGE_SCHEMA_FILE)
-
-
-def agent_document_tool_schema() -> dict[str, Any]:
-    """Bounded import, search, read, and error payloads."""
-    return _load(AGENT_DOCUMENT_TOOL_SCHEMA_FILE)
-
-
-def selection_tool_schema() -> dict[str, Any]:
-    """Closed local selection inputs, receipts, and sanitized errors."""
-    return _load(SELECTION_TOOL_SCHEMA_FILE)
-
-
-def document_tool_schema() -> dict[str, Any]:
-    """Whole retained normalized results with lossless continuation and existing artifact errors."""
-    return _load(DOCUMENT_TOOL_SCHEMA_FILE)
-
-
-def import_job_schema() -> dict[str, Any]:
-    """Persistent local import status and closed background tool requests."""
-    return _load(IMPORT_JOB_SCHEMA_FILE)
 
 
 def _cli_validate() -> int:

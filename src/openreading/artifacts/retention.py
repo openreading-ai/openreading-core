@@ -44,7 +44,8 @@ from openreading.artifacts.models import (
     json_bytes,
 )
 from openreading.artifacts.passages import iter_passages
-from openreading.artifacts.service import ArtifactService, _display_name
+from openreading.artifacts.retained import RetainedService as ArtifactService
+from openreading.artifacts.retained import _display_name
 from openreading.artifacts.store import file_record
 from openreading.schemas import validate_response
 from openreading.types.response import NormalizedResponse
