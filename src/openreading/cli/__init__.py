@@ -1189,6 +1189,354 @@ For a Plain strategy, use `strategy show NAME --longhand` to obtain an advanced
 body before adding advanced gate keys. Mixing both dialects in one body fails
 validation. An empty `recommended` means there is no numeric gate to propose.
 
+Local extraction and OCR setup
+-----------------------------
+You can extract readable embedded text without OCR, or recognize text from
+page images with a configured OCR engine. A backend is the engine that
+processes your document, such as LiteParse or Tesseract. OCR means optical
+character recognition: reading words from pixels instead of embedded text.
+
+Start without OCR when copied text matches the visible page. Use OCR for
+scans, empty extraction, or broken text encoding. For example, selectable
+text that copies as control characters still needs an OCR trial. Page count
+and status.state="succeeded" do not establish that readable text exists.
+Inspect document.text, document.pages, and warnings before using a result.
+
+Core installs adapters, not every system executable or model file. Each
+backend reads the formats its descriptor claims; the catalog is in
+src/openreading/adapters/README.md. Choose the setup chapter you need:
+
+    openreading help liteparse
+    openreading help tesseract
+    openreading help docling-local
+    openreading help docling
+
+These recipes assume a Core clone and its activated Python environment.
+After the README's dependency installation, activate it and check discovery:
+
+    . .venv/bin/activate
+    openreading backends
+
+The README's all-extras installation already includes the Python packages
+used by these chapters. Skip their pip install lines in that case.
+For a minimal environment, install the chosen extra with pip. If the
+activated environment lacks pip, enable it first with python -m ensurepip.
+These commands install Python dependencies; system engines and model files
+still need the separate setup steps below.
+
+CONFIGURED means the backend passed its readiness checks, not that OCR
+assets were validated or your document produced usable text. Run the small
+example in the selected chapter before processing a long document.
+
+Save only the variables you use in .env at the directory where you launch
+Core. Copy the absolute paths printed by the setup commands. Core's .env
+loader does not expand ~, $HOME, ${HOME}, or shell commands. Already exported
+variables override .env, including empty values. Use --env-file PATH to
+select another file, and restart serve after changing its environment.
+
+To use LiteParse for requests without a backend id, save openreading.yaml:
+
+    version: 1
+    policy:
+      backends: [liteparse]
+
+Export OPENREADING_CONFIG to that file's absolute path before starting the
+server. The server does not discover a working-directory YAML. Choose
+tesseract, docling_local, or
+docling instead when testing those engines. An explicitly named backend
+bypasses this default chain. There is no automatic OCR-quality fallback
+merely because a result is empty; see openreading help gates for strategies.
+
+    openreading serve --port 7777
+
+In another terminal, verify the server's selection without parsing:
+
+    curl -sS http://127.0.0.1:7777/v1/route \
+      -F 'file=@examples/john_smith_1000_2026_01.pdf' \
+      -F 'request={"backend":{"id":null}}'
+
+Inspect chosen and fallbacks. Use /v1/parse with the same body to process the
+sample, and inspect backend.id, warnings, and document.text in the result.
+GET /healthz only establishes server availability, not OCR readiness.
+
+Core's HTTP result cache holds at most 256 entries for 15 minutes. Restarting
+clears it. An agent client can also retain its own results. A Core restart
+does not clear those; request a fresh import through that client's workflow.
+
+LiteParse with OCR
+------------------
+You get local extraction with bundled PDFium and Tesseract from the
+liteparse extra. English OCR language data still needs explicit provisioning.
+Installing the Python package alone does not enable OCR in Core.
+
+If this extra is not installed, enable pip with python -m ensurepip first
+when needed, then install it from the Core clone:
+
+    python -m pip install -e '.[liteparse]'
+
+Core accepts only the pinned English tessdata_fast or tessdata_best files
+listed in openreading.adapters.liteparse.assets. A directory containing an
+arbitrary eng.traineddata is insufficient. Download the pinned fast variant
+once into your own directory, then verify its bytes before parsing:
+
+    export LITEPARSE_TESSDATA="$HOME/.local/share/openreading/tessdata"
+    python - <<'PY'
+    import os
+    from pathlib import Path
+    from urllib.request import urlretrieve
+    from openreading.adapters.liteparse.assets import (
+        PINNED_TESSDATA, verify_tessdata,
+    )
+    root = Path(os.environ["LITEPARSE_TESSDATA"])
+    root.mkdir(parents=True, exist_ok=True)
+    _, _, source = PINNED_TESSDATA["eng"]["tessdata_fast"]
+    url = source.replace("github.com/", "raw.githubusercontent.com/")
+    url = url.replace("/blob/", "/")
+    urlretrieve(url, root / "eng.traineddata")
+    print(verify_tessdata(str(root), "eng"))
+    print("LITEPARSE_TESSDATA=" + str(root))
+PY
+
+The download contacts GitHub during setup. Parsing uses the verified local
+file and does not download OCR data. Save the printed LITEPARSE_TESSDATA
+line in .env. To reuse installed data, set that variable to its directory
+and call verify_tessdata first. For example, Homebrew commonly stores it
+under $(brew --prefix)/share/tessdata; verification still applies.
+
+    openreading parse examples/john_smith_1000_2026_01.pdf \
+      --backend liteparse > liteparse.json
+    python - <<'PY'
+    import json
+    result = json.load(open("liteparse.json"))
+    print(result["backend"]["id"], result["status"]["state"])
+    print(result.get("warnings", []))
+    print(result["document"]["text"][:200])
+PY
+
+features.ocr defaults to "auto". With verified data, LiteParse chooses which
+regions need OCR. Without LITEPARSE_TESSDATA, it reads the text layer and
+returns ocr_skipped. Invalid data produces ocr_assets_unverified or
+ocr_assets_missing. Only English is supported by this pinned profile.
+"off" disables OCR. "force" is unsupported; direct Tesseract or local
+Docling can OCR full pages when selective recognition misses broken text.
+The parse CLI has no --ocr flag. Python and HTTP accept features.ocr;
+openreading help docling-local shows a multipart request using that field.
+
+The supervised worker has a 120-second whole-document budget by default.
+A long OCR run can fail with worker_timeout even when individual pages are
+readable. LITEPARSE_WORKER_MEMORY_BYTES controls memory, not this timeout;
+it defaults to 2147483648 bytes (2 GiB). There is no LiteParse timeout env
+variable or serve flag. A named CLI call can supply a longer budget:
+
+    openreading parse examples/john_smith_1000_2026_01.pdf \
+      --backend liteparse --deadline 600 > liteparse.json
+
+Python accepts the same budget in milliseconds:
+
+    python - <<'PY'
+    import json
+    import openreading
+    result = openreading.run(
+        "examples/john_smith_1000_2026_01.pdf", backend="liteparse",
+        features={"ocr": "auto"}, deadline_ms=600_000, env_file=".env",
+    )
+    print(json.dumps(result))
+PY
+
+Those ten-minute budgets apply to the named CLI or Python call, not
+subsequent server requests. The adapter does not support page subsets.
+Start with a separate small document before sending a long job through serve.
+
+Tesseract OCR
+-------------
+You get OCR of every selected page, including pages whose embedded text is
+unusable. Core rasterizes PDFs with PyMuPDF, then calls the system Tesseract
+executable through pytesseract. For a minimal install, enable pip with
+python -m ensurepip when needed, then install both extras for PDF input:
+
+    python -m pip install -e '.[tesseract,pymupdf]'
+
+Install the system engine and English data using your platform's package
+manager. On macOS with Homebrew:
+
+    brew install tesseract
+    tesseract --version
+    tesseract --list-langs
+
+On Debian or Ubuntu:
+
+    sudo apt install tesseract-ocr tesseract-ocr-eng
+    tesseract --list-langs
+
+The language list must include eng. Windows setup follows the upstream
+instructions at https://tesseract-ocr.github.io/tessdoc/Installation.html.
+The executable must be on PATH for the process that launches Core.
+No Core-specific environment variable or API key is required. If you use
+custom language files, set TESSDATA_PREFIX to their absolute directory.
+That variable is interpreted by Tesseract, not Core's credential broker.
+
+    openreading parse examples/john_smith_1000_2026_01.pdf \
+      --backend tesseract --pages 1 > tesseract.json
+
+Inspect the text and warnings as shown in openreading help liteparse.
+PDFs are rasterized at 150 DPI by default. OCR always runs in this adapter;
+features.ocr="off" does not turn it into a text-layer extractor. Choose
+pymupdf for that purpose. Python and HTTP can set features.ocr_languages,
+for example ["eng", "deu"], after installing those Tesseract language files.
+
+Normal Core CLI, Python, and HTTP calls allow 120 seconds per OCR page.
+This differs from LiteParse's 120-second whole-document limit. A named CLI
+call can override that budget with --deadline SECONDS. A long document can take
+several minutes. Rasterized pages are held in memory before recognition;
+try --pages 1 first rather than assuming arbitrary document sizes fit.
+Tesseract returns word confidence but has no table or layout model.
+OCR can misread digits even when processing succeeds; inspect source pages
+before relying on extracted amounts.
+
+Local Docling Slim with OCR
+--------------------------
+You get Core's pinned CPU layout pipeline through the docling_local backend.
+Its extra installs docling-slim 2.126.0 and selected conversion dependencies.
+Slim uses the Docling codebase with selected dependencies. It is not a
+separate OCR engine and does not include every model or system executable.
+Core's local pipeline disables table recognition and uses ONNX layout.
+Installing full upstream docling does not enable those stages in this
+adapter. See openreading help docling for the separate HTTP integration.
+
+For a minimal install, enable pip with python -m ensurepip when needed:
+
+    python -m pip install -e '.[docling_local]'
+
+Provision the exact layout model revision required by this Core version.
+The setup below contacts Hugging Face. The local adapter never fetches models
+when processing documents and refuses missing or changed assets.
+
+    export DOCLING_LOCAL_ASSETS="$HOME/.local/share/openreading/docling"
+    python - <<'PY'
+    import os
+    from pathlib import Path
+    from huggingface_hub import snapshot_download
+    from openreading.adapters.docling_local.config import (
+        MODEL_REPOSITORY, MODEL_REVISION, MODEL_FILES, LocalDoclingConfig,
+    )
+    root = Path(os.environ["DOCLING_LOCAL_ASSETS"])
+    model = root / MODEL_REPOSITORY.replace("/", "--")
+    snapshot_download(
+        MODEL_REPOSITORY, revision=MODEL_REVISION,
+        allow_patterns=list(MODEL_FILES), local_dir=model,
+    )
+    hashes = LocalDoclingConfig(root).validate_assets()
+    print("Verified model files:", len(hashes))
+    print("DOCLING_LOCAL_ASSETS=" + str(root))
+PY
+
+Save the printed DOCLING_LOCAL_ASSETS line in .env. For text-layer extraction
+with layout only, leave both OCR variables unset. Automatic requests then
+return ocr_skipped. To enable OCR, install Tesseract as described in
+openreading help tesseract and set both paths. On Homebrew macOS:
+
+    export DOCLING_LOCAL_TESSERACT="$(command -v tesseract)"
+    export DOCLING_LOCAL_TESSDATA="$(brew --prefix)/share/tessdata"
+    printf 'DOCLING_LOCAL_TESSERACT=%s\n' "$DOCLING_LOCAL_TESSERACT"
+    printf 'DOCLING_LOCAL_TESSDATA=%s\n' "$DOCLING_LOCAL_TESSDATA"
+
+Copy those printed absolute paths into .env. On Linux, locate the binary
+with command -v tesseract. Find its data directory with tesseract --list-langs.
+The directory must contain eng.traineddata, osd.traineddata, and configs/tsv.
+A lone eng.traineddata is sufficient for LiteParse, but insufficient for this
+adapter.
+Verify the entire local setup, including OCR files:
+
+    python - <<'PY'
+    import os
+    from pathlib import Path
+    from openreading.credentials import load_dotenv
+    from openreading.adapters.docling_local.config import LocalDoclingConfig
+    load_dotenv()
+    config = LocalDoclingConfig(
+        Path(os.environ["DOCLING_LOCAL_ASSETS"]), ocr=True,
+        tesseract_cmd=Path(os.environ["DOCLING_LOCAL_TESSERACT"]),
+        tessdata_path=Path(os.environ["DOCLING_LOCAL_TESSDATA"]),
+    )
+    print("Verified model and OCR files:", len(config.validate_assets()))
+PY
+
+    openreading parse examples/john_smith_1000_2026_01.pdf \
+      --backend docling_local > docling-local.json
+
+features.ocr="auto" enables selective OCR when both Tesseract paths are set.
+"off" disables it; "force" rasterizes every page and requires both paths.
+For broken embedded text, test forced OCR through Python or HTTP. With Core
+serve running on port 7777, this multipart request forces local Docling OCR:
+
+    ocr_request='{"backend":{"id":"docling_local"},"features":{"ocr":"force"}}'
+    curl -sS http://127.0.0.1:7777/v1/parse \
+      -F 'file=@examples/john_smith_1000_2026_01.pdf' \
+      -F "request=$ocr_request"
+
+The Core parse CLI does not expose --ocr. The general docling_local adapter
+runs in process; it does not use LiteParse's supervised worker limits.
+Plan capacity with a small real conversion. Legacy-format conversion can
+also require LibreOffice, as the adapter's format providers document.
+
+Full Docling through your own Docling Serve
+------------------------------------------
+You can run upstream Docling Serve separately and connect Core's docling
+backend to it. The docling_local backend remains Core's Slim CPU pipeline.
+Installing docling alone does not start Docling Serve or change that pipeline.
+Use a separate environment to avoid changing Core's pinned dependencies.
+Skip the first line if Core already has its docling extra installed.
+Otherwise, enable pip with python -m ensurepip when needed before installing:
+
+    python -m pip install -e '.[docling]'
+    docling_env="$HOME/.local/share/openreading/docling-serve-venv"
+    python3 -m venv "$docling_env"
+    "$docling_env/bin/pip" install docling-serve
+    "$docling_env/bin/docling-tools" models download
+    export DOCLING_SERVE_ARTIFACTS_PATH="$HOME/.cache/docling/models"
+    "$docling_env/bin/docling-serve" run --host 127.0.0.1 --port 5001
+
+The model download is a separate network step and can be large. Check the
+printed destination and adjust DOCLING_SERVE_ARTIFACTS_PATH if it differs.
+That variable belongs to the Docling Serve process, not Core's .env.
+Without explicit provisioning, upstream Docling can download models on
+first use. Its model prefetching instructions are at:
+https://docling-project.github.io/docling/usage/advanced_options/
+
+Alternatively, with a container engine installed, start the upstream CPU
+image. The image supplies its own dependencies and model assets:
+
+    docker run --rm -p 127.0.0.1:5001:5001 \
+      quay.io/docling-project/docling-serve-cpu:latest
+
+Use one method, not both on the same port. Follow the upstream installation
+and model provisioning instructions for your chosen version and hardware:
+https://github.com/docling-project/docling-serve#readme
+The moving latest tag is a trial example, not a Core-tested version pin.
+Pin a tested image version or digest for reproducible deployments.
+
+Set this variable in Core's .env, not in the other server's environment:
+
+    DOCLING_SERVE_URL=http://127.0.0.1:5001
+
+In another terminal with Core's environment activated:
+
+    openreading backends --check docling
+    openreading parse examples/john_smith_1000_2026_01.pdf \
+      --backend docling > docling.json
+
+Docling Serve listens on port 5001 in this example. Your openreading serve
+process uses a different port, such as 7777, and forwards document bytes to
+DOCLING_SERVE_URL. Point the agent plugin at Core's port, not Docling Serve.
+Setting the URL does not start Docling Serve or verify a real conversion.
+
+Core sends do_ocr=true unless features.ocr="off". It does not forward OCR
+engine, language, or force-full-page options through this adapter today.
+In particular, "force" currently enables OCR without forcing every page.
+Configure the upstream installation's engines and models separately; its
+full options are not all exposed through Core's normalized request.
+The synchronous HTTP client timeout is 300 seconds; Docling Serve can impose
+its own conversion or synchronous-wait limits. Check both sides on failure.
 serve
 -----
 `serve [--host H] [--port P] [--cors-origin O ...]` runs the HTTP API
@@ -1197,7 +1545,8 @@ serve
 only.) Binding any host other than `127.0.0.1` prints a warning: anyone who can
 reach the socket spends your vendor keys, so put it behind your own auth/proxy.
 The server never reads the working directory for a config -- pass
-`OPENREADING_CONFIG`.
+`OPENREADING_CONFIG`. Run openreading help local-ocr for local engine setup,
+OCR assets, and a request that verifies the default backend.
 
 A request may not name a local file by path unless
 `OPENREADING_SERVER_PATH_ROOT` is set to a directory. With it set,

@@ -1,0 +1,35 @@
+# Express grouped checks and require the final local result to pass as well.
+# Install PyMuPDF and Tesseract as in example 02. No vendor key is required.
+version: 1
+
+defaults:
+  strategy: main
+
+strategies:
+  main:
+    steps:
+      - backend: pymupdf
+        # any_of means OR. all_of means AND within that one alternative.
+        # Pair scan detection with sparse text. Scan detection describes the
+        # source document and remains true even after a successful OCR pass.
+        escalate_if:
+          any_of:
+            - all_of:
+                - scanned_pages_detected: true
+                - chars_per_page_below: 80
+            - garbled: true
+            - empty_pages_over: 0.2
+      - backend: tesseract
+        # A final-step gate is legal in advanced syntax. A match cannot advance
+        # further, so it follows on_quality_exhausted instead of accepting blindly.
+        escalate_if:
+          any_of:
+            - chars_per_page_below: 80
+            - garbled: true
+    on_quality_exhausted: fail
+    budget:
+      max_duration: 2m
+
+# Change fail to best_effort to return a retained deficient result with warnings.
+# Useful sparse documents can fail these thresholds. Tune them on your own corpus.
+# Do not mix Plain keys such as try with advanced steps in the same strategy body.

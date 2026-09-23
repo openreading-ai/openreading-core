@@ -1,6 +1,22 @@
-"""Docling adapter — the first ContainerAdapter. Talks to a self-hosted docling-serve container
-over HTTP; because the container runs in the caller's own infra, data never leaves the environment
-(it runs on hardware you control, so no document leaves it). MIT-licensed.
+"""Connect Core to a Docling Serve process that you install and start separately.
+
+Core sends document bytes to the configured HTTP endpoint. Its operator owns the runtime,
+model provisioning, and network boundary. The adapter does not install or start Docling Serve.
+Core's in-process Slim pipeline is the separate openreading.adapters.docling_local package.
+Run openreading help docling for the separate-environment and container setup recipes.
+
+Environment variables this module reads
+---------------------------------------
+The credential broker resolves DOCLING_SERVE_URL into the required endpoint field.
+Unset means the backend is unconfigured. A configured address does not prove it is reachable.
+For example, http://127.0.0.1:5001 names Docling Serve, not the Core server on port 8787.
+The synchronous HTTP client timeout is 300 seconds. The other server has its own limits.
+
+OCR options
+-----------
+The adapter sends do_ocr=true unless features.ocr is off. Engine selection, languages,
+and force-full-page options are not forwarded. In particular, force only enables OCR here.
+The upstream server owns its engine and model setup; full upstream options are not all exposed.
 
 The DoclingDocument is a tree: `body.children` are JSON-pointer refs (`#/texts/0`, `#/tables/0`,
 `#/groups/1`) that we walk to linearize reading order. Each item's provenance carries a bbox with

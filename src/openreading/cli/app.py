@@ -2047,7 +2047,7 @@ Then:
 Exits: 0 always, a backend reported unreachable included. 3 an unknown
 --check slug.
 
-More: openreading help backends, openreading help env""",
+More: openreading help backends, openreading help local-ocr""",
     "serve": """\
 Examples:
   openreading serve                  # http://127.0.0.1:8787, loopback only

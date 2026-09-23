@@ -1,0 +1,34 @@
+# Keep several recipes together, then choose a default for ordinary requests.
+# A strategy is a named recipe for which backends run and when to move on.
+# These recipes need the local runtimes described in examples 01 and 02.
+version: 1
+
+# This chain applies when you deliberately bypass the default strategy with
+# --no-strategy. It does not restrict the strategies declared below.
+policy:
+  backends: [pymupdf]
+
+defaults:
+  strategy: main
+
+strategies:
+  # A bare backend name is a complete, single-step strategy.
+  text_only: pymupdf
+  ocr_only: tesseract
+
+  # Plain try lists accept strategy names as well as backend names.
+  # These references reuse recipes without duplicating their configuration.
+  main:
+    try: [text_only, ocr_only]
+    # With no escalate_when, success ends the walk, even for sparse output.
+
+# The Python API and HTTP use main for requests without an explicit backend.
+# The parse CLI requires a choice: --strategy main or --strategy ocr_only.
+# --backend pymupdf bypasses strategies. --no-strategy uses policy.backends.
+#
+# openreading parse examples/1040-1988.pdf --strategy ocr_only \
+#   --config examples/configs/03-named-strategies.yaml
+#
+# You can also set defaults.strategy to a built-in preset such as offline_first.
+# Inspect a preset with `openreading strategy show offline_first --longhand`
+# before choosing it. Its backend choices and gates are not defined in this file.

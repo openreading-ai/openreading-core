@@ -26,6 +26,12 @@ Legacy v0.1 status is read as v0.2 without a page observation; reads never rewri
 Frozen clients dispatch --internal-artifact-job to main, after verifying their runtime.
 The job owns a serialized profile, so removing a launcher's temporary profile is safe.
 No network endpoint, credential, percentage estimate or provider-specific inference is added.
+Trusted launchers can supply ImportExecution and a fixed service_factory to main or run.
+Its snapshot belongs to that launcher and must contain no credentials or executable selectors.
+External dispatch fails closed without its factory. Core never imports a client package.
+Report uploading before submitting bytes; waiting, receiving, and retaining follow that stage.
+Queue contention can retry before submission. Busy after submission never repeats the import.
+Cancellation and interrupted external jobs disclose that server processing may continue.
 """
 
 from __future__ import annotations
@@ -41,7 +47,8 @@ import sys
 import threading
 import time
 import uuid
-from dataclasses import asdict
+from collections.abc import Callable
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import psutil
@@ -63,6 +70,30 @@ def _status(path: Path) -> ImportJob:
 
 
 TERMINAL = {"succeeded", "failed", "cancelled"}
+
+
+@dataclass(frozen=True)
+class ImportExecution:
+    """A trusted launcher's child dispatch and validated, nonsecret execution snapshot.
+
+    The launcher owns snapshot validation and credential lookup in both processes.
+    For example, an HTTP client records a destination revision, never its bearer token.
+    No tool argument can supply this object, and Core never imports code named in it.
+    The child must pass its fixed service factory to main; ordinary dispatch refuses it.
+    """
+
+    command: tuple[str, ...]
+    snapshot: dict
+
+    def __post_init__(self):
+        if not self.command or any(
+            not isinstance(v, str) or not v or "\x00" in v for v in self.command
+        ):
+            raise ValueError("Trusted import dispatch requires a command vector")
+        encoded = json_bytes(self.snapshot)
+        if not isinstance(self.snapshot, dict) or len(encoded) > 16384:
+            raise ValueError("Execution snapshot must be a bounded JSON object")
+        object.__setattr__(self, "snapshot", json.loads(encoded))
 
 
 class JobError(ValueError):
@@ -101,8 +132,9 @@ def _read(path: Path) -> dict:
 
 
 class ImportJobs:
-    def __init__(self, service: ArtifactService):
+    def __init__(self, service: ArtifactService, *, execution: ImportExecution | None = None):
         self.service = service
+        self.execution = execution
         self.root = service.config.artifact_root / "jobs" / service.store.grant
         with directory(self.root, create=True):
             pass
@@ -116,7 +148,11 @@ class ImportJobs:
         try:
             root.mkdir(mode=0o700)
             initial = ImportJob(
-                job_id=identifier, state="queued", stage="queued", elapsed_seconds=0.0
+                schema_version="0.4" if self.execution else "0.3",
+                job_id=identifier,
+                state="queued",
+                stage="queued",
+                elapsed_seconds=0.0,
             )
             _write(root / "status.json", initial.wire())
             _write(
@@ -130,6 +166,7 @@ class ImportJobs:
                     "docling": config.docling.wire() if config.docling else None,
                     "identity": self.service.identity.model_dump(mode="json"),
                     "started": time.time(),
+                    **({"execution": self.execution.snapshot} if self.execution else {}),
                 },
             )
             dispatch = (
@@ -138,7 +175,10 @@ class ImportJobs:
                 else ["-m", "openreading.artifacts.jobs"]
             )
             process = subprocess.Popen(
-                [sys.executable, *dispatch, str(root)],
+                [
+                    *(self.execution.command if self.execution else [sys.executable, *dispatch]),
+                    str(root),
+                ],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -199,6 +239,8 @@ class ImportJobs:
                         return final
                     value.state, value.stage = "failed", "stopped"
                     value.error = ArtifactError("parse_failed").envelope().error
+                    if "execution" in request:
+                        value.error.message = "The local supervisor stopped. Submitted server processing may continue; no retry was sent."
                     _write(root / "status.json", value.wire())
                     return value
                 if time.monotonic() >= until:
@@ -260,15 +302,23 @@ class ImportJobs:
         return ImportJobList(jobs=rows, next_cursor=continuation)
 
 
-def run(root: Path) -> int:
+def run(root: Path, *, service_factory: Callable[[dict], ArtifactService] | None = None) -> int:
     request = _read(root / "request.json")
-    config = ProfileConfig(
-        Path(request["input_root"]),
-        Path(request["artifact_root"]),
-        (DoclingLimits if request["docling"] is not None else ProfileLimits)(**request["limits"]),
-        LocalDoclingConfig.from_wire(request["docling"]) if request["docling"] else None,
-    )
-    service = ArtifactService(config)
+    if ("execution" in request) != (service_factory is not None):
+        raise ValueError("Job execution must match its launcher's fixed service factory")
+    if "execution" in request:
+        assert service_factory is not None
+        service = service_factory(request)
+    else:
+        config = ProfileConfig(
+            Path(request["input_root"]),
+            Path(request["artifact_root"]),
+            (DoclingLimits if request["docling"] is not None else ProfileLimits)(
+                **request["limits"]
+            ),
+            LocalDoclingConfig.from_wire(request["docling"]) if request["docling"] else None,
+        )
+        service = ArtifactService(config)
     value = _status(root / "status.json")
 
     class Cancellation(threading.Event):
@@ -313,12 +363,27 @@ def run(root: Path) -> int:
             except ArtifactError as error:
                 if error.code != "busy":
                     raise
+                if "execution" in request and value.stage in {
+                    "uploading",
+                    "waiting",
+                    "receiving",
+                }:
+                    # Retention contention cannot resubmit a possibly billable server parse.
+                    raise ArtifactError("parse_failed") from None
                 time.sleep(0.1)
         value.state, value.stage, value.receipt = "succeeded", "complete", receipt
+        if receipt.schema_version == "0.5":
+            value.schema_version = "0.4"
     except Exception as error:
         failure = error if isinstance(error, ArtifactError) else ArtifactError("parse_failed")
         value.state = "cancelled" if failure.code == "cancelled" else "failed"
         value.stage, value.error = "stopped", failure.envelope().error
+        if (
+            "execution" in request
+            and failure.code in {"cancelled", "parse_failed"}
+            and not getattr(failure, "preserve_message", False)
+        ):
+            value.error.message = "Local processing stopped. Submitted server processing may continue; no retry was sent."
     finally:
         service.close()
         for sig, handler in previous.items():
@@ -329,13 +394,17 @@ def run(root: Path) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    service_factory: Callable[[dict], ArtifactService] | None = None,
+) -> int:
     """Run a private import supervisor; exit two on invalid internal configuration."""
     arguments = sys.argv[1:] if argv is None else argv
     try:
         if len(arguments) != 1:
             return 2
-        return run(Path(arguments[0]))
+        return run(Path(arguments[0]), service_factory=service_factory)
     except Exception:
         return 2
 

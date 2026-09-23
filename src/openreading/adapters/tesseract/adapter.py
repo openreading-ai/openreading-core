@@ -11,6 +11,23 @@ who accepts documents from people they do not trust should also run it under an 
 that hardened runner can be swapped in. Untrusted input is treated as untrusted: rasterization
 and OCR only, never shell-eval.
 
+Setup and execution limits
+--------------------------
+Install the tesseract extra, the system executable, and the language data you request.
+PDF rasterization also requires the pymupdf extra. The default language is English.
+The adapter OCRs every selected page, regardless of features.ocr, at 150 DPI by default.
+Normal Core dispatch supplies a 120-second budget, applied separately to each OCR subprocess.
+A direct adapter call without ctx.deadline_ms falls back to 60 seconds per page.
+Rasterization materializes selected page images before the sequential OCR loop starts.
+A long document therefore needs memory for those images, not only the current page.
+Run openreading help tesseract for platform installation commands and a one-page check.
+
+Environment variables this module reads
+---------------------------------------
+Core reads no adapter-specific variable here. The subprocess resolves tesseract from PATH.
+Tesseract itself reads TESSDATA_PREFIX when set and otherwise uses its installed language data.
+For example, a custom English installation points TESSDATA_PREFIX at the directory containing eng.traineddata.
+
 Geometry: coordinates are pixels at the rasterization DPI, top-left (internal/research/openreading/_data/live_runs.md verified: title
 word left=152px @150dpi ≈ 72pt). The adapter converts them with to_canonical(unit=pixel, dpi,
 page px dims).

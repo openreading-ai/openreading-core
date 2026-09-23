@@ -1,0 +1,23 @@
+# Optimize for the first successful response rather than the best-scoring text.
+# Both local runtimes from example 02 must be installed to exercise both branches.
+version: 1
+
+defaults:
+  strategy: main
+
+strategies:
+  main:
+    race: [pymupdf, tesseract]
+    max_time: 90s
+
+# Both branches start together. The first success wins, and the loser is cancelled.
+# Race does not apply quality gates before selecting its winner. On a scanned
+# PDF, a fast but empty PyMuPDF response can beat useful OCR.
+# Choose example 04 for quality escalation or example 08 for scored comparison.
+#
+# Parallelism spends resources on more than one parser. If you replace either
+# branch with a hosted backend, cancellation might not stop remote work or billing.
+#
+# openreading parse examples/john_smith_1000_2026_01.pdf --strategy main \
+#   --config examples/configs/07-race.yaml > run.json
+# openreading explain run.json

@@ -29,6 +29,13 @@ _SLUGS = [t.slug for t in TOPICS]
 _LINE_BUDGET = 79
 
 
+@pytest.fixture(autouse=True)
+def _isolate_cli_environment(tmp_path, monkeypatch):
+    """Help tests cannot inherit a checkout's .env or its configured strategy file."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("OPENREADING_CONFIG", raising=False)
+
+
 def _headings() -> list[str]:
     """Every heading the contract in `openreading.cli.help` recognizes, in docstring order."""
     out = []
@@ -107,6 +114,16 @@ def test_the_docstring_fits_an_eighty_column_terminal():
     assert not over, f"{len(over)} docstring lines exceed {_LINE_BUDGET} columns: {over[:8]}"
 
 
+def test_heredoc_delimiters_are_pasteable():
+    """A quoted heredoc delimiter has to start in column zero when a reader pastes a chapter."""
+    for index, line in enumerate(_DOC):
+        if "<<'PY'" not in line:
+            continue
+        assert "PY" in _DOC[index + 1 :], f"line {index + 1} opens an unterminated heredoc"
+        closing = next(item for item in _DOC[index + 1 :] if item.strip() == "PY")
+        assert closing == "PY", f"line {index + 1} has an indented heredoc delimiter"
+
+
 @pytest.mark.parametrize("topic", TOPICS, ids=lambda t: t.slug)
 def test_no_chapter_names_a_file_the_reader_cannot_open(topic):
     for line in render(topic):
@@ -114,13 +131,17 @@ def test_no_chapter_names_a_file_the_reader_cannot_open(topic):
         assert not line.startswith("Provenance:"), f"{topic.slug} leaks a provenance line"
 
 
-def test_bare_help_prints_the_index_and_succeeds(capsys):
+def test_bare_help_prints_the_index_and_succeeds(tmp_path, monkeypatch, capsys):
+    """Help must not inherit a repository-local .env from the test runner's directory."""
+    monkeypatch.chdir(tmp_path)
     assert main(["help"]) == 0
     out = capsys.readouterr().out
     assert "START HERE" in out and "quickstart" in out
 
 
-def test_a_topic_prints_its_chapter(capsys):
+def test_a_topic_prints_its_chapter(tmp_path, monkeypatch, capsys):
+    """A chapter renders without loading ambient configuration from the checkout."""
+    monkeypatch.chdir(tmp_path)
     assert main(["help", "batch"]) == 0
     out = capsys.readouterr().out
     assert out.startswith("Batch: a directory, a glob, or two or more sources")
@@ -391,3 +412,16 @@ def test_dataset_chapter_example_loads_for_calibration(tmp_path, monkeypatch, ca
     case = load_case(path, backend_id="pymupdf")
     assert case.request_body["document"]["bytes_base64"]
     assert case.expected["text_contains"]
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["local-ocr", "ocr", "liteparse", "tesseract", "docling-local", "docling_local", "docling"],
+)
+def test_local_setup_help_is_available_without_assets(name, tmp_path, monkeypatch, capsys):
+    """A fresh install can read setup before any OCR engine or model is configured."""
+    monkeypatch.chdir(tmp_path)
+    for key in ("LITEPARSE_TESSDATA", "DOCLING_LOCAL_ASSETS", "DOCLING_SERVE_URL"):
+        monkeypatch.delenv(key, raising=False)
+    assert main(["help", name]) == 0
+    assert capsys.readouterr().out == "\n".join(render(resolve(name))) + "\n"

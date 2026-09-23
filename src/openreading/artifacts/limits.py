@@ -8,6 +8,8 @@ Import, search, and read payloads permit 4096, 8192, and 16384 UTF-8 bytes respe
 Full-document continuation payloads default to 65536 UTF-8 bytes, with no silent truncation.
 These caps do not promise a hard native-parser memory ceiling or an operating-system sandbox.
 Docling limits accept None for uncapped documents, storage, time, and sampled RSS.
+ExternalLimits permits uncapped retention without configuring a local parser or worker.
+For example, an HTTP caller can retain a completed response without a parser deadline.
 Explicit positive operator limits remain enforced. Idle shutdown and tool reply caps remain bounded.
 The legacy profile rejects worker settings that its disposable parser cannot enforce.
 Only busy and storage_limit invite retry after the blocking condition is resolved.
@@ -37,7 +39,7 @@ MESSAGES: dict[ErrorCode, str] = {
     "timeout": "The import exceeded its time limit.",
     "cancelled": "The import was cancelled.",
     "storage_limit": "Local storage could not retain this document. Check free disk space and any configured storage limit.",
-    "parse_failed": "The local parser could not complete this document.",
+    "parse_failed": "Document processing could not complete.",
     "artifact_not_found": "This artifact is unavailable under the current input grant.",
     "artifact_corrupt": "The retained artifact failed integrity validation. Import the source again after removing it.",
     "artifact_version_unsupported": "This artifact format is not supported by this runtime.",
@@ -47,7 +49,7 @@ MESSAGES: dict[ErrorCode, str] = {
 }
 
 
-__all__ = ["ArtifactError", "DoclingLimits", "ProfileConfig", "ProfileLimits"]
+__all__ = ["ArtifactError", "DoclingLimits", "ExternalLimits", "ProfileConfig", "ProfileLimits"]
 
 # The worker reports these from preflight or its metered writer, after which it waits for the
 # next job with its converter intact. Restarting it would repeat model initialization for
@@ -132,10 +134,39 @@ class DoclingLimits:
 
 
 @dataclass(frozen=True)
+class ExternalLimits:
+    """Bound external response retention independently from local parser profiles."""
+
+    source_bytes: int | None = None
+    pages: int | None = None
+    extraction_bytes: int | None = None
+    store_bytes: int | None = None
+    deadline_seconds: float | None = None
+    worker_memory_bytes: None = None
+    worker_idle_seconds: float = 60
+    import_bytes: int = 4096
+    search_bytes: int = 8192
+    read_bytes: int = 16384
+    document_bytes: int = 65536
+
+    def __post_init__(self):
+        if self.worker_memory_bytes is not None or self.worker_idle_seconds != 60:
+            raise ValueError("External retention cannot configure a parser worker.")
+        for value in (self.source_bytes, self.pages, self.extraction_bytes, self.store_bytes):
+            if value is not None and (type(value) is not int or value <= 0):
+                raise ValueError("Retention limits require positive integers or null.")
+        value = self.deadline_seconds
+        if value is not None and (
+            type(value) not in (int, float) or not math.isfinite(value) or value <= 0
+        ):
+            raise ValueError("Retention deadlines require positive finite numbers or null.")
+
+
+@dataclass(frozen=True)
 class ProfileConfig:
     input_root: Path
     artifact_root: Path
-    limits: ProfileLimits | DoclingLimits = field(default_factory=ProfileLimits)
+    limits: ProfileLimits | DoclingLimits | ExternalLimits = field(default_factory=ProfileLimits)
     docling: LocalDoclingConfig | None = None
 
     def __post_init__(self):

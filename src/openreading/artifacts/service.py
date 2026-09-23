@@ -230,7 +230,10 @@ def engine_identity(config: ProfileConfig | None = None) -> EngineIdentity:
 
 def _display_name(relative: str) -> str:
     name = "".join(
-        c for c in relative.split("/")[-1] if not unicodedata.category(c).startswith("C")
+        c
+        for c in relative.split("/")[-1]
+        if not unicodedata.category(c).startswith("C")
+        and unicodedata.category(c) not in {"Zl", "Zp"}
     )
     return name.encode("utf-8")[:255].decode("utf-8", errors="ignore") or "document.pdf"
 
@@ -469,6 +472,7 @@ class ArtifactService:
 
     def _receipt(self, manifest: ArtifactManifest, *, reused: bool) -> ImportReceipt:
         result = ImportReceipt(
+            schema_version="0.5" if manifest.acquisition is not None else "0.4",
             artifact_id=manifest.artifact_id,
             display_name=manifest.display_name,
             document_sha256=manifest.document_sha256,
@@ -476,6 +480,10 @@ class ArtifactService:
             passage_count=manifest.passage_count,
             reused=reused,
             warnings=manifest.warnings,
+            extraction_state=manifest.acquisition.extraction_state
+            if manifest.acquisition
+            else None,
+            next_action="search" if manifest.passage_count else "get_document",
         )
         if len(json_bytes(result.wire())) > self.config.limits.import_bytes:
             raise ArtifactError("response_too_large")

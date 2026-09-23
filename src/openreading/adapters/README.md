@@ -76,6 +76,12 @@ Every adapter passes a conformance kit before it ships, which checks bbox geomet
 honesty, usage shape and determinism. Channel honesty means a channel graded `N`, `D` or `X` in
 [the fifth table](#what-each-backend-can-put-in-a-response) behaves that way.
 
+## Local setup
+
+The CLI manual owns local setup recipes. Run `uv run openreading help local-ocr` to select a
+backend, then open that backend's chapter for its required assets and a small verification run.
+`GET /healthz` only proves that Core answers. It does not prove an OCR engine can read a page.
+
 ## Catalog
 
 A table cell reading none means the descriptor sets no value for that field, which is different
@@ -178,7 +184,7 @@ machine and has nothing to sign up for.
 | `aws-textract` | hosted_api | proprietary | https://aws.amazon.com/textract/ |
 | `azure-document-intelligence` | hosted_api | proprietary | https://azure.microsoft.com/products/ai-services/ai-document-intelligence |
 | `chunkr` | hosted_api | proprietary (AGPL-3.0 self-host available) | https://chunkr.ai |
-| `docling_local` | oss_library | MIT | Tesseract for OCR; LibreOffice when the provider requires legacy conversion |
+| `docling_local` | oss_library | MIT | none |
 | `docling` | oss_library | MIT | none |
 | `google-document-ai` | hosted_api | proprietary | https://cloud.google.com/document-ai |
 | `google-gemini` | hosted_api | proprietary | https://aistudio.google.com/apikey |
@@ -188,7 +194,7 @@ machine and has nothing to sign up for.
 | `llamaparse-agentic` | hosted_api | proprietary | https://cloud.llamaindex.ai |
 | `llamaparse-agentic-plus` | hosted_api | proprietary | https://cloud.llamaindex.ai |
 | `mistral-ocr` | hosted_api | proprietary | https://console.mistral.ai/api-keys |
-| `nuextract` | hosted_api | proprietary (open-weight NuExtract 2.0 [MIT 2B/8B] self-hostable via vLLM — different wire protocol, separate adapter) | https://nuextract.ai |
+| `nuextract` | hosted_api | proprietary (open-weight NuExtract 2.0 [MIT 2B/8B] self-hostable via vLLM, different wire protocol, separate adapter) | https://nuextract.ai |
 | `open-ocr` | hosted_api | proprietary | https://open-ocr.com |
 | `pulse` | hosted_api | proprietary | https://www.runpulse.com |
 | `pymupdf` | oss_library | AGPL-3.0 | none |

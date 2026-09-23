@@ -13,6 +13,48 @@ from openreading.mcp_server.tools import create_server
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stage", "number"),
+    [("uploading", 0), ("waiting", 1), ("receiving", 2), ("retaining", 3), ("future", None)],
+)
+async def test_external_import_progress_never_prevents_a_receipt(stage, number):
+    from openreading.artifacts.jobs import ImportExecution
+
+    class Service:
+        config = SimpleNamespace(docling=None)
+
+        def import_document(self, path, *, cancelled, progress):
+            progress(stage)
+            time.sleep(0.05)
+            return ImportReceipt(
+                schema_version="0.5",
+                extraction_state="succeeded",
+                artifact_id="or1_" + "a" * 64,
+                display_name="test.pdf",
+                document_sha256="b" * 64,
+                page_count=1,
+                passage_count=1,
+                reused=False,
+                warnings=[],
+            )
+
+    seen = []
+
+    async def observed(value, total, message):
+        seen.append((value, total, message))
+
+    server = create_server(Service(), execution=ImportExecution(("trusted-child",), {}))
+    assert server.create_initialization_options().instructions.startswith("For server processing,")
+    async with create_connected_server_and_client_session(server) as session:
+        result = await session.call_tool(
+            "openreading_import", {"path": "test.pdf"}, progress_callback=observed
+        )
+        assert not result.isError
+        assert json.loads(result.content[0].text)["schema_version"] == "0.5"
+    assert seen == ([] if number is None else [(number, None, stage)])
+
+
+@pytest.mark.asyncio
 async def test_progress_is_rate_limited_and_v2_description_uses_explicit_limits():
     class Service:
         config = SimpleNamespace(

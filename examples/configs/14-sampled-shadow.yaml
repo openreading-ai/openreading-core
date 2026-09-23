@@ -1,0 +1,36 @@
+# Audit a deterministic sample without allowing the audit parser to win.
+# A shadow branch runs and is recorded, but never supplies the selected result.
+# Install local runtimes and reducto. Set REDUCTO_API_KEY outside this YAML file.
+version: 1
+
+defaults:
+  strategy: main
+
+strategies:
+  standard:
+    try: [pymupdf, tesseract]
+    escalate_when: looks_bad
+    max_time: 2m
+  audited:
+    parallel:
+      - use: standard
+      - backend: reducto
+        shadow: true
+    pick: best
+    budget:
+      max_duration: 3m
+  main:
+    route:
+      rules:
+        - when:
+            # Sampling uses a document-content hash. The same bytes select the
+            # same branch. Five percent is a target, not a quota per small batch.
+            sample_percent: 5
+          use: strategy:audited
+      default: strategy:standard
+
+# Sampled documents reach Reducto and can be billed. Non-sampled runs remain local.
+# A shadow is always drained, so auditing can increase end-to-end latency.
+# Parallel siblings must not dispatch the same backend, including through reuse.
+# Here standard uses only local parsers, while the shadow uses a distinct backend.
+# Use --keep-candidates to retain completed alternatives for later inspection.

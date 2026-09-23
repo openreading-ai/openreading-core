@@ -1,0 +1,28 @@
+# Start one hosted parser, then launch another only if no winner arrives in time.
+# A hedge is a delayed parallel attempt, not a retry of the first backend.
+# Install and configure reducto and azure-document-intelligence before running.
+# Every launched branch can upload the document and incur provider charges.
+version: 1
+
+defaults:
+  strategy: main
+
+strategies:
+  main:
+    parallel:
+      - reducto
+      - backend: azure-document-intelligence
+        start_after: 15s
+    pick: fastest
+    on_win: cancel
+    budget:
+      max_duration: 2m
+
+# A winner before 15 seconds prevents the second branch from starting.
+# Early failure of the first branch does not shorten the configured delay.
+# The first successful response wins without quality gating, as in example 07.
+#
+# Changing fastest to best changes the behavior: both branches are needed for
+# comparison, so start_after becomes a stagger rather than a cost-saving hedge.
+# Cancelling a started request does not guarantee that remote processing stops.
+# Tune the delay from measured latency rather than treating 15s as universal.

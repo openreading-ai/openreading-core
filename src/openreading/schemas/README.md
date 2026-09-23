@@ -24,6 +24,10 @@ Every surface reads and writes exactly these shapes, so the CLI, the Python API 
 server hand you the same JSON. The pydantic models in `openreading.types` mirror the files, and
 when the two disagree the JSON file wins.
 
+Artifact schemas describe field shapes; Python artifact models also enforce relationships between fields.
+For example, a v0.5 receipt requires extraction_state, while legacy receipts require at least one passage.
+Schema-only validation does not establish those cross-field invariants or verify retained file hashes.
+
 ## Understanding the response JSON
 
 You write one consumer for the content you need, then change backends without changing its field paths.
@@ -591,6 +595,9 @@ entry naming it, so the warning reaches you before the removal does.
 | Schema | Owner | Result |
 | --- | --- | --- |
 | `local-document.v0.4.json` | `openreading.artifacts.models` | Source hash, engine identity, and retained file inventory. |
+| `local-document.v0.5.json` | `openreading.artifacts.retention` | External-response acquisition binding with zero-passage structured results and unchanged v0.4 passage geometry. |
+| `agent-document-tool.v0.5.json` | `openreading.artifacts.models` | External import receipts disclose partial extraction and support complete retrieval without textual passages. |
+| `import-job.v0.4.json` | `openreading.types.import_job` | External transfer stages and response receipts preserve earlier local receipt shapes. |
 | `passage.v0.4.json` | `openreading.artifacts.passages` | Exact spans with physical pages or normalized JSON locations. |
 | `selection-tool.v0.1.json` | Historical selection | Frozen single-file receipts and empty selection input. |
 | `selection-tool.v0.2.json` | `openreading.mcp_server.selection` | Legacy receipts plus paginated snapshots, skipped-entry counts and cursor continuation. |

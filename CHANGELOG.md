@@ -1,5 +1,18 @@
 # Changelog
 
+- Handle external MCP progress stages without aborting imports; ignore unknown advisory stages.
+- Refuse nonobject external responses and remove Unicode line separators from artifact labels.
+
+## Unreleased external response retention
+
+- Retain validated normalized responses with exact uploaded-source and acquisition bindings, without parsing again.
+  Preserve partial status, explicit nulls, additive envelope fields, and structured-only results without invented passages.
+- Add local-document v0.5, agent-document-tool v0.5, and import-job v0.4 contracts.
+  Keep preceding schemas byte-identical and retain existing local artifact readers.
+- Add trusted launcher hooks for detached external imports, with explicit network annotations and transfer stages.
+  Refuse ordinary child dispatch for external jobs and never retry a busy import after upload begins.
+- Let external retention configure optional limits without constructing a local parser profile.
+
 ## Unreleased local MCP review fixes
 
 - Mark import status and listing tools as potentially writing interrupted-job recovery.

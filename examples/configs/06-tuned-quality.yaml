@@ -1,0 +1,32 @@
+# Tune the readable Plain checks to your documents before adding advanced gates.
+# This example uses the two local runtimes from example 02.
+version: 1
+
+defaults:
+  strategy: main
+
+strategies:
+  main:
+    try: [pymupdf, tesseract]
+    escalate_when:
+      looks_bad:
+        # Disable the garble heuristic if unusual but legitimate text trips it.
+        # false is a YAML boolean, not the quoted string "false".
+        garbled: false
+        # Escalate if more than 10% of pages have fewer than 25 characters.
+        # Blank separator pages can make this threshold too strict.
+        empty_pages: 0.1
+        no_text_from_images: true
+        # This additional check considers text density across all pages.
+        # A sparse title page is not necessarily a failed extraction.
+        min_text_per_page: 80
+    max_time: 90s
+
+# These enabled checks combine with OR. Any matching check advances the walk.
+# The final Tesseract result is accepted without reapplying the Plain gate.
+# Start with representative documents before lowering thresholds across a corpus.
+#
+# Inspect the expanded checks without processing any document:
+# openreading strategy normalize --config examples/configs/06-tuned-quality.yaml
+# Confidence checks are another option, but only backends reporting that
+# measurement can satisfy them. A missing measurement is skipped, not invented.
