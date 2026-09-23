@@ -80,6 +80,41 @@ def test_external_execution_recovery_discloses_uncertain_server_outcome(retentio
     assert value.error.retryable is False
 
 
+def test_external_execution_preserves_a_confirmed_destination_failure(retention, monkeypatch):
+    from openreading.artifacts.jobs import ImportExecution, ImportJobs
+    from openreading.artifacts.limits import ArtifactError
+
+    class Process:
+        pid = 999999999
+
+        def wait(self):
+            return 0
+
+    class ConfirmedFailure(ArtifactError):
+        preserve_message = True
+
+        def envelope(self):
+            value = super().envelope()
+            value.error.message = "Core server returned HTTP 401."
+            return value
+
+    monkeypatch.setattr(jobs.subprocess, "Popen", lambda *args, **kwargs: Process())
+    manager = ImportJobs(retention, execution=ImportExecution(("/trusted/worker",), {}))
+    initial = manager.start("source.md")
+    root = manager.root / initial.job_id
+
+    def factory(request):
+        def external(path, **kwargs):
+            raise ConfirmedFailure("parse_failed")
+
+        monkeypatch.setattr(retention, "import_document", external)
+        return retention
+
+    assert jobs.main([str(root)], service_factory=factory) == 0
+    status = json.loads((root / "status.json").read_bytes())
+    assert status["error"]["message"] == "Core server returned HTTP 401."
+
+
 def test_busy_after_submission_never_repeats_the_external_operation(retention, monkeypatch):
     from openreading.artifacts.jobs import ImportExecution, ImportJobs
     from openreading.artifacts.limits import ArtifactError
@@ -109,6 +144,40 @@ def test_busy_after_submission_never_repeats_the_external_operation(retention, m
     assert len(calls) == 1
     status = json.loads((root / "status.json").read_bytes())
     assert status["error"]["retryable"] is False
+
+
+def test_retaining_contention_recovers_the_cached_external_result(retention, monkeypatch):
+    """A local retention lock must not discard a completed server response."""
+    from openreading.artifacts.jobs import ImportExecution, ImportJobs
+    from openreading.artifacts.limits import ArtifactError
+
+    class Process:
+        pid = 999999999
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(jobs.subprocess, "Popen", lambda *args, **kwargs: Process())
+    manager = ImportJobs(retention, execution=ImportExecution(("/trusted/worker",), {}))
+    initial = manager.start("source.md")
+    root = manager.root / initial.job_id
+    calls = []
+
+    def factory(request):
+        def external(path, **kwargs):
+            calls.append(path)
+            kwargs["progress"]("retaining")
+            if len(calls) == 1:
+                raise ArtifactError("busy")
+            return retain(retention, rich_response())
+
+        monkeypatch.setattr(retention, "import_document", external)
+        return retention
+
+    assert jobs.main([str(root)], service_factory=factory) == 0
+    assert len(calls) == 2
+    status = json.loads((root / "status.json").read_bytes())
+    assert status["state"] == "succeeded"
 
 
 def test_local_job_wire_still_validates_against_its_frozen_version():

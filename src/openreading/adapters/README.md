@@ -76,47 +76,11 @@ Every adapter passes a conformance kit before it ships, which checks bbox geomet
 honesty, usage shape and determinism. Channel honesty means a channel graded `N`, `D` or `X` in
 [the fifth table](#what-each-backend-can-put-in-a-response) behaves that way.
 
-## Local setup walkthrough
+## Local setup
 
-Use this sequence to establish usable extraction before sending a long document through your own Core server.
-The recipes live in the CLI manual, so terminal help and Python documentation show the same instructions.
-
-1. Run `uv run openreading help local-ocr` to choose text extraction or OCR for your input.
-   For example, text that copies as control characters needs an OCR trial even when the PDF is selectable.
-2. Open the setup chapter for your chosen backend, then install its extra and provision its dependencies.
-   The LiteParse chapter downloads and verifies English data, while the Docling Slim chapter provisions pinned layout weights.
-3. Run the chapter's small synthetic conversion and inspect the JSON before processing your own document.
-   Check `backend.id`, `status.state`, `warnings`, and whether `document.text` contains readable words.
-4. Follow `openreading help local-ocr` to configure `OPENREADING_CONFIG`, start Core, and verify the selected backend over HTTP.
-   Repeating `/healthz` only proves that the server answers, not that the OCR engine can read a page.
-
-| You want to run | Setup command | What you provision separately |
-|---|---|---|
-| LiteParse with optional OCR | `uv run openreading help liteparse` | Verified English data; the wheel supplies PDFium and Tesseract |
-| Direct Tesseract OCR | `uv run openreading help tesseract` | System executable and language files; the PyMuPDF extra rasterizes PDFs |
-| Core's Docling Slim CPU pipeline | `uv run openreading help docling-local` | Pinned layout weights; Tesseract executable and full tessdata directory for OCR |
-| Full upstream Docling through HTTP | `uv run openreading help docling` | A separate Docling Serve installation or container, with its engines and models |
-
-To examine the sample result from the LiteParse recipe:
-
-```bash
-uv run python - <<'PY'
-import json
-result = json.load(open("liteparse.json"))
-print(result["backend"]["id"], result["status"]["state"])
-print(result.get("warnings", []))
-print(result["document"]["text"][:200])
-PY
-```
-
-For the shipped synthetic statement, a local OCR run must return readable statement text.
-Exact recognition varies with language data and engine versions, so compare important values with the source page.
-A successful process with empty text is not a successful extraction for that purpose.
-
-The setup chapters document `ocr_skipped`, asset failures, selective versus forced OCR, and timeout differences.
-They also explain why changing the server does not rewrite results already retained by an agent client.
-Full Docling deployment options follow the [upstream installation instructions](https://github.com/docling-project/docling-serve#readme).
-Core's HTTP adapter exposes only its implemented subset of those options, as `openreading help docling` describes.
+The CLI manual owns local setup recipes. Run `uv run openreading help local-ocr` to select a
+backend, then open that backend's chapter for its required assets and a small verification run.
+`GET /healthz` only proves that Core answers. It does not prove an OCR engine can read a page.
 
 ## Catalog
 
@@ -220,7 +184,7 @@ machine and has nothing to sign up for.
 | `aws-textract` | hosted_api | proprietary | https://aws.amazon.com/textract/ |
 | `azure-document-intelligence` | hosted_api | proprietary | https://azure.microsoft.com/products/ai-services/ai-document-intelligence |
 | `chunkr` | hosted_api | proprietary (AGPL-3.0 self-host available) | https://chunkr.ai |
-| `docling_local` | oss_library | MIT | Tesseract for OCR; LibreOffice when the provider requires legacy conversion |
+| `docling_local` | oss_library | MIT | none |
 | `docling` | oss_library | MIT | none |
 | `google-document-ai` | hosted_api | proprietary | https://cloud.google.com/document-ai |
 | `google-gemini` | hosted_api | proprietary | https://aistudio.google.com/apikey |
@@ -230,13 +194,13 @@ machine and has nothing to sign up for.
 | `llamaparse-agentic` | hosted_api | proprietary | https://cloud.llamaindex.ai |
 | `llamaparse-agentic-plus` | hosted_api | proprietary | https://cloud.llamaindex.ai |
 | `mistral-ocr` | hosted_api | proprietary | https://console.mistral.ai/api-keys |
-| `nuextract` | hosted_api | proprietary (open-weight NuExtract 2.0 [MIT 2B/8B] self-hostable via vLLM — different wire protocol, separate adapter) | https://nuextract.ai |
+| `nuextract` | hosted_api | proprietary (open-weight NuExtract 2.0 [MIT 2B/8B] self-hostable via vLLM, different wire protocol, separate adapter) | https://nuextract.ai |
 | `open-ocr` | hosted_api | proprietary | https://open-ocr.com |
 | `pulse` | hosted_api | proprietary | https://www.runpulse.com |
 | `pymupdf` | oss_library | AGPL-3.0 | none |
 | `qwen-vl` | self_hosted_model | Apache-2.0 (Qwen3-VL; Qwen2.5-VL per-size) | none |
 | `reducto` | hosted_api | proprietary | https://platform.reducto.ai |
-| `tesseract` | oss_library | Apache-2.0 | System Tesseract executable and language data |
+| `tesseract` | oss_library | Apache-2.0 | none |
 
 Source: `AdapterDescriptor.type`, `RuntimeProfile.license` and `signup_url` in
 `src/openreading/types/descriptor.py`. Live truth: `uv run python -c "from

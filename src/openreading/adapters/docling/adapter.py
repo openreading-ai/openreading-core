@@ -9,7 +9,7 @@ Environment variables this module reads
 ---------------------------------------
 The credential broker resolves DOCLING_SERVE_URL into the required endpoint field.
 Unset means the backend is unconfigured. A configured address does not prove it is reachable.
-For example, http://127.0.0.1:5001 names Docling Serve, not the Core server on port 7777.
+For example, http://127.0.0.1:5001 names Docling Serve, not the Core server on port 8787.
 The synchronous HTTP client timeout is 300 seconds. The other server has its own limits.
 
 OCR options

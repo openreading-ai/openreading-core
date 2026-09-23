@@ -1240,8 +1240,9 @@ To use LiteParse for requests without a backend id, save openreading.yaml:
     policy:
       backends: [liteparse]
 
-Set OPENREADING_CONFIG to that file's absolute path in .env. The server does
-not discover a working-directory YAML. Choose tesseract, docling_local, or
+Export OPENREADING_CONFIG to that file's absolute path before starting the
+server. The server does not discover a working-directory YAML. Choose
+tesseract, docling_local, or
 docling instead when testing those engines. An explicitly named backend
 bypasses this default chain. There is no automatic OCR-quality fallback
 merely because a result is empty; see openreading help gates for strategies.
@@ -1258,9 +1259,9 @@ Inspect chosen and fallbacks. Use /v1/parse with the same body to process the
 sample, and inspect backend.id, warnings, and document.text in the result.
 GET /healthz only establishes server availability, not OCR readiness.
 
-Core's HTTP result cache lasts for the server process. Restarting clears it.
-An agent client can also retain its own results. A Core restart does not
-clear those; request a fresh import through that client's workflow.
+Core's HTTP result cache holds at most 256 entries for 15 minutes. Restarting
+clears it. An agent client can also retain its own results. A Core restart
+does not clear those; request a fresh import through that client's workflow.
 
 LiteParse with OCR
 ------------------
@@ -1294,7 +1295,7 @@ once into your own directory, then verify its bytes before parsing:
     urlretrieve(url, root / "eng.traineddata")
     print(verify_tessdata(str(root), "eng"))
     print("LITEPARSE_TESSDATA=" + str(root))
-    PY
+PY
 
 The download contacts GitHub during setup. Parsing uses the verified local
 file and does not download OCR data. Save the printed LITEPARSE_TESSDATA
@@ -1310,7 +1311,7 @@ under $(brew --prefix)/share/tessdata; verification still applies.
     print(result["backend"]["id"], result["status"]["state"])
     print(result.get("warnings", []))
     print(result["document"]["text"][:200])
-    PY
+PY
 
 features.ocr defaults to "auto". With verified data, LiteParse chooses which
 regions need OCR. Without LITEPARSE_TESSDATA, it reads the text layer and
@@ -1340,7 +1341,7 @@ Python accepts the same budget in milliseconds:
         features={"ocr": "auto"}, deadline_ms=600_000, env_file=".env",
     )
     print(json.dumps(result))
-    PY
+PY
 
 Those ten-minute budgets apply to the named CLI or Python call, not
 subsequent server requests. The adapter does not support page subsets.
@@ -1427,7 +1428,7 @@ when processing documents and refuses missing or changed assets.
     hashes = LocalDoclingConfig(root).validate_assets()
     print("Verified model files:", len(hashes))
     print("DOCLING_LOCAL_ASSETS=" + str(root))
-    PY
+PY
 
 Save the printed DOCLING_LOCAL_ASSETS line in .env. For text-layer extraction
 with layout only, leave both OCR variables unset. Automatic requests then
@@ -1441,9 +1442,9 @@ openreading help tesseract and set both paths. On Homebrew macOS:
 
 Copy those printed absolute paths into .env. On Linux, locate the binary
 with command -v tesseract. Find its data directory with tesseract --list-langs.
-The directory
-must contain eng.traineddata, osd.traineddata, and configs/tsv. A lone
-eng.traineddata, sufficient for LiteParse, is insufficient for this adapter.
+The directory must contain eng.traineddata, osd.traineddata, and configs/tsv.
+A lone eng.traineddata is sufficient for LiteParse, but insufficient for this
+adapter.
 Verify the entire local setup, including OCR files:
 
     python - <<'PY'
@@ -1458,7 +1459,7 @@ Verify the entire local setup, including OCR files:
         tessdata_path=Path(os.environ["DOCLING_LOCAL_TESSDATA"]),
     )
     print("Verified model and OCR files:", len(config.validate_assets()))
-    PY
+PY
 
     openreading parse examples/john_smith_1000_2026_01.pdf \
       --backend docling_local > docling-local.json

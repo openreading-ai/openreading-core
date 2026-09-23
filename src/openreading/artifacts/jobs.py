@@ -367,7 +367,6 @@ def run(root: Path, *, service_factory: Callable[[dict], ArtifactService] | None
                     "uploading",
                     "waiting",
                     "receiving",
-                    "retaining",
                 }:
                     # Retention contention cannot resubmit a possibly billable server parse.
                     raise ArtifactError("parse_failed") from None
@@ -379,7 +378,11 @@ def run(root: Path, *, service_factory: Callable[[dict], ArtifactService] | None
         failure = error if isinstance(error, ArtifactError) else ArtifactError("parse_failed")
         value.state = "cancelled" if failure.code == "cancelled" else "failed"
         value.stage, value.error = "stopped", failure.envelope().error
-        if "execution" in request and failure.code in {"cancelled", "parse_failed"}:
+        if (
+            "execution" in request
+            and failure.code in {"cancelled", "parse_failed"}
+            and not getattr(failure, "preserve_message", False)
+        ):
             value.error.message = "Local processing stopped. Submitted server processing may continue; no retry was sent."
     finally:
         service.close()
