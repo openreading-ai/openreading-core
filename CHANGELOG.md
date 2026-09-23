@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased client-only build profile
+
+- Build canonical retention and MCP modules without the parsing engine through `packages/agent-client`.
+  Agent connectors use this isolated Git profile. The ordinary Core distribution keeps its existing CLI, Python and HTTP APIs.
+
 - Reject duplicate physical page numbers before external retention and when loading older external artifacts.
   Preserve positional evidence for explicitly unpaginated results.
 - Make the five Python heredoc recipes executable as printed by CLI help.

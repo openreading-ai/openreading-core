@@ -15,11 +15,15 @@ The legacy profile rejects worker settings that its disposable parser cannot enf
 Only busy and storage_limit invite retry after the blocking condition is resolved.
 """
 
+from __future__ import annotations
+
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from openreading.adapters.docling_local.config import LocalDoclingConfig
+if TYPE_CHECKING:
+    from openreading.adapters.docling_local.config import LocalDoclingConfig
 from openreading.artifacts.models import ErrorCode, ErrorEnvelope, ToolError
 
 MESSAGES: dict[ErrorCode, str] = {

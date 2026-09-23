@@ -21,7 +21,7 @@ from pathlib import PurePosixPath
 
 from openreading.artifacts.intake import directory
 from openreading.artifacts.models import json_bytes
-from openreading.artifacts.service import ArtifactService
+from openreading.artifacts.retained import RetainedService as ArtifactService
 from openreading.artifacts.store import safe_read
 from openreading.types.selection import SelectionBatch, SelectionPage, SelectionReceipt
 
