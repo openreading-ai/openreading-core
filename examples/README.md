@@ -1,4 +1,7 @@
-# Example documents
+# Example documents and configurations
+
+For ready-to-run `openreading.yaml` files, start with the [commented configuration examples](configs/README.md).
+They progress from one backend to quality checks, parallel runs, routing, and composed strategies.
 
 You can parse these five documents the moment the clone finishes. Your first run needs no key, no
 vendor account, and no documents of your own. A backend is one document parser. Both of the parsers
@@ -136,17 +139,15 @@ than errors, and neither reaches the JSON. The command above sends stdout to a f
 notices are all you see. Confirm the run with `jq -r .status.state pymupdf.json`, which prints
 `succeeded`.
 
-Every document as a batch. Pointing `parse` at a directory is what turns on batch mode:
+Parse all five documents as a batch. Quote the glob so OpenReading expands it:
 
 ```bash
-uv run openreading parse examples/ --backend pymupdf > batch.json
+uv run openreading parse 'examples/*.pdf' --backend pymupdf > batch.json
 ```
 
-The run touches six files, not five. The terminal prints `[3/6] README.md failed
-unsupported_format`. Inside `batch.json`, `summary` records `"total": 6, "succeeded": 5,
-"failed": 1`. This README sits in the directory too, and PyMuPDF does not read `.md`. Every source
-is offered to the backend, so it comes back carrying PyMuPDF's own reason rather than being
-filtered out before it was tried, and the batch exits 4 as partial.
+Inside `batch.json`, `summary` records `"total": 5, "succeeded": 5, "failed": 0`.
+The glob excludes this README and the YAML examples. Passing `examples/` instead recursively
+includes those supporting files, and unsupported formats become failed items in a partial batch.
 
 Your own test documents belong in `samples/` at the clone root, which is gitignored for that
 purpose. `scripts/batch_demo.sh` reads that folder by default, and a path argument such as

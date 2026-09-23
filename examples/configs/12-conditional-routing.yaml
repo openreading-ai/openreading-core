@@ -1,0 +1,40 @@
+# Choose reusable local recipes using facts available before document parsing.
+# Install both local runtimes from example 02. No classifier or vendor key is used.
+version: 1
+
+defaults:
+  strategy: main
+
+strategies:
+  text_only: pymupdf
+  ocr_only: tesseract
+  local_quality:
+    try: [pymupdf, tesseract]
+    escalate_when: looks_bad
+    max_time: 2m
+  main:
+    route:
+      # First matching rule wins. More specific rules therefore belong first.
+      rules:
+        - when:
+            # A filename convention is a hint you control, not content detection.
+            filename_matches: '(?i)(scan|1988)'
+          use: strategy:ocr_only
+        - when:
+            # Keys within when combine with AND. Unknown facts skip the rule.
+            mime: application/pdf
+            pages_over: 100
+          use: strategy:text_only
+        - when:
+            # This uses routing.doc_type_hint supplied by a Python or HTTP caller.
+            # It does not classify the document. The parse CLI does not set it.
+            doc_type: [invoice, bank_statement]
+          use: strategy:local_quality
+      default: strategy:local_quality
+
+# The large-document rule prioritizes speed and does not automatically OCR scans.
+# Remove it if every document must receive the quality checks.
+#
+# Inspect the eligible tree without calling a parser:
+# openreading strategy plan examples/1040-1988.pdf --strategy main \
+#   --config examples/configs/12-conditional-routing.yaml

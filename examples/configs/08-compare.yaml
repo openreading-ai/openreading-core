@@ -1,0 +1,23 @@
+# Run two local parsers and select their best-scoring completed result.
+# Install both local runtimes from example 02. Both process the document.
+version: 1
+
+defaults:
+  strategy: main
+
+strategies:
+  main:
+    compare: [pymupdf, tesseract]
+    max_time: 2m
+
+# Unlike a race, comparison normally waits for both branches to resolve.
+# The engine scores available result signals. It does not know the ground truth
+# and does not merge text from the two parsers into a corrected transcription.
+#
+# Keep completed alternatives if you want to inspect their disagreement later:
+# openreading parse examples/john_smith_1000_2026_01.pdf --strategy main --keep-candidates \
+#   --config examples/configs/08-compare.yaml > run.json
+# openreading explain run.json
+# openreading compare --from run.json --format diffs
+#
+# Keeping candidates increases the output size. It is off unless requested.

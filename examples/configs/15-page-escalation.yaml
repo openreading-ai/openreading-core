@@ -1,0 +1,31 @@
+# Keep useful text pages and send only deficient pages to the next local parser.
+# Install both local runtimes from example 02. This example requires PDF input.
+version: 1
+
+defaults:
+  strategy: main
+
+strategies:
+  main:
+    granularity: page
+    steps:
+      - backend: pymupdf
+        escalate_if:
+          chars_per_page_below: 80
+      - tesseract
+    budget:
+      max_duration: 2m
+
+# PyMuPDF and Tesseract both declare native page-range selection. Gates select
+# failing pages, and the final response records which backend supplied each page.
+# A sparse but valid page can trigger OCR, so tune the threshold for your corpus.
+#
+# If you substitute a backend without native page-range selection, that rung
+# falls back to document-level execution and emits a warning. Do not assume
+# page-level savings for every backend. Check its descriptor before substituting.
+#
+# Validation checks backend capabilities before you run the document:
+# openreading strategy validate --config examples/configs/15-page-escalation.yaml
+#
+# The final Tesseract step has no quality gate, so its successful pages are accepted.
+# Read the orchestration trace to see which pages actually needed another attempt.

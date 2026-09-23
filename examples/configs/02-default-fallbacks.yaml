@@ -1,0 +1,24 @@
+# Try local parsers in your preferred order when a request names no backend.
+# Install Core's pymupdf and tesseract extras, plus the Tesseract executable.
+# See the local setup walkthrough linked from this directory's README.
+version: 1
+
+policy:
+  backends:
+    - pymupdf
+    - tesseract
+
+# A fallback is another backend attempted when the preceding backend fails.
+# Reorder the list to change which parser gets the first attempt.
+# Missing credentials or unavailable runtimes do not create a working fallback.
+#
+# This is failure recovery, not a quality check. PyMuPDF can successfully read
+# an empty text layer, so that success does not automatically trigger OCR.
+# Example 04 adds quality-based escalation for precisely that situation.
+#
+# Inspect the default chain without sending a document to a parser:
+# openreading route examples/1040-1988.pdf \
+#   --config examples/configs/02-default-fallbacks.yaml
+#
+# This list is not a security allowlist. Explicit backend requests and named
+# strategy leaves select their own backends. Server API-key scopes are separate.

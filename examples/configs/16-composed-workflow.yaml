@@ -1,0 +1,66 @@
+# Compose routing, reusable local checks, and parallel hosted fallback in one file.
+# Install local runtimes, reducto, and azure-document-intelligence before running.
+# Configure provider credentials outside YAML. The hosted branch uploads content.
+version: 1
+
+# --no-strategy uses this local chain. It is a default, not an access restriction.
+policy:
+  backends: [pymupdf, tesseract]
+
+limits:
+  max_duration_per_doc: 4m
+
+defaults:
+  strategy: main
+
+strategies:
+  local_only:
+    try: [pymupdf, tesseract]
+    escalate_when: looks_bad
+    max_time: 2m
+
+  hosted_comparison:
+    compare: [reducto, azure-document-intelligence]
+    max_time: 2m
+
+  quality_first:
+    steps:
+      - backend: pymupdf
+        escalate_if:
+          any_of:
+            - chars_per_page_below: 80
+            - garbled: true
+      - backend: tesseract
+        escalate_if:
+          any_of:
+            - chars_per_page_below: 80
+            - garbled: true
+      # Both hosted backends run only when this final step is reached.
+      # Reusing a named subtree keeps its concurrency and budget rules together.
+      - use: hosted_comparison
+    on_error:
+      invalid_input: fail
+      auth: fail
+      transient: next
+    on_quality_exhausted: best_effort
+    budget:
+      max_duration: 3m
+
+  main:
+    route:
+      rules:
+        - when:
+            filename_matches: '(?i)^local-'
+          use: strategy:local_only
+      default: strategy:quality_first
+
+# The local- filename convention demonstrates routing, not a security control.
+# A renamed file or explicit strategy choice can take another path. Enforce any
+# caller restrictions at the server API-key scope or your application boundary.
+#
+# The final hosted comparison selects a scored winner without a final quality gate.
+# A retained deficient local result can still be returned if later steps fail.
+# Review warnings and use `openreading explain run.json` to see what actually ran.
+#
+# Keep sibling backends distinct, and validate after editing any reused recipe:
+# openreading strategy validate --config examples/configs/16-composed-workflow.yaml

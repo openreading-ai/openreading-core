@@ -1,0 +1,26 @@
+# Use the text layer when useful, then try OCR when the result looks deficient.
+# All parsing stays in the two local runtimes. Install both as in example 02.
+version: 1
+
+defaults:
+  strategy: main
+
+strategies:
+  main:
+    try: [pymupdf, tesseract]
+    # A gate is a test on a result that decides whether another step is needed.
+    # looks_bad checks garbled text, mostly empty pages, and scans with sparse
+    # extracted text. Detecting a scan alone does not reject successful OCR.
+    escalate_when: looks_bad
+    max_time: 2m
+
+# Compare a text-layer document with the scanned fixture:
+# openreading parse examples/john_smith_1000_2026_01.pdf --strategy main \
+#   --config examples/configs/04-local-quality.yaml
+# openreading parse examples/1040-1988.pdf --strategy main \
+#   --config examples/configs/04-local-quality.yaml > run.json
+# openreading explain run.json
+#
+# Plain try gates every step except the last. The final successful OCR result
+# is accepted without this gate. Example 10 also checks the final result.
+# A quality signal is a heuristic, not proof that the extracted text is correct.

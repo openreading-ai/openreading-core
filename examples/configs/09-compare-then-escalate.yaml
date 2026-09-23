@@ -1,0 +1,28 @@
+# Compare locally first, then consult a hosted parser when the comparison fails.
+# Install both local runtimes and reducto. Set REDUCTO_API_KEY outside this file.
+version: 1
+
+defaults:
+  strategy: main
+
+strategies:
+  main:
+    compare: [pymupdf, tesseract]
+    then: reducto
+    escalate_when:
+      # Any listed check can send the document to the third backend.
+      looks_bad: true
+      # Disagreement is token-set distance, not a measured error rate.
+      # Lower values make differences more likely to trigger another attempt.
+      disagree: 0.25
+    max_time: 3m
+
+# With then but without escalate_when, the defaults are looks_bad OR disagreement
+# above 0.3. Explicit checks replace that bundle rather than extending it.
+# disagree is meaningful here because compare produced multiple candidate texts.
+#
+# Reducto receives the document only when that final step runs. It may be billed.
+# The third parser is not an arbiter of factual truth, and its result needs review.
+#
+# openreading parse examples/john_smith_1000_2026_01.pdf --strategy main \
+#   --config examples/configs/09-compare-then-escalate.yaml > run.json

@@ -1,0 +1,27 @@
+# Keep useful local results, with an explicitly chosen hosted fallback.
+# Install the local runtimes from example 02 and Core's reducto extra.
+# Set REDUCTO_API_KEY in your environment or .env, never in this YAML file.
+# The adapters guide documents each backend's installation and credential names.
+version: 1
+
+defaults:
+  strategy: main
+
+strategies:
+  main:
+    try: [pymupdf, tesseract, reducto]
+    # The same gate checks both local steps because neither is the final step.
+    # Reducto receives the document only if execution reaches that third step.
+    escalate_when: looks_bad
+    max_time: 3m
+
+# The hosted step sends document content outside your machine and may cost money.
+# Choose providers according to your own agreements and document permissions.
+# Missing credentials skip a step. They do not turn it into a local parser.
+#
+# If every completed result is deficient, the engine can return a retained
+# result with warnings. Inspect warnings and the trace, not only status.state.
+#
+# openreading parse examples/1040-1988.pdf --strategy main \
+#   --config examples/configs/05-local-then-hosted.yaml > run.json
+# openreading explain run.json

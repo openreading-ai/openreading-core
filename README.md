@@ -355,17 +355,21 @@ strategy offline_first  →  pymupdf (ok)
 The trace shows PyMuPDF ran, three gates passed, and the run stopped there, so no second backend
 was ever called. The fourth gate is `skipped` rather than failed, because PyMuPDF reports no
 confidence. A missing measurement never counts as a passing one. Timings vary between machines.
-Write your own strategy with `uv run openreading strategy --help`. Set `OPENREADING_LEDGER` to a
+Start with the [commented YAML examples](examples/configs/README.md), ordered from a single backend
+to routing, quality checks, parallel runs, and composed workflows. Each file is a complete configuration.
+Use `uv run openreading strategy --help` to inspect or validate your chosen file.
+
+Set `OPENREADING_LEDGER` to a
 directory before a long `--strategy` run and every step is journaled there, so an interruption
 resumes instead of restarting. Without that variable nothing is written and there is nothing to
 resume. A `--backend` run writes no journal, and a batch has no resume of its own. The
 [run ledger](src/openreading/ledger/README.md) guide explains the journal.
 
-**A folder at a time.** Point `parse` at a directory and it batches, which is how you run a whole
-corpus rather than one file:
+**Several documents at a time.** Point `parse` at a directory or a quoted glob to run a batch.
+This glob selects the five sample PDFs without including their README or configuration examples:
 
 ```bash
-uv run openreading parse examples/ --backend pymupdf --jobs 2 > batch.json
+uv run openreading parse 'examples/*.pdf' --backend pymupdf --jobs 2 > batch.json
 ```
 
 Progress goes to stderr, one line per file, so `batch.json` stays pure JSON.
@@ -375,14 +379,13 @@ Its `summary` tells you at a glance whether the sweep went as expected, and the 
 between machines:
 
 ```json
-{ "total": 6, "succeeded": 5, "failed": 1, "duration_ms": 511.0,
+{ "total": 5, "succeeded": 5, "failed": 0, "duration_ms": 550.0,
   "pages_processed": 10, "backends": { "pymupdf": 5 } }
 ```
 
-The total is six because `examples/README.md` is in that folder too. It comes back as a failed
-item carrying PyMuPDF's own `unsupported_format` reason rather than being dropped in silence, so
-the count you get back always accounts for every file you pointed at. `scripts/batch_demo.sh path/to/docs` runs the same
-sweep with both local backends and compares the two corpora.
+Pointing at `examples/` instead recursively includes supporting files too. An unsupported file
+gets a failed item with the backend's reason, rather than disappearing from the result.
+`scripts/batch_demo.sh path/to/docs` runs a directory sweep with both local backends and compares the two corpora.
 
 The command above names its backend explicitly. A `policy.backends` list supplies the default
 chain only when a request names no backend.
@@ -542,6 +545,7 @@ command.
 | **how to get from a fresh clone to a working strategy, one step at a time** | [The tutorial](https://openreading.ai/oss-tutorial), maintained in `openreading-web`, over the shipped documents |
 | **how to build against the response JSON** | [Annotated response and Python consumer](src/openreading/schemas/README.md#understanding-the-response-json), or `uv run openreading help response` |
 | what the shipped example documents contain and where they came from | [`examples/README.md`](examples/README.md) |
+| complete, generously commented `openreading.yaml` files, from simple defaults to composed strategies | [Configuration examples](examples/configs/README.md) |
 | install local engines, enable OCR, and distinguish Docling Slim from Docling Serve | `uv run openreading help local-ocr`, then [local setup walkthrough](src/openreading/adapters/README.md#local-setup-walkthrough) |
 | each backend's variables, runtime location, and env-var precedence rules | [`src/openreading/adapters/README.md`](src/openreading/adapters/README.md), then `uv run python -m pydoc openreading.credentials` |
 | the exact JSON shapes (the contract) | [`src/openreading/schemas/README.md`](src/openreading/schemas/README.md), then the `*.json` files beside it |

@@ -1,0 +1,35 @@
+# Choose how a serial strategy handles failures and bounds its document runtime.
+# Install reducto and azure-document-intelligence, plus pymupdf for local fallback.
+# Configure hosted credentials using the adapters guide, never inside this file.
+# Either hosted attempt can upload the document and incur charges.
+version: 1
+
+limits:
+  # This ceiling applies to strategy execution, not an explicit --backend request.
+  max_duration_per_doc: 3m
+
+defaults:
+  strategy: main
+
+strategies:
+  main:
+    budget:
+      # The smaller enclosing deadline wins. Durations require units, not numbers.
+      max_duration: 2m
+    steps: [reducto, azure-document-intelligence, pymupdf]
+    # Turn off quality escalation. This recipe advances on errors, not sparse text.
+    escalate_if: false
+    on_error:
+      # Retrying a malformed document elsewhere is unlikely to repair that input.
+      invalid_input: fail
+      # Stop on rejected credentials so configuration mistakes remain visible.
+      auth: fail
+      # transient covers timeout, rate_limited, and provider_error.
+      transient: next
+      unsupported_feature: next
+
+# Missing credentials are always skipped, unlike credentials rejected by a server.
+# Same-backend retries belong to the driver. next means another strategy step.
+# Time budgets do not cap vendor spending or guarantee remote cancellation.
+# Do not add max_attempts, attempt_timeout, or circuit_breaker as safety limits.
+# Those controls are not implemented and strategy validate rejects them.

@@ -1,0 +1,17 @@
+# Start with one local parser and no strategy rules or vendor credentials.
+# A backend is one document parser, identified by its registered name.
+# Install Core with its pymupdf extra before running this example.
+# Each backend reads the formats its descriptor claims. See the adapters guide.
+#
+# From the repository root:
+# openreading parse examples/john_smith_1000_2026_01.pdf --no-strategy \
+#   --config examples/configs/01-single-backend.yaml
+#
+# This file supplies a default, not an access-control boundary. An explicit
+# --backend runs directly, even if that backend is absent from this list.
+version: 1
+
+policy:
+  # An unnamed request tries only PyMuPDF. There is no second attempt available.
+  # PyMuPDF reads existing text. A successful result can still need OCR.
+  backends: [pymupdf]
