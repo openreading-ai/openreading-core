@@ -1,5 +1,9 @@
 # Changelog
 
+- Reject duplicate physical page numbers before external retention and when loading older external artifacts.
+  Preserve positional evidence for explicitly unpaginated results.
+- Make the five Python heredoc recipes executable as printed by CLI help.
+
 - Handle external MCP progress stages without aborting imports; ignore unknown advisory stages.
 - Refuse nonobject external responses and remove Unicode line separators from artifact labels.
 

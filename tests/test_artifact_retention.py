@@ -117,6 +117,58 @@ def test_schema_invalid_and_nonfinite_values_are_rejected(retention):
             retain(retention, response)
 
 
+def duplicate_pages(*, blocks=False):
+    response = rich_response()
+    response["document"] = {
+        "page_count": 2,
+        "pages": [
+            {
+                "page_number": 1,
+                **({"blocks": [{"type": "text", "text": text}]} if blocks else {"text": text}),
+            }
+            for text in ("Payment approved.", "Payment rejected.")
+        ],
+    }
+    return response
+
+
+@pytest.mark.parametrize("blocks", [False, True])
+def test_duplicate_physical_pages_cannot_publish_ambiguous_evidence(retention, blocks):
+    with pytest.raises(ArtifactError, match="parse_failed"):
+        retain(retention, duplicate_pages(blocks=blocks))
+    assert list(retention.store.documents.iterdir()) == []
+    assert list((retention.config.artifact_root / "staging").iterdir()) == []
+
+
+def test_legacy_external_artifact_with_duplicate_pages_is_corrupt(retention, monkeypatch):
+    from openreading.artifacts import retention as module
+    from openreading.types.response import NormalizedResponse
+
+    # Emulate the old writer while preserving real file hashes and acquisition bindings.
+    with monkeypatch.context() as old_writer:
+        old_writer.setattr(module, "validate_external_response", NormalizedResponse.model_validate)
+        receipt = retain(retention, duplicate_pages())
+    with pytest.raises(ArtifactError, match="artifact_corrupt"):
+        retention.load_artifact(receipt.artifact_id)
+
+
+@pytest.mark.parametrize("unpaginated", [False, True])
+def test_external_search_and_read_agree_for_distinct_sources(retention, unpaginated):
+    response = duplicate_pages()
+    if unpaginated:
+        response["warnings"] = [
+            {"code": "page_attribution_unavailable", "message": "Synthetic containers"}
+        ]
+    else:
+        response["document"]["pages"][0]["page_number"] = 2
+    receipt = retain(retention, response)
+    for word in ("approved", "rejected"):
+        hit = retention.search(receipt.artifact_id, word).hits[0]
+        result = retention.read(receipt.artifact_id, [hit.evidence_id])
+        assert word in result.passages[0].text
+        assert hit.evidence_id.startswith("d" if unpaginated else "p")
+
+
 @pytest.mark.parametrize("response", [None, [], "invalid", 1])
 def test_nonobject_external_response_is_a_domain_failure(retention, response):
     with pytest.raises(ArtifactError, match="parse_failed"):

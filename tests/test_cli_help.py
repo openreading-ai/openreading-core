@@ -124,6 +124,15 @@ def test_heredoc_delimiters_are_pasteable():
         assert closing == "PY", f"line {index + 1} has an indented heredoc delimiter"
 
 
+@pytest.mark.parametrize("slug", ["liteparse", "docling-local"])
+def test_rendered_python_heredocs_compile_without_reindentation(slug):
+    page = "\n".join(render(resolve(slug)))
+    bodies = re.findall(r"python - <<'PY'\n(.*?)\nPY", page, re.DOTALL)
+    assert len(bodies) == (3 if slug == "liteparse" else 2)
+    for index, body in enumerate(bodies):
+        compile(body, f"{slug}-recipe-{index}", "exec")
+
+
 @pytest.mark.parametrize("topic", TOPICS, ids=lambda t: t.slug)
 def test_no_chapter_names_a_file_the_reader_cannot_open(topic):
     for line in render(topic):

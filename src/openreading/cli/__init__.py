@@ -1281,20 +1281,20 @@ once into your own directory, then verify its bytes before parsing:
 
     export LITEPARSE_TESSDATA="$HOME/.local/share/openreading/tessdata"
     python - <<'PY'
-    import os
-    from pathlib import Path
-    from urllib.request import urlretrieve
-    from openreading.adapters.liteparse.assets import (
-        PINNED_TESSDATA, verify_tessdata,
-    )
-    root = Path(os.environ["LITEPARSE_TESSDATA"])
-    root.mkdir(parents=True, exist_ok=True)
-    _, _, source = PINNED_TESSDATA["eng"]["tessdata_fast"]
-    url = source.replace("github.com/", "raw.githubusercontent.com/")
-    url = url.replace("/blob/", "/")
-    urlretrieve(url, root / "eng.traineddata")
-    print(verify_tessdata(str(root), "eng"))
-    print("LITEPARSE_TESSDATA=" + str(root))
+import os
+from pathlib import Path
+from urllib.request import urlretrieve
+from openreading.adapters.liteparse.assets import (
+    PINNED_TESSDATA, verify_tessdata,
+)
+root = Path(os.environ["LITEPARSE_TESSDATA"])
+root.mkdir(parents=True, exist_ok=True)
+_, _, source = PINNED_TESSDATA["eng"]["tessdata_fast"]
+url = source.replace("github.com/", "raw.githubusercontent.com/")
+url = url.replace("/blob/", "/")
+urlretrieve(url, root / "eng.traineddata")
+print(verify_tessdata(str(root), "eng"))
+print("LITEPARSE_TESSDATA=" + str(root))
 PY
 
 The download contacts GitHub during setup. Parsing uses the verified local
@@ -1306,11 +1306,11 @@ under $(brew --prefix)/share/tessdata; verification still applies.
     openreading parse examples/john_smith_1000_2026_01.pdf \
       --backend liteparse > liteparse.json
     python - <<'PY'
-    import json
-    result = json.load(open("liteparse.json"))
-    print(result["backend"]["id"], result["status"]["state"])
-    print(result.get("warnings", []))
-    print(result["document"]["text"][:200])
+import json
+result = json.load(open("liteparse.json"))
+print(result["backend"]["id"], result["status"]["state"])
+print(result.get("warnings", []))
+print(result["document"]["text"][:200])
 PY
 
 features.ocr defaults to "auto". With verified data, LiteParse chooses which
@@ -1334,13 +1334,13 @@ variable or serve flag. A named CLI call can supply a longer budget:
 Python accepts the same budget in milliseconds:
 
     python - <<'PY'
-    import json
-    import openreading
-    result = openreading.run(
-        "examples/john_smith_1000_2026_01.pdf", backend="liteparse",
-        features={"ocr": "auto"}, deadline_ms=600_000, env_file=".env",
-    )
-    print(json.dumps(result))
+import json
+import openreading
+result = openreading.run(
+    "examples/john_smith_1000_2026_01.pdf", backend="liteparse",
+    features={"ocr": "auto"}, deadline_ms=600_000, env_file=".env",
+)
+print(json.dumps(result))
 PY
 
 Those ten-minute budgets apply to the named CLI or Python call, not
@@ -1413,21 +1413,21 @@ when processing documents and refuses missing or changed assets.
 
     export DOCLING_LOCAL_ASSETS="$HOME/.local/share/openreading/docling"
     python - <<'PY'
-    import os
-    from pathlib import Path
-    from huggingface_hub import snapshot_download
-    from openreading.adapters.docling_local.config import (
-        MODEL_REPOSITORY, MODEL_REVISION, MODEL_FILES, LocalDoclingConfig,
-    )
-    root = Path(os.environ["DOCLING_LOCAL_ASSETS"])
-    model = root / MODEL_REPOSITORY.replace("/", "--")
-    snapshot_download(
-        MODEL_REPOSITORY, revision=MODEL_REVISION,
-        allow_patterns=list(MODEL_FILES), local_dir=model,
-    )
-    hashes = LocalDoclingConfig(root).validate_assets()
-    print("Verified model files:", len(hashes))
-    print("DOCLING_LOCAL_ASSETS=" + str(root))
+import os
+from pathlib import Path
+from huggingface_hub import snapshot_download
+from openreading.adapters.docling_local.config import (
+    MODEL_REPOSITORY, MODEL_REVISION, MODEL_FILES, LocalDoclingConfig,
+)
+root = Path(os.environ["DOCLING_LOCAL_ASSETS"])
+model = root / MODEL_REPOSITORY.replace("/", "--")
+snapshot_download(
+    MODEL_REPOSITORY, revision=MODEL_REVISION,
+    allow_patterns=list(MODEL_FILES), local_dir=model,
+)
+hashes = LocalDoclingConfig(root).validate_assets()
+print("Verified model files:", len(hashes))
+print("DOCLING_LOCAL_ASSETS=" + str(root))
 PY
 
 Save the printed DOCLING_LOCAL_ASSETS line in .env. For text-layer extraction
@@ -1448,17 +1448,17 @@ adapter.
 Verify the entire local setup, including OCR files:
 
     python - <<'PY'
-    import os
-    from pathlib import Path
-    from openreading.credentials import load_dotenv
-    from openreading.adapters.docling_local.config import LocalDoclingConfig
-    load_dotenv()
-    config = LocalDoclingConfig(
-        Path(os.environ["DOCLING_LOCAL_ASSETS"]), ocr=True,
-        tesseract_cmd=Path(os.environ["DOCLING_LOCAL_TESSERACT"]),
-        tessdata_path=Path(os.environ["DOCLING_LOCAL_TESSDATA"]),
-    )
-    print("Verified model and OCR files:", len(config.validate_assets()))
+import os
+from pathlib import Path
+from openreading.credentials import load_dotenv
+from openreading.adapters.docling_local.config import LocalDoclingConfig
+load_dotenv()
+config = LocalDoclingConfig(
+    Path(os.environ["DOCLING_LOCAL_ASSETS"]), ocr=True,
+    tesseract_cmd=Path(os.environ["DOCLING_LOCAL_TESSERACT"]),
+    tessdata_path=Path(os.environ["DOCLING_LOCAL_TESSDATA"]),
+)
+print("Verified model and OCR files:", len(config.validate_assets()))
 PY
 
     openreading parse examples/john_smith_1000_2026_01.pdf \

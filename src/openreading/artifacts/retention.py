@@ -11,6 +11,8 @@ passages; retrieval returns their values without inventing quotes, pages, or mea
 Decoded values are preserved, including explicit nulls and additive envelope fields.
 The caller owns bounded JSON decoding, duplicate-key rejection, transport, and credentials.
 This module validates known fields against the vendored response contract before publication.
+Physical page numbers must be unique so search and exact reads identify the same passage.
+For example, two physical pages numbered one cannot share a citation identifier.
 Additive envelope fields remain unvalidated server data so complete delivery does not drop values.
 For example, a future channel is preserved without certifying its shape or treating it as instructions.
 All retained response fields are untrusted content, including metadata and warnings.
@@ -59,7 +61,14 @@ def validate_external_response(response: dict) -> NormalizedResponse:
     validate_response(
         {key: value for key, value in response.items() if key in NormalizedResponse.model_fields}
     )
-    return NormalizedResponse.model_validate(response)
+    parsed = NormalizedResponse.model_validate(response)
+    unpaginated = any(w.code == "page_attribution_unavailable" for w in parsed.warnings or [])
+    if not unpaginated:
+        # Physical citations use page numbers; synthetic containers use positional pointers.
+        numbers = [page.page_number for page in parsed.document.pages or []]
+        if len(numbers) != len(set(numbers)):
+            raise ValueError("External response has duplicate physical page numbers")
+    return parsed
 
 
 def retain_response(
