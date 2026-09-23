@@ -33,7 +33,9 @@ satisfy those (`openreading.readiness`). `openreading backends` names missing VA
 `.env` loading (`load_dotenv`): `KEY=VALUE` lines from a dotenv file enter the environment WITHOUT
 overriding an already-set process var — an exported shell variable always wins over the file, so a
 value exported in an earlier shell command silently beats the file you just edited. The CLI loads
-`./.env` (or `--env-file`) on every invocation, `openreading serve` included. A program that
+`./.env` (or `--env-file`) on every invocation, `openreading serve` included.
+Values are literal: the loader does not expand tilde, variable references, or shell commands.
+For example, use an absolute OCR model path rather than $HOME/models in this file. A program that
 imports `openreading.server.app.create_app` directly loads nothing, so it calls `load_dotenv`
 itself. `openreading.run(env_file=)` / `run_batch(env_file=)` load only when given. Do NOT copy
 `.env.example` wholesale: it pre-fills two localhost endpoints (`DOCLING_SERVE_URL`,

@@ -100,9 +100,11 @@ hosted backend needs your vendor key. If you have no document to hand, two synth
 
 ## Install
 
-Four lines give you a working install with two local backends and no API keys. You need `git` and
+These commands install Core and its Python dependencies. Local OCR can also need system engines
+and model assets, as the setup chapters explain. You need `git` and
 [`uv`](https://docs.astral.sh/uv/), which fetches Python 3.11+ itself. The Tesseract OCR engine is a
-separate system binary, needed only for the `tesseract` backend, and the next section installs it.
+separate system binary for direct Tesseract and local Docling OCR. LiteParse bundles its own
+engine but still requires configured language data. See [local OCR setup](#local-engines-and-ocr).
 Python 3.11+ with `pip` also works. Nothing is on PyPI yet, so install from the clone.
 
 ```bash
@@ -116,7 +118,24 @@ Without uv, run `python3 -m venv .venv && .venv/bin/pip install -e '.[pymupdf,te
 and type `.venv/bin/openreading …` wherever this page says `uv run openreading …`. In that venv,
 `openreading backends` marks a hosted backend as missing an extra rather than a variable.
 
-### The two local backends
+### Local engines and OCR
+
+Installing Python extras does not provision every OCR language file, model weight, or system executable.
+Use the setup chapters from the activated Core environment, or prefix commands with `uv run`:
+
+```bash
+uv run openreading help local-ocr
+uv run openreading help liteparse
+uv run openreading help tesseract
+uv run openreading help docling-local
+uv run openreading help docling
+```
+
+These chapters cover text extraction versus OCR, asset downloads, `.env` paths, small test conversions,
+and timeout limits. The [local setup walkthrough](src/openreading/adapters/README.md#local-setup-walkthrough)
+connects installation to a readable result and a configured `openreading serve` process.
+
+### Two local backends to start with
 
 Neither local backend calls anyone, so nothing you parse with them leaves your machine.
 
@@ -523,6 +542,7 @@ command.
 | **how to get from a fresh clone to a working strategy, one step at a time** | [The tutorial](https://openreading.ai/oss-tutorial), maintained in `openreading-web`, over the shipped documents |
 | **how to build against the response JSON** | [Annotated response and Python consumer](src/openreading/schemas/README.md#understanding-the-response-json), or `uv run openreading help response` |
 | what the shipped example documents contain and where they came from | [`examples/README.md`](examples/README.md) |
+| install local engines, enable OCR, and distinguish Docling Slim from Docling Serve | `uv run openreading help local-ocr`, then [local setup walkthrough](src/openreading/adapters/README.md#local-setup-walkthrough) |
 | each backend's variables, runtime location, and env-var precedence rules | [`src/openreading/adapters/README.md`](src/openreading/adapters/README.md), then `uv run python -m pydoc openreading.credentials` |
 | the exact JSON shapes (the contract) | [`src/openreading/schemas/README.md`](src/openreading/schemas/README.md), then the `*.json` files beside it |
 | how to cascade backends under quality gates, race them, or compare them from one file | [Strategies](src/openreading/strategies/README.md) |

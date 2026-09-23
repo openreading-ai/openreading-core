@@ -79,6 +79,11 @@ class Topic:
 TOPICS: tuple[Topic, ...] = (
     # start here
     Topic("quickstart", "Quickstart", ("start", "tutorial")),
+    Topic("local-ocr", "Local extraction and OCR setup", ("ocr", "local-setup")),
+    Topic("liteparse", "LiteParse with OCR"),
+    Topic("tesseract", "Tesseract OCR"),
+    Topic("docling-local", "Local Docling Slim with OCR", ("docling_local", "docling-slim")),
+    Topic("docling", "Full Docling through your own Docling Serve", ("docling-serve",)),
     Topic("response", "Understanding the response JSON", ("envelope", "json")),
     Topic("help", "help [TOPIC]", ("manual",)),
     Topic("output", "What lands on stdout, on stderr, and in the exit code", ("stdout", "stderr")),
@@ -128,6 +133,7 @@ TOPICS: tuple[Topic, ...] = (
 # Which heading each group of the index prints under, in index order.
 _GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("START HERE", ("quickstart", "response", "help", "output", "chaining")),
+    ("LOCAL ENGINES AND OCR", ("local-ocr", "liteparse", "tesseract", "docling-local", "docling")),
     ("DO ONE JOB", ("batch", "backends-policy", "gates", "usage", "env", "datasets")),
     ("WHEN SOMETHING STOPS", ("exit-codes", "signals")),
     (
@@ -154,6 +160,11 @@ _GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
 # One line per topic for the index. Written in the reader's terms, not the module's.
 _BLURBS: dict[str, str] = {
     "quickstart": "four commands, from a clone to parsed JSON, with no key",
+    "local-ocr": "choose text extraction or OCR, configure serve, and check results",
+    "liteparse": "install LiteParse and provision verified English OCR data",
+    "tesseract": "install the system OCR engine and its language data",
+    "docling-local": "provision Core's Docling Slim CPU models and optional OCR",
+    "docling": "connect Core to a separate full Docling Serve installation",
     "response": "read the JSON: content, tables, fields, warnings, and provenance",
     "help": "find a chapter, its aliases, or one command's flags",
     "output": "what goes to stdout, what goes to stderr, what the code says",

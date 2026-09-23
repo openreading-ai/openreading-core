@@ -26,6 +26,10 @@ A few endpoints report readiness and routing plans and never run a backend, amon
 and never from a request body. You need `sample.pdf` and the install from the root README, which
 includes the server's dependencies.
 
+For local OCR, first follow the [engine setup walkthrough](../adapters/README.md#local-setup-walkthrough)
+or run `uv run openreading help local-ocr`. It covers language data, Docling model assets, explicit
+`OPENREADING_CONFIG`, and a routing check before parsing. Starting this server does not provision those assets.
+
 ```bash
 uv run openreading serve
 ```

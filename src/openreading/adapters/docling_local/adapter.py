@@ -10,8 +10,22 @@ Each input format uses its configured provider pipeline, declared in openreading
 Raster inputs retain the CPU layout and Tesseract stages without enabling table recognition.
 Model-free inputs preserve provider blocks and reported table cells in a synthetic container.
 Their page_attribution_unavailable warning prevents that container from claiming physical pagination.
+Setup is documented by openreading help docling-local. The docling_local extra installs
+selected docling-slim dependencies, not model weights or the system Tesseract executable.
+The configured pipeline uses ONNX layout and disables table recognition. Full upstream
+Docling requires its own installation through the separate docling HTTP adapter.
 Confidence, typed fields, and markdown remain unavailable through this adapter.
 Running headers, footers, and page numbers are Docling furniture, omitted with a warning.
+
+Environment variables this module reads
+---------------------------------------
+The credential broker resolves DOCLING_LOCAL_ASSETS into the required assets_path field.
+Its directory contains docling-project--docling-layout-heron-onnx with the files pinned
+by openreading.adapters.docling_local.config. Missing configuration fails readiness.
+DOCLING_LOCAL_TESSERACT and DOCLING_LOCAL_TESSDATA enable automatic OCR only when both are set.
+The language directory needs eng.traineddata, osd.traineddata, and configs/tsv for default English.
+Paths must be absolute. Automatic OCR is skipped without both paths; forced OCR refuses.
+
 Sources: https://docling-project.github.io/docling/usage/advanced_options/ (2026-09-10).
 """
 

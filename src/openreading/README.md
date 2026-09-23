@@ -124,6 +124,7 @@ The table below tells you which guide answers which need and how long each takes
 
 | You want to… | Guide | Read time |
 |---|---|---|
+| set up local OCR, language data, and Docling models | [Local setup](adapters/README.md#local-setup-walkthrough), or `uv run openreading help local-ocr` | 10 min |
 | retrieve retained local evidence through an agent | [MCP tools](mcp_server/README.md) | 5 min |
 | inspect source spans and retained files | [Artifacts](artifacts/README.md) | 5 min |
 | know what this is, where to go next, and how an agent uses it | this page | 10 min |

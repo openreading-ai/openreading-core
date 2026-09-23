@@ -391,3 +391,16 @@ def test_dataset_chapter_example_loads_for_calibration(tmp_path, monkeypatch, ca
     case = load_case(path, backend_id="pymupdf")
     assert case.request_body["document"]["bytes_base64"]
     assert case.expected["text_contains"]
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["local-ocr", "ocr", "liteparse", "tesseract", "docling-local", "docling_local", "docling"],
+)
+def test_local_setup_help_is_available_without_assets(name, tmp_path, monkeypatch, capsys):
+    """A fresh install can read setup before any OCR engine or model is configured."""
+    monkeypatch.chdir(tmp_path)
+    for key in ("LITEPARSE_TESSDATA", "DOCLING_LOCAL_ASSETS", "DOCLING_SERVE_URL"):
+        monkeypatch.delenv(key, raising=False)
+    assert main(["help", name]) == 0
+    assert capsys.readouterr().out == "\n".join(render(resolve(name))) + "\n"
