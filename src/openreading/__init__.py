@@ -559,9 +559,15 @@ at `src/openreading/README.md`. Those are files in this repo that a reader can o
 
 from __future__ import annotations
 
-from openreading.api import resume_run as resume
-from openreading.api import route, run, run_batch
-from openreading.comparison import compare
+from importlib import import_module
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from openreading.api import resume_run as resume
+if TYPE_CHECKING:
+    from openreading.api import route, run, run_batch
+if TYPE_CHECKING:
+    from openreading.comparison import compare
 
 # The triage above tells an agent to branch on the exception TYPE, because Python is the only
 # surface that separates every failure condition. That advice is only executable if the type can
@@ -569,15 +575,16 @@ from openreading.comparison import compare
 # agent actually writes -- `from openreading import ScopeRefused` -- raised ImportError on the
 # very surface the briefing recommends. They are re-exported here and their home is unchanged:
 # `openreading.types.errors` is the home of every one of them.
-from openreading.types.errors import (
-    MissingCredentialsError,
-    PlanExhaustedError,
-    RetryableError,
-    SourceNotFoundError,
-    TerminalError,
-    UnknownStrategyError,
-    UnsupportedFeatureError,
-)
+if TYPE_CHECKING:
+    from openreading.types.errors import (
+        MissingCredentialsError,
+        PlanExhaustedError,
+        RetryableError,
+        SourceNotFoundError,
+        TerminalError,
+        UnknownStrategyError,
+        UnsupportedFeatureError,
+    )
 
 __version__ = "0.3.0"
 SCHEMA_VERSION = "0.1"
@@ -598,3 +605,33 @@ __all__ = [
     "UnknownStrategyError",
     "UnsupportedFeatureError",
 ]
+
+
+# A response consumer must not initialize parser registries through a package facade.
+_EXPORTS = {
+    "resume": ("openreading.api", "resume_run"),
+    "route": ("openreading.api", "route"),
+    "run": ("openreading.api", "run"),
+    "run_batch": ("openreading.api", "run_batch"),
+    "compare": ("openreading.comparison", "compare"),
+    "MissingCredentialsError": ("openreading.types.errors", "MissingCredentialsError"),
+    "PlanExhaustedError": ("openreading.types.errors", "PlanExhaustedError"),
+    "RetryableError": ("openreading.types.errors", "RetryableError"),
+    "SourceNotFoundError": ("openreading.types.errors", "SourceNotFoundError"),
+    "TerminalError": ("openreading.types.errors", "TerminalError"),
+    "UnknownStrategyError": ("openreading.types.errors", "UnknownStrategyError"),
+    "UnsupportedFeatureError": ("openreading.types.errors", "UnsupportedFeatureError"),
+}
+
+
+def __getattr__(name: str):
+    target = _EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(target[0]), target[1])
+    globals()[name] = value
+    return value
+
+
+def __dir__():
+    return sorted(set(globals()) | set(_EXPORTS))

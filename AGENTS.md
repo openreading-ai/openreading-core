@@ -186,6 +186,7 @@ src/openreading/
   readiness.py    is a backend runnable here, and which vars are missing
   liveness.py     is a backend answering right now
 tests/         offline suite + keyed live lane                 (conftest.py docstring: the runbook)
+packages/agent-client/  isolated client-only wheel profile over canonical shared modules
 scripts/       smoke runners, extras-parity, adapter scaffold
 examples/      two synthetic bank statements the READMEs parse (README.md: what they are)
 ```

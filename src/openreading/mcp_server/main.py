@@ -13,11 +13,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import signal
 import sys
-import threading
 from collections.abc import Callable
-from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -114,54 +111,18 @@ async def serve(
     service_factory: Callable[[ProfileConfig], ArtifactService] | None = None,
     execution: ImportExecution | None = None,
 ) -> None:
-    import anyio
-
     from openreading.artifacts.service import ArtifactService
-    from openreading.mcp_server.delivery import validate_delivery_config
-    from openreading.mcp_server.selection import validate_selection_timeout
-    from openreading.mcp_server.tools import create_server
-    from openreading.mcp_server.transport import cancellable_stdio
+    from openreading.mcp_server.session import serve as serve_session
 
-    validate_selection_timeout(selection_timeout_seconds)
-    validate_delivery_config(document_response_bytes, document_export_root)
-    interrupted = False
-    signals = []
-    if threading.current_thread() is threading.main_thread():
-        signals = [
-            value
-            for value in (signal.SIGINT, signal.SIGTERM)
-            if signal.getsignal(value) not in (None, signal.SIG_IGN)
-        ]
-    receiver = anyio.open_signal_receiver(*signals) if signals else nullcontext()
-    with receiver as received:
-        service = service_factory(config) if service_factory else ArtifactService(config)
-        try:
-            server = create_server(
-                service,
-                selection_provider=selection_provider,
-                selection_timeout_seconds=selection_timeout_seconds,
-                document_response_bytes=document_response_bytes,
-                document_export_root=document_export_root,
-                **({"execution": execution} if execution is not None else {}),
-            )
-            async with anyio.create_task_group() as group, cancellable_stdio() as (reader, writer):
-
-                async def stop_on_signal():
-                    nonlocal interrupted
-                    assert received is not None
-                    async for _ in received:
-                        interrupted = True
-                        group.cancel_scope.cancel()
-                        break
-
-                if received is not None:
-                    group.start_soon(stop_on_signal)
-                await server.run(reader, writer, server.create_initialization_options())
-                group.cancel_scope.cancel()
-        finally:
-            service.close()
-    if interrupted:
-        raise KeyboardInterrupt
+    await serve_session(
+        config,
+        selection_provider=selection_provider,
+        selection_timeout_seconds=selection_timeout_seconds,
+        document_response_bytes=document_response_bytes,
+        document_export_root=document_export_root,
+        service_factory=service_factory or ArtifactService,
+        execution=execution,
+    )
 
 
 def main(

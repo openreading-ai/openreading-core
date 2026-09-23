@@ -20,6 +20,10 @@ calling agent's cloud context; local parsing does not prevent that disclosure.
 
 Integration exports and return shapes
 ------------------------------------
+External clients subclass RetainedService from openreading.artifacts.retained.
+It requires a supplied identity and has no parsing engine or automatic fallback.
+The client wheel profile in packages/agent-client selects these canonical modules.
+
 Import ArtifactService and engine_identity from openreading.artifacts.service. The service
 returns ImportReceipt, SearchResult, and ReadResult models with JSON-ready wire() dictionaries.
 ArtifactService.get_document returns DocumentResult, defined in openreading.artifacts.document.

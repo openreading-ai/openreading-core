@@ -32,7 +32,7 @@ from openreading.artifacts.delivery import (
 )
 from openreading.artifacts.limits import ArtifactError
 from openreading.artifacts.models import json_bytes
-from openreading.artifacts.service import ArtifactService
+from openreading.artifacts.retained import RetainedService as ArtifactService
 
 DEFAULT_RESPONSE_BYTES = 1_000_000
 

@@ -65,6 +65,9 @@ A sampled memory limit includes the worker and its descendants; sampling permits
 
 ## How it decides
 
+External clients subclass `openreading.artifacts.retained.RetainedService` and supply their acquisition implementation.
+The [client build profile](../../../packages/agent-client/README.md) packages these shared modules without the parsing engine.
+
 External results can be retained through `openreading.artifacts.retention.retain_response` without invoking a local parser.
 The upload's source hash binds the result to the selected bytes, preventing an edited file from inheriting earlier evidence.
 Structured-only results remain retrievable through `get_document`; they produce no invented source quotes.

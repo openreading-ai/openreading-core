@@ -53,11 +53,10 @@ from pathlib import Path
 
 import psutil
 
-from openreading.adapters.docling_local.config import LocalDoclingConfig
 from openreading.artifacts.intake import directory
-from openreading.artifacts.limits import ArtifactError, DoclingLimits, ProfileConfig, ProfileLimits
+from openreading.artifacts.limits import ArtifactError
 from openreading.artifacts.models import EngineIdentity, json_bytes
-from openreading.artifacts.service import ArtifactService
+from openreading.artifacts.retained import RetainedService as ArtifactService
 from openreading.artifacts.store import safe_read
 from openreading.types.import_job import ImportJob, ImportJobList, ImportJobSummary, PageProgress
 
@@ -310,15 +309,9 @@ def run(root: Path, *, service_factory: Callable[[dict], ArtifactService] | None
         assert service_factory is not None
         service = service_factory(request)
     else:
-        config = ProfileConfig(
-            Path(request["input_root"]),
-            Path(request["artifact_root"]),
-            (DoclingLimits if request["docling"] is not None else ProfileLimits)(
-                **request["limits"]
-            ),
-            LocalDoclingConfig.from_wire(request["docling"]) if request["docling"] else None,
-        )
-        service = ArtifactService(config)
+        from openreading.artifacts.local_jobs import local_service
+
+        service = local_service(request)
     value = _status(root / "status.json")
 
     class Cancellation(threading.Event):

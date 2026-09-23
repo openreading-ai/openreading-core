@@ -1,5 +1,8 @@
 """Expose local document tools over stdio using the optional agent extra.
 
+External clients call openreading.mcp_server.session.serve with an explicit service factory.
+The local CLI retains its default parser factory in openreading.mcp_server.main.
+
 This profile requires POSIX descriptor and process-group support. Windows startup exits 2.
 The launcher resolves explicit root symlinks once, then intake refuses symlinks below that grant.
 SIGINT and SIGTERM cancel synchronous imports, reap their workers, and exit 130.
