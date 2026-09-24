@@ -16,6 +16,7 @@
 - Correct security-policy promises about plaintext retention, native parsers, HTTP jobs, URL forwarding, and pre-release tags.
 - Narrow source distributions and audit the isolated client dependency lock with a pinned runner.
   The Git-based ExtractBench extra still prevents publishing the full distribution to PyPI.
+- Isolate scratch Git fixtures from hook environment variables so verification cannot add commits to the branch being checked.
 
 ## Unreleased client-only build profile
 
