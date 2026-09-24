@@ -67,8 +67,9 @@ Several paths are easy to miss when reading a single page:
 
 - **A document URL.** OpenReading checks HTTP or HTTPS URLs and public DNS answers before
   downloading or forwarding them. URL credentials are refused. Its own download pins the
-  vetted address, rejects redirects, and limits the streamed response to 100 MiB. A nonempty
-  `OPENREADING_ALLOW_PRIVATE_URLS` disables the public-address check and address pinning.
+  vetted address, rejects redirects, and limits the streamed response to 100 MiB.
+  A well-known NAT64 address must also embed a public IPv4 destination. Local-use translation prefixes are refused.
+  A nonempty `OPENREADING_ALLOW_PRIVATE_URLS` disables the public-address check and address pinning.
   A backend that accepts URLs directly receives the checked URL instead. That backend resolves
   the hostname again and may follow redirects. Its network policy must prevent private-network
   access because Core cannot pin that later fetch or bound its response size.
@@ -103,10 +104,12 @@ terminal records, while active records may remain until they complete or are rem
 vendor billing after a hosted submission.
 
 The MCP artifact store retains source copies, normalized responses, passages, manifests, job
-records, and exports beneath the configured `--artifact-root`. MCP means Model Context Protocol,
+records, and default exports beneath the configured `--artifact-root`. MCP means Model Context Protocol,
 the tool interface used by an assistant. For example, an imported file remains after its host
 disconnects. Cancel active imports and wait for terminal status before stopping every client
 using the store. Remove that exact artifact-root directory to delete its retained data.
+An explicit `--document-export-root` can place exports elsewhere, such as a separate delivery directory.
+Removing the artifact root leaves those exports intact. Remove unwanted exported files separately after stopping clients.
 Do not delete the source input directory unless you also intend to remove your original files.
 No MCP tool deletes retained data, and plugin removal does not clean a separately configured
 store. Launcher-owned selection copies and transfer caches require that launcher's cleanup steps.

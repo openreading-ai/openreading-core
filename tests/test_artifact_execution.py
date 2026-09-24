@@ -1,6 +1,8 @@
 """Trusted launchers choose detached import implementations without model-controlled code."""
 
 import json
+import os
+import time
 
 import pytest
 
@@ -78,6 +80,83 @@ def test_external_execution_recovery_discloses_uncertain_server_outcome(retentio
     assert value.state == "failed"
     assert "may continue" in value.error.message
     assert value.error.retryable is False
+
+
+@pytest.mark.parametrize("recover_first", [False, True])
+def test_supervisor_publishes_identity_or_refuses_an_already_recovered_job(
+    retention, monkeypatch, recover_first
+):
+    class Process:
+        pid = 999999999
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(jobs.subprocess, "Popen", lambda *args, **kwargs: Process())
+    manager = jobs.ImportJobs(retention, execution=jobs.ImportExecution(("/trusted/worker",), {}))
+    initial = manager.start("source.md")
+    root = manager.root / initial.job_id
+    (root / "process.json").unlink()
+    request = jobs._read(root / "request.json")
+    request["started"] = time.time() - 120
+    jobs._write(root / "request.json", request)
+    if recover_first:
+        assert manager.cancel(initial.job_id).state == "failed"
+
+    def factory(request):
+        assert not recover_first, "A delayed supervisor must not restart recovered work"
+        owner = jobs._read(root / "process.json")
+        assert owner["pid"] == os.getpid()
+        assert owner["created"] == jobs.psutil.Process().create_time()
+        assert manager.get(initial.job_id).state == "queued"
+
+        def external(path, **kwargs):
+            return retain(retention, rich_response())
+
+        monkeypatch.setattr(retention, "import_document", external)
+        return retention
+
+    assert jobs.main([str(root)], service_factory=factory) == 0
+    result = manager.get(initial.job_id)
+    assert result.state == ("failed" if recover_first else "succeeded")
+    if recover_first:
+        assert "may continue" in result.error.message
+        assert not list(retention.store.documents.iterdir())
+
+
+def test_live_supervisor_with_unreadable_identity_keeps_slot_until_cancelled(
+    retention, monkeypatch
+):
+    from openreading.artifacts.limits import ArtifactError
+
+    class Process:
+        pid = 999999999
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(jobs.subprocess, "Popen", lambda *args, **kwargs: Process())
+    manager = jobs.ImportJobs(retention, execution=jobs.ImportExecution(("/trusted/worker",), {}))
+    initial = manager.start("source.md")
+    root = manager.root / initial.job_id
+    request = jobs._read(root / "request.json")
+    request["started"] = time.time() - 120
+    jobs._write(root / "request.json", request)
+
+    def factory(request):
+        (root / "process.json").write_text("broken JSON")
+        assert manager.get(initial.job_id).state == "queued"
+        assert jobs.main([str(root)], service_factory=factory) == 2
+        with pytest.raises(ArtifactError, match="busy"):
+            manager.start("source.md")
+        assert manager.cancel(initial.job_id).cancel_requested
+        monkeypatch.setattr(
+            retention, "import_document", lambda *a, **kw: pytest.fail("cancelled before import")
+        )
+        return retention
+
+    assert jobs.main([str(root)], service_factory=factory) == 0
+    assert manager.get(initial.job_id).state == "cancelled"
 
 
 def test_external_execution_preserves_a_confirmed_destination_failure(retention, monkeypatch):

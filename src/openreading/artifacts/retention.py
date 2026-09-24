@@ -20,6 +20,8 @@ Page limits compare the response's reported count. Missing counts remain unmeasu
 retention does not reopen a parser to independently count physical source pages.
 Cancellation stops incomplete staging. Once every artifact file and its receipt are ready,
 publication preserves the complete server result even if cancellation arrives before rename.
+An explicit retention deadline still applies before publication, including this final boundary.
+For example, a launcher requiring a ten-second deadline can reject completed staging after ten seconds.
 """
 
 from __future__ import annotations

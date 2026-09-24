@@ -283,7 +283,9 @@ def _assert_public_http_url(url: str) -> str:
     Returning the address lets `_download` pin its own connection and avoid DNS rebinding.
     Backends that fetch URLs themselves cannot use this pin: a later vendor-side DNS lookup can
     change between validation and fetch. `OPENREADING_ALLOW_PRIVATE_URLS=1` disables the address
-    check for intranet document stores."""
+    check for intranet document stores.
+    Well-known NAT64 addresses must embed public IPv4 addresses, such as 93.184.216.34.
+    Local-use translation prefixes are refused because their targets are operator-defined."""
     import ipaddress
     import socket
 
@@ -296,7 +298,17 @@ def _assert_public_http_url(url: str) -> str:
     vetted = ""
     for info in infos:
         addr = ipaddress.ip_address(info[4][0])
-        if not addr.is_global or addr.is_multicast:
+        translated = addr
+        if addr in ipaddress.ip_network("64:ff9b::/96"):
+            # RFC 6052 section 3.1 forbids non-global targets even when the IPv6 prefix is public.
+            translated = ipaddress.IPv4Address(addr.packed[-4:])
+        if (
+            not addr.is_global
+            or addr.is_multicast
+            or not translated.is_global
+            or translated.is_multicast
+            or addr in ipaddress.ip_network("64:ff9b:1::/48")
+        ):
             raise TerminalError(
                 f"URL host {host!r} resolves to a non-public address",
                 backend_code="url_not_public",

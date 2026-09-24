@@ -75,6 +75,8 @@ Trusted launchers can select detached execution through `openreading.artifacts.j
 Post-upload storage contention never repeats an external import, preventing duplicate server processing.
 Duplicate physical page numbers are refused before projection, preventing ambiguous citation identifiers across local and external artifacts.
 Complete external staging survives late cancellation, preventing loss of a fully received server result during publication.
+Explicit retention deadlines still apply at publication. An expired operator deadline can refuse otherwise complete staging.
+Abandoned supervisor identity records recover after a startup grace period, preventing permanent admission blockage after launcher crashes.
 
 Line-end dehyphenation lets a search for renewal find re- followed by newal on the next line.
 Returned passages and excerpt offsets still refer to the original text, including the hyphen and newline.

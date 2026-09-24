@@ -27,6 +27,56 @@ def stop_jobs(manager, jobs):
         assert terminal(manager, job.job_id).state == "cancelled"
 
 
+def orphan_record(manager, *, age, owner):
+    from openreading.artifacts.jobs import _write
+    from openreading.types.import_job import ImportJob
+
+    identifier = "j1_" + "0" * 32
+    root = manager.root / identifier
+    root.mkdir(mode=0o700)
+    value = ImportJob(job_id=identifier, state="queued", stage="queued", elapsed_seconds=0)
+    _write(root / "status.json", value.wire())
+    _write(root / "request.json", {"path": "orphan.pdf", "started": time.time() - age})
+    if owner is not None:
+        (root / "process.json").write_text(owner)
+    return identifier
+
+
+@pytest.mark.parametrize("owner", [None, "broken JSON", "{}"])
+@pytest.mark.parametrize("lookup", ["start", "get", "cancel", "list"])
+def test_abandoned_identity_publication_recovers_without_blocking_grant(service, owner, lookup):
+    manager = ImportJobs(service)
+    identifier = orphan_record(manager, age=120, owner=owner)
+    started = []
+    with service.store.import_lock():
+        try:
+            if lookup == "start":
+                started.append(manager.start("test.pdf"))
+            elif lookup == "list":
+                assert manager.list().jobs[0].state == "failed"
+            else:
+                assert getattr(manager, lookup)(identifier).state == "failed"
+            result = manager.cancel(identifier)
+            assert result.state == "failed"
+            assert result.stage == "stopped"
+            assert result.error.code == "parse_failed"
+            assert not result.error.retryable
+            if not started:
+                started.append(manager.start("test.pdf"))
+        finally:
+            stop_jobs(manager, started)
+
+
+def test_recent_missing_identity_keeps_its_admission_slot(service):
+    manager = ImportJobs(service)
+    identifier = orphan_record(manager, age=0, owner=None)
+    (service.config.input_root / "orphan.pdf").write_bytes(b"synthetic source")
+    assert manager.get(identifier).state == "queued"
+    with pytest.raises(ArtifactError, match="busy"):
+        manager.start("orphan.pdf")
+    assert manager.cancel(identifier).cancel_requested
+
+
 def test_nonterminal_admission_caps_supervisors_and_releases_terminal_slots(service):
     manager = ImportJobs(service)
     started = []

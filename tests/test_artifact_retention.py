@@ -244,6 +244,26 @@ def test_complete_external_staging_wins_late_cancellation(retention, monkeypatch
     assert list((retention.config.artifact_root / "staging").iterdir()) == []
 
 
+def test_explicit_retention_deadline_still_applies_at_publication(retention, monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr("time.monotonic", lambda: clock[0])
+    retention.config = replace(
+        retention.config, limits=replace(retention.config.limits, deadline_seconds=1)
+    )
+    original = retention._receipt
+
+    def receipt(*args, **kwargs):
+        result = original(*args, **kwargs)
+        clock[0] = 2.0
+        return result
+
+    monkeypatch.setattr(retention, "_receipt", receipt)
+    with pytest.raises(ArtifactError, match="timeout"):
+        retain(retention, rich_response())
+    assert not list(retention.store.documents.iterdir())
+    assert not list((retention.config.artifact_root / "staging").iterdir())
+
+
 def test_disk_failure_leaves_no_committed_artifact(retention, monkeypatch):
     import os
 
