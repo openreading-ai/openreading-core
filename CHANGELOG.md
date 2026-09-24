@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased security hardening
+
+- Validate Azure model identifiers before constructing authenticated vendor requests, preserving valid custom model identifiers.
+- Check document URLs before self-fetching backend dispatch and reject URL credentials.
+  Downstream DNS resolution and redirects still require the backend's own network controls.
+- Bind asynchronous HTTP job reads, polling, and deletion to the submitting API-key principal.
+- Cap detached imports at four nonterminal jobs per input grant and reject duplicate active source references.
+  Serialize supervisor publication with status reads so half-published jobs cannot appear invalid.
+- Include requested backend versions, filenames, and MIME types in result-cache identity.
+- Validate individual Tesseract language identifiers before rasterization, preserving documented script model names.
+- Reject duplicate physical pages on local publication and legacy artifact reads.
+  Preserve complete external staging when cancellation arrives at the publication boundary.
+- Refuse local parser dispatch explicitly in the client-only package.
+- Correct security-policy promises about plaintext retention, native parsers, HTTP jobs, URL forwarding, and pre-release tags.
+- Narrow source distributions and audit the isolated client dependency lock with a pinned runner.
+  The Git-based ExtractBench extra still prevents publishing the full distribution to PyPI.
+
 ## Unreleased client-only build profile
 
 - Build canonical retention and MCP modules without the parsing engine through `packages/agent-client`.

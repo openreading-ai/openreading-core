@@ -10,8 +10,12 @@ existing responses. ``POST /v1/batch`` accepts explicit document objects plus fo
 fields: outputs, extraction schema, features, and pages. Batch items fail independently.
 
 ``POST /v1/jobs`` starts an in-memory job. ``GET /v1/jobs/{job_id}`` advances or reads it, while
-``DELETE /v1/jobs/{job_id}`` drops its local record. The job store is bounded by count and terminal
-age. It is process-local and does not use the run ledger.
+``DELETE /v1/jobs/{job_id}`` drops its local record. A configured API key can read or delete only
+jobs it submitted, and a backend scope still applies before polling. The store is process-local
+and does not use the run ledger. A count limit caps submissions, and terminal records expire by age.
+``OPENREADING_JOB_TTL_S`` expires terminal jobs only. A job that never finishes keeps its slot
+until its owner deletes it or the process restarts. Deletion does not call the backend's cancel
+method, so remote work and charges may continue after the local record disappears.
 
 HTTP status codes
 -----------------
@@ -39,11 +43,9 @@ HTTP status codes
 500
     An unexpected internal failure occurred.
 502
-    A backend returned a terminal provider failure.
-503
-    A backend returned a retryable failure or the resolved chain produced no response.
+    A backend returned a terminal provider failure, or the resolved chain produced no response.
 504
-    Execution exceeded its deadline.
+    A retryable failure exhausted its budget or execution exceeded its deadline.
 
 API keys come from ``OPENREADING_API_KEYS``. Optional backend scopes come from
 ``OPENREADING_API_KEY_SCOPES`` and can only narrow access. Backend credentials remain in the

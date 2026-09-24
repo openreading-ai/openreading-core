@@ -18,6 +18,8 @@ For example, a future channel is preserved without certifying its shape or treat
 All retained response fields are untrusted content, including metadata and warnings.
 Page limits compare the response's reported count. Missing counts remain unmeasured;
 retention does not reopen a parser to independently count physical source pages.
+Cancellation stops incomplete staging. Once every artifact file and its receipt are ready,
+publication preserves the complete server result even if cancellation arrives before rename.
 """
 
 from __future__ import annotations
@@ -187,7 +189,8 @@ def retain_response(
             )
             write("manifest.json", [json_bytes(manifest.wire())])
             receipt = service._receipt(manifest, reused=False)
-            service._check_time(started, cancelled)
+            # Complete paid server work must survive cancellation at the publication boundary.
+            service._check_time(started, None)
             service._fsync(staging)
             os.rename(staging, service.store.documents / identifier)
             service._fsync(service.store.documents)

@@ -1627,15 +1627,24 @@ def create_app(*, cors_origins: list[str] | None = None):
         return _job_dict(rec)
 
     @app.get("/v1/jobs/{job_id}")
-    async def get_job(job_id: str):
+    async def get_job(job_id: str, request: Request):
         _sweep_jobs(jobs, int(time.time() * 1000))
         rec = jobs.get(job_id)
-        if rec is None:
+        # A job id is a locator, not a bearer capability. The stored principal is the caller
+        # that submitted it, including for an already-completed response.
+        if rec is None or rec.principal != getattr(request.state, "principal", None):
             return _not_found(
                 "unknown_job",
                 f"no job with id {job_id!r}. The job store is in memory only, so a server "
                 "restart or a TTL expiry drops the record.",
             )
+        scope = getattr(request.state, "api_key_scope", None)
+        if (
+            scope is not None
+            and strip_strategy_prefix(rec.backend) is None
+            and rec.backend not in scope
+        ):
+            return _scope_denied_response(rec.backend)
         pending = rec.response is None and rec.error is None and not rec.job.is_terminal()
         # BL-83: rec.job is one mutable object and the drive below crosses into a real OS thread
         # via run_in_threadpool — two concurrent GETs for the same still-pending job_id must not
@@ -1709,17 +1718,19 @@ def create_app(*, cors_origins: list[str] | None = None):
         return _job_dict(rec)
 
     @app.delete("/v1/jobs/{job_id}")
-    async def delete_job(job_id: str):
+    async def delete_job(job_id: str, request: Request):
         # No TTL sweep here (unlike submit/GET): a caller naming a specific id is acting on that
         # id directly, not merely touching the store, so this frees the slot immediately and
         # unconditionally -- regardless of job state or age -- rather than waiting on the lazy
         # staleness check submit/GET use to bound unattended growth.
-        if jobs.pop(job_id, None) is None:
+        rec = jobs.get(job_id)
+        if rec is None or rec.principal != getattr(request.state, "principal", None):
             return _not_found(
                 "unknown_job",
                 f"no job with id {job_id!r}. The job store is in memory only, so a server "
                 "restart or a TTL expiry drops the record.",
             )
+        jobs.pop(job_id, None)
         return Response(status_code=204)
 
     @app.post("/v1/webhooks/{backend_id}")

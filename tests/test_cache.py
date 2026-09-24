@@ -45,6 +45,35 @@ def test_key_changes_with_content_backend_version_and_options():
     )
 
 
+def test_key_separates_request_version_and_document_format_metadata():
+    document = {
+        "bytes_base64": "...",
+        "filename": "invoice.pdf",
+        "mime_type": "application/pdf",
+    }
+    backend = {"id": "aws-textract", "operation": "AnalyzeDocument", "version": "v1"}
+    base = content_key(DATA, "aws-textract", "runtime-v4", _req(document=document, backend=backend))
+
+    assert base != content_key(
+        DATA,
+        "aws-textract",
+        "runtime-v4",
+        _req(document=document, backend={**backend, "version": "v2"}),
+    )
+    assert base != content_key(
+        DATA,
+        "aws-textract",
+        "runtime-v4",
+        _req(document={**document, "filename": "receipt.pdf"}, backend=backend),
+    )
+    assert base != content_key(
+        DATA,
+        "aws-textract",
+        "runtime-v4",
+        _req(document={**document, "mime_type": "image/png"}, backend=backend),
+    )
+
+
 def test_key_ignores_secrets_and_transport():
     with_secret = _req(
         backend={

@@ -18,7 +18,7 @@ from openreading.adapters.azure_document_intelligence import (
 from openreading.router import FakeClock, await_result
 from openreading.testing import ConformanceCase, check_adapter_conformance
 from openreading.types import BlockType, JobState, TextType
-from openreading.types.errors import RetryableError
+from openreading.types.errors import RetryableError, TerminalError
 from openreading.types.request import OpenReadingRequest
 from openreading.types.runtime import RunContext
 
@@ -73,6 +73,17 @@ def _req(op="prebuilt-layout", **over) -> OpenReadingRequest:
     }
     body.update(over)
     return OpenReadingRequest.model_validate(body)
+
+
+def test_submit_refuses_unsafe_model_id_with_injected_client():
+    client = FakeAzureClient(_succeeded("layout"))
+    adapter = AzureDocumentIntelligenceAdapter(client=client)
+
+    with pytest.raises(TerminalError) as exc_info:
+        adapter.submit(_req(op="../../admin"), RunContext())
+
+    assert exc_info.value.backend_code == "unsupported_input"
+    assert client.analyze_calls == []
 
 
 async def _run(adapter, req):

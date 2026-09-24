@@ -14,9 +14,10 @@ Geometry is per-page unit (inch for PDF, pixel for image); polygons are flat [x1
 from __future__ import annotations
 
 import base64
+import re
 from dataclasses import dataclass
 from typing import Any, Protocol
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from openreading.adapters._http import error_for_status, retry_after_seconds
 from openreading.adapters.base import BackendAdapter
@@ -74,6 +75,7 @@ N = ChannelGrade.NATIVE
 D = ChannelGrade.DERIVABLE
 
 _API_VERSION = "2024-11-30"
+_MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._~-]{0,63}\Z")
 _ROLE_MAP = {
     "title": BlockType.TITLE,
     "sectionHeading": BlockType.SECTION_HEADER,
@@ -84,6 +86,13 @@ _ROLE_MAP = {
 }
 _UNIT_MAP = {"inch": (PageUnit.INCH, NativeUnit.INCH), "pixel": (PageUnit.PIXEL, NativeUnit.PIXEL)}
 _DEFAULT_PORT_FOR_SCHEME = {"http": 80, "https": 443}
+
+
+def _safe_model_id(model_id: str) -> str:
+    """Accept Azure model IDs, including caller-owned custom models, as one URL path segment."""
+    if not _MODEL_ID.fullmatch(model_id):
+        raise TerminalError("invalid Azure model ID", backend_code="unsupported_input")
+    return quote(model_id, safe="")
 
 
 def _origin(url: str) -> tuple[str | None, str | None, int | None]:
@@ -133,7 +142,8 @@ class _HttpxAzureClient:
         self._http = build_httpx_client(headers={"Ocp-Apim-Subscription-Key": key})
 
     def analyze(self, model_id: str, body: dict, content_format: str) -> str:  # pragma: no cover
-        url = f"{self._endpoint}/documentintelligence/documentModels/{model_id}:analyze"
+        model_segment = _safe_model_id(model_id)
+        url = f"{self._endpoint}/documentintelligence/documentModels/{model_segment}:analyze"
         r = self._http.post(
             url,
             params={"api-version": _API_VERSION, "outputContentFormat": content_format},
@@ -283,8 +293,9 @@ class AzureDocumentIntelligenceAdapter(BackendAdapter):
         return _HttpxAzureClient(endpoint, key)  # pragma: no cover
 
     def submit(self, req: OpenReadingRequest, ctx: RunContext) -> Job:
-        client = self._get_client(ctx)
         model_id = req.backend.operation or "prebuilt-layout"
+        _safe_model_id(model_id)
+        client = self._get_client(ctx)
         d = req.document
         if d.bytes_base64:
             body = {"base64Source": d.bytes_base64}

@@ -15,6 +15,9 @@ Setup and execution limits
 --------------------------
 Install the tesseract extra, the system executable, and the language data you request.
 PDF rasterization also requires the pymupdf extra. The default language is English.
+Each ocr_languages entry names one traineddata model, such as eng, chi_sim, or script/Latin.
+Use separate array entries for multiple models because + combines names only after validation.
+Entries containing ../, embedded +, or control characters fail before rasterization.
 The adapter OCRs every selected page, regardless of features.ocr, at 150 DPI by default.
 Normal Core dispatch supplies a 120-second budget, applied separately to each OCR subprocess.
 A direct adapter call without ctx.deadline_ms falls back to 60 seconds per page.
@@ -36,6 +39,7 @@ page px dims).
 from __future__ import annotations
 
 import base64
+import re
 import shutil
 from typing import Any, Protocol
 
@@ -89,6 +93,10 @@ D = ChannelGrade.DERIVABLE
 
 _DEFAULT_DPI = 150
 _DEFAULT_TIMEOUT_S = 60
+# Tesseract's own tessdata includes nested script/Latin and names with underscores. Keep the
+# one documented directory prefix while refusing path traversal and + expressions inside an
+# item; the array itself is the only way a caller asks for multiple models.
+_LANGUAGE_NAME = re.compile(r"(?:script/)?[A-Za-z0-9][A-Za-z0-9_-]*")
 
 
 class RasterPage:
@@ -247,7 +255,14 @@ class TesseractAdapter(BackendAdapter):
     def submit(self, req: OpenReadingRequest, ctx: RunContext) -> Job:
         self.assert_supports(req)  # raises UnsupportedFeatureError for extraction_schema
         feats = req.features
-        lang = "+".join(feats.ocr_languages) if (feats and feats.ocr_languages) else "eng"
+        languages = feats.ocr_languages if (feats and feats.ocr_languages) else ["eng"]
+        if any(_LANGUAGE_NAME.fullmatch(language) is None for language in languages):
+            raise TerminalError(
+                "each OCR language must name one model using letters, digits, underscores, "
+                "hyphens, or the script/ prefix",
+                backend_code="invalid_ocr_language",
+            )
+        lang = "+".join(languages)
         # BL-154: both `or`s below used to be bare truthiness, silently discarding an explicit
         # deadline_ms=0 ("fail fast, no time left") and any sub-second remaining budget back to
         # the full 60s default. `is not None` resolves the None-vs-0 question; the floor below

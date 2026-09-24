@@ -66,6 +66,35 @@ def test_analyze_sends_api_version_and_content_format_params_with_subscription_k
 
 
 @respx.mock
+@pytest.mark.parametrize("model_id", ["../../admin", "bad/model", "bad?api-version=x", "x" * 65])
+def test_analyze_refuses_unsafe_model_id_before_sending_subscription_key(model_id):
+    with pytest.raises(TerminalError) as exc_info:
+        _HttpxAzureClient(_ENDPOINT, "test-key").analyze(
+            model_id, {"base64Source": DOC_B64}, "markdown"
+        )
+
+    assert exc_info.value.backend_code == "unsupported_input"
+    assert len(respx.calls) == 0
+
+
+@respx.mock
+def test_analyze_accepts_custom_model_id_outside_descriptor_operations():
+    model_id = "Customer-v1_~.2"
+    path = f"{_ENDPOINT}/documentintelligence/documentModels/{model_id}:analyze"
+    route = respx.post(path).mock(
+        return_value=httpx.Response(202, headers={"operation-location": path + "/results/1"})
+    )
+
+    result = _HttpxAzureClient(_ENDPOINT, "test-key").analyze(
+        model_id, {"base64Source": DOC_B64}, "markdown"
+    )
+
+    assert route.called
+    assert route.calls.last.request.url.path.endswith(f"/{model_id}:analyze")
+    assert result == path + "/results/1"
+
+
+@respx.mock
 def test_analyze_202_missing_operation_location_header_raises_keyerror():
     # Malformed/incomplete response: the ready-made repro this finding names directly.
     respx.post(f"{_ENDPOINT}/documentintelligence/documentModels/prebuilt-layout:analyze").mock(

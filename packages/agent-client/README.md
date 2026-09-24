@@ -14,3 +14,6 @@ The caller supplies an acquisition service and fixed detached-job execution.
 For example, Agent Tools uploads selected bytes to its configured server and retains the response locally.
 This profile has no parser, adapter registry, Core HTTP server, routing engine, model provisioning or Core CLI.
 Dependencies cover schema validation, the MCP protocol and process lifecycle only.
+This profile requires `mcp>=1.30,<2`; the full Core `agent` extra currently permits
+`mcp>=1.28,<2`. Keep their floors in view when changing the shared MCP modules.
+`uv.lock` pins this profile's resolved dependency graph for `make audit-client`.

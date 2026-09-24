@@ -7,6 +7,8 @@ Without physical attribution, text retains exact spans into its normalized JSON 
 The page_attribution_unavailable warning marks synthetic containers, such as unpaginated blocks.
 Without block containers, document text uses /document/text instead.
 Those references carry no physical page, geometry, or measured extraction origin.
+Physical page numbers must be unique before projection yields any citation identifiers.
+For example, duplicate page one entries are refused on local publication and legacy loads.
 """
 
 from collections.abc import Iterator
@@ -51,6 +53,9 @@ def iter_passages(
                     text=text[start:end],
                 )
         return
+    numbers = [page.page_number for page in response.document.pages]
+    if len(numbers) != len(set(numbers)):
+        raise ValueError("Response has duplicate physical page numbers")
     for page in sorted(response.document.pages or [], key=lambda p: p.page_number):
         origin = (origins or {}).get(str(page.page_number))
         has_text = bool((page.text or "").strip()) or any(

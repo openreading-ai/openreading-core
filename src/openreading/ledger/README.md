@@ -73,7 +73,8 @@ The journal is a required dependency after arming. An unwritable ledger director
 backend execution, because continuing would falsely imply that the run is resumable.
 
 Secrets stay out of ledger metadata. Credential values, document passwords, and webhook URLs are
-not persisted. Document bytes and source URLs use the blob store instead of the header.
+not persisted. Document bytes use the blob store instead of the header.
+Source URLs are omitted because they may contain credentials, so URL-only runs cannot resume.
 
 ## Reference
 

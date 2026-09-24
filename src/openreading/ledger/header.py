@@ -190,13 +190,13 @@ def slim_request(req: OpenReadingRequest) -> OpenReadingRequest:
 
 def slim_request_dict(req: OpenReadingRequest) -> dict[str, Any]:
     """A resume-safe echo of an `OpenReadingRequest` for the header's own `slim_request` field:
-    every field except `document.bytes_base64` and `document.url`. Those values use the header's
-    `document: BlobRef` instead. It also excludes the two fields
+    every field except `document.bytes_base64` and `document.url`. Document bytes use the header's
+    `document: BlobRef` instead, while source URLs are not retained. It also excludes the two fields
     `test_planted_canaries_in_password_and_webhook_url_never_reach_disk` pins as NEVER reaching
     ledger disk in any form: `document.password`, `async.webhook_url`.
 
-    A document URL can contain a presigned credential. It therefore travels through the blob store
-    like document bytes, rather than appearing in the request echo.
+    A document URL can contain a presigned credential. Omitting it prevents a live credential
+    from reaching the plaintext blob store, but leaves a URL-only run without resumable input.
 
     Delegates to `slim_request` (Ledger T4b §4.2) for the actual exclusion — this function is now
     just that object's `to_schema_dict()` projection, so the two never drift apart again."""

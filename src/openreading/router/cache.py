@@ -83,8 +83,16 @@ def document_digest(d: DocumentInput) -> bytes | None:
 def canonical_options(request_dict: dict[str, Any]) -> str:
     """Stable JSON of the result-affecting request options (sorted keys, no whitespace)."""
     backend = request_dict.get("backend", {}) or {}
+    document = request_dict.get("document", {}) or {}
     opts: dict[str, Any] = {
         "operation": backend.get("operation"),
+        "version": backend.get("version"),
+        # The same bytes can produce different results when a backend reads the declared format
+        # or filename. Keep locator and secret fields out of this content-derived key.
+        "document_metadata": {
+            k: document[k] for k in ("filename", "mime_type") if document.get(k) is not None
+        }
+        or None,
         # runtime.device/mode can change output (e.g. ocr on/off), keep the result-relevant bits
         "runtime": {
             k: (backend.get("runtime") or {}).get(k)

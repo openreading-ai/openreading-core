@@ -456,21 +456,21 @@ The [server guide](src/openreading/server/README.md) covers explicit server file
 
 **Status: pre-release.** You can build on the JSON shape today, while CLI flags, the Python API
 and the strategy grammar may still change before 1.0. The JSON Schemas are stable, pinned byte
-for byte by `tests/test_schema_evolution.py`. Nothing is on PyPI and the repository has no git
-tags, so install from a clone.
+for byte by `tests/test_schema_evolution.py`. Nothing is on PyPI. The repository has a
+`v0.3.0-rc.1` tag, but that tag is not a published acceptance release. Install from a clone.
 
 Five numbers travel with this project, and only one of them is the code you installed.
 
 | Number | Where you read it | What it identifies | When it changes |
 |---|---|---|---|
 | `schema_version` `0.3` | every response envelope | the JSON contract that response obeys | a new version file lands in [`src/openreading/schemas/`](src/openreading/schemas/README.md) |
-| package `0.3.0` | `uv run openreading --version`, `openreading.__version__`, `pyproject.toml` | the code you installed | the first tagged release, which has not happened |
+| package `0.3.0` | `uv run openreading --version`, `openreading.__version__`, `pyproject.toml` | the code you installed | a package release or explicit version change; the RC tag alone does not change it |
 | `"version": "0.3.0"` | `GET /healthz` on a running `openreading serve` | the package number of the process answering you | with the package number, never on its own |
 | heading `[0.4.0]` | [`CHANGELOG.md`](CHANGELOG.md) | a development milestone merged to `main` | a milestone merges, so it runs ahead of the package number and meets it at the first tagged release |
 | codename `Canon (v0.5)` | [`CHANGELOG.md`](CHANGELOG.md) | a branch that carried one body of work | never, because it is a label rather than a version |
 
-Pin a commit SHA. None of the five numbers is a pin, because there are no git tags and no PyPI
-release. A SHA is the only way to name the exact code you tested.
+Pin a commit SHA. The RC tag and the five numbers do not identify every subsequent fix on `main`.
+A SHA names the exact code you tested, while no PyPI release exists yet.
 
 ## How this repo is built and verified
 

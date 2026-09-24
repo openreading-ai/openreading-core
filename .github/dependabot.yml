@@ -20,6 +20,15 @@ updates:
       minor-and-patch:
         update-types: [minor, patch]
 
+  - package-ecosystem: uv
+    directory: /packages/agent-client
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      client-minor-and-patch:
+        update-types: [minor, patch]
+
   # Action bumps get the same treatment, so a stale pin cannot pile up unreviewed. CI pins every
   # action by commit SHA, so each of these pull requests moves a SHA and its version comment.
   - package-ecosystem: github-actions

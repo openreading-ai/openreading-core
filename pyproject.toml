@@ -149,6 +149,12 @@ packages = ["src/openreading"]
 "src/openreading/schemas/strategy-config.v0.1.json" = "openreading/schemas/strategy-config.v0.1.json"
 "src/openreading/schemas/comparison-report.v0.1.json" = "openreading/schemas/comparison-report.v0.1.json"
 
+[tool.hatch.build.targets.sdist]
+# A source install needs the package, build metadata, license, and README. The test suite uses
+# repository-only examples and fixtures, so including tests without those inputs would imply a
+# runnable sdist test lane that does not exist. Wheels still include package schema resources.
+only-include = ["src/openreading", "pyproject.toml", "README.md", "LICENSE"]
+
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
