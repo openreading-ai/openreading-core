@@ -98,6 +98,16 @@ class _BoomVersionRunner(_OneWordRunner):
         raise RuntimeError("no binary to ask")
 
 
+class _LanguageRunner(_OneWordRunner):
+    def __init__(self) -> None:
+        super().__init__()
+        self.languages: list[str] = []
+
+    def image_to_data(self, image, lang, dpi, timeout):
+        self.languages.append(lang)
+        return super().image_to_data(image, lang, dpi, timeout)
+
+
 def _run(adapter, req):
     ctx = RunContext()
     return adapter.normalize(adapter.submit(req, ctx), ctx, req)
@@ -171,6 +181,47 @@ def test_image_input_skips_the_pdf_rasterizer():
 
 
 # ---- OCR failure -----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("languages", "expected"),
+    [
+        (["eng", "deu"], "eng+deu"),
+        (["chi_sim", "script/Latin"], "chi_sim+script/Latin"),
+        (["script/HanS_vert", "my_model-v2"], "script/HanS_vert+my_model-v2"),
+    ],
+)
+def test_language_model_names_preserve_documented_forms(languages, expected):
+    runner = _LanguageRunner()
+    job = TesseractAdapter(runner=runner).submit(
+        _req(features={"ocr_languages": languages}), RunContext()
+    )
+    assert job.raw is not None and job.raw.payload["lang"] == expected
+    assert runner.languages == [expected]
+
+
+@pytest.mark.parametrize(
+    "language",
+    [
+        "",
+        "../eng",
+        "script/../eng",
+        "/tmp/eng",
+        "eng/other",
+        "script/",
+        "eng+deu",
+        "--psm",
+        "eng\n--psm 0",
+        "eng\x00deu",
+    ],
+)
+def test_invalid_language_model_name_is_rejected_before_ocr(language):
+    runner = _LanguageRunner()
+    adapter = TesseractAdapter(runner=runner)
+    with pytest.raises(TerminalError) as exc:
+        adapter.submit(_req(features={"ocr_languages": [language]}), RunContext())
+    assert exc.value.backend_code == "invalid_ocr_language"
+    assert runner.languages == []
 
 
 def test_ocr_subprocess_failure_is_terminal():

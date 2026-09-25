@@ -139,13 +139,154 @@ def test_url_materialized_to_bytes_for_non_url_backend(resolves_public):
     assert base64.b64decode(out.document.bytes_base64) == b"%PDF-1.7 x"
 
 
-def test_url_passed_through_for_url_accepting_backend():
+def test_url_passed_through_for_url_accepting_backend(resolves_public):
     url = "https://example.test/doc.pdf"
     req = api.build_request(url, "reducto")
     out = api.materialize_document(
         req, make_adapter("reducto").descriptor, transport=_mock_transport(b"should-not-fetch")
     )
     assert out.document.url == url and out.document.bytes_base64 is None  # untouched
+
+
+@pytest.mark.parametrize("address", ["127.0.0.1", "169.254.169.254", "224.0.0.1"])
+def test_docling_url_refuses_non_public_destination_before_dispatch(monkeypatch, address):
+    monkeypatch.delenv("OPENREADING_ALLOW_PRIVATE_URLS", raising=False)
+    monkeypatch.setattr("socket.getaddrinfo", lambda *a, **k: [(2, 1, 6, "", (address, 443))])
+
+    with pytest.raises(TerminalError) as exc_info:
+        api.prepare_named_backend(
+            api.build_request("https://metadata.test/doc.pdf", "docling"), "docling"
+        )
+
+    assert exc_info.value.backend_code == "url_not_public"
+
+
+@pytest.mark.parametrize(
+    "address, allowed",
+    [
+        ("::1", False),
+        ("::ffff:127.0.0.1", False),
+        ("64:ff9b::7f00:1", False),
+        ("64:ff9b::a00:1", False),
+        ("64:ff9b::a9fe:a9fe", False),
+        ("64:ff9b::e000:1", False),
+        ("64:ff9b:1::7f00:1", False),
+        ("64:ff9b:1::5db8:d822", False),
+        ("64:ff9b::5db8:d822", True),
+        ("2606:4700:4700::1111", True),
+    ],
+)
+def test_native_url_checks_ipv6_and_translated_ipv4_destinations(monkeypatch, address, allowed):
+    monkeypatch.delenv("OPENREADING_ALLOW_PRIVATE_URLS", raising=False)
+    monkeypatch.setattr("socket.getaddrinfo", lambda *a, **k: [(10, 1, 6, "", (address, 443))])
+    url = f"https://[{address}]/doc.pdf"
+    req = api.build_request(url, "docling")
+    descriptor = make_adapter("docling").descriptor
+    if allowed:
+        assert api.materialize_document(req, descriptor).document.url == url
+    else:
+        with pytest.raises(TerminalError) as caught:
+            api.materialize_document(req, descriptor)
+        assert caught.value.backend_code == "url_not_public"
+
+
+@pytest.mark.parametrize("userinfo", ["user:password", "user", ""])
+@pytest.mark.parametrize("opt_in", [False, True])
+def test_native_url_refuses_userinfo_before_dns_even_with_private_opt_in(
+    monkeypatch, userinfo, opt_in
+):
+    if opt_in:
+        monkeypatch.setenv("OPENREADING_ALLOW_PRIVATE_URLS", "1")
+    else:
+        monkeypatch.delenv("OPENREADING_ALLOW_PRIVATE_URLS", raising=False)
+    monkeypatch.setattr("socket.getaddrinfo", lambda *a, **k: pytest.fail("userinfo reached DNS"))
+    req = api.build_request(f"https://{userinfo}@example.test/doc.pdf", "docling")
+    with pytest.raises(TerminalError) as caught:
+        api.materialize_document(req, make_adapter("docling").descriptor)
+    assert caught.value.backend_code == "unsupported_input"
+
+
+def test_docling_url_refuses_mixed_public_private_dns_answers(monkeypatch):
+    monkeypatch.delenv("OPENREADING_ALLOW_PRIVATE_URLS", raising=False)
+    monkeypatch.setattr(
+        "socket.getaddrinfo",
+        lambda *a, **k: [
+            (2, 1, 6, "", ("93.184.216.34", 443)),
+            (2, 1, 6, "", ("10.0.0.1", 443)),
+        ],
+    )
+
+    with pytest.raises(TerminalError) as exc_info:
+        api.materialize_document(
+            api.build_request("https://metadata.test/doc.pdf", "docling"),
+            make_adapter("docling").descriptor,
+        )
+
+    assert exc_info.value.backend_code == "url_not_public"
+
+
+def test_docling_url_refuses_missing_host():
+    req = api.build_request("https:///doc.pdf", "docling")
+
+    with pytest.raises(TerminalError) as exc_info:
+        api.materialize_document(req, make_adapter("docling").descriptor)
+
+    assert exc_info.value.backend_code == "unsupported_input"
+
+
+def test_routed_docling_url_refuses_private_destination_before_chain_dispatch(monkeypatch):
+    from openreading.router.compliance import RouterConfig
+
+    monkeypatch.delenv("OPENREADING_ALLOW_PRIVATE_URLS", raising=False)
+    req = api.build_request("http://127.0.0.1/doc.pdf")
+
+    with pytest.raises(TerminalError) as exc_info:
+        api.run_request(req, config=RouterConfig(backends=("docling",)))
+
+    assert exc_info.value.backend_code == "url_not_public"
+
+
+@pytest.mark.parametrize("backends", [("docling",), ("docling", "pymupdf"), ("pymupdf", "docling")])
+def test_strategy_docling_url_refuses_private_destination_before_leaf_dispatch(
+    monkeypatch, backends
+):
+    from openreading.strategies.model import StrategyConfig
+
+    monkeypatch.delenv("OPENREADING_ALLOW_PRIVATE_URLS", raising=False)
+    req = api.build_request("http://127.0.0.1/doc.pdf", "strategy:s")
+    strategy_config = StrategyConfig.model_validate(
+        {"version": 1, "strategies": {"s": {"steps": [{"backend": b} for b in backends]}}}
+    )
+
+    with pytest.raises(TerminalError) as exc_info:
+        api.run_request(req, strategy_config=strategy_config)
+
+    assert exc_info.value.backend_code == "url_not_public"
+
+
+def test_docling_url_allows_private_destination_with_operator_opt_in(monkeypatch):
+    monkeypatch.setenv("OPENREADING_ALLOW_PRIVATE_URLS", "1")
+    monkeypatch.setattr(
+        "socket.getaddrinfo", lambda *a, **k: pytest.fail("opt-in must not query DNS")
+    )
+    req = api.build_request("http://127.0.0.1/doc.pdf", "docling")
+
+    out = api.materialize_document(req, make_adapter("docling").descriptor)
+
+    assert out.document.url == "http://127.0.0.1/doc.pdf"
+
+
+def test_download_refuses_userinfo_before_constructing_host_header(monkeypatch):
+    monkeypatch.delenv("OPENREADING_ALLOW_PRIVATE_URLS", raising=False)
+    monkeypatch.setattr(
+        "socket.getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 443))]
+    )
+    transport = httpx.MockTransport(lambda request: pytest.fail("userinfo reached transport"))
+
+    with pytest.raises(TerminalError) as exc_info:
+        api._download("https://user:pass@example.test/doc.pdf", transport=transport)
+
+    assert exc_info.value.backend_code == "unsupported_input"
 
 
 def test_materialize_download_error_maps_to_terminal(resolves_public):

@@ -54,6 +54,11 @@ jobs:
         if: matrix.python-version == '3.12'
         run: make audit
 
+      # The client-only distribution has a separate lock and dependency graph.
+      - name: client profile dependency vulnerability audit
+        if: matrix.python-version == '3.12'
+        run: make audit-client
+
       # The single gate: ruff (lint+format) + pyright + pytest (non-live) + JSON-Schema
       # validation + CLI smoke. Live tests are @pytest.mark.live and skipped without provider keys.
       - name: make verify

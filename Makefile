@@ -1,4 +1,4 @@
-.PHONY: verify lint typecheck typecheck-mypy test schema-validate extras-parity smoke strategy-smoke compare-smoke leaderboard-smoke serve-smoke audit verify-live sync clean
+.PHONY: verify lint typecheck typecheck-mypy test schema-validate extras-parity smoke strategy-smoke compare-smoke leaderboard-smoke serve-smoke audit audit-client verify-live sync clean
 
 # `make verify` is the gate. CI runs it on every pull request and on every push to main.
 verify: lint typecheck test schema-validate extras-parity smoke strategy-smoke compare-smoke leaderboard-smoke
@@ -92,7 +92,8 @@ serve-smoke:
 	uv run python scripts/serve_smoke.py
 
 # Dependency vulnerability audit: this queries the OSV/PyPI advisory database against the
-# third-party dependencies in the resolved lock. It is not part of `verify`, because it needs the
+# third-party dependencies in the resolved lock. The audit runner pins pip-audit 2.10.1 so its
+# CLI behavior does not change during a CI rerun. It is not part of `verify`, because it needs the
 # network, and it blocks the build on any hit. A vulnerable lock with no CI signal is how
 # PYSEC-2026-3655/3656 (pypdf) and PYSEC-2026-3552 (cryptography) sat unnoticed. Dependabot opens
 # a pull request for each one, but it never blocks the green build that ships the lock. The audit
@@ -115,7 +116,14 @@ audit:
 	uv export --format requirements.txt --all-extras --no-emit-project > "$${TMPDIR:-/tmp}/audit-export.txt"
 	@grep '@ git+' "$${TMPDIR:-/tmp}/audit-export.txt" | sed 's/^/audit: excluded, not auditable by version: /' || true
 	grep -v '@ git+' "$${TMPDIR:-/tmp}/audit-export.txt" > "$${TMPDIR:-/tmp}/audit-requirements.txt"
-	uv run --with pip-audit pip-audit --strict -r "$${TMPDIR:-/tmp}/audit-requirements.txt"
+	uv run --with pip-audit==2.10.1 pip-audit --strict -r "$${TMPDIR:-/tmp}/audit-requirements.txt"
+
+# The isolated agent client profile has its own dependency graph and lock. Auditing only the
+# full-core lock misses changes to this profile's direct floors or MCP dependency tree.
+# --locked refuses drift, while --no-emit-project avoids looking up this unpublished checkout.
+audit-client:
+	uv export -q --project packages/agent-client --locked --no-dev --no-emit-project --format requirements.txt --output-file "$${TMPDIR:-/tmp}/audit-client-requirements.txt"
+	uv run --with pip-audit==2.10.1 pip-audit --strict -r "$${TMPDIR:-/tmp}/audit-client-requirements.txt"
 
 # Live lane: this runs only the tests marked `@pytest.mark.live`, and nothing else. Each one skips
 # cleanly unless its backend's environment keys are set, and `-rs` prints the skip reasons. It is

@@ -144,9 +144,18 @@ def test_legacy_external_artifact_with_duplicate_pages_is_corrupt(retention, mon
     from openreading.artifacts import retention as module
     from openreading.types.response import NormalizedResponse
 
+    def old_passages(parsed):
+        for page in parsed.document.pages:
+            single = parsed.model_copy(
+                update={"document": parsed.document.model_copy(update={"pages": [page]})}
+            )
+            yield from module_passages(single)
+
+    module_passages = module.iter_passages
     # Emulate the old writer while preserving real file hashes and acquisition bindings.
     with monkeypatch.context() as old_writer:
         old_writer.setattr(module, "validate_external_response", NormalizedResponse.model_validate)
+        old_writer.setattr(module, "iter_passages", old_passages)
         receipt = retain(retention, duplicate_pages())
     with pytest.raises(ArtifactError, match="artifact_corrupt"):
         retention.load_artifact(receipt.artifact_id)
@@ -214,6 +223,45 @@ def test_retention_cancellation_and_extraction_limit_leave_no_artifact(retention
     with pytest.raises(ArtifactError, match="extraction_too_large"):
         retain(retention, rich_response())
     assert list(retention.store.documents.iterdir()) == []
+
+
+def test_complete_external_staging_wins_late_cancellation(retention, monkeypatch):
+    import threading
+
+    event = threading.Event()
+    original = retention._receipt
+
+    def receipt(*args, **kwargs):
+        result = original(*args, **kwargs)
+        event.set()
+        return result
+
+    monkeypatch.setattr(retention, "_receipt", receipt)
+    response = rich_response()
+    result = retain(retention, response, cancelled=event)
+    assert event.is_set()
+    assert retention.store.load_document(result.artifact_id)[2] == response
+    assert list((retention.config.artifact_root / "staging").iterdir()) == []
+
+
+def test_explicit_retention_deadline_still_applies_at_publication(retention, monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr("time.monotonic", lambda: clock[0])
+    retention.config = replace(
+        retention.config, limits=replace(retention.config.limits, deadline_seconds=1)
+    )
+    original = retention._receipt
+
+    def receipt(*args, **kwargs):
+        result = original(*args, **kwargs)
+        clock[0] = 2.0
+        return result
+
+    monkeypatch.setattr(retention, "_receipt", receipt)
+    with pytest.raises(ArtifactError, match="timeout"):
+        retain(retention, rich_response())
+    assert not list(retention.store.documents.iterdir())
+    assert not list((retention.config.artifact_root / "staging").iterdir())
 
 
 def test_disk_failure_leaves_no_committed_artifact(retention, monkeypatch):

@@ -1044,6 +1044,9 @@ def test_a_url_sourced_run_records_no_url_and_refuses_resume(tmp_path, monkeypat
     for var in ("REDUCTO_API_KEY", "OPENREADING_REDUCTO_API_KEY"):
         monkeypatch.delenv(var, raising=False)
     secret = "https://bucket.example/doc.pdf?X-Amz-Signature=deadbeefcafe"
+    monkeypatch.setattr(
+        "socket.getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 443))]
+    )
     armed: list[str] = []
     with pytest.raises(Exception):  # noqa: B017 — it fails on the key; the header is the subject
         api.run(secret, strategy="s", on_run_armed=armed.append)

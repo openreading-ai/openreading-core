@@ -65,6 +65,19 @@ from openreading.mcp_server.tools import create_server
 from openreading.schemas import response_schema
 assert response_schema()["properties"]["schema_version"]["const"] == "0.3"
 assert not any(n.startswith("openreading.adapters") for n in sys.modules)
+from pathlib import Path
+from openreading.artifacts.jobs import run, main
+job = Path(sys.argv[1]) / "job"
+job.mkdir()
+(job / "request.json").write_text("{}")
+try:
+    run(job)
+except ValueError as error:
+    assert str(error) == "Local jobs require the parser-enabled Core package"
+else:
+    raise AssertionError("Client-only package accepted local parser dispatch")
+assert main([str(job)]) == 2
+assert not any(n.startswith("openreading.adapters") for n in sys.modules)
 """
     result = subprocess.run(
         [sys.executable, "-c", script, str(tmp_path)], capture_output=True, text=True

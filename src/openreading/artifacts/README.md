@@ -73,6 +73,10 @@ The upload's source hash binds the result to the selected bytes, preventing an e
 Structured-only results remain retrievable through `get_document`; they produce no invented source quotes.
 Trusted launchers can select detached execution through `openreading.artifacts.jobs.ImportExecution` and a fixed service factory.
 Post-upload storage contention never repeats an external import, preventing duplicate server processing.
+Duplicate physical page numbers are refused before projection, preventing ambiguous citation identifiers across local and external artifacts.
+Complete external staging survives late cancellation, preventing loss of a fully received server result during publication.
+Explicit retention deadlines still apply at publication. An expired operator deadline can refuse otherwise complete staging.
+Abandoned supervisor identity records recover after a startup grace period, preventing permanent admission blockage after launcher crashes.
 
 Line-end dehyphenation lets a search for renewal find re- followed by newal on the next line.
 Returned passages and excerpt offsets still refer to the original text, including the hyphen and newline.
@@ -90,6 +94,7 @@ Every load checks hashes and regenerates passages from the normalized response, 
 ## Operations
 
 The store permits one import at a time; background jobs wait for that import to finish.
+Each input grant admits four nonterminal jobs and one per source reference, preventing repeated calls from growing an unbounded process queue.
 Use `openreading_start_import`, check `openreading_get_import`, and cancel explicitly with `openreading_cancel_import`.
 A completed job returns the ordinary artifact receipt; disconnecting the host leaves background work running.
 Optional Docling limits and historical PyMuPDF defaults live in `openreading.artifacts.limits`, including the source, extraction, storage, deadline, and payload caps.

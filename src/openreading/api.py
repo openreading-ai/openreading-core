@@ -72,12 +72,14 @@ All other batches fan out through `run`, isolating failures in their individual 
 Environment variables read by this module
 -----------------------------------------
 `OPENREADING_LEDGER` names a directory that stores every strategy document and full response in
-plaintext. It creates the journal, header, and `blobs/` entries required by resume.
+plaintext. Source URLs are not retained because they may contain presigned credentials.
+It creates the journal, header, and `blobs/` entries required by resume.
 Nothing here encrypts, expires, or deletes that data. The operator owns its storage policy.
 
 `OPENREADING_ALLOW_PRIVATE_URLS` disables public-address validation when set to any non-empty value.
-Without it, URL materialization refuses private destinations, redirects, and oversized responses.
-The connection is pinned to the vetted address to prevent DNS rebinding between validation and use.
+Without it, local downloads and backends that accept URLs refuse hosts with private DNS answers.
+Local downloads reject redirects and oversized responses, then connect to a vetted address.
+A backend that fetches URLs itself resolves the hostname later, so its DNS answer may change after validation.
 
 `env_file` loads key-value lines without overriding existing process variables. A library call
 with no `env_file` never discovers `.env` from the working directory.
@@ -105,6 +107,7 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from urllib.parse import ParseResult
 
 from openreading.adapters._http import error_for_status
 from openreading.adapters.registry import build_registry, make_adapter
@@ -251,30 +254,43 @@ def build_request(
     return OpenReadingRequest.model_validate(body)
 
 
+def _http_url_parts(url: str) -> tuple[ParseResult, str, int | None]:
+    """Validate the HTTP URL shape shared by local downloads and backend URL handoff."""
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(url)
+        host, port = parsed.hostname, parsed.port
+    except ValueError as exc:
+        raise TerminalError("invalid URL authority", backend_code="unsupported_input") from exc
+    if parsed.scheme not in ("http", "https"):
+        raise TerminalError(
+            f"unsupported URL scheme {parsed.scheme!r}", backend_code="unsupported_input"
+        )
+    if not host:
+        raise TerminalError("URL has no host", backend_code="unsupported_input")
+    if parsed.username is not None or parsed.password is not None:
+        raise TerminalError("URL credentials are unsupported", backend_code="unsupported_input")
+    return parsed, host, port
+
+
 def _assert_public_http_url(url: str) -> str:
     """Refuse URL schemes and destinations a hosted parse must never fetch on a caller's behalf:
     non-http(s), and hosts resolving to loopback/private/link-local/reserved addresses (cloud
     metadata endpoints included). Returns the ONE vetted address the caller must then connect to —
     see `_download`, which pins the connection to it.
 
-    Returning the address rather than just approving the name is what closes DNS rebinding. Every
-    answer is checked, and the first is handed back; resolving again at connect time would re-ask
-    a resolver whose answer the attacker controls and can change between the two calls, which is
-    the whole trick. `OPENREADING_ALLOW_PRIVATE_URLS=1` disables the address check (and, with it,
-    the pinning) for intranet document stores."""
+    Returning the address lets `_download` pin its own connection and avoid DNS rebinding.
+    Backends that fetch URLs themselves cannot use this pin: a later vendor-side DNS lookup can
+    change between validation and fetch. `OPENREADING_ALLOW_PRIVATE_URLS=1` disables the address
+    check for intranet document stores.
+    Well-known NAT64 addresses must embed public IPv4 addresses, such as 93.184.216.34.
+    Local-use translation prefixes are refused because their targets are operator-defined."""
     import ipaddress
     import socket
-    from urllib.parse import urlparse
 
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        raise TerminalError(
-            f"unsupported URL scheme {parsed.scheme!r}", backend_code="unsupported_input"
-        )
-    host = parsed.hostname
-    if not host:
-        raise TerminalError("URL has no host", backend_code="unsupported_input")
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    parsed, host, explicit_port = _http_url_parts(url)
+    port = explicit_port if explicit_port is not None else (443 if parsed.scheme == "https" else 80)
     try:
         infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
     except OSError as exc:
@@ -282,7 +298,17 @@ def _assert_public_http_url(url: str) -> str:
     vetted = ""
     for info in infos:
         addr = ipaddress.ip_address(info[4][0])
-        if not addr.is_global or addr.is_multicast:
+        translated = addr
+        if addr in ipaddress.ip_network("64:ff9b::/96"):
+            # RFC 6052 section 3.1 forbids non-global targets even when the IPv6 prefix is public.
+            translated = ipaddress.IPv4Address(addr.packed[-4:])
+        if (
+            not addr.is_global
+            or addr.is_multicast
+            or not translated.is_global
+            or translated.is_multicast
+            or addr in ipaddress.ip_network("64:ff9b:1::/48")
+        ):
             raise TerminalError(
                 f"URL host {host!r} resolves to a non-public address",
                 backend_code="url_not_public",
@@ -302,21 +328,25 @@ def _pin_to_address(url: str, address: str) -> tuple[str, dict[str, str], dict[s
     original host rides in `Host` (virtual hosting still routes) and in `sni_hostname` (TLS still
     presents and verifies the right certificate). An IPv6 literal is bracketed, as a URL authority
     requires."""
-    from urllib.parse import urlparse, urlunparse
+    from urllib.parse import urlunparse
 
-    parsed = urlparse(url)
+    parsed, host, port = _http_url_parts(url)
     literal = f"[{address}]" if ":" in address else address
-    netloc = f"{literal}:{parsed.port}" if parsed.port else literal
+    netloc = f"{literal}:{port}" if port is not None else literal
     pinned = urlunparse(parsed._replace(netloc=netloc))
-    assert parsed.hostname is not None  # _assert_public_http_url refuses a host-less URL
-    return pinned, {"Host": parsed.netloc}, {"sni_hostname": parsed.hostname}
+    authority = f"[{host}]" if ":" in host else host
+    if port is not None:
+        authority = f"{authority}:{port}"
+    return pinned, {"Host": authority}, {"sni_hostname": host}
 
 
 def _download(url: str, *, transport=None) -> bytes:
     import httpx  # lazy — only when a URL is actually materialized
 
     target, headers, extensions = url, {}, {}
-    if not os.environ.get("OPENREADING_ALLOW_PRIVATE_URLS"):
+    if os.environ.get("OPENREADING_ALLOW_PRIVATE_URLS"):
+        _http_url_parts(url)
+    else:
         target, headers, extensions = _pin_to_address(url, _assert_public_http_url(url))
     client = (
         httpx.Client(transport=transport, timeout=60.0) if transport else httpx.Client(timeout=60.0)
@@ -354,15 +384,29 @@ def _download(url: str, *, transport=None) -> bytes:
     return b"".join(chunks)
 
 
+def _validate_native_url(req: OpenReadingRequest) -> None:
+    """Vet a URL before any backend that fetches it itself receives the request."""
+    url = req.document.url
+    if url is None:
+        return
+    if os.environ.get("OPENREADING_ALLOW_PRIVATE_URLS"):
+        _http_url_parts(url)
+    else:
+        # A self-fetching backend resolves the hostname again. This check rejects currently
+        # private answers but cannot pin the vendor's later DNS lookup to the vetted address.
+        _assert_public_http_url(url)
+
+
 def materialize_document(req: OpenReadingRequest, descriptor=None, *, transport=None):
     """If the document is a URL and the target backend can't ingest URLs natively (accepts_url),
-    download it to bytes so the backend can run. Backends that accept URLs get the URL untouched.
+    download it to bytes so the backend can run. Backends that accept URLs get the vetted URL.
     `descriptor=None` forces materialization when any resolved chain member needs
     bytes). Offline tests inject an httpx transport; no default path performs network I/O."""
     d = req.document
     if not d.url:
         return req
     if descriptor is not None and descriptor.accepts_url:
+        _validate_native_url(req)
         return req
     data = _download(d.url, transport=transport)
     new_doc = d.model_copy(
@@ -570,6 +614,8 @@ def _run_strategy_request(
         for bid in compiled.dispatchable
     ):
         req = materialize_document(req, transport=transport)
+    else:
+        _validate_native_url(req)
     run_id = str(uuid.uuid4())
     clock = RealClock()
     executor = _arm_ledger(
@@ -772,6 +818,8 @@ def run_request(
                 )
         if any(not a.descriptor.accepts_url for a in plan.chain):
             req = materialize_document(req, transport=transport)
+        else:
+            _validate_native_url(req)
         return execute_plan(plan, req, broker=broker, cache=cache).to_schema_dict()
 
     adapter, req, ctx = prepare_named_backend(

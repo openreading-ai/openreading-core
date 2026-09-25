@@ -716,6 +716,10 @@ def test_planted_canary_in_document_url_never_reaches_disk(tmp_path, monkeypatch
     monkeypatch.setenv("OPENREADING_LEDGER", str(ledger_root))
 
     url_canary = "https://storage.example.com/doc.html?X-Amz-Signature=SECRET-PRESIGNED-TOKEN-9f3a"
+    # Exercise persistence after URL validation without consulting live DNS.
+    monkeypatch.setattr(
+        "socket.getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 443))]
+    )
     req = OpenReadingRequest.model_validate(
         {
             "document": {"url": url_canary, "mime_type": "text/html"},

@@ -39,7 +39,8 @@ LiteParse's own process pool. An OCR server would send page pixels off this mach
 others are not exercised here. Usage is the page count, because nothing is billed.
 
 Environment variables this module reads. The credential broker resolves both through
-`config_spec` into `ctx.runtime`, and `request.backend.runtime` can override them.
+`config_spec` into `ctx.runtime`. The typed `request.backend.runtime` has no fields for either
+setting, so a request cannot override these operator-controlled limits.
 `LITEPARSE_TESSDATA` names the absolute tessdata directory, and OCR stays off when it is unset.
 `LITEPARSE_WORKER_MEMORY_BYTES` sets the sampled worker ceiling, and 2 GiB applies when unset.
 

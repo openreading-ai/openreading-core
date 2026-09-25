@@ -2,6 +2,7 @@
 
 import builtins
 import json
+import os
 import subprocess
 
 import pytest
@@ -9,10 +10,50 @@ import pytest
 from openreading.artifacts import service
 
 
+def test_scratch_git_setup_does_not_mutate_a_hook_repository(tmp_path, monkeypatch):
+    # Even a broken inner guard must be confined to these two disposable repositories.
+    for name in tuple(os.environ):
+        if name.startswith("GIT_"):
+            monkeypatch.delenv(name)
+    outer = tmp_path / "outer"
+    safe_env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    subprocess.run(["git", "init", "-q", str(outer)], check=True, env=safe_env)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(outer),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "sentinel",
+        ],
+        check=True,
+        env=safe_env,
+    )
+    before = subprocess.check_output(["git", "-C", str(outer), "rev-parse", "HEAD"], env=safe_env)
+    monkeypatch.setenv("GIT_DIR", str(outer / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(outer))
+    test_installed_identity_never_uses_an_enclosing_git_repository(
+        tmp_path / "scratch", monkeypatch, True
+    )
+    after = subprocess.check_output(["git", "-C", str(outer), "rev-parse", "HEAD"], env=safe_env)
+    assert after == before
+    assert (tmp_path / "scratch/.git").is_dir()
+
+
 @pytest.mark.parametrize("inside_repository", [False, True])
 def test_installed_identity_never_uses_an_enclosing_git_repository(
     tmp_path, monkeypatch, inside_repository
 ):
+    # Hooks export repository selectors that override Git's requested working directory.
+    for name in tuple(os.environ):
+        if name.startswith("GIT_"):
+            monkeypatch.delenv(name)
     package = tmp_path / "package/openreading"
     (package / "artifacts").mkdir(parents=True)
     (package / "artifacts/service.py").write_text("# installed module")
