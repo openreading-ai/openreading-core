@@ -17,7 +17,7 @@ from openreading.evals.leaderboard import run_leaderboard
 from openreading.router.registry import Registry
 from tests.fakes import ScriptedBackend
 
-SAMPLE = Path("src/openreading/evals/sample")
+SAMPLE = Path(__file__).resolve().parents[1] / "src/openreading/evals/sample"
 
 
 def _write_case(tmp_path: Path, subdir: str, spec: dict) -> Path:

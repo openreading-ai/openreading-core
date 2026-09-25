@@ -272,9 +272,10 @@ def test_generated_rules_are_shapes_the_publisher_accepts() -> None:
     import json
     from pathlib import Path
 
-    expected = json.loads(Path("src/openreading/evals/sample/loan_page1/case.json").read_text())[
-        "expected"
-    ]
+    sample = (
+        Path(__file__).resolve().parents[1] / "src/openreading/evals/sample/loan_page1/case.json"
+    )
+    expected = json.loads(sample.read_text())["expected"]
 
     detail = score_rules(_MARKDOWN, suggest_rules(expected))
 

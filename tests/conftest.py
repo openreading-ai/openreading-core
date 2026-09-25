@@ -1,9 +1,12 @@
 """pytest configuration, and the testing runbook for every surface and both lanes.
 
-The only global hook: load `.env` for the live lane so `make verify-live` (and any `-m live` run)
-sees the caller's real keys without a manual export. GUARDED to the live marker — the offline
-suite (`make verify`, which runs `-m "not live"`) NEVER loads real credentials, so it can never
-accidentally hit the network.
+Offline tests start in an empty temporary directory with `OPENREADING_CONFIG` unset.
+CLI calls cannot discover the checkout's personal YAML or `.env` files there.
+Tests create their own configuration when exercising discovery, and environment changes are
+restored after each test. Repository fixtures use paths anchored to their test module.
+
+The startup hook loads `.env` only when the caller selects the live lane.
+Live tests keep the caller's working directory and environment for their configured providers.
 
 The one sentence: `make verify` is green on every surface offline; the live lane is the ONLY
 thing that proves a hosted backend against its real API, and it needs that backend's keys.
@@ -220,7 +223,10 @@ fill the descriptor honestly.
 from __future__ import annotations
 
 import json
+import os
+from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -239,6 +245,20 @@ def pytest_configure(config: pytest.Config) -> None:
         from openreading.credentials import load_dotenv
 
         load_dotenv(".env")
+
+
+@pytest.fixture(autouse=True)
+def _offline_workspace(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[None]:
+    """Keep personal config and dotenv writes out of unrelated offline tests."""
+    if request.node.get_closest_marker("live") is not None:
+        yield
+        return
+    # CLI dotenv loading mutates os.environ directly, outside a test's monkeypatch tracking.
+    # Restore the complete mapping so those writes cannot change a later server's startup.
+    with patch.dict(os.environ), pytest.MonkeyPatch.context() as isolated:
+        isolated.chdir(tmp_path)
+        os.environ.pop("OPENREADING_CONFIG", None)
+        yield
 
 
 # --- publisher benchmark corpora ---------------------------------------------------------------
