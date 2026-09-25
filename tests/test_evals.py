@@ -24,7 +24,7 @@ from openreading.evals.dataset import load_case
 from openreading.evals.scorers import contains_fraction
 from tests.fakes import ConfigurableBackend, make_backend
 
-SAMPLE = Path("src/openreading/evals/sample")
+SAMPLE = Path(__file__).resolve().parents[1] / "src/openreading/evals/sample"
 
 
 # --- scorers ----------------------------------------------------------------------------

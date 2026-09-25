@@ -344,6 +344,9 @@ def test_a_walk_with_a_race_and_a_paged_cascade_produces_a_byte_identical_journa
     outputs = []
     for seed in range(5):
         env = dict(os.environ, PYTHONHASHSEED=str(seed))
+        env["PYTHONPATH"] = os.pathsep.join(
+            filter(None, [str(Path(__file__).resolve().parents[1]), env.get("PYTHONPATH")])
+        )
         result = subprocess.run(
             [sys.executable, "-c", script], capture_output=True, text=True, env=env
         )

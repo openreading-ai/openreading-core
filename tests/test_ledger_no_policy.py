@@ -21,10 +21,13 @@ What stays is the ledger's actual job: the journal, the header, the blobs, repla
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 
 from openreading import api
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
@@ -35,7 +38,7 @@ def armed(tmp_path, monkeypatch):
 
 
 def _run(root):
-    api.run("examples/schedule_a_2024.pdf", strategy="offline_first")
+    api.run(ROOT / "examples/schedule_a_2024.pdf", strategy="offline_first")
     return root
 
 
@@ -89,9 +92,7 @@ def test_retention_and_its_environment_variables_are_gone():
 def test_cryptography_is_no_longer_a_dependency():
     """Imported by exactly one file for one narrow scenario, and a native dependency on every
     install. Disk encryption is the operator's own, and their OS does it better."""
-    import pathlib
-
-    src = pathlib.Path("src/openreading")
+    src = ROOT / "src/openreading"
     # An IMPORT, not the word: `localfs.py`'s docstring names the dependency to explain why it
     # went, and a prose mention is not a dependency.
     importing = [
@@ -100,5 +101,5 @@ def test_cryptography_is_no_longer_a_dependency():
         if re.search(r"^\s*(from|import)\s+cryptography", p.read_text(), re.M)
     ]
     assert not importing, f"cryptography still imported by {importing}"
-    deps = pathlib.Path("pyproject.toml").read_text()
+    deps = (ROOT / "pyproject.toml").read_text()
     assert '"cryptography' not in deps, "still a declared dependency"

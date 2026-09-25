@@ -14,6 +14,7 @@ today's implementation happens to exercise it."""
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -28,7 +29,7 @@ from openreading.types.errors import (
 
 pytest.importorskip("fitz", reason="pymupdf not installed")
 
-SAMPLE = "src/openreading/evals/sample"
+SAMPLE = str(Path(__file__).resolve().parents[1] / "src/openreading/evals/sample")
 
 
 @pytest.fixture

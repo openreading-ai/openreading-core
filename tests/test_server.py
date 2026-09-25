@@ -170,7 +170,7 @@ def test_parse_rejects_document_path_by_default(client, monkeypatch):
 
 
 def test_parse_allows_path_under_configured_root(client, monkeypatch, tmp_path):
-    src = Path("examples")  # repo ships two synthetic PDFs
+    src = Path(__file__).resolve().parents[1] / "examples"
     pdf = next(src.glob("*.pdf"))
     doc = tmp_path / pdf.name
     doc.write_bytes(pdf.read_bytes())

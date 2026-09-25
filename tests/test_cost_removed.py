@@ -99,7 +99,7 @@ def test_the_leaderboard_reports_no_cost_per_doc():
     from openreading.evals import run_leaderboard
 
     report = run_leaderboard(
-        "src/openreading/evals/sample", ["pymupdf", "tesseract"], api.build_registry()
+        str(SRC / "evals/sample"), ["pymupdf", "tesseract"], api.build_registry()
     ).to_schema_dict()
     for row in report["backends"]:
         assert "cost_per_doc" not in row

@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -154,8 +155,11 @@ def _leaderboard() -> Any:
     came through unmoved."""
     from openreading.evals import run_leaderboard
 
+    # Keep the pinned relative dataset identity without discovering checkout configuration.
+    dataset = Path("src/openreading/evals/sample")
+    shutil.copytree(EXAMPLES.parent / dataset, dataset, dirs_exist_ok=True)
     report = run_leaderboard(
-        "src/openreading/evals/sample", ["pymupdf", "tesseract"], api.build_registry()
+        str(dataset), ["pymupdf", "tesseract"], api.build_registry()
     ).to_schema_dict()
     # Two backends are required by `run_leaderboard`, and pymupdf plus tesseract is the only
     # keyless local pair. Tesseract's own rows are dropped from the pin because its scores depend
