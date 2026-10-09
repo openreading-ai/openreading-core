@@ -5,7 +5,7 @@ description = "Client-only retained documents and MCP contracts for OpenReading 
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = []
-dependencies = ["pydantic>=2.7", "jsonschema>=4.21", "mcp>=1.30,<2", "psutil>=7.2,<8"]
+dependencies = ["pydantic>=2.7", "jsonschema>=4.21", "mcp>=1.30,<3", "psutil>=7.2,<8"]
 
 [build-system]
 requires = ["hatchling"]
