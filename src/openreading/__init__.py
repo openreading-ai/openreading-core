@@ -513,6 +513,8 @@ projection. What one invocation actually did (backends eligible, attempted, disp
 switch and its reason; time and cost with honest unknowns) is spread across `warnings[]` prose,
 strategy `orchestration`, the batch summary and an armed ledger, with no common carrier
 (design record: `design/run-stats-analytics.md`).
+Guided medical-chart discovery above core remains unbuilt, as scoped in
+`product/specs/medical-chart-discovery.product-spec.md`.
 
 Recently removed, and worth knowing if you read older material about this package: the compliance
 filter and its per-vendor table, the capability gate, the stage-3 scorer, `optimize_for`, and
