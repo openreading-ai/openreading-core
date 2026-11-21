@@ -668,3 +668,71 @@ def test_every_keyed_preset_passes_the_profile_checks():
         if preset.key_env:
             profile["key_env"] = preset.key_env
         assert config.validate_providers({"preset-check": profile})
+
+
+# --- every failure is a ✗ line, never a traceback ----------------------------------------------
+
+
+def test_a_keychain_that_refuses_a_remove_is_a_cross_line(
+    wizard, monkeypatch, capsys, fake_keychain
+):
+    _probe_script(monkeypatch, LivenessStatus.UNAUTHORIZED)
+
+    def refuse(name):
+        raise cli_setup.keychain.KeychainUnavailable("The keychain refused to remove it.")
+
+    monkeypatch.setattr(cli_setup.keychain, "delete", refuse)
+    code, out, err, _ = wizard(
+        [
+            ("checkbox", _pick("anthropic-claude")),
+            ("password", KEY),
+            ("confirm", True),
+            ("select", "remove"),
+        ],
+        capsys=capsys,
+    )
+    assert code == 0, err
+    assert "✗ Could not remove ANTHROPIC_API_KEY" in out
+    assert "Traceback" not in err
+
+
+def test_a_probe_that_raises_is_a_cross_line(wizard, monkeypatch, capsys, fake_keychain):
+    def boom(adapter, *, broker, timeout_s=None):
+        raise RuntimeError(f"connection reset {KEY}")
+
+    monkeypatch.setattr(cli_keys, "check_liveness", boom)
+    code, out, err, _ = wizard(
+        [
+            ("checkbox", _pick("anthropic-claude")),
+            ("password", KEY),
+            ("confirm", True),  # test the key
+            ("select", "keep"),
+        ],
+        capsys=capsys,
+    )
+    assert code == 0, err
+    assert "✗ anthropic-claude could not be tested (RuntimeError)" in out
+    assert KEY not in out + err
+
+
+def test_a_file_that_cannot_be_written_is_a_cross_line(
+    wizard, monkeypatch, capsys, fake_keychain, tmp_path
+):
+    _probe_script(monkeypatch, LivenessStatus.LIVE)
+
+    def deny(path, text):
+        raise PermissionError(13, "Permission denied", str(path))
+
+    monkeypatch.setattr(cli_setup, "_write", deny)
+    code, out, err, _ = wizard(
+        [
+            ("checkbox", _pick("anthropic-claude")),
+            ("password", KEY),
+            ("confirm", True),
+            ("confirm", True),  # write policy.backends
+        ],
+        capsys=capsys,
+    )
+    assert code == 0, err
+    assert "✗ Could not write ./openreading.yaml (Permission denied)" in out
+    assert not (tmp_path / "openreading.yaml").exists()

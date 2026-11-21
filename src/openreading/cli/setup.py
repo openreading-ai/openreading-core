@@ -543,7 +543,12 @@ class _Wizard:
         what = "the key" if keyed else "it"
         if not self.ask.confirm(f"Test {what} now? This makes one small request.", default=False):
             return True, "not tested"
-        report = keys_cli.run_probe(slug)
+        try:
+            report = keys_cli.run_probe(slug)
+        except Exception as e:  # noqa: BLE001 - a probe failure is an ✗ line, never a traceback
+            # The type alone: an exception message can echo a request, and the key with it.
+            self.out.fail(f"{slug} could not be tested ({type(e).__name__})")
+            return False, "not tested"
         detail = (report.detail or "").strip()
         if report.status is LivenessStatus.LIVE:
             latency = f" ({report.latency_ms:.0f} ms)" if report.latency_ms is not None else ""
@@ -562,7 +567,13 @@ class _Wizard:
     def _remove(self, desc: AdapterDescriptor) -> None:
         removed = False
         for name in dict.fromkeys(keys_cli._secret_names(desc)):
-            if keychain.delete(name):
+            try:
+                gone = keychain.delete(name)
+            except keychain.KeychainUnavailable as e:
+                self.out.fail(f"Could not remove {name}. {e}")
+                self.rows.append(_Row(desc.id, "not removed", False))
+                return
+            if gone:
                 removed = True
                 self.out.ok(f"Removed {name} from the {self.label}")
                 if name in self.saved:
@@ -627,12 +638,14 @@ class _Wizard:
         if not self.ask.confirm(f"Add {name} to providers in {self.shown}?", default=False):
             self.out.note(f"- Left {self.shown} as it was. No provider was added.")
             return None
-        text = self.target.read_text(encoding="utf-8") if self.target.exists() else "version: 1\n"
         try:
-            _write(self.target, with_provider(text, name, profile))
+            _write(self.target, with_provider(self._text(), name, profile))
         except EditRefused:
             self.out.fail(f"Could not change {self.shown} without touching its other content,")
             self.out.note("so it was left as it was. Add this block by hand, then run setup again.")
+            return None
+        except OSError as e:
+            self._write_failed(e, "Add this block by hand, then run setup again.")
             return None
         self.written.append(self.shown)
         self.out.ok(f"Written to {self.shown}.")
@@ -640,6 +653,19 @@ class _Wizard:
         install_profiles(loaded.providers if loaded is not None else None)
         self.set_up(name, 1, 1)
         return name
+
+    # -- the file
+
+    def _text(self) -> str:
+        return self.target.read_text(encoding="utf-8") if self.target.exists() else "version: 1\n"
+
+    def _write_failed(self, exc: Exception, then: str) -> None:
+        if isinstance(exc, config.ConfigError):
+            why = _why(exc)
+        else:
+            why = exc.strerror if isinstance(exc, OSError) and exc.strerror else type(exc).__name__
+        self.out.fail(f"Could not write {self.shown} ({why})")
+        self.out.note(f"It was left as it was. {then}")
 
     # -- the end
 
@@ -680,12 +706,14 @@ class _Wizard:
         if not self.ask.confirm(f"Add these to policy.backends in {self.shown}?", default=False):
             self.out.note(f"- Left {self.shown} as it was")
             return False
-        text = self.target.read_text(encoding="utf-8") if self.target.exists() else "version: 1\n"
         try:
-            _write(self.target, with_policy_backends(text, new))
+            _write(self.target, with_policy_backends(self._text(), new))
         except EditRefused:
             self.out.fail(f"Could not change {self.shown} without touching its other content,")
             self.out.note("so it was left as it was. Add the block above by hand.")
+            return False
+        except (OSError, config.ConfigError) as e:
+            self._write_failed(e, "Add the block above by hand.")
             return False
         self.written.append(self.shown)
         self.out.ok(f"Written to {self.shown}.")
