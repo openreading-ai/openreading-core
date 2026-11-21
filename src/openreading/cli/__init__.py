@@ -241,10 +241,11 @@ on a batch, and `orchestration.outcome` and `warnings[]` on a single response.
 Environment variables this module reads
 ---------------------------------------
 Credentials never come from the command line. They come from the process
-environment or a `.env` file, so a key cannot land in your shell history or in
-a `ps` listing. `--env-file PATH` picks the file (default `./.env` when
-present) and every verb accepts it. On `strategy` and `benchmark` it belongs
-BEFORE the sub-verb, because it is declared on the parent parser:
+environment, a `.env` file, or the OS keychain, so a key cannot land in your
+shell history or in a `ps` listing. `openreading help keys` covers the
+keychain. Commands with `--env-file PATH` load that file or default to
+`./.env` when present. The MCP launcher skips dotenv loading. On `keys`,
+`strategy` and `benchmark`, put the flag before the subcommand:
 
     openreading strategy --env-file ci.env validate
 
@@ -273,6 +274,10 @@ These are the variables the CLI itself changes behaviour on.
                             the engine default with reason `env_disabled`. Two
                             keys are deliberate, so a checked-in YAML cannot
                             start spending tokens on its own.
+  OPENREADING_KEYCHAIN      set `off` and this process neither reads nor
+                            writes the OS keychain, so `keys set` exits 2.
+                            CI and the offline tests set it, so a developer's
+                            saved keys never change a test result.
   OPENREADING_ALLOW_PRIVATE_URLS
                             allow a document URL whose host resolves to a
                             private or loopback address. Any nonempty value
@@ -477,6 +482,10 @@ Single-document flags:
                       `--strategy` / `--no-strategy`, which manage their own
                       per-node budget. `0` or negative means fail fast: do not
                       wait at all.
+                      A provider profile instead allows 300s per chat call
+                      when you omit this flag. An explicit deadline covers
+                      all selected pages. If time runs out after some pages
+                      finish, parse returns them with status `partial`.
 
 Single-document exits: 0 printed; 2 selector misuse, unknown backend/strategy,
 unresolvable source; 3 cannot run (missing credentials -- the message names the
@@ -660,6 +669,16 @@ backends` is offline and free: it never touches the network.
     pymupdf                        oss_library        yes         -
     reducto                      hosted_api       no        REDUCTO_API_KEY
 
+Once any key resolves from the OS keychain, a SOURCE column appears between
+CONFIGURED and MISSING. It names where each backend's secrets come from:
+`env`, `.env` or `keychain`, and `-` for none. With nothing saved the table
+is unchanged, so a script reading it keeps working.
+
+A remote profile can use a key saved for its origin. To use an exported key
+there, list the origin in an exported `OPENREADING_PROVIDER_ORIGINS`. With
+neither source available, the profile reads `no` with its key under MISSING.
+If an environment key was ignored, stderr names the variable and origin.
+
 "Configured" is not "reachable" -- a `DOCLING_SERVE_URL` pointing at a dead
 port is configured. `--check` answers the other question by actually probing,
 and it is NEVER implicit: on a CLI, a flag the user typed is the consent a page
@@ -671,6 +690,19 @@ hides the ones that already answered.
     chunkr   none      not_configured  no        -        not configured:...
     docling  endpoint  not_configured  no        -        not configured:...
                                           (columns abridged for this page)
+
+The table includes the provider profiles named in your file's `providers:`
+block. This example selects the file explicitly.
+
+    OPENREADING_CONFIG=./ci/openreading.yaml openreading backends
+
+Otherwise the command discovers the configuration in the working directory.
+A keyed profile lists its variable as missing until it resolves. A file that
+does not load lists the built-ins only, and one `[config]` line on stderr names
+the file and what is wrong with it, such as a missing `version: 1`. Every
+command that does not read the file itself prints that line too. `parse`,
+`route`, `strategy` and the other commands that read it still exit 3.
+`pydoc openreading.config` prints the grammar.
 
 Status ladder (`openreading.types.liveness.LivenessStatus`), seven states
 ascending in what is known: `not_supported` (no probe AND nothing declared to
@@ -693,6 +725,169 @@ the free inference). `--timeout` omitted means the adapter's own declared
 DEFAULT_PROBE_TIMEOUT_S`); any value is clamped to [0.1, 30] (clamped, not
 rejected, so nobody parks a worker indefinitely). Liveness is a diagnostic,
 never routing input (D-v7-6). An unknown slug exits 3.
+
+keys <set|list|unset|import>
+----------------------------
+Save a backend key once and every folder finds it. `keys set` asks for each
+secret a backend declares, with hidden input, and saves it to your OS
+keychain: the macOS Keychain, the Windows Credential Manager, or a Secret
+Service keyring on Linux. It needs the `[setup]` extra (`pip install
+'openreading[setup]'`), and without it the environment and `.env` work as
+before. This is the one case in which OpenReading writes a key, and it never
+writes one to a file.
+
+    openreading keys set anthropic-claude
+    anthropic-claude
+      Get a key: https://console.anthropic.com
+    ANTHROPIC_API_KEY (hidden, Enter to skip):
+      ✓ Saved ANTHROPIC_API_KEY to the macOS Keychain
+    Test the key now? This makes one small request. [y/N]
+
+The keychain is read last. An exported variable beats the same line in
+`.env`, which beats the saved key, so an export you made for one shell never
+loses to a value saved weeks ago. A blank `ANTHROPIC_API_KEY=` line counts as
+unset and does not hide the saved key. A saved key is never copied into the
+process environment, so a worker process such as `tesseract` never inherits
+it. Every verb reads the keychain except `serve` and `mcp`, which each read it
+only when started with their own `--keychain` flag.
+
+Only secrets reach the keychain. `keys set` takes a backend slug, never a free
+variable name. Naming one variable after the slug saves only that one, and it
+must be a secret the backend declares. `keys set anthropic-claude
+ANTHROPIC_MODEL` exits 2, because a model name is a setting that stays in the
+environment or `openreading.yaml`. A provider profile in `openreading.yaml`
+counts as a backend, and its one secret is the variable its `key_env` names.
+
+A provider profile's key is bound to that profile's endpoint, because a
+cloned repository's `openreading.yaml` could otherwise point a profile at its
+author's host. `keys set openrouter-gpt` saves `OPENROUTER_API_KEY` for
+`https://openrouter.ai` only, so another profile naming the same variable for
+another host never reads it. The environment and `.env` reach a profile only
+when its host is loopback, or when `OPENREADING_PROVIDER_ORIGINS` lists its
+origin, such as `https://openrouter.ai`. That setting counts only when your
+shell or service environment exports it. A value from `.env` is ignored.
+When neither holds, `keys list` shows SOURCE `env-ignored`, and a line on
+stderr names the setting, never the value.
+
+A built-in accepts a saved key at its default origin or a loopback endpoint.
+For other dotenv endpoints, export the endpoint setting in your shell or list
+its origin in an exported `OPENREADING_PROVIDER_ORIGINS`.
+Until then, a required key blocks that backend. An optional saved key stays
+unread. For example, keyless Qwen can still run and Textract can use its
+AWS profile. Export `AWS_PROFILE` itself to use saved keys with that selector.
+`keys list` names the setting to export. If Anthropic reports a missing key
+after you saved one, check whether `ANTHROPIC_BASE_URL` came from dotenv.
+
+A key never crosses the command line. There is no flag that takes a value,
+because argv shows up in `ps` and in shell history. A `--value` you type out
+of habit exits 2 with that reason and is never echoed. Scripts pipe the value:
+
+    pass show reducto | openreading keys set reducto --stdin
+
+`--stdin` reads one line per secret, in the order `keys list` prints them. A
+blank line skips one, and more lines than secrets is refused before anything
+is saved. So `aws-textract` reads `AWS_ACCESS_KEY_ID`, then
+`AWS_SECRET_ACCESS_KEY`, then the optional `AWS_SESSION_TOKEN`. A probe is a
+network call, so `keys set` offers one only at a terminal, and only after
+asking. The probe uses the selected saved key even when your shell supplies
+another value for normal runs.
+
+`keys list` prints where each declared secret resolves from. SOURCE is `env`
+(exported), `.env`, `keychain`, `env-ignored`, or `missing`, and `--json`
+prints the same rows as an array. It never prints a value, a prefix, or a
+length.
+
+    BACKEND           VAR                SOURCE
+    anthropic-claude  ANTHROPIC_API_KEY  keychain
+    reducto           REDUCTO_API_KEY    .env
+    mistral-ocr       MISTRAL_API_KEY    missing
+
+`keys unset SLUG [VAR ...]` removes that backend's saved secrets. One variable
+can serve several backends: the four `llamaparse-*` slugs read one key, so
+the output names the others it affects. `keys import PATH` copies every
+built-in backend's secret in a `.env` file into the keychain. A provider
+profile's key moves only with `keys import PATH SLUG`, because the variable
+alone cannot say which endpoint the key is for. The output prints `Binding
+VAR to <origin>` before it saves a profile's key, and `keys set` does too.
+The output names the copied lines and any setting to export before removing
+them. Conflicting values for one selected variable stop the import before any
+key is saved.
+
+A failed or timed-out keychain refresh keeps the last value this process
+read. Without a cached value the lookup returns nothing. An unavailable
+keychain causes a save or deletion to exit 2. `OPENREADING_KEYCHAIN=off`
+disables keychain access for one process.
+
+Exits: 0 done, or nothing to do. 2 invalid input, conflicting import values,
+a failed keychain operation, or an interactive save without a terminal.
+3 an unreadable import file. 130 a save interrupted with Ctrl+C.
+
+setup [--provider] [--config PATH]
+----------------------------------
+Get a hosted backend working without reading anything else first. `setup` is
+a short run of questions: pick backends, paste each key into a hidden prompt,
+test it, and add what worked to `openreading.yaml`. It needs the `[setup]`
+extra and a terminal.
+
+    OpenReading setup
+    Keys are saved to the macOS Keychain. Your shell and .env still take
+    priority.
+
+    ? Which backends do you want to set up?  anthropic-claude
+
+    anthropic-claude
+      Get a key: https://console.anthropic.com
+    ? ANTHROPIC_API_KEY  (hidden, Enter to skip)  ****************
+      ✓ Saved ANTHROPIC_API_KEY to the macOS Keychain
+    ? Test the key now? This makes one small request.  Yes
+      ✓ anthropic-claude is working (412 ms)
+
+      policy:
+        backends: [anthropic-claude, pymupdf]
+    ? Add these to policy.backends in ./openreading.yaml?  Yes
+      ✓ Written to ./openreading.yaml.
+
+    Next: openreading parse FILE
+
+`setup` adds no capability of its own. It reads readiness the way `backends`
+does, saves keys the way `keys set` does, and probes the way `backends
+--check` does, so the wizard and a script never disagree about a backend.
+
+Enter always takes the safe choice: no backend picked, keep a saved key, and
+no to every question. The probe is a network call and the file is committed,
+so each asks first. Every step ends with a ✓, ✗ or - line. After a rejected
+key, the ✗ line names the variable, and you can enter the key again, keep it,
+or remove it. A key no probe answered, because you declined the test or the
+backend has no free one, is "saved, not tested" and marked -. It is offered
+for `policy.backends` only in its own question, and Enter leaves it out.
+A backend already in the keychain shows as "set up, from keychain",
+and picking it again offers keep, replace or remove. Colour is only a hint, so
+`NO_COLOR` keeps every mark and every word.
+
+The `policy.backends` edit keeps the rest of the file as you wrote it,
+comments included. When it cannot change that one block alone, it changes
+nothing and prints the block to add by hand. The file is `--config PATH`,
+else the one other commands read here, else `./openreading.yaml`.
+
+`setup --provider`, or "Add an LLM provider" in the list, adds an
+OpenAI-compatible endpoint as a backend. A provider profile is a named backend
+in the `providers:` block of `openreading.yaml`. The starting points (OpenAI,
+OpenRouter, Groq, Ollama, LM Studio, other) fill in a base URL and a key
+variable for you to confirm. You type the model id. No price, model list or
+capability claim comes with a starting point. The wizard writes the entry,
+saves its key bound to that endpoint, as `keys set` does, and offers a probe.
+It needs no `OPENREADING_PROVIDER_ORIGINS`. The name may not be a built-in
+backend id.
+
+The probe requests the endpoint's model list. A matching id confirms the
+model, including an Ollama model listed with its default `:latest` tag.
+If the list omits your model, setup reports that the endpoint responded and
+still offers it for `policy.backends`. A parse tests the model itself.
+
+Exits: 0 done, with every ✗ already reported. 2 no terminal (use `keys set
+--stdin` and `keys list` instead), no `[setup]` extra, or no usable keychain.
+3 an `openreading.yaml` that does not load. 130 stopped with Ctrl+C, after
+naming the keys already saved.
 
 compare <subjects...>
 ---------------------
@@ -725,10 +920,9 @@ table and Markdown formats (hidden by default). `--baseline LABEL` signs deltas
 against one subject. Labels come from `backend.id`, not the response filename.
 Read `subjects[].label` in the JSON report when backend IDs repeat. A response
 path instead adds a new baseline subject. `--truth golden.json`
-scores each subject against a golden in the evals `expected` shape. `--deadline
-SECONDS` overrides the 120s single-document deadline for every fanned-out
-backend (the same escape hatch as `parse --backend --deadline`; `0` or negative
-means fail fast).
+scores each subject against a golden in the evals `expected` shape. The
+`--deadline SECONDS` flag gives each backend its own document budget, as in
+`parse --backend --deadline`. Zero or a negative value means fail fast.
 
 Corpus mode: when EVERY subject is a `batch-result` envelope (from `parse
 <dir>`), documents are paired across runs by identity (`relpath`, then
@@ -1539,14 +1733,20 @@ The synchronous HTTP client timeout is 300 seconds; Docling Serve can impose
 its own conversion or synchronous-wait limits. Check both sides on failure.
 serve
 -----
-`serve [--host H] [--port P] [--cors-origin O ...]` runs the HTTP API
-(`openreading.server`; needs the `[server]` extra, else exit 3). Default
+`serve [--host H] [--port P] [--cors-origin O ...] [--keychain]` runs the
+HTTP API (`openreading.server`). It needs the `[server]` extra, else exit 3.
+Default
 `127.0.0.1:8787`. (This package ships no web UI. `serve` exposes the JSON API
 only.) Binding any host other than `127.0.0.1` prints a warning: anyone who can
 reach the socket spends your vendor keys, so put it behind your own auth/proxy.
 The server never reads the working directory for a config -- pass
 `OPENREADING_CONFIG`. Run openreading help local-ocr for local engine setup,
 OCR assets, and a request that verifies the default backend.
+
+Keys come from the server's own environment: exported variables, a systemd
+`EnvironmentFile`, or a container secret mapped to variables. `--keychain`
+also reads keys saved with `openreading keys set`, for a server you run on
+your own laptop. The default avoids keychain unlock prompts on headless hosts.
 
 A request may not name a local file by path unless
 `OPENREADING_SERVER_PATH_ROOT` is set to a directory. With it set,
@@ -1582,7 +1782,9 @@ fire after that clean shutdown.
 
 mcp --profile local-document-proof-v1
 ------------------------------------
-Serve nine document tools over stdio with openreading[agent,pymupdf].
+Serve nine document tools over stdio with openreading[agent,pymupdf], plus
+the openreading_backends readiness tool. The client-only wheel and a launch
+with an ImportExecution omit the readiness tool.
 You grant an absolute --input-root and a separate absolute --artifact-root.
 For example, use /absolute/documents and /absolute/evidence respectively.
 The server retains source bytes and page evidence until you remove the store.
@@ -1619,6 +1821,17 @@ Follow next_cursor when present. A failed search does not prove absence.
 Call openreading_select_document with {} when a trusted launcher supplies
 an optional local chooser. Import the returned path to create evidence.
 Without a chooser, selection returns selection_unavailable; other tools work.
+
+In the local Core launcher, call openreading_backends with {} for readiness.
+Each row names missing and found variables and their source, never a value.
+For example, ANTHROPIC_API_KEY found in the keychain shows source keychain.
+No tool accepts a key. Run `openreading setup` in a terminal to configure one.
+The launcher skips dotenv and never discovers a working-directory config.
+--config PATH names the openreading.yaml whose provider profiles it reports.
+Without --keychain, the process reads the environment only.
+--keychain also reads keys saved with `openreading keys set`.
+Your MCP client config then carries no env block with a key in it.
+No tool runs a hosted backend. Imports use the fixed local profile.
 
 This profile accepts one PDF, at most 25 MiB and 100 physical pages.
 It uses local PyMuPDF without OCR, passwords, routing, or hosted fallback.
@@ -1661,7 +1874,10 @@ Exit codes
      `benchmark` profile (unknown, or cataloged where a runnable one is
      required), target, preset, `--jobs`, terms, package, or preparation
      errors; `replay` with no strategy name anywhere; `help` with an unknown
-     topic.
+     topic; `keys` with conflicting import values, an unknown slug, an
+     undeclared variable, no terminal and no `--stdin`, or a keychain failure;
+     `setup` with no terminal,
+     without the `[setup]` extra, or with no usable keychain.
   3  cannot run: missing credentials (names the exact vars + signup URL),
      `auth_rejected`, `unsupported_format` on a named single-document parse,
      `unsupported_feature`, an unreadable `--config` / document / `--trace` /
@@ -1685,7 +1901,8 @@ Exit codes
      poll job past its deadline /
      `openreading.router.driver.MAX_CONSECUTIVE_FAULTS` -- a named backend has
      no next rung to fall back to); `help` under `python -OO`, which discarded
-     the manual's docstrings.
+     the manual's docstrings; a `keys import` file that cannot be read; an
+     `openreading.yaml` that does not load when `setup` starts.
   4  `route`: no registered backend permitted by policy (the empty plan is
      printed as JSON); batch `parse`: partial -- some items failed.
   5  `compare`: inputs are not schema-valid responses, or `--from` on a run
@@ -1702,6 +1919,8 @@ Exit codes
      variable is set, so an interrupted `--backend` batch exits 6 and names no
      id, and there is nothing for `resume` to replay. Arm the ledger for the
      strategy runs you mean to resume.
+130  `keys set` or `setup` stopped with Ctrl+C. The keys saved before the stop
+     stay saved, and one `[keys]` or `[setup]` line names them.
 143  terminated by SIGTERM with no ledger armed (MCP instead exits 130).
      Nothing was resumable, so one
      `[openreading]` line says so and names `OPENREADING_LEDGER`. Unarmed

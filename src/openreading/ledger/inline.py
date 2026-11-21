@@ -37,6 +37,7 @@ from openreading.ledger.ports import BlobStore, Journal
 from openreading.ledger.sanitizer import Sanitizer
 from openreading.ledger.step import BlobRef, ExecResult, StepError, StepRef, StepRequest, StepResult
 from openreading.router.clock import Clock
+from openreading.types.descriptor import descriptor_digest as descriptor_digest
 from openreading.types.errors import (
     AdapterError,
     RetryableError,
@@ -103,20 +104,12 @@ class NullJournal:
         return []
 
 
-def descriptor_digest(descriptor: Any) -> str:
-    """sha256 of a descriptor's schema dict — the same computation `strategies/prune.py`'s
-    `config_hash` already makes per eligible backend (BL-163), reused here for the L2 gate."""
-    return hashlib.sha256(
-        json.dumps(descriptor.to_schema_dict(), sort_keys=True, default=str).encode()
-    ).hexdigest()
-
-
 class InlineExecutor:
     """`registry`/`clock` back the L2 gate and the journal's timestamps; `pinned_eligible`, when
     given, maps `backend_id -> descriptor_digest` snapshotted at plan-compile time (mirroring
-    `config_hash`'s own per-backend digests). The gate is inert in T1 (inline execution can never
-    diverge from its own plan mid-run — there is no second worker to disagree with the pinned set)
-    but the mechanism and its test exist, per AC-14's T1 row.
+    `config_hash`'s own per-backend digests). Before dispatch, the gate checks the current
+    descriptor against that pin (AC-14). A resumed run cannot silently switch to another
+    profile endpoint, even if the new URL shares the original host.
 
     Armed execution stores successful payloads in the configured blob store. Replay verifies each
     content digest before returning recorded output. Missing or modified payloads refuse replay.

@@ -125,6 +125,7 @@ The table below tells you which guide answers which need and how long each takes
 | You want to… | Guide | Read time |
 |---|---|---|
 | set up local OCR, language data, and Docling models | [Local setup](adapters/README.md#local-setup-walkthrough), or `uv run openreading help local-ocr` | 10 min |
+| connect a model endpoint and inspect credential sources | [Provider profiles](adapters/README.md#provider-profiles), `openreading help setup`, and `openreading help keys` | 5 min |
 | retrieve retained local evidence through an agent | [MCP tools](mcp_server/README.md) | 5 min |
 | inspect source spans and retained files | [Artifacts](artifacts/README.md) | 5 min |
 | know what this is, where to go next, and how an agent uses it | this page | 10 min |
@@ -145,7 +146,7 @@ The table below tells you which guide answers which need and how long each takes
 | look up a backend's variables, license, and runtime requirements | [Backend adapters](adapters/README.md) | look up as needed |
 | call it from Python: `run()`, `route()`, `compare()`, `run_batch()`, and one exception type per condition | reference only: `uv run python -m pydoc openreading.api` | look up as needed |
 | look up the pydantic models that mirror the schemas | reference only: `uv run python -m pydoc openreading.types` | look up as needed |
-| look up how `openreading.yaml` is found, and the nine keys its `policy:` block takes | reference only: `uv run python -m pydoc openreading.config` | look up as needed |
+| look up configuration discovery, `policy.backends`, and the `providers:` grammar | reference only: `uv run python -m pydoc openreading.config` | look up as needed |
 | gate your own adapter against the conformance kit | reference only: `uv run python -m pydoc openreading.testing` | look up as needed |
 
 ### Every guide, by file

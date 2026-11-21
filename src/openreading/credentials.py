@@ -5,9 +5,14 @@ surface (CLI, server, Python API, evals, chain executor, strategy engine) runs t
 
 Posture — pure BYO-key pass-through
 -----------------------------------
-You bring the provider's own credential; it is read from the process environment per request,
-held in memory only for that call, and the charge lands on your own account. This package never
-stores, logs, or echoes the key, and never sends it anywhere but the provider.
+You bring the provider's own credential. It is read per request, and the charge lands on your own
+account. A key from the environment or `.env` is read where it already lives. A key from the OS
+keychain is cached in this process's memory. After 60 seconds the next read refreshes it
+(`openreading.keychain.CACHE_TTL_S`). A locked keychain can leave the last read in use. That cache
+never enters `os.environ`, so a subprocess never inherits it. This package never logs or echoes the
+key, and never sends it anywhere but the provider. OpenReading writes a key in exactly one case:
+you ran `openreading keys set`, `openreading keys import` or `openreading setup`, and it writes to
+your OS keychain (`openreading.keychain`). It never writes a key to a file.
 The broker never branches on backend type — it is driven entirely by the descriptor's spec. Each
 run gets a fresh adapter instance (D-v2-6 / D-v2-8.1), so a credential-bound client is never
 shared across requests. Keys never travel in a request body — only `credentials_ref` handles do —
@@ -20,28 +25,85 @@ Precedence (D-v2-1), highest first
      `OPENREADING_CREDENTIALS_REF_ALIASES` (comma-separated; unset/empty accepts none — closed)
   3. `OPENREADING_<SLUG>_<KEY>` (slug `-` -> `_`, e.g. `OPENREADING_REDUCTO_API_KEY`)
   4. the service-native var(s), in `spec.env` order (e.g. `REDUCTO_API_KEY`)
+Steps 3 and 4 read the process environment, which holds `.env` once it is loaded. When the
+process opted into the keychain, the OS keychain sits below both, for the secret variables a
+backend declares in step 4 only. For example, an exported `ANTHROPIC_API_KEY` beats the same line
+in `.env`, which beats the saved key. The keychain never beats the shell or `.env`, so an export
+you made for one shell cannot lose to a value saved weeks ago.
   5. the provider SDK's own ambient chain (boto3 default chain, GCP ADC, the anthropic SDK's own
      `ANTHROPIC_API_KEY`)
 Step 5 is NOT resolved here: when the broker finds nothing it leaves the value unset and the
 adapter's SDK falls through to its own chain. That is why aws-textract, google-document-ai and
 anthropic-claude work with no OpenReading-specific env on a machine their own provider tooling
-already configured. `openreading backends` reads the environment only. A backend whose credentials
-sit in `~/.aws/credentials` or in an ADC file prints `no` under CONFIGURED and still runs.
-Readiness also requires the vars a descriptor's `live_gate_env` names, and only the environment can
-satisfy those (`openreading.readiness`). `openreading backends` names missing VARS, never values.
+already configured. `openreading backends` reads the environment and the keychain only. A backend
+whose credentials sit in `~/.aws/credentials` or in an ADC file prints `no` under CONFIGURED and
+still runs. Readiness also requires the vars a descriptor's `live_gate_env` names, and only the
+environment or the keychain can satisfy those (`openreading.readiness`). `openreading backends` names missing VARS, never values.
+
+The keychain, opt-in
+--------------------
+The CLI opts in through `use_keychain(True)` for every verb except `serve` and `mcp`, which read
+the keychain only when started with `--keychain`. A long-running server that reaches for a
+keychain can hang at boot or pop an unlock dialog, which is why it waits for the flag. The Python
+API reads it only with `keychain=True`, matching `env_file=`. A broker that reads the keychain
+uses `keychain_environ()`, a `ChainMap` over `os.environ` and `openreading.keychain.
+KeychainMapping`. A saved value is therefore never copied into `os.environ`, so a subprocess such
+as the liteparse worker or `tesseract` never inherits it. With `OPENREADING_KEYCHAIN=off`, without
+the `[setup]` extra, or with nothing saved, every lookup resolves exactly as it does without the
+keychain. A blank variable counts as unset, so an empty `ANTHROPIC_API_KEY=` line left in `.env`
+does not hide a saved key. `EnvCredentialBroker.var_source` names where a variable resolves from
+(`env`, `.env`, `keychain`, `missing`) for `openreading backends` and `openreading keys list`.
+
+A built-in backend can use a saved key when a dotenv file selects loopback or its default
+origin. An origin consists of the scheme, host and port. For a custom remote endpoint,
+export the endpoint variable in your shell or export its origin in `OPENREADING_PROVIDER_ORIGINS`.
+An AWS configuration selector such as `AWS_PROFILE` must itself be exported to permit a
+keychain lookup. These rules govern saved keys. Built-ins still use credentials supplied
+through their environment under the precedence above.
+
+When the destination prevents a keychain lookup, a named backend with an unresolved required
+secret reports the setting to export. The default chain skips that backend. Optional secrets
+stay unset: Qwen can run anonymously and Textract can use the AWS SDK's ambient credentials.
+
+A provider profile's key is bound to its endpoint
+-------------------------------------------------
+A provider profile is a backend that `openreading.yaml` defines (`openreading.config`), and that
+file often arrives with a repository you cloned. Its key therefore reaches only the endpoint you
+gave it, through two rules that apply to profiles alone. `bound_origin` names a profile's origin,
+which is the `scheme://host[:port]` of its `base_url`, lowercased, with the default port dropped.
+
+- The keychain holds a profile's key under the account `<VAR>@<origin>`, such as
+  `OPENROUTER_API_KEY@https://openrouter.ai` (`keychain_account`). A profile reads only the
+  account for its own origin, never the plain `<VAR>` account a built-in uses. Two profiles that
+  share `key_env` for two hosts never share a saved key.
+- The environment and `.env` reach a profile only when its host is loopback, or its origin is
+  listed in an exported `OPENREADING_PROVIDER_ORIGINS` (`EnvCredentialBroker.env_allowed`). A
+  value a `.env` file set never counts. Otherwise the value is ignored, and the variable reads as
+  missing. `openreading backends`, `keys list`
+  (SOURCE `env-ignored`), the MCP backends report and the missing-credentials error each say so,
+  by name and setting, never by value. `openreading keys set <profile>` and `openreading setup`
+  need no setting, because they save to the bound account.
+
+Failure prevented: a committed profile naming `GITHUB_TOKEN`, or a key you saved for OpenRouter,
+with its author's `base_url`. Before the binding, the broker sent that key from your shell or
+keychain to the author's host. The built-in-owned-name and https rules in `openreading.config`
+still apply on top.
 
 `.env` loading (`load_dotenv`): `KEY=VALUE` lines from a dotenv file enter the environment WITHOUT
 overriding an already-set process var — an exported shell variable always wins over the file, so a
 value exported in an earlier shell command silently beats the file you just edited. The CLI loads
-`./.env` (or `--env-file`) on every invocation, `openreading serve` included.
+`./.env` (or `--env-file`) for commands including `serve`. The `mcp` launcher skips dotenv.
+Set `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, `SSL_CERT_FILE`, `SSL_CERT_DIR`,
+`REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE` and `AWS_CA_BUNDLE` in the shell or service environment.
+The loader ignores those nine names in any letter case.
 Values are literal: the loader does not expand tilde, variable references, or shell commands.
 For example, use an absolute OCR model path rather than $HOME/models in this file. A program that
 imports `openreading.server.app.create_app` directly loads nothing, so it calls `load_dotenv`
 itself. `openreading.run(env_file=)` / `run_batch(env_file=)` load only when given. Do NOT copy
 `.env.example` wholesale: it pre-fills two localhost endpoints (`DOCLING_SERVE_URL`,
 `QWEN_VL_ENDPOINT`), which marks those backends configured on a machine where neither is running
-and sends a document there before the router falls back to one that works. Write only the keys
-you actually hold, one line at a time: `echo 'REDUCTO_API_KEY=sk_...' >> .env`.
+and sends a document there before the router falls back to one that works. Use an editor to
+enter only the keys you hold, or use the hidden prompt in `openreading keys set reducto`.
 
 Why the `credentials_ref` allow-list exists (BL-162): before it, `env:<anything>` resolved every
 credential key as `<anything>_<KEY>`, so an unauthenticated request (server auth is off by default)
@@ -106,7 +168,8 @@ Per-backend reference
   open-ocr  [open-ocr]  auth: OPENOCR_API_KEY   config: OPENOCR_ENGINE (default openocr/tesseract)
             ops: parse   limits: OCR aggregator (~20 engines behind one API); plain text only (NO
             blocks/bboxes); 10MB body cap
-  anthropic-claude [anthropic-claude]   auth: ANTHROPIC_API_KEY   config: ANTHROPIC_MODEL (opt)
+  anthropic-claude [anthropic-claude]   auth: ANTHROPIC_API_KEY   config: ANTHROPIC_MODEL and
+            the SDK endpoint ANTHROPIC_BASE_URL (both optional)
             ops: parse, extract   limits: native-PDF ~100 pages / 32MB ceiling -> `doc_too_large`
   aws-textract [textract]   auth: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN (opt,
             STS/temporary creds) — or the ambient boto3 chain
@@ -131,6 +194,10 @@ Per-backend reference
             default mistral-ocr-latest)   ops: parse, extract
             limits: INLINE OCR/Document AI; public URL or base64 bytes; native Markdown, blocks,
             bounds and confidence
+  <profile> [http, + pymupdf for PDFs]   auth: the profile's `key_env` var (bound to its
+            endpoint, see above), or none
+            config: none (base_url and model come from openreading.yaml)   ops: parse, extract
+            limits: one provider profile per `providers:` entry (`openreading.config`)
 textract and google-document-ai use IAM keypairs / ADC, not API keys — their descriptors say
 `byo_mode: cloud_credential` (D-v2-6.1b); the per-key truth is always `credentials_spec`.
 
@@ -163,7 +230,8 @@ Actionable failures
 
 Time budget: `ctx.deadline_ms` is a BUDGET, not an absolute deadline (DEFAULT_DEADLINE_MS, or
 DEFAULT_NATIVE_BATCH_DEADLINE_MS for native batch); callers convert it via
-`clock.now_ms() + budget`.
+`clock.now_ms() + budget`. The context also records whether the caller supplied a budget.
+An OpenAI-compatible profile uses its per-call timeout when the caller supplied none.
 
 Ledger storage: with `OPENREADING_LEDGER` armed, the ledger root holds headers, JSONL journals,
 and plaintext content-addressed blobs. The package never encrypts or expires them. Operators
@@ -174,14 +242,34 @@ Operator knobs that are not credentials (`OPENREADING_LEDGER*`, `OPENREADING_CON
 line each in `.env.example` and in the module that reads them (`openreading.api`,
 `openreading.strategies.loader` / `.decider`, `openreading.server.app`). The server's HTTP posture
 (no caller auth by default) lives in `openreading.server.app`.
+
+Environment variables this module reads
+---------------------------------------
+- `OPENREADING_CREDENTIALS_REF_ALIASES`: the `credentials_ref` allow-list above (BL-162).
+  Unset or empty accepts no alias.
+- `OPENREADING_PROVIDER_ORIGINS` also permits a built-in to use its saved key at a listed
+  dotenv-selected origin. It holds comma-separated origins whose provider profiles may read their
+  key from the environment and `.env`, such as `https://openrouter.ai,https://api.groq.com`. Each
+  entry is normalized like a profile's origin, so a path, a default port or upper case does not
+  matter. An entry without a scheme matches nothing. Unset or empty lists none, so only loopback
+  profiles read the environment. It counts only when the process environment exported it. A
+  value `load_dotenv` set, from `./.env`, `--env-file` or `env_file=`, is ignored, and so is the
+  keychain (law PS5). A cloned repository can carry a `.env` that lists its author's origin, so
+  a setting that widens where a key goes must come from your shell or service environment.
+- Every variable a backend declares in `credentials_spec` and `config_spec`, per the precedence
+  above.
 """
 
 from __future__ import annotations
 
 import os
-from collections.abc import MutableMapping
+from collections import ChainMap
+from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
 
+from openreading import keychain
 from openreading.router.cache import content_key, document_identity
 from openreading.types.descriptor import AdapterDescriptor, ConfigField, CredentialField
 from openreading.types.errors import TerminalError
@@ -205,20 +293,13 @@ DEFAULT_DEADLINE_MS = 120_000
 DEFAULT_NATIVE_BATCH_DEADLINE_MS = 3_600_000
 
 
-def load_dotenv(
-    path: str | os.PathLike[str] | None = None,
-    environ: MutableMapping[str, str] | None = None,
-) -> int:
-    """Load `KEY=VALUE` lines from a `.env` file into the environment WITHOUT overriding a var
-    that is already set (explicit process env always wins). `export KEY=VALUE`, `#` comments,
-    blank lines, and single/double-quoted values are handled. Returns the number of vars set.
-    With `path=None`, loads `./.env` if it exists (missing file → no-op, returns 0)."""
-    env = environ if environ is not None else os.environ
-    p = Path(path) if path is not None else Path(".env")
-    if not p.is_file():
-        return 0
-    count = 0
-    for raw in p.read_text(encoding="utf-8").splitlines():
+def dotenv_entries(path: str | os.PathLike[str]) -> list[tuple[int, str, str]]:
+    """Parse a dotenv file into `(line_number, KEY, value)` triples, in file order. `export KEY=`,
+    `#` comments, blank lines, and single/double-quoted values are handled. A missing file raises
+    `OSError`. `load_dotenv` and `openreading keys import` share this one parser, so the two never
+    disagree about what a line means."""
+    out: list[tuple[int, str, str]] = []
+    for number, raw in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), start=1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
@@ -241,11 +322,236 @@ def load_dotenv(
                 if ch == "#" and (i == 0 or val[i - 1] in " \t"):
                     val = val[:i].rstrip()
                     break
-        if not key or key in env:
+        if key:
+            out.append((number, key, val))
+    return out
+
+
+# The names `load_dotenv` wrote into `os.environ` in this process. `openreading backends` and
+# `openreading keys list` read it to tell a `.env` value from an exported one.
+_DOTENV_NAMES: set[str] = set()
+
+# A project file must not change the connection or its trust roots behind an approved endpoint.
+_TRANSPORT_ENV = frozenset(
+    {
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "AWS_CA_BUNDLE",
+    }
+)
+
+
+def load_dotenv(
+    path: str | os.PathLike[str] | None = None,
+    environ: MutableMapping[str, str] | None = None,
+) -> int:
+    """Load `KEY=VALUE` lines from a `.env` file into the environment WITHOUT overriding a var
+    that is already set (explicit process env always wins). Returns the number of vars set.
+    With `path=None`, loads `./.env` if it exists (missing file → no-op, returns 0). The line
+    grammar is `dotenv_entries`. The proxy and certificate settings listed in this module's
+    dotenv reference are skipped regardless of letter case."""
+    env = environ if environ is not None else os.environ
+    p = Path(path) if path is not None else Path(".env")
+    if not p.is_file():
+        return 0
+    count = 0
+    for _, key, val in dotenv_entries(p):
+        if key in env or key.upper() in _TRANSPORT_ENV:
             continue
         env[key] = val
+        # Tracked whenever the target is the process environment, including an explicit
+        # `os.environ`. Untracked, a `.env` OPENREADING_PROVIDER_ORIGINS passed for an exported one.
+        if env is os.environ:
+            _DOTENV_NAMES.add(key)
         count += 1
     return count
+
+
+def dotenv_loaded_names() -> frozenset[str]:
+    """The variables `load_dotenv` set in `os.environ` during this process."""
+    return frozenset(_DOTENV_NAMES)
+
+
+def declared_secret_envs(descriptors: Iterable[AdapterDescriptor]) -> frozenset[str]:
+    """Every service-native variable a backend declares for a SECRET credential field. These are
+    the only names the keychain is ever asked about (law PS5). The `OPENREADING_<SLUG>_<KEY>` form
+    and every `config_spec` field stay environment-only."""
+    return frozenset(
+        name for d in descriptors for f in d.credentials_spec if f.secret for name in f.env
+    )
+
+
+PROVIDER_ORIGINS_ENV = "OPENREADING_PROVIDER_ORIGINS"
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def endpoint_origin(url: str) -> str:
+    """The origin of `url`: `scheme://host[:port]`, lowercased, with the scheme's default port
+    dropped and any path left out. `HTTPS://Api.Example:443/v1` is `https://api.example`. Raises
+    `ValueError` for a port that is not a number."""
+    parts = urlsplit(url.strip())
+    scheme = parts.scheme.lower()
+    host = (parts.hostname or "").lower()
+    if ":" in host:
+        host = f"[{host}]"
+    port = parts.port
+    netloc = host if port is None or port == _DEFAULT_PORTS.get(scheme) else f"{host}:{port}"
+    return f"{scheme}://{netloc}"
+
+
+def bound_origin(descriptor: AdapterDescriptor) -> str | None:
+    """The origin a provider profile's key is bound to, or None for every other backend.
+
+    The descriptor carries the endpoint of the instance that will actually receive the key.
+    Looking up the id again could bind credentials to a different application's profile."""
+    if descriptor._profile_base_url is not None and descriptor.credentials_spec:
+        return endpoint_origin(descriptor._profile_base_url)
+    return None
+
+
+def keychain_account(descriptor: AdapterDescriptor, name: str) -> str:
+    """The keychain account that holds `name` for this backend: `name` itself for a built-in,
+    `name@origin` for a provider profile, such as `OPENROUTER_API_KEY@https://openrouter.ai`."""
+    origin = bound_origin(descriptor)
+    return name if origin is None else f"{name}@{origin}"
+
+
+def keychain_accounts(descriptors: Iterable[AdapterDescriptor]) -> frozenset[str]:
+    """Every keychain account the broker may read for `descriptors`: each declared secret
+    variable (`declared_secret_envs`) under the account `keychain_account` gives it."""
+    return frozenset(
+        keychain_account(d, name)
+        for d in descriptors
+        for f in d.credentials_spec
+        if f.secret
+        for name in f.env
+    )
+
+
+def provider_origins_from_dotenv(environ: Mapping[str, str] | None = None) -> bool:
+    """True when `OPENREADING_PROVIDER_ORIGINS` in `environ` (default `os.environ`) was set by
+    `load_dotenv`, from `./.env`, `--env-file` or `env_file=`, rather than exported."""
+    env = os.environ if environ is None else environ
+    return (
+        env is os.environ and PROVIDER_ORIGINS_ENV in _DOTENV_NAMES and PROVIDER_ORIGINS_ENV in env
+    )
+
+
+def provider_origins(environ: Mapping[str, str] | None = None) -> frozenset[str]:
+    """The origins `OPENREADING_PROVIDER_ORIGINS` lists, normalized by `endpoint_origin`. An
+    entry without a scheme and a host matches nothing. Unset or empty lists none, and so does a
+    value a dotenv file set (`provider_origins_from_dotenv`). A cloned repository's `.env` would
+    otherwise allow-list its author's host for the profile its `openreading.yaml` declares."""
+    env = os.environ if environ is None else environ
+    if provider_origins_from_dotenv(env):
+        return frozenset()
+    out: set[str] = set()
+    for entry in env.get(PROVIDER_ORIGINS_ENV, "").split(","):
+        if "://" not in entry:
+            continue
+        try:
+            origin = endpoint_origin(entry)
+        except ValueError:
+            continue
+        if not origin.endswith("://"):
+            out.add(origin)
+    return frozenset(out)
+
+
+def env_ignored_reason() -> str:
+    """Why a remote provider profile does not read its key from the environment, as text that
+    follows "not sent to <origin>,". Names the setting, never a value."""
+    if provider_origins_from_dotenv():
+        return (
+            f"because {PROVIDER_ORIGINS_ENV} was set by a .env file, and a file cannot widen "
+            "where a key goes. To allow that origin, export it in your shell instead."
+        )
+    return f"because {PROVIDER_ORIGINS_ENV} does not list that origin."
+
+
+def _loopback_origin(origin: str) -> bool:
+    from openreading.config import _is_loopback  # lazy: config is not needed on most runs
+
+    return _is_loopback(urlsplit(origin).hostname or "")
+
+
+def _registered_secret_envs() -> frozenset[str]:
+    # Imported here, not at module top: the adapter registry imports modules that import this one.
+    # `known_backends`, not the built-ins alone: a provider profile's key is a declared secret
+    # too, so `openreading keys set <profile>` saves a key the broker can read back. Its account
+    # is bound to the profile's origin, so the plain `key_env` name never joins this set.
+    from openreading.adapters.registry import known_backends
+
+    return keychain_accounts(factory().descriptor for factory in known_backends().values())
+
+
+class _KeychainChain(ChainMap[str, str]):
+    """`ChainMap(os.environ, KeychainMapping)` with the broker's own notion of "set".
+
+    The broker already treats an empty variable as unset and moves to the next name. A blank
+    `ANTHROPIC_API_KEY=` line left in `.env` would otherwise hide the saved key behind a value the
+    broker then ignores. So a lookup skips an empty value and returns the first non-empty one, and
+    returns the empty one only when no later layer has a value. Writes go to `os.environ` as with
+    any `ChainMap`, and the broker never writes."""
+
+    def __getitem__(self, key: str) -> str:
+        empty: str | None = None
+        for mapping in self.maps:
+            try:
+                value = mapping[key]
+            except KeyError:
+                continue
+            if value:
+                return value
+            if empty is None:
+                empty = value
+        if empty is not None:
+            return empty
+        raise KeyError(key)
+
+    def get(self, key: str, default: Any = None) -> Any:  # type: ignore[override]
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+
+def keychain_environ(names: Iterable[str] | None = None) -> MutableMapping[str, str]:
+    """The process environment with the keychain behind it: `os.environ` first, then the keychain
+    for the declared secret variables only. `names` narrows the set, and defaults to every
+    variable a registered backend declares. Keychain values are read through this view and are
+    never copied into `os.environ` (law PS3)."""
+    from openreading.keychain import KeychainMapping
+
+    allowed: Iterable[str] | Callable[[], Iterable[str]] = (
+        _registered_secret_envs if names is None else frozenset(names)
+    )
+    return _KeychainChain(os.environ, KeychainMapping(allowed))
+
+
+# The process-level opt-in. False until a surface asks: the CLI does for every verb but `serve`
+# and `mcp`, and `openreading serve --keychain` does for the server.
+_USE_KEYCHAIN = False
+
+
+def use_keychain(on: bool) -> bool:
+    """Make every `EnvCredentialBroker()` built without an explicit `environ` read the keychain
+    (`on=True`) or the environment alone (`on=False`). Returns the previous setting, so a caller
+    can restore it."""
+    global _USE_KEYCHAIN
+    previous, _USE_KEYCHAIN = _USE_KEYCHAIN, on
+    return previous
+
+
+def keychain_in_use() -> bool:
+    """True when this process opted in through `use_keychain(True)`."""
+    return _USE_KEYCHAIN
 
 
 def _slug_env(slug: str, key: str) -> str:
@@ -253,7 +559,24 @@ def _slug_env(slug: str, key: str) -> str:
     return f"OPENREADING_{slug.replace('-', '_').upper()}_{key.upper()}"
 
 
-def _credentials_ref_aliases(env: MutableMapping[str, str]) -> frozenset[str]:
+def _first_set(env: Mapping[str, str], names: Iterable[str]) -> tuple[str, str] | None:
+    for name in names:
+        value = env.get(name)
+        if value:
+            return name, value
+    return None
+
+
+def _field_item(
+    env: Mapping[str, str], slug: str, field: CredentialField | ConfigField, prefix: str | None
+) -> tuple[str, str] | None:
+    names = [_slug_env(slug, field.key), *field.env]
+    if prefix:
+        names.insert(0, f"{prefix}_{field.key.upper()}")
+    return _first_set(env, names)
+
+
+def _credentials_ref_aliases(env: Mapping[str, str]) -> frozenset[str]:
     """BL-162: `credentials_ref: "env:<alias>"` may only select a prefix the OPERATOR has
     explicitly allow-listed via `OPENREADING_CREDENTIALS_REF_ALIASES` (comma-separated) — never an
     arbitrary caller-chosen env-var prefix. Before this, `env:<anything>` resolved every
@@ -270,10 +593,123 @@ def _credentials_ref_aliases(env: MutableMapping[str, str]) -> frozenset[str]:
 
 class EnvCredentialBroker:
     """Resolves a descriptor's credential/config spec from the environment. Inject an explicit
-    `environ` dict in tests; defaults to `os.environ`."""
+    `environ` mapping in tests. The default is `os.environ`, or `keychain_environ()` once the
+    process called `use_keychain(True)`."""
 
-    def __init__(self, environ: MutableMapping[str, str] | None = None) -> None:
-        self._env: MutableMapping[str, str] = environ if environ is not None else os.environ
+    def __init__(
+        self, environ: Mapping[str, str] | None = None, *, probe_saved: Iterable[str] = ()
+    ) -> None:
+        self._probe_saved = frozenset(probe_saved)
+        if environ is None:
+            environ = keychain_environ() if _USE_KEYCHAIN else os.environ
+        self._env: Mapping[str, str] = environ
+
+    def _layers(self) -> list[Mapping[str, str]]:
+        """The environment first, then the keychain when this broker reads it."""
+        return list(self._env.maps) if isinstance(self._env, _KeychainChain) else [self._env]
+
+    def env_allowed(self, origin: str | None) -> bool:
+        """Whether a backend bound to `origin` may read its key from the environment and `.env`.
+        Always for a built-in (`origin` None). For a provider profile, only when the origin is
+        loopback or `OPENREADING_PROVIDER_ORIGINS` lists it. The list is read from the
+        environment layer alone, never the keychain (law PS5)."""
+        if origin is None or _loopback_origin(origin):
+            return True
+        return origin in provider_origins(self._layers()[0])
+
+    def untrusted_endpoint(
+        self,
+        descriptor: AdapterDescriptor,
+        prefix: str | None = None,
+        *,
+        file_values: Mapping[str, str] | None = None,
+    ) -> str | None:
+        """Name the dotenv setting blocking a saved key. Import can preview a file before use."""
+        process_env = self._layers()[0]
+        file_names = _DOTENV_NAMES if process_env is os.environ else set()
+        env = process_env
+        if file_values:
+            file_names = file_names.union(file_values.keys() - process_env.keys())
+            env = {**file_values, **process_env}
+        if not file_names:
+            return None
+        for name in descriptor._sdk_config_envs:
+            if name in file_names and env.get(name):
+                return name
+        settings = [
+            _field_item(env, descriptor.id, field, prefix)
+            for field in descriptor.config_spec
+            if field.key in {"endpoint", "base_url"}
+        ]
+        settings.extend(_first_set(env, names) for names in descriptor._sdk_endpoint_envs)
+        for item in settings:
+            if item and item[0] in file_names:
+                try:
+                    url = urlsplit(item[1])
+                    if (
+                        url.scheme not in _DEFAULT_PORTS
+                        or not url.hostname
+                        or url.username is not None
+                        or "\\" in item[1]
+                    ):
+                        return item[0]
+                    origin = endpoint_origin(item[1])
+                except ValueError:
+                    return item[0]
+                if not (
+                    _loopback_origin(origin)
+                    or origin == descriptor._default_origin
+                    or origin in provider_origins(process_env)
+                ):
+                    return item[0]
+        return None
+
+    def var_source(self, name: str, descriptor: AdapterDescriptor | None = None) -> str:
+        """Where `name` resolves from for this broker: `env` (exported), `.env` (set by
+        `load_dotenv`), `keychain`, or `missing`. Names a place, never a value. With a provider
+        profile's `descriptor`, the environment counts only when `env_allowed` says so, and the
+        keychain is asked for the profile's bound account (`keychain_account`)."""
+        origin = bound_origin(descriptor) if descriptor is not None else None
+        layers = self._layers()
+        first = layers[0]
+        if first.get(name) and self.env_allowed(origin):
+            return ".env" if first is os.environ and name in _DOTENV_NAMES else "env"
+        if descriptor is not None and self.untrusted_endpoint(descriptor):
+            return "missing"
+        account = name if origin is None else f"{name}@{origin}"
+        if any(layer.get(account) for layer in layers[1:]):
+            return "keychain"
+        return "missing"
+
+    def ignored_env(self, descriptor: AdapterDescriptor) -> list[str]:
+        """The credential variables set in the environment that this backend does not read,
+        because it is a provider profile whose origin `env_allowed` refuses. Names only."""
+        origin = bound_origin(descriptor)
+        if origin is None or self.env_allowed(origin):
+            return []
+        first = self._layers()[0]
+        names = [
+            n
+            for f in descriptor.credentials_spec
+            for n in (_slug_env(descriptor.id, f.key), *f.env)
+        ]
+        return [n for n in dict.fromkeys(names) if first.get(n)]
+
+    def secret_sources(self, descriptor: AdapterDescriptor) -> list[tuple[str, str]]:
+        """One `(VAR, SOURCE)` pair per secret credential field, in descriptor order. VAR is the
+        name that resolves (the `OPENREADING_<SLUG>_<KEY>` form included), else the field's
+        primary variable with SOURCE `missing`. The pick follows `resolve`: every name in the
+        environment first, then the keychain. `openreading keys list` prints these rows."""
+        rows: list[tuple[str, str]] = []
+        for f in descriptor.credentials_spec:
+            if not f.secret:
+                continue
+            names = [_slug_env(descriptor.id, f.key), *f.env]
+            sources = [(n, self.var_source(n, descriptor)) for n in names]
+            found = next(((n, src) for n, src in sources if src in ("env", ".env")), None)
+            found = found or next(((n, src) for n, src in sources if src == "keychain"), None)
+            rows.append(found or (f.env[0] if f.env else names[0], "missing"))
+        return rows
 
     def _ref_prefix(self, req: OpenReadingRequest) -> str | None:
         ref = req.backend.credentials_ref
@@ -303,40 +739,43 @@ class EnvCredentialBroker:
             )
         return alias
 
-    def _lookup(
-        self,
-        slug: str,
-        field: CredentialField | ConfigField,
-        ref_prefix: str | None,
-        request_value: str | None = None,
-    ) -> str | None:
-        if request_value is not None:
-            return request_value
-        if ref_prefix is not None:
-            v = self._env.get(f"{ref_prefix}_{field.key.upper()}")
-            if v:
-                return v
-        v = self._env.get(_slug_env(slug, field.key))
-        if v:
-            return v
-        for name in field.env:
-            v = self._env.get(name)
-            if v:
-                return v
-        return None
-
     def resolve(
         self, descriptor: AdapterDescriptor, req: OpenReadingRequest
     ) -> ResolvedCredentials:
-        """Secrets/credentials from credentials_spec → ResolvedCredentials.values. Keys the broker
-        can't find are left out (the adapter's ambient SDK chain, if any, takes over)."""
+        """Resolve each credential from the environment, then its eligible keychain accounts.
+
+        A post-save probe reads the selected accounts directly. Other fields retain their
+        normal precedence, including operator settings for the actual destination.
+        """
         prefix = self._ref_prefix(req)
+        origin = bound_origin(descriptor)
+        layers = self._layers()
+        use_store = len(layers) > 1 and not keychain.disabled()
+        blocked = self.untrusted_endpoint(descriptor, prefix) if use_store else None
         values: dict[str, object] = {}
-        for f in descriptor.credentials_spec:
-            v = self._lookup(descriptor.id, f, prefix)
-            if v is not None:
-                values[f.key] = v
-        return ResolvedCredentials(values=values, source="env" if values else None)
+        for field in descriptor.credentials_spec:
+            selected = [name for name in field.env if name in self._probe_saved]
+            # PS2: an exported LLAMA_PARSE_API_KEY wins even when the keychain holds the
+            # primary LLAMA_CLOUD_API_KEY. A remote profile also needs consent for its origin.
+            if not selected and self.env_allowed(origin):
+                item = _field_item(layers[0], descriptor.id, field, prefix)
+                if item:
+                    values[field.key] = item[1]
+                    continue
+            if field.secret and use_store and not blocked:
+                for name in selected or field.env:
+                    value = layers[1].get(keychain_account(descriptor, name))
+                    if value:
+                        values[field.key] = value
+                        break
+        # Qwen can run anonymously and Textract can use the AWS SDK's credential chain.
+        if blocked and not any(
+            f.secret and f.required and f.key not in values for f in descriptor.credentials_spec
+        ):
+            blocked = None
+        return ResolvedCredentials(
+            values=values, source="env" if values else None, keychain_blocked_by=blocked
+        )
 
     def resolve_config(self, descriptor: AdapterDescriptor, req: OpenReadingRequest) -> dict:
         """Non-secret config from config_spec → ctx.runtime dict, merged with the request's typed
@@ -362,9 +801,13 @@ class EnvCredentialBroker:
             )
         out: dict[str, object] = dict(runtime_req)  # pass through remaining typed runtime fields
         for f in descriptor.config_spec:
-            v = self._lookup(descriptor.id, f, prefix, request_value=runtime_req.get(f.key))
-            if v is not None:
-                out[f.key] = v
+            if f.key not in out and (
+                item := _field_item(self._layers()[0], descriptor.id, f, prefix)
+            ):
+                out[f.key] = item[1]
+        for names, key in descriptor._sdk_endpoint_envs.items():
+            if key is not None and (item := _first_set(self._layers()[0], names)):
+                out[key] = item[1]
         return out
 
 
@@ -391,12 +834,13 @@ def build_run_context(
     `_default_idempotency_key`, so every submit carries a stable key before it ever reaches an
     adapter, without the caller having to think about it."""
     broker = broker or EnvCredentialBroker()
-    creds = broker.resolve(descriptor, req)
     runtime = broker.resolve_config(descriptor, req)
+    creds = broker.resolve(descriptor, req)
     return RunContext(
-        credentials=creds if creds.values else None,
+        credentials=creds if creds.values or creds.keychain_blocked_by else None,
         runtime=runtime or None,
         deadline_ms=deadline_ms if deadline_ms is not None else DEFAULT_DEADLINE_MS,
+        deadline_is_default=deadline_ms is None,
         idempotency_key=(
             req.idempotency_key
             if req.idempotency_key is not None

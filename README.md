@@ -393,17 +393,27 @@ chain only when a request names no backend.
 
 ## Bring your own key
 
-A hosted backend works as soon as its vendor key is in `.env`. Without one, the command exits with
-code 3 and names the variable:
+Reducto needs a vendor key. With no key in the environment, `.env`, or the OS keychain,
+this command exits 3 and names the missing variable.
 
 ```bash
 uv run openreading parse examples/john_smith_1000_2026_01.pdf --backend reducto
 # [reducto] missing required credentials/config: REDUCTO_API_KEY. Sign up / configure: https://platform.reducto.ai
 ```
 
-To fix it, append the one key you hold to a fresh file with `echo 'REDUCTO_API_KEY=sk_…' >> .env`.
-`uv run openreading backends` then shows `reducto … yes`. From then on every Reducto call is
-billed to your account.
+To use the key from any folder, save it once in your OS keychain with hidden input.
+This needs the `[setup]` extra, which `make sync` installs.
+
+```bash
+uv run openreading keys set reducto
+```
+
+For project-local credentials, enter `REDUCTO_API_KEY=your-key` in `.env` with an editor and
+run `chmod 600 .env`. Shell exports take precedence over `.env`, followed by the keychain.
+`uv run openreading backends` then shows Reducto as configured without making a paid request.
+
+`uv run openreading setup` guides you through saving keys and choosing the default backends.
+Use `uv run openreading setup --provider` to give an OpenAI-compatible endpoint its own backend name.
 
 Never run `cp .env.example .env`. That file ships `DOCLING_SERVE_URL` and `QWEN_VL_ENDPOINT` with
 values rather than blanks. A copy therefore marks `docling` and `qwen-vl` configured on a machine
@@ -412,12 +422,6 @@ configuration. Put `docling` in your `policy.backends` after that copy and the r
 scan to `http://localhost:5001`, and the envelope records `docling TerminalError (ConnectError)`.
 Without the copy the same command records `docling skipped (missing_credentials)` and the document
 never reaches a socket.
-
-Two things about that `echo`. `.env` is already in this repo's `.gitignore`, so the file you just
-wrote inside a clone is not committed by accident. Your shell records the line itself, which puts
-the key in `~/.zsh_history` or `~/.bash_history` in plain text. Prefix the command with a space if
-your shell is set to skip those. You can also open `.env` in an editor and type the key there
-instead.
 
 ## Python and HTTP
 
@@ -546,6 +550,7 @@ command.
 | **how to build against the response JSON** | [Annotated response and Python consumer](src/openreading/schemas/README.md#understanding-the-response-json), or `uv run openreading help response` |
 | what the shipped example documents contain and where they came from | [`examples/README.md`](examples/README.md) |
 | complete, generously commented `openreading.yaml` files, from simple defaults to composed strategies | [Configuration examples](examples/configs/README.md) |
+| connect a model endpoint or find where a backend gets its key | [Provider profiles](src/openreading/adapters/README.md#provider-profiles), `openreading help setup`, and `openreading help keys` |
 | install local engines, enable OCR, and distinguish Docling Slim from Docling Serve | `uv run openreading help local-ocr`, then [local setup walkthrough](src/openreading/adapters/README.md#local-setup-walkthrough) |
 | each backend's variables, runtime location, and env-var precedence rules | [`src/openreading/adapters/README.md`](src/openreading/adapters/README.md), then `uv run python -m pydoc openreading.credentials` |
 | the exact JSON shapes (the contract) | [`src/openreading/schemas/README.md`](src/openreading/schemas/README.md), then the `*.json` files beside it |

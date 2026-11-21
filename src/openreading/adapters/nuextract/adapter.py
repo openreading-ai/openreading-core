@@ -176,7 +176,7 @@ class _HttpxNuExtractClient:  # pragma: no cover - real network path
 
 
 def _descriptor() -> AdapterDescriptor:
-    return AdapterDescriptor(
+    descriptor = AdapterDescriptor(
         id="nuextract",
         type=BackendType.HOSTED_API,
         # Ledger T4a (AC-8): poll()/cancel() build their client fresh from ctx on every call (no
@@ -282,6 +282,8 @@ def _descriptor() -> AdapterDescriptor:
             ),
         ],
     )
+    descriptor._default_origin = _DEFAULT_BASE_URL
+    return descriptor
 
 
 class NuExtractAdapter(BackendAdapter):

@@ -177,12 +177,13 @@ src/openreading/
   cli/         `openreading …` + `openreading help`, which serves  (docstring: subcommands,
                that docstring back as the CLI's own manual          exit codes, the manual)
   artifacts/   retained local source, page evidence, bounded search and read
-  mcp_server/  nine stdio tools for the fixed local document profile
+  mcp_server/  nine stdio tools for the fixed local document profile, plus a readiness tool
   server/      `openreading serve`                             (docstring: endpoints, status codes)
   api.py          `run` / `route` / `compare` / `resume`       (docstring: exports and return shapes)
-  config.py       the one reader of `openreading.yaml`         (docstring: discovery, the nine
-                                                                policy keys, the union, P4-P6)
+  config.py       the one reader of `openreading.yaml`         (docstring: discovery, policy.backends,
+                                                                provider profiles, strategies)
   credentials.py  BYO-key broker                               (docstring: precedence, per-backend vars)
+  keychain.py     OS storage for secret variables saved through `keys` and `setup`
   readiness.py    is a backend runnable here, and which vars are missing
   liveness.py     is a backend answering right now
 tests/         offline suite + keyed live lane                 (conftest.py docstring: the runbook)
@@ -200,6 +201,11 @@ and every chapter is a section of the `openreading.cli` docstring, located by it
 printed verbatim. `pydoc` prints that whole docstring in source order. Editing that docstring
 therefore edits user-facing help, which is why `tests/test_cli_help.py` holds it to 79 columns and
 one slug per heading. A new verb owes a docstring section, a `TOPICS` row and an epilog.
+
+For provider setup, start with `openreading help setup` and `openreading help keys`.
+Agents can inspect configured credential sources with `openreading keys list --json` or call
+`openreading_backends` with `{}` on the local Core MCP launcher. Both report variable names
+and sources without values. A person enters a new key in the terminal's hidden prompt.
 
 ## The company repo
 

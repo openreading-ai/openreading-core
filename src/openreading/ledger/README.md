@@ -24,7 +24,9 @@ An armed strategy run writes three kinds of data:
 - `blobs/<run_id>/<digest>.bin` stores documents and successful responses by SHA-256 digest.
 
 Resume checks the header before execution. A changed plan or unsupported journal version refuses
-resume. Each blob read verifies its recorded digest, so modified content cannot replay as the
+resume. For example, changing a provider profile's port or URL path refuses resume before
+the next backend call. Restore the recorded configuration to continue, or start a new run.
+Each blob read verifies its recorded digest, so modified content cannot replay as the
 recorded response.
 
 ## Walkthrough

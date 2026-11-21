@@ -19,6 +19,11 @@ caller may override.
 Images use image content blocks with their MIME type in both single requests and native batches.
 For example, a PNG stays an image/png source instead of being labeled as a PDF document.
 Only PDF document blocks enable citations, because image blocks do not accept that parameter.
+
+Environment variables this module reads
+---------------------------------------
+`ANTHROPIC_BASE_URL` selects the endpoint for both messages and model probes through the broker.
+An unset value uses the Anthropic API. The broker checks a dotenv override before releasing a saved key.
 """
 
 from __future__ import annotations
@@ -101,15 +106,14 @@ class AnthropicProbeClient(Protocol):
     def list_models(self) -> list[str]: ...
 
 
+_DEFAULT_BASE_URL = "https://api.anthropic.com"
+
+
 class _RealAnthropicProbeClient:  # pragma: no cover - real API path, proven by the live lane
-    def __init__(self, api_key: str | None, timeout_s: float) -> None:
+    def __init__(self, api_key: str | None, timeout_s: float, base_url: str) -> None:
         import anthropic
 
-        self._client = (
-            anthropic.Anthropic(api_key=api_key, timeout=timeout_s)
-            if api_key
-            else anthropic.Anthropic(timeout=timeout_s)
-        )
+        self._client = anthropic.Anthropic(api_key=api_key, timeout=timeout_s, base_url=base_url)
 
     def list_models(self) -> list[str]:
         # GET /v1/models — a list endpoint, not a generation call: nothing is billed.
@@ -117,10 +121,10 @@ class _RealAnthropicProbeClient:  # pragma: no cover - real API path, proven by 
 
 
 class _RealAnthropicClient:  # pragma: no cover - real API path
-    def __init__(self, api_key: str | None) -> None:
+    def __init__(self, api_key: str, base_url: str) -> None:
         import anthropic
 
-        self._client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
+        self._client = anthropic.Anthropic(api_key=api_key, base_url=base_url)
 
     def create(self, *, model, max_tokens, messages, tools=None, tool_choice=None) -> dict:
         kw: dict[str, Any] = {"model": model, "max_tokens": max_tokens, "messages": messages}
@@ -142,7 +146,7 @@ class _RealAnthropicClient:  # pragma: no cover - real API path
 
 
 def _descriptor() -> AdapterDescriptor:
-    return AdapterDescriptor(
+    descriptor = AdapterDescriptor(
         id="anthropic-claude",
         type=BackendType.HOSTED_API,
         # Ledger T4a (AC-8): poll()/submit_many() build their client fresh from ctx on every call
@@ -272,6 +276,10 @@ def _descriptor() -> AdapterDescriptor:
         ],
     )
 
+    descriptor._sdk_endpoint_envs = {("ANTHROPIC_BASE_URL",): "base_url"}
+    descriptor._default_origin = _DEFAULT_BASE_URL
+    return descriptor
+
 
 class AnthropicClaudeAdapter(BackendAdapter):
     def __init__(
@@ -301,7 +309,11 @@ class AnthropicClaudeAdapter(BackendAdapter):
         dependency). See internal/design/liveness.md §4 for why every other hosted backend
         honestly declares no probe rather than a guessed URL."""
         creds = (ctx.credentials.values if ctx.credentials else {}) or {}
-        client = self._probe_client or _RealAnthropicProbeClient(creds.get("api_key"), timeout_s)
+        client = self._probe_client or _RealAnthropicProbeClient(
+            creds.get("api_key"),
+            timeout_s,
+            (ctx.runtime or {}).get("base_url") or _DEFAULT_BASE_URL,
+        )
         try:
             models = client.list_models()
         except Exception as e:  # noqa: BLE001 - a probe reports, it never throws
@@ -367,7 +379,9 @@ class AnthropicClaudeAdapter(BackendAdapter):
                 f"missing required credentials/config: ANTHROPIC_API_KEY.{signup}",
                 missing=["ANTHROPIC_API_KEY"],
             )
-        return _RealAnthropicClient(api_key)  # pragma: no cover
+        return _RealAnthropicClient(
+            api_key, (ctx.runtime or {}).get("base_url") or _DEFAULT_BASE_URL
+        )
 
     def _document_b64(self, req: OpenReadingRequest) -> str:
         d = req.document

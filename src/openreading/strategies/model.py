@@ -1,4 +1,4 @@
-"""Pydantic mirror of `strategy-config.v0.4.json`, and the reference for what `openreading.yaml`
+"""Pydantic mirror of `strategy-config.v0.5.json`, and the reference for what `openreading.yaml`
 may contain — every node kind, every key, every gate predicate, and every validation rule.
 
 A **strategy** is a named recipe for which backends run — in what order or in parallel — and
@@ -137,7 +137,7 @@ who cares about compliance already knows which vendors they hold agreements with
 a statement core can honour exactly.
 
 The block is refused whole (`ConfigError`, from `openreading.config.load`) if it names a key
-outside it or gives one the wrong type. `strategy-config` v0.4 declares this sub-object
+outside it or gives one the wrong type. `strategy-config` v0.5 declares this sub-object
 `additionalProperties: false` with the key typed, which is what stands between a typo and a run
 with no restriction at all: `backend: [pymupdf]` would otherwise be dropped in silence and mean
 "every backend" rather than "only this one".
@@ -929,7 +929,7 @@ satisfies "locate"). `validate` also resolves the file's default backend chain.
 10. JSON Schema and editor experience
 =====================================
 
-The config schema is vendored at `src/openreading/schemas/strategy-config.v0.4.json`. Earlier
+The config schema is vendored at `src/openreading/schemas/strategy-config.v0.5.json`. Earlier
 artifacts remain byte-frozen, while the config `version` const stays `1`. This follows the same schema-authority
 convention as request/response/descriptor (and the same wheel force-include gotcha). Shorthands
 are encoded as titled `oneOf: [string, array, object]` branches so editor completion stays clean.
@@ -1080,6 +1080,18 @@ class StrategyConfig(BaseModel):
     @classmethod
     def _strict_policy(cls, value: Any) -> Any:
         return coerce_policy(value)
+
+    # Provider profiles: named backends this file defines. `openreading.config.validate_providers`
+    # owns the grammar and the built-in shadow rule, so a config built here in Python gets the
+    # refusals a file gets. The strategy engine never reads the block. The adapter registry does.
+    providers: dict[str, dict[str, Any]] | None = None
+
+    @field_validator("providers", mode="before")
+    @classmethod
+    def _validated_providers(cls, value: Any) -> Any:
+        from openreading.config import validate_providers
+
+        return None if value is None else validate_providers(value)
 
     limits: Limits | None = None
     decider: DeciderConfig | None = None

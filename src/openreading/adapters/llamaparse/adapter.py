@@ -250,7 +250,7 @@ def _descriptor(profile: TierProfile) -> AdapterDescriptor:
         ),
         block_granularity="element" if profile.structured else None,
     )
-    return AdapterDescriptor(
+    descriptor = AdapterDescriptor(
         id=profile.slug,
         type=BackendType.HOSTED_API,
         provisioning=Provisioning(byo_mode=["api_key"], auth="api_key"),
@@ -333,6 +333,8 @@ def _descriptor(profile: TierProfile) -> AdapterDescriptor:
             ),
         ],
     )
+    descriptor._default_origin = DEFAULT_BASE_URL
+    return descriptor
 
 
 def _unsupported(feature: str, message: str) -> UnsupportedFeatureError:

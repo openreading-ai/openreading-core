@@ -2,11 +2,34 @@
 Registry with every adapter instantiated. Constructing an adapter never imports its runtime dep
 (each is lazy-imported inside health/submit), so this module is import-safe with no extras
 installed — the router reads only the static descriptors.
+
+Provider profiles join the catalog at run time. A provider profile is a named backend defined in
+the `providers:` block of `openreading.yaml` (grammar in `openreading.config`).
+`install_profiles(mapping)` validates that block and replaces the process's profile set with it,
+and each profile becomes one `openreading.adapters.openai_compatible` instance under its own id.
+`known_backends()` is the catalog every surface reads: the built-ins, then the installed
+profiles. `make_adapter` and `build_registry` read it too, so the router resolves a profile like
+any other id and never needs to know one is a profile.
+
+The CLI installs its process-wide set in
+`openreading.cli.app.main` before parsing arguments, so `--backend` accepts a profile id.
+The MCP launcher installs its configured profiles at startup. Each HTTP application owns a
+separate profile snapshot, including an empty one when its deployment supplies no configuration.
+
+A library call scopes its set to itself instead. Each `openreading.api` entry point reads its own
+file and calls `set_call_profiles`, which sets a `ContextVar` that `known_backends`, `make_adapter` and
+`build_registry` consult before the process set. No file found means no profile for that call
+(law P5 in `openreading.config`). A process-wide set let two threads with two files swap
+profiles between load and dispatch, so a document went to the other file's endpoint. Batch workers inherit their caller's profile context for each submitted item.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar, Token
+from functools import partial
+from typing import Any
 
 from openreading.adapters.anthropic_claude import AnthropicClaudeAdapter
 from openreading.adapters.aws_textract import AWSTextractAdapter
@@ -27,6 +50,7 @@ from openreading.adapters.llamaparse import (
 from openreading.adapters.mistral_ocr import MistralOCRAdapter
 from openreading.adapters.nuextract import NuExtractAdapter
 from openreading.adapters.open_ocr import OpenOCRAdapter
+from openreading.adapters.openai_compatible import OpenAICompatibleAdapter, ProviderProfile
 from openreading.adapters.pulse import PulseAdapter
 from openreading.adapters.pymupdf import PyMuPDFAdapter
 from openreading.adapters.qwen_vl import QwenVLAdapter
@@ -59,13 +83,97 @@ BUILTIN_ADAPTERS: dict[str, Callable[[], BackendAdapter]] = {
 }
 
 
+# Replaced wholesale by `install_profiles`, never mutated in place, so a reader that took the
+# dict before an install keeps a consistent snapshot.
+_PROFILES: dict[str, ProviderProfile] = {}
+
+# One library call's own set. None (the default) defers to `_PROFILES`, and `{}` means no profile.
+_CALL_PROFILES: ContextVar[dict[str, ProviderProfile] | None] = ContextVar(
+    "openreading_call_profiles", default=None
+)
+
+
+def build_profiles(providers: Mapping[str, Mapping[str, Any]] | None) -> dict[str, ProviderProfile]:
+    """Build an independent snapshot of the validated provider profiles in a configuration."""
+    from openreading.config import validate_providers  # lazy: config reads this module lazily
+
+    validated = validate_providers(dict(providers) if providers is not None else None)
+    return {
+        name: ProviderProfile(
+            name=name,
+            base_url=p["base_url"],
+            model=p["model"],
+            key_env=p.get("key_env"),
+        )
+        for name, p in validated.items()
+    }
+
+
+def install_profiles(providers: Mapping[str, Mapping[str, Any]] | None) -> None:
+    """Replace the process-wide provider profiles with `providers`, the `providers:` block's
+    shape.
+
+    The block is validated by `openreading.config.validate_providers` first, so a mapping built
+    in Python gets the refusals a file gets, a built-in shadow included. `None` or `{}` removes
+    every profile. Raises `openreading.config.ConfigError` and installs nothing on a bad block.
+    """
+    global _PROFILES
+    _PROFILES = build_profiles(providers)
+
+
+def set_call_profiles(
+    providers: Mapping[str, Mapping[str, Any]] | None,
+) -> Token[dict[str, ProviderProfile] | None]:
+    """Give the current context its own profile set, validated like `install_profiles`. `None`
+    or `{}` means no profile, whatever the process set holds. Pass the returned token to
+    `reset_call_profiles` when the call ends."""
+    return _CALL_PROFILES.set(build_profiles(providers))
+
+
+def reset_call_profiles(token: Token[dict[str, ProviderProfile] | None]) -> None:
+    """Restore the profile set the context had before `set_call_profiles` returned `token`."""
+    _CALL_PROFILES.reset(token)
+
+
+@contextmanager
+def profile_scope(profiles: dict[str, ProviderProfile]) -> Iterator[None]:
+    """Use an application-owned snapshot for every catalog read within the current request."""
+    token = _CALL_PROFILES.set(profiles)
+    try:
+        yield
+    finally:
+        _CALL_PROFILES.reset(token)
+
+
+def installed_profiles() -> dict[str, ProviderProfile]:
+    """A copy of the process-wide provider profiles, by backend id."""
+    return dict(_PROFILES)
+
+
+def active_profiles() -> dict[str, ProviderProfile]:
+    """A copy of the profiles this context resolves: the call's own set, else the process set."""
+    scoped = _CALL_PROFILES.get()
+    return dict(_PROFILES if scoped is None else scoped)
+
+
+def known_backends() -> dict[str, Callable[[], BackendAdapter]]:
+    """Every backend id this context can run, mapped to a zero-argument factory: the built-ins in
+    `BUILTIN_ADAPTERS` order, then the active provider profiles. Read this, not
+    `BUILTIN_ADAPTERS`, wherever the question is "which ids exist here"."""
+    known: dict[str, Callable[[], BackendAdapter]] = dict(BUILTIN_ADAPTERS)
+    for name, profile in active_profiles().items():
+        known[name] = partial(OpenAICompatibleAdapter, profile)
+    return known
+
+
 def make_adapter(slug: str) -> BackendAdapter:
-    """Build one built-in adapter by slug, then refuse it when its `protocol_version` is below
-    the router's floor. An unknown slug raises `KeyError`, and a below-floor adapter raises
-    `ValueError`."""
-    if slug not in BUILTIN_ADAPTERS:
-        raise KeyError(f"unknown backend {slug!r}; known: {', '.join(sorted(BUILTIN_ADAPTERS))}")
-    adapter = BUILTIN_ADAPTERS[slug]()
+    """Build one adapter by id, a built-in or an installed provider profile, then refuse it when
+    its `protocol_version` is below the router's floor. An unknown id raises `KeyError`, and a
+    below-floor adapter raises `ValueError`."""
+    known = known_backends()
+    if slug not in known:
+        raise KeyError(f"unknown backend {slug!r}; known: {', '.join(sorted(known))}")
+    adapter = known[slug]()
     # Ledger T4a (AC-8): this is the second adapter-construction entry point.
     # `api.prepare_named_backend` and the other direct-named paths call it without ever reaching
     # `router.registry.Registry.register()`. Without the check here,
@@ -77,8 +185,9 @@ def make_adapter(slug: str) -> BackendAdapter:
 
 
 def build_registry() -> Registry:
-    """A Registry with all built-in adapters registered (descriptors only — nothing runs)."""
+    """A Registry with every known adapter registered, built-ins then provider profiles
+    (descriptors only, so nothing runs)."""
     reg = Registry()
-    for slug in BUILTIN_ADAPTERS:
+    for slug in known_backends():
         reg.register(make_adapter(slug))
     return reg

@@ -334,7 +334,12 @@ from openreading.credentials import (
     redact,
     secret_values,
 )
-from openreading.readiness import auth_rejected_hint, backend_readiness, missing_reason
+from openreading.readiness import (
+    auth_rejected_hint,
+    backend_readiness,
+    keychain_blocked_hint,
+    missing_reason,
+)
 from openreading.types.descriptor import AdapterDescriptor
 from openreading.types.liveness import (
     LivenessReport,
@@ -454,6 +459,8 @@ def infer_liveness(adapter, *, broker: EnvCredentialBroker | None = None) -> Liv
             if missing
             else "not configured on this machine"
         )
+        if readiness.keychain_blocked_by:
+            detail = keychain_blocked_hint(readiness.keychain_blocked_by)
         return _report(descriptor, LivenessStatus.NOT_CONFIGURED, detail=detail, secrets=secrets)
 
     # No probe declared (or declared but not implemented): infer from configuration, and say

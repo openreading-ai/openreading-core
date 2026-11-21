@@ -101,7 +101,7 @@ TOPICS: tuple[Topic, ...] = (
         ("gate", "looks_bad", "low_confidence", "missing", "disagree", "escalate_when"),
     ),
     Topic("usage", "What a run uses, and how to use less", ("cost", "money", "spend", "billing")),
-    Topic("env", "Environment variables this module reads", ("environment", "keys", "credentials")),
+    Topic("env", "Environment variables this module reads", ("environment", "credentials")),
     Topic("datasets", "Datasets for calibrate, leaderboard and rules", ("dataset", "labels")),
     # when something stops
     Topic("exit-codes", "Exit codes", ("exits", "exit", "exitcodes")),
@@ -110,6 +110,8 @@ TOPICS: tuple[Topic, ...] = (
     # one command at a time
     Topic("parse", "parse <file|url|dir|glob ...>"),
     Topic("backends", "backends [--check SLUG[,SLUG...]|all] [--timeout SECONDS]", ("check",)),
+    Topic("keys", "keys <set|list|unset|import>", ("keychain", "key")),
+    Topic("setup", "setup [--provider] [--config PATH]", ("wizard", "provider", "providers")),
     Topic("resume", "resume RUN_ID", ("ledger", "journal")),
     Topic("compare", "compare <subjects...>", ("diff", "delta")),
     Topic("strategy", "strategy <verb>: list, show, validate, normalize, plan", ("strategies",)),
@@ -141,6 +143,8 @@ _GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "parse",
             "backends",
+            "keys",
+            "setup",
             "resume",
             "compare",
             "strategy",
@@ -179,6 +183,8 @@ _BLURBS: dict[str, str] = {
     "signals": "Ctrl-C, SIGTERM, and what a stopped run leaves behind",
     "parse": "read one document, a folder, or a glob",
     "backends": "list backends and whether this machine can run them",
+    "keys": "save a key in the OS keychain once, for every folder",
+    "setup": "a guided setup: pick backends, save keys, test them",
     "resume": "pick an interrupted run back up from its journal",
     "compare": "show where two or more backends disagree",
     "strategy": "plans over several backends, and the openreading.yaml grammar",

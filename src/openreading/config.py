@@ -11,6 +11,61 @@ table it could not verify. They are gone, and `backends` is what replaced them: 
 cares about compliance already knows which vendors they hold agreements with, and core holds no
 fact it cannot verify.
 
+Provider profiles
+-----------------
+A provider profile is a named backend you define in this file instead of in code. The optional
+`providers:` block maps each name to one profile, and every profile speaks the OpenAI
+chat-completions protocol:
+
+    version: 1
+    providers:
+      openrouter-gpt:
+        kind: openai-compatible           # the only kind
+        base_url: https://openrouter.ai/api/v1
+        model: openai/gpt-5.1
+        key_env: OPENROUTER_API_KEY       # the variable NAME, never the key
+      local-llama:
+        kind: openai-compatible
+        base_url: http://localhost:11434/v1
+        model: llama3.2-vision            # no key_env: the endpoint needs no key
+    policy:
+      backends: [openrouter-gpt, pymupdf]
+
+Four keys make up a profile, and any other key is refused. `kind`, `base_url` and `model` are
+required. `base_url` must be an `http` or `https` URL with a host and no user or password in it,
+because this file is committed. The scheme is lowercase, as the schema pattern requires, and a
+Python mapping is held to the same rule as a file. `key_env` must be an uppercase variable name outside the
+`OPENREADING_` prefix, which belongs to operator settings. Absent, the endpoint is called with no
+key. The name is a backend id, so it follows the built-in slug shape (`openrouter-gpt`, lowercase
+and hyphenated).
+
+`openreading.yaml` is operator configuration, and it often arrives with a repository you cloned.
+So a profile's key is bound to the profile's endpoint, and a file can only reach a key you gave
+that endpoint. Four rules hold it, and each stops one way a committed file could send your key to
+a host its author chose.
+
+- A profile can never name a variable a built-in backend declares, such as `ANTHROPIC_API_KEY`.
+- A profile with `key_env` must use `https`, unless its host is `localhost`, `127.0.0.0/8` or
+  `::1`, so no key travels in clear text.
+- A remote profile reads `key_env` from the environment or `.env` only when the operator lists
+  its origin in `OPENREADING_PROVIDER_ORIGINS`. Without that, a profile naming `GITHUB_TOKEN` with
+  its author's `base_url` would receive the token your shell exports. The list counts only when
+  your shell or service environment exports it. A `.env` file that sets it is ignored, because
+  the repository that ships this file can ship a `.env` too.
+- A key saved in the keychain for a profile sits under the account `<VAR>@<origin>`, and a
+  profile reads only the account for its own origin. Two profiles that share `key_env` for two
+  hosts therefore never share a saved key.
+
+`openreading.credentials` enforces the last two, at the one place every key is read.
+
+A name that shadows a built-in backend id is a `ConfigError`, exit 3 on the CLI. Letting a file
+replace `pymupdf` would make one id mean two backends depending on the folder you ran from. A
+`strategy:` prefix is refused for the same reason, since it names a strategy and never a backend.
+`validate_providers` holds every one of these checks, so a mapping built in Python is refused
+exactly where a file is. `openreading.adapters.registry` turns the validated block into
+backends before dispatch: the CLI and MCP launcher install their process profiles, each HTTP app scopes
+its deployment snapshot per request, and each Python API call scopes its own configuration.
+
 Discovery order (first hit wins; sources are NEVER merged):
   1. an explicit path or an inline dict — CLI `--config PATH`, Python `openreading.run(config=…)`;
   2. the `OPENREADING_CONFIG` environment variable;
@@ -80,11 +135,14 @@ from __future__ import annotations
 
 import hashlib
 import io
+import ipaddress
 import json
 import os
+import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from openreading import schemas
 from openreading.router.compliance import RouterConfig
@@ -96,6 +154,20 @@ _DEFAULT_FILENAME = "openreading.yaml"
 _ALT_FILENAME = "openreading.yml"
 
 # The `policy:` block supplies a default backend chain for callers that name no backend.
+
+# The shapes a `providers:` entry may take. The slug pattern is the one new built-ins follow
+# (`scripts/new_adapter.py`), and the variable pattern is the conventional environment shape.
+_PROVIDER_KINDS = frozenset({"openai-compatible"})
+_PROVIDER_KEYS = frozenset({"kind", "base_url", "model", "key_env"})
+_PROVIDER_REQUIRED = ("kind", "base_url", "model")
+# Every pattern here is applied with `fullmatch`, because `match` lets `$` end before a final
+# newline and `https://x.example/v1\n` passed.
+_PROFILE_NAME_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+_ENV_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+# The schema's own `base_url` pattern, so a Python mapping and a file refuse alike. `urlsplit`
+# lowercases the scheme, so without this `HTTPS://...` passed here and failed at first use.
+_BASE_URL_RE = re.compile(r"^https?://[^\s]+$")
+_STRATEGY_PREFIX = "strategy:"
 
 
 class ConfigError(ValueError):
@@ -118,6 +190,11 @@ class LoadedFile:
     policy: dict | None
     path: Path | None
     source_hash: str
+
+    @property
+    def providers(self) -> dict:
+        """The file's `providers:` block, validated at load, or `{}` when it has none."""
+        return dict(self.raw.get("providers") or {})
 
     @property
     def content_hash(self) -> str:
@@ -187,7 +264,139 @@ def _validated_mapping(raw: Any, *, source: str) -> dict:
         schemas.validate_strategy_config(raw)
     except Exception as exc:  # jsonschema.ValidationError (or a schema error)
         raise ConfigError(f"{source}: {_format_schema_error(exc)}") from exc
+    if "providers" in raw:
+        validate_providers(raw["providers"], source=source)
     return raw
+
+
+def validate_providers(block: Any, *, source: str = "<providers>") -> dict[str, dict[str, Any]]:
+    """Check a `providers:` block and return a copy of it, or raise `ConfigError` naming the node.
+
+    The schema covers file text, and this covers what a schema cannot: the built-in shadow rule.
+    It also repeats every shape check, because a mapping built in Python reaches no schema (law
+    PF2). The built-in ids are read from `openreading.adapters.registry` only when the block is
+    non-empty, so a file without profiles never imports the adapter catalog from here.
+    """
+    if block is None:
+        return {}
+    if not isinstance(block, dict):
+        raise ConfigError(f"{source}: invalid config at 'providers': must be a mapping")
+    builtins: frozenset[str] = frozenset()
+    owned: dict[str, str] = {}
+    if block:
+        from openreading.adapters.registry import BUILTIN_ADAPTERS
+
+        builtins = frozenset(BUILTIN_ADAPTERS)
+        owned = _builtin_env_owners(BUILTIN_ADAPTERS)
+    out: dict[str, dict[str, Any]] = {}
+    for name, profile in block.items():
+        at = f"providers/{name}"
+        if not isinstance(name, str) or name.startswith(_STRATEGY_PREFIX):
+            raise ConfigError(
+                f"{source}: invalid config at '{at}': a profile name is a backend id, and the "
+                f"'{_STRATEGY_PREFIX}' prefix names a strategy"
+            )
+        if not _PROFILE_NAME_RE.fullmatch(name):
+            raise ConfigError(
+                f"{source}: invalid config at '{at}': a profile name must be lowercase and "
+                "hyphenated, such as 'openrouter-gpt'"
+            )
+        if name in builtins:
+            raise ConfigError(
+                f"{source}: invalid config at '{at}': {name!r} is a built-in backend id. Rename "
+                "the profile, because one id cannot name two backends"
+            )
+        out[name] = _validated_profile(profile, at=at, source=source, owned=owned, name=name)
+    return out
+
+
+def _builtin_env_owners(adapters: dict[str, Any]) -> dict[str, str]:
+    """Every variable a built-in backend declares, credential or config, mapped to the first
+    backend id that declares it."""
+    owners: dict[str, str] = {}
+    for slug, factory in adapters.items():
+        descriptor = factory().descriptor
+        names = [field.env for field in (*descriptor.credentials_spec, *descriptor.config_spec)]
+        for group in (*names, *descriptor._sdk_endpoint_envs, descriptor._sdk_config_envs):
+            for env in group:
+                owners.setdefault(env, slug)
+    return owners
+
+
+def _is_loopback(host: str) -> bool:
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _validated_profile(
+    profile: Any, *, at: str, source: str, owned: dict[str, str], name: str
+) -> dict[str, Any]:
+    def refuse(where: str, why: str) -> ConfigError:
+        return ConfigError(f"{source}: invalid config at '{where}': {why}")
+
+    if not isinstance(profile, dict):
+        raise refuse(at, "a provider profile must be a mapping")
+    unknown = sorted(str(k) for k in profile if k not in _PROVIDER_KEYS)
+    if unknown:
+        raise refuse(
+            at,
+            f"unknown key(s) {', '.join(unknown)}. A profile takes kind, base_url, model, key_env",
+        )
+    for key in _PROVIDER_REQUIRED:
+        if key not in profile:
+            raise refuse(at, f"{key!r} is required")
+    if profile["kind"] not in _PROVIDER_KINDS:
+        raise refuse(f"{at}/kind", "the only kind is 'openai-compatible'")
+    base_url = profile["base_url"]
+    if not isinstance(base_url, str):
+        raise refuse(f"{at}/base_url", "must be an http or https URL")
+    if not _BASE_URL_RE.fullmatch(base_url):
+        raise refuse(f"{at}/base_url", "must be an http or https URL")
+    try:
+        parts = urlsplit(base_url)
+        _ = parts.port  # a non-numeric port raises here, not on the first request
+    except ValueError:
+        raise refuse(f"{at}/base_url", "must be an http or https URL with a host") from None
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise refuse(f"{at}/base_url", "must be an http or https URL with a host")
+    if parts.username is not None or parts.password is not None:
+        raise refuse(
+            f"{at}/base_url",
+            "must not carry a user or password. Name the key with key_env instead",
+        )
+    model = profile["model"]
+    if not isinstance(model, str) or not model.strip():
+        raise refuse(f"{at}/model", "must be a non-empty model id")
+    key_env = profile.get("key_env")
+    if key_env is not None:
+        if not isinstance(key_env, str) or not _ENV_NAME_RE.fullmatch(key_env):
+            raise refuse(
+                f"{at}/key_env",
+                "must be an environment variable NAME such as OPENROUTER_API_KEY, never a key",
+            )
+        if key_env.startswith("OPENREADING_"):
+            raise refuse(
+                f"{at}/key_env",
+                "the OPENREADING_ prefix belongs to operator settings, so it cannot name a key",
+            )
+        if key_env in owned:
+            own = name.replace("-", "_").upper() + "_API_KEY"
+            raise refuse(
+                f"{at}/key_env",
+                f"{key_env} belongs to the built-in backend {owned[key_env]}, so a profile "
+                f"cannot reuse it. Pick a name of its own, such as {own}",
+            )
+        if parts.scheme != "https" and not _is_loopback(parts.hostname):
+            raise refuse(
+                f"{at}/base_url",
+                "a profile with key_env must use https, because plain http would send the key "
+                "in clear text. Plain http is allowed only for localhost, 127.0.0.0/8 and ::1",
+            )
+    return dict(profile)
 
 
 def load(

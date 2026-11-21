@@ -37,9 +37,11 @@ together.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from openreading.types.enums import BackendType, ChannelGrade, OutputParadigm, WaitMode
 
@@ -253,5 +255,22 @@ class AdapterDescriptor(BaseModel):
     # register a descriptor declaring a version below the router's own current floor.
     protocol_version: int
 
+    # Local connection settings participate in replay identity without entering the wire catalog.
+    _profile_base_url: str | None = PrivateAttr(default=None)
+    # The built-in client's factory origin also accepts its saved key when repeated in dotenv.
+    _default_origin: str | None = PrivateAttr(default=None)
+    # SDK-native destination selectors also govern whether a project can read a saved key.
+    # A runtime key pins the resolved URL. None leaves SDK-specific precedence to its client.
+    _sdk_endpoint_envs: dict[tuple[str, ...], str | None] = PrivateAttr(default_factory=dict)
+    _sdk_config_envs: tuple[str, ...] = PrivateAttr(default=())
+
     def to_schema_dict(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude_none=True)
+
+
+def descriptor_digest(descriptor: AdapterDescriptor) -> str:
+    """Identify the execution target for strategy compilation, journal pins and resume (BL-163)."""
+    data = descriptor.to_schema_dict()
+    if descriptor._profile_base_url is not None:
+        data["profile_base_url"] = descriptor._profile_base_url
+    return hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()

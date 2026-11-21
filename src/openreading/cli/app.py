@@ -10,10 +10,14 @@ and prints the one response schema.
 
 Credentials never travel on the CLI: they are read from the environment by the broker
 (OPENREADING_<SLUG>_<KEY> or the service-native var, e.g. REDUCTO_API_KEY). A `.env` in the
-working directory is loaded automatically (never overriding an already-set var).
+working directory is loaded automatically except by `mcp`. Exported variables take precedence.
+Every verb but `serve` and `mcp` then reads the OS keychain last (`credentials.use_keychain`). Those two read
+it only with `--keychain`. The `keys` verbs live in `openreading.cli.keys`, and the `setup`
+wizard in `openreading.cli.setup`.
 
-The user-facing reference (every subcommand, flags, exit codes 0-6 and 143) is the `openreading.cli`
-package docstring; this module holds the `cmd_*` handlers, `build_parser`, and `main`.
+The user-facing reference (every subcommand, flags, exit codes 0-6, 130 and 143) is the
+`openreading.cli` package docstring. This module holds the `cmd_*` handlers, `build_parser`, and
+`main`.
 
 Environment this module reads itself
 ------------------------------------
@@ -45,6 +49,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import io
 import json
 import os
 import signal
@@ -55,7 +60,12 @@ from typing import Any, Literal, TypeGuard
 
 from openreading import __version__ as openreading_version
 from openreading import api, config, schemas
-from openreading.adapters.registry import BUILTIN_ADAPTERS, build_registry, make_adapter
+from openreading.adapters.registry import (
+    build_registry,
+    install_profiles,
+    known_backends,
+    make_adapter,
+)
 from openreading.batch.runner import MAX_BATCH_JOBS, JobsLimitError
 from openreading.batch.sources import (
     DEFAULT_MAX_ITEMS,
@@ -64,14 +74,17 @@ from openreading.batch.sources import (
     is_url,
     looks_batch,
 )
+from openreading.cli import keys as keys_cli
+from openreading.cli import setup as setup_cli
 from openreading.cli.help import cmd_help
-from openreading.credentials import EnvCredentialBroker, load_dotenv
+from openreading.credentials import EnvCredentialBroker, load_dotenv, use_keychain
 from openreading.ledger.header import HeaderMismatch
 from openreading.liveness import check_liveness, probe_kind
 from openreading.readiness import (
     auth_rejected_backends,
     auth_rejected_hint,
     backend_readiness,
+    env_ignored_hint,
     missing_reason,
 )
 from openreading.router.executor import execute_plan
@@ -645,12 +658,12 @@ def cmd_backends(args) -> int:
     """List backends and whether they are CONFIGURED here. `--check` additionally probes the named
     backends for real liveness (internal/design/liveness.md §9).
 
-    `--check` never defaults to "everything": a bare `openreading backends` is byte-for-byte what
-    it has always been, offline and free. The literal `--check all` exists as explicit typed
+    Bare `openreading backends` is offline and free. A SOURCE column appears when a credential
+    resolves from the OS keychain. The literal `--check all` exists as explicit typed
     consent to probe every backend that declares a probe — on a CLI, a flag the user typed IS the
     consent that a page load can never be."""
     broker = EnvCredentialBroker()
-    slugs = sorted(BUILTIN_ADAPTERS)
+    slugs = sorted(known_backends())
     adapters = {s: make_adapter(s) for s in slugs}
     rows = [backend_readiness(adapters[s], broker=broker) for s in slugs]
 
@@ -659,13 +672,25 @@ def cmd_backends(args) -> int:
         return 3
 
     if not requested:
-        print(f"{'BACKEND':<30} {'TYPE':<18} {'CONFIGURED':<11} MISSING")
+        # SOURCE appears only once a key resolves from the keychain. With nothing saved, the
+        # table stays byte-identical to what scripts already parse (law PS1 in
+        # `openreading.credentials`), and the column sits before MISSING so `$3` stays CONFIGURED.
+        sources = {s: _row_sources(broker, adapters[s].descriptor) for s in slugs}
+        show_source = any("keychain" in v for v in sources.values())
+        source_head = f"{'SOURCE':<10} " if show_source else ""
+        print(f"{'BACKEND':<30} {'TYPE':<18} {'CONFIGURED':<11} {source_head}MISSING")
         for r in rows:
             miss = missing_reason(r)
+            source = f"{','.join(sources[r.slug]) or '-':<10} " if show_source else ""
             print(
-                f"{r.slug:<30} {r.type:<18} {('yes' if r.ready else 'no'):<11} "
+                f"{r.slug:<30} {r.type:<18} {('yes' if r.ready else 'no'):<11} {source}"
                 f"{', '.join(miss) or '-'}"
             )
+        # On stderr, so the table a script parses stays the same.
+        for r in rows:
+            hint = env_ignored_hint(r)
+            if hint:
+                print(f"[backends] {hint}", file=sys.stderr)
         return 0
 
     # --check: the probe lane. Reports are printed as they complete so a slow backend never hides
@@ -681,6 +706,13 @@ def cmd_backends(args) -> int:
             f"{('yes' if report.measured else 'no'):<9} {latency:<9} {report.detail}"
         )
     return 0
+
+
+def _row_sources(broker: EnvCredentialBroker, descriptor) -> list[str]:
+    """Where a backend's resolved secrets come from (`env`, `.env`, `keychain`), deduplicated in
+    descriptor order. Empty when no secret resolves."""
+    found = [src for _, src in broker.secret_sources(descriptor) if src != "missing"]
+    return list(dict.fromkeys(found))
 
 
 def _check_targets(raw: str | None, adapters: dict) -> list[str] | None:
@@ -1236,15 +1268,15 @@ def cmd_leaderboard(args) -> int:
         ids = [
             r.slug
             for r in (
-                backend_readiness(make_adapter(s), broker=broker) for s in sorted(BUILTIN_ADAPTERS)
+                backend_readiness(make_adapter(s), broker=broker) for s in sorted(known_backends())
             )
             if r.ready
         ]
     else:
         ids = [b.strip() for b in (args.backends or "").split(",") if b.strip()]
-        unknown = [b for b in ids if b not in BUILTIN_ADAPTERS]
+        unknown = [b for b in ids if b not in known_backends()]
         if unknown:
-            print(_unknown_backends_line("leaderboard", unknown, BUILTIN_ADAPTERS), file=sys.stderr)
+            print(_unknown_backends_line("leaderboard", unknown, known_backends()), file=sys.stderr)
             return 2
     if len(ids) < 2:
         print(
@@ -1268,7 +1300,7 @@ def cmd_leaderboard(args) -> int:
     # scored CaseResult — AC-1/AC-2), so _CLEAN_EXIT3_ERRORS is defensive symmetry with
     # compare/calibrate's coded-exit family (AC-6) rather than a path real backend behavior takes
     # today; ValueError/FileNotFoundError cover an empty/missing dataset_dir or (defensively, the
-    # CLI already validated every id against BUILTIN_ADAPTERS above) an unregistered backend.
+    # CLI already validated every id against known_backends() above) an unregistered backend.
     except (ValueError, FileNotFoundError, *_CLEAN_EXIT3_ERRORS) as e:
         print(f"[leaderboard] {e}", file=sys.stderr)
         return 3
@@ -1368,9 +1400,9 @@ def _benchmark_targets(args):
         # cannot see the adapter registry without the dependency running the wrong way. Identity
         # is checked here instead, where `compare` and `leaderboard` already check theirs. A typo
         # otherwise priced a run that could not exist, and said nothing.
-        if target.kind == "backend" and target.name not in BUILTIN_ADAPTERS:
+        if target.kind == "backend" and target.name not in known_backends():
             print(
-                _unknown_backends_line("benchmark", [target.name], BUILTIN_ADAPTERS),
+                _unknown_backends_line("benchmark", [target.name], known_backends()),
                 file=sys.stderr,
             )
             return None
@@ -1794,15 +1826,15 @@ def cmd_compare(args) -> int:
                 r.slug
                 for r in (
                     backend_readiness(make_adapter(s), broker=broker)
-                    for s in sorted(BUILTIN_ADAPTERS)
+                    for s in sorted(known_backends())
                 )
                 if r.ready
             ]
         else:
             ids = [b.strip() for b in args.backends.split(",") if b.strip()]
-            unknown = [b for b in ids if b not in BUILTIN_ADAPTERS]
+            unknown = [b for b in ids if b not in known_backends()]
             if unknown:
-                print(_unknown_backends_line("compare", unknown, BUILTIN_ADAPTERS), file=sys.stderr)
+                print(_unknown_backends_line("compare", unknown, known_backends()), file=sys.stderr)
                 return 2
         if len(ids) < 2:
             print(
@@ -1951,11 +1983,13 @@ def cmd_compare(args) -> int:
 EPILOGS = {
     "mcp": r"""Examples:
   openreading mcp --profile local-document-proof-v1 \
-    --input-root /absolute/documents --artifact-root /absolute/evidence
+    --input-root /absolute/documents --artifact-root /absolute/evidence \
+    --keychain    # also read keys saved with keys set
 
 Then:
   Connect your MCP client and call openreading_import with a relative path.
   Search the returned artifact, then read evidence and cite its physical page.
+  Call openreading_backends to see which backends are configured.
 
 Exits: 0 transport closed. 2 configuration or dependencies. 130 interrupted.
 
@@ -2054,6 +2088,7 @@ Examples:
   openreading serve --port 0         # the kernel picks, the line names it
   openreading serve --host 0.0.0.0   # reachable by others, so read below
   openreading serve --cors-origin http://localhost:3000  # one browser origin
+  openreading serve --keychain       # also read keys saved with keys set
 
 Authentication is OFF by default. With no OPENREADING_API_KEYS set, anyone who
 reaches this socket spends your vendor credits, which is why the default bind
@@ -2484,6 +2519,9 @@ More: openreading help leaderboard, openreading help datasets""",
 # argparse renders the description before the subcommand list and the epilog after it. The
 # quickstart goes in the description on purpose: a first-time reader must reach something they
 # can paste inside the first screen, and a thirteen-verb listing pushes an epilog past the fold.
+EPILOGS.update(keys_cli.EPILOGS)
+EPILOGS["setup"] = setup_cli.EPILOG
+
 TOP_DESCRIPTION = """\
 One JSON shape from every document parser, so switching or comparing parsers
 never changes your code.
@@ -2500,6 +2538,8 @@ QUICKSTART. No key or account. Install dependencies first (see the README).
 TOP_EPILOG = """\
 I WANT TO ...                          RUN
   see what works here, with no keys    openreading backends
+  get a hosted backend working, guided openreading setup
+  save a key once, for every folder    openreading keys set SLUG
   read one document                    openreading parse FILE --backend SLUG
   understand the response JSON         openreading help response
   read a folder, a glob, or a list     openreading parse DIR/ --backend SLUG
@@ -2562,7 +2602,7 @@ def _attach_epilogs(parser: argparse.ArgumentParser, path: str = "") -> None:
 
 
 def cmd_mcp(args: argparse.Namespace) -> int:
-    """Launch the fixed local profile without loading ambient credentials."""
+    """Launch the fixed local profile. It loads no `.env`, and the keychain only with `--keychain`."""
     from openreading.mcp_server.main import launch
 
     return launch(args)
@@ -2645,7 +2685,7 @@ def build_parser() -> argparse.ArgumentParser:
     choose.add_argument(
         "--backend",
         default=None,
-        choices=sorted(BUILTIN_ADAPTERS),
+        choices=sorted(known_backends()),
         # The choices still gate the value and still print in full on an invalid one; the metavar
         # only keeps fifteen slugs out of the usage line, where they buried the English.
         metavar="SLUG",
@@ -2824,7 +2864,15 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument(
         "--cors-origin", action="append", default=None, help="allowed CORS origin (repeatable)"
     )
+    serve.add_argument(
+        "--keychain",
+        action="store_true",
+        help="also read saved backend keys from this server's OS keychain (off by default)",
+    )
     serve.set_defaults(func=cmd_serve)
+
+    keys_cli.add_parser(sub, common)
+    setup_cli.add_parser(sub, common)
 
     # `openreading strategy <show|list|normalize|validate|plan>` inspects the openreading.yaml
     # orchestration config. The verbs that work on a run instead sit at the top level: `explain`
@@ -2952,9 +3000,8 @@ def build_parser() -> argparse.ArgumentParser:
         dest="deadline_s",
         metavar="SECONDS",
         help="absolute time budget override, in seconds, applied to every fanned-out backend. "
-        "Raise it for a long-running hosted async job. Default, when omitted, is "
-        "the generic 120s single-document deadline. A non-positive value (0 or negative) means "
-        "fail fast: do not wait at all",
+        "Defaults to 120s for built-ins. Provider profiles allow 300s per chat call when "
+        "omitted. A non-positive value (0 or negative) means fail fast",
     )
     show = compare.add_argument_group("how it prints")
     show.add_argument(
@@ -3480,13 +3527,171 @@ def _terminate_as_interrupt(*, enabled: bool = True):
             signal.signal(signal.SIGINT, signal.default_int_handler)
 
 
+# The commands that load `openreading.yaml` themselves and report a broken file with exit 3 and
+# their own message. Every other command runs on built-ins and names the file once on stderr.
+_FILE_COMMANDS = frozenset(
+    {
+        "parse",
+        "route",
+        "resume",
+        "strategy",
+        "compare",
+        "replay",
+        "calibrate",
+        "leaderboard",
+    }
+)
+
+
+def _prescan_flags(argv: list[str]) -> dict[str, str | None]:
+    """The `--config` and `--env-file` values in argv, read before argparse runs."""
+    flags: dict[str, str | None] = {"--config": None, "--env-file": None}
+    for i, arg in enumerate(argv):
+        name, eq, value = arg.partition("=")
+        if name in flags:
+            flags[name] = value if eq else (argv[i + 1] if i + 1 < len(argv) else None)
+    return flags
+
+
+def _install_file_profiles(argv: list[str]) -> ConfigError | None:
+    """Install the provider profiles of the `openreading.yaml` this invocation will read.
+
+    It runs before argument parsing because `--backend` checks its value against the known ids,
+    and a profile id only becomes known once its file is read. It finds the file the way the
+    command will: `--config PATH`, then `OPENREADING_CONFIG`, then the working directory. The
+    dotenv file loads first, so an `OPENREADING_CONFIG` set there counts, and loading it again
+    in `main` changes nothing. `serve` reads its file in `create_app`, and `mcp` reads only its
+    own `--config`, so both are skipped. `setup --config PATH` naming a file that does not exist
+    yet installs nothing and reports nothing, because `setup` creates that file.
+
+    A file that fails to load installs nothing and is returned for `main` to report. Swallowed,
+    it left `backends` and `keys list` silently short of every profile, and a user who forgot
+    `version: 1` never learned why.
+    """
+    command = next((a for a in argv if not a.startswith("-")), None)
+    if command in (None, "serve", "mcp"):
+        return None
+    flags = _prescan_flags(argv)
+    load_dotenv(flags["--env-file"])
+    explicit = flags["--config"]
+    if command == "setup" and explicit is not None and not Path(explicit).exists():
+        # `setup` creates the file it names, so a missing one is the normal first run, not a
+        # problem to report. `cmd_setup` still refuses a file that exists and does not load.
+        return None
+    try:
+        loaded = config.load(explicit)
+    except ConfigError as e:
+        return e
+    if loaded is not None:
+        install_profiles(loaded.providers)
+    return None
+
+
+def _parse_args_reporting_config(
+    argv: list[str] | None, command: str | None, broken: ConfigError | None
+) -> argparse.Namespace | int:
+    """`build_parser().parse_args`, plus what a broken file means for this command.
+
+    A command in `_FILE_COMMANDS` keeps its own exit 3 and message. Only when argument parsing
+    itself fails is the file reported here instead, because the failure is the file's: with the
+    profiles unread, `parse --backend <profile>` became an "invalid choice" usage error, exit 2.
+    Every other command prints one `[config]` line on stderr and runs on built-ins, so stdout is
+    unchanged.
+    """
+    parser = build_parser()
+    if command in _KEY_COMMANDS:
+        if broken is not None:
+            # The scan reads `--config` for every verb, so its value may be a key pasted in the
+            # wrong place. A path that came from argv is therefore never quoted back here.
+            raw = list(sys.argv[1:] if argv is None else argv)
+            why = (
+                "The openreading.yaml named on the command line could not be loaded"
+                if _prescan_flags(raw)["--config"] is not None
+                else " ".join(str(broken).split()).rstrip(".")
+            )
+            print(
+                f"[config] {why}. Provider profiles from this file are not loaded.", file=sys.stderr
+            )
+        return _parse_args_without_echo(parser, argv, command)
+    if broken is None:
+        return parser.parse_args(argv)
+    why = " ".join(str(broken).split()).rstrip(".")
+    if command not in _FILE_COMMANDS:
+        print(f"[config] {why}. Provider profiles from this file are not loaded.", file=sys.stderr)
+        return parser.parse_args(argv)
+    usage = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(usage):
+            return parser.parse_args(argv)
+    except SystemExit as exit_:
+        if exit_.code != 2:
+            sys.stderr.write(usage.getvalue())
+            raise
+    print(f"[{command}] {broken}", file=sys.stderr)
+    return 3
+
+
+# The commands a user reaches for while holding a key. A key pasted on their command line must not
+# come back in a usage error.
+_KEY_COMMANDS = frozenset({"keys", "setup"})
+
+
+def _parse_args_without_echo(
+    parser: argparse.ArgumentParser, argv: list[str] | None, command: str
+) -> argparse.Namespace | int:
+    """Parse a `_KEY_COMMANDS` command without letting argparse quote a token back (law PS4).
+
+    argparse names the offending token in every usage error, such as "unrecognized arguments:
+    --token sk-...". A key pasted after a mistyped flag would reach the terminal and the scrollback.
+    The usage error is therefore replaced by a key-free sentence with the same exit 2. Help output
+    and every other exit pass through unchanged.
+    """
+    usage = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(usage):
+            return parser.parse_args(argv)
+    except SystemExit as exit_:
+        if exit_.code != 2:
+            sys.stderr.write(usage.getvalue())
+            raise
+    where = (
+        "Setup asks for each key at a hidden prompt"
+        if command == "setup"
+        else "Use the hidden prompt or --stdin"
+    )
+    print(
+        f"[{command}] Those arguments are not valid here. Run openreading {command} --help for "
+        f"usage. A key never goes on the command line. {where}.",
+        file=sys.stderr,
+    )
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse argv, load ./.env or --env-file, dispatch the handler, and return its exit code.
     SIGTERM arrives as KeyboardInterrupt for every command but `serve`, which hands its own
     signals to uvicorn."""
-    args = build_parser().parse_args(argv)
+    raw = list(sys.argv[1:] if argv is None else argv)
+    broken = _install_file_profiles(raw)
+    # Any `keys` or `setup` token selects the no-echo parse. A key typed before the verb, as in
+    # `--key sk-... setup`, otherwise became the command argparse quoted as an invalid choice.
+    command = next((a for a in raw if a in _KEY_COMMANDS), None) or next(
+        (a for a in raw if not a.startswith("-")), None
+    )
+    parsed = _parse_args_reporting_config(argv, command, broken)
+    if isinstance(parsed, int):
+        return parsed
+    args = parsed
     if args.func is cmd_mcp:
         return cmd_mcp(args)
     load_dotenv(getattr(args, "env_file", None))  # ./.env or --env-file; never overrides set env
-    with _terminate_as_interrupt(enabled=args.func is not cmd_serve):
-        return args.func(args)
+    # Every verb reads the keychain after the environment and .env, except `serve`, which waits
+    # for `--keychain`. `mcp` returned above, because its launcher reads its own `--keychain`.
+    # The opt-in ends with the command, so a caller that runs `main` twice in one process starts
+    # clean each time.
+    previous = use_keychain(args.func is not cmd_serve or bool(getattr(args, "keychain", False)))
+    try:
+        with _terminate_as_interrupt(enabled=args.func is not cmd_serve):
+            return args.func(args)
+    finally:
+        use_keychain(previous)

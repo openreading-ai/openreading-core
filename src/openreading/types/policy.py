@@ -1,4 +1,4 @@
-"""The `policy:` block as a typed object, mirroring `strategy-config.v0.4.json`.
+"""The `policy:` block as a typed object, mirroring `strategy-config.v0.5.json`.
 
 One key: `backends`, a flat list of backend ids in preference order. It supplies the chain an
 unnamed request walks. A backend named directly by a request or a strategy leaf runs

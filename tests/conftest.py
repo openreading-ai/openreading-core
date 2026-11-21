@@ -114,6 +114,19 @@ Surface: CLI + Python (local backends `pymupdf` / `tesseract`, no keys)
 API-shape gotcha: `run` / `route` take a PATH or `bytes` first, not a request dict. Passing a
 dict raises a confusing "File name too long" `OSError` (the dict's repr is opened as a path).
 
+Keychain: off by default, a fake when a test needs one
+=======================================================
+The autouse fixture sets `OPENREADING_KEYCHAIN=off`, so no offline test reads or writes the real
+OS keychain and a developer's saved keys never change a result. A test that exercises the
+keychain takes the `fake_keychain` fixture. It removes the switch, installs an in-memory `keyring`
+backend through `keyring.core._keyring_backend`, and clears `openreading.keychain`'s per-process
+cache before and after. The fake keeps entries in `.store` and records every call in `.calls`, so
+a test can assert that a surface made none. Setting the `.block` event makes `get_password` wait
+on `.release`, which is how the timeout test stands in for a Secret Service that never answers.
+To prove the plaintext refusal, a test sets `keyring.core._keyring_backend` to one of `keyring`'s
+own fail or null backends instead. Opting a surface in stays the surface's job: the CLI calls
+`credentials.use_keychain(True)` itself, and a Python API test passes `keychain=True`.
+
 Surface: HTTP server (`openreading serve`)
 ==========================================
 Same request/response schema over HTTP. `tests/test_server.py` (in `verify`) drives the ASGI app
@@ -255,10 +268,85 @@ def _offline_workspace(request: pytest.FixtureRequest, tmp_path: Path) -> Iterat
         return
     # CLI dotenv loading mutates os.environ directly, outside a test's monkeypatch tracking.
     # Restore the complete mapping so those writes cannot change a later server's startup.
+    from openreading import credentials, keychain
+
     with patch.dict(os.environ), pytest.MonkeyPatch.context() as isolated:
         isolated.chdir(tmp_path)
         os.environ.pop("OPENREADING_CONFIG", None)
-        yield
+        # A developer's own keychain must never reach a test. `fake_keychain` opts back in.
+        os.environ["OPENREADING_KEYCHAIN"] = "off"
+        previous = credentials.use_keychain(False)
+        keychain._reset()
+        credentials._DOTENV_NAMES.clear()
+        try:
+            yield
+        finally:
+            credentials.use_keychain(previous)
+            keychain._reset()
+            credentials._DOTENV_NAMES.clear()
+
+
+def _fake_keyring_class():
+    """The in-memory backend class. Built on demand, because a test may hide `keyring` from the
+    module under test to prove the code path without the `[setup]` extra."""
+    import threading
+
+    import keyring.backend
+
+    class _Fake(keyring.backend.KeyringBackend):
+        priority = 10  # type: ignore[assignment]
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.store: dict[tuple[str, str], str] = {}
+            self.calls: list[tuple[str, str]] = []
+            self.block = threading.Event()
+            self.release = threading.Event()
+
+        def get_password(self, service, username):
+            self.calls.append(("get", username))
+            if self.block.is_set():
+                self.release.wait(10)
+            return self.store.get((service, username))
+
+        def set_password(self, service, username, password):
+            self.calls.append(("set", username))
+            self.store[(service, username)] = password
+
+        def delete_password(self, service, username):
+            self.calls.append(("delete", username))
+            self.store.pop((service, username), None)
+
+    return _Fake
+
+
+@pytest.fixture
+def fake_keychain(monkeypatch: pytest.MonkeyPatch):
+    """Turn the keychain on for one test, backed by an in-memory fake that records its calls."""
+    import keyring.core
+
+    from openreading import keychain
+
+    fake = _fake_keyring_class()()
+    monkeypatch.delenv("OPENREADING_KEYCHAIN", raising=False)
+    monkeypatch.setattr(keyring.core, "_keyring_backend", fake)
+    keychain._reset()
+    try:
+        yield fake
+    finally:
+        fake.release.set()
+        keychain._reset()
+
+
+@pytest.fixture(autouse=True)
+def _no_provider_profiles() -> Iterator[None]:
+    """Provider profiles are process-wide (`openreading.adapters.registry.install_profiles`), so
+    one test's `openreading.yaml` must not leave a backend id behind for the next test."""
+    from openreading.adapters import registry
+
+    registry.install_profiles(None)
+    yield
+    registry.install_profiles(None)
 
 
 # --- publisher benchmark corpora ---------------------------------------------------------------

@@ -57,25 +57,23 @@ NOTHING IS ON PyPI. `pip install openreading` does not work; install from a clon
     uv run openreading backends         # one row per backend, under the header
                                         #   BACKEND  TYPE  CONFIGURED  MISSING
 
-The readiness column is headed CONFIGURED, and it reports `yes` / `no`. It is not a complete
-provisioning source: for `anthropic-claude` and `aws-textract` the MISSING column stays `-` even
-when they are unconfigured, so those two name nothing to provision and the only way to learn the
-requirement is to attempt a parse and read the error (it names the var).
+CONFIGURED reports offline readiness. MISSING lists variables or dependencies. When a key
+resolves from the OS keychain, SOURCE shows where credentials came from. For example,
+`openreading keys list --json` reports variable names and sources without exposing values.
 
 Do NOT run `cp .env.example .env`. That file pre-fills two localhost endpoints, which flips
 `docling` and `qwen-vl` to CONFIGURED `yes` on a machine where neither is running. The router
 still falls back to a working local backend, so the parse succeeds, but only after your document
-is sent to `http://localhost:5001` first, an address you never chose. Write only the keys you
-actually hold:
+is sent to `http://localhost:5001` first, an address you never chose. Enter only the keys you
+hold in an editor, or use the hidden terminal prompt:
 
-    echo 'REDUCTO_API_KEY=sk_...' >> .env
+    openreading keys set reducto
 
-Keys are read from the environment per call, held only in memory, never stored. Credentials
-never travel on the command line: no verb takes a key flag, environment / `.env` only, so a key
-can never land in shell history or a process listing. The CLI auto-loads `./.env` (`--env-file`
-to point elsewhere); the Python API loads a file ONLY when you pass `env_file=` to `run()` /
-`run_batch()`. With it unset nothing is read, exported variables alone apply. A loaded file never
-overrides an already-exported variable (`openreading.credentials.load_dotenv`). A venv synced
+The CLI can use that saved key from any directory. `openreading setup` and `keys import` also
+write to the OS keychain. The CLI loads `./.env` by default, except for the MCP launcher.
+Shell exports take precedence over a loaded file. Both `serve` and `mcp` need `--keychain`
+to read saved keys. In Python, `env_file=` selects a dotenv file for `run` or `run_batch`.
+Pass `keychain=True` to `run`, `run_batch` or `resume` to read saved keys. A venv synced
 without `--all-extras` silently lacks the server and hosted extras and dies later with import
 errors, so `make sync` is step zero.
 
@@ -100,6 +98,7 @@ Parse one document. `source` is a path, an http(s) URL, or raw bytes (NOT a requ
     resp = openreading.run("scan.png", backend="tesseract",
                            pages={"ranges": [{"start": 1, "end": 2}]})
     # CLI: openreading parse doc.pdf --backend pymupdf     (URL sources work; --pages 1 2)
+    resp = openreading.run("doc.pdf", backend="reducto", keychain=True)  # key from keychain
 
 Extract typed fields (schema-driven). A directly-named backend that cannot do it (pymupdf,
 tesseract, docling) RAISES `UnsupportedFeatureError` (CLI exit 3, HTTP 422) rather than silently
@@ -177,6 +176,7 @@ Strategies (optional `openreading.yaml` orchestration):
 Resume a journalled run (needs `OPENREADING_LEDGER`, see `openreading.api`):
 
     resp = openreading.resume("7dbf6b71-adb5-4e90-9188-a184fdba9d05")   # a run id is a UUIDv4
+    resp = openreading.resume(run_id, keychain=True)   # keys saved with `openreading keys set`
     # CLI: openreading resume 7dbf6b71-adb5-4e90-9188-a184fdba9d05      (no other flags)
 
 HTTP server (`[server]` extra; binds 127.0.0.1:8787; NO built-in caller auth unless

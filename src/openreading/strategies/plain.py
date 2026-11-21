@@ -3,7 +3,7 @@
 A strategy says which backends run, in what order or together, and when to move on. Plain lets
 you write that in eleven words you can hold in your head. It is a dialect, not a second engine:
 the loader (`openreading.strategies.loader.parse_config_raw`) calls `desugar_config` after the
-JSON-Schema gate (`schemas/strategy-config.v0.4.json`) and before `StrategyConfig.model_validate`,
+JSON-Schema gate (`schemas/strategy-config.v0.5.json`) and before `StrategyConfig.model_validate`,
 so the engine, traces, replay, keep-best, caller-scope pruning, and `strategy validate` see only
 the canonical five-node longhand the engine already runs. `openreading strategy show <name>` prints
 a user strategy's body AS WRITTEN — a Plain body prints Plain, a preset prints its vendored
@@ -491,7 +491,7 @@ Design decisions, and the failure each avoids
 * Every Plain construct desugars to existing longhand — one engine, one validator, one trace,
   one replay path. The only engine changes Plain brought were the step gate on parallel steps
   and the `disagreement_over` signal, both available to advanced files too.
-* The grammar lives in `strategy-config.v0.4.json`. A
+* The grammar lives in `strategy-config.v0.5.json`. A
   released schema is byte-frozen, so it is changed by cutting a new version. The change is
   additive, the config `version` const stays 1, and v0.2 validates every v0.1 config.
 * Presets stay vendored in longhand; they carry `intent:`, which Plain cannot spell. The docs
@@ -516,7 +516,7 @@ import difflib
 from dataclasses import dataclass
 from typing import Any
 
-from openreading.adapters.registry import BUILTIN_ADAPTERS
+from openreading.adapters.registry import known_backends
 from openreading.strategies.loader import ConfigError
 from openreading.strategies.presets import PRESET_NAMES
 
@@ -585,13 +585,19 @@ def desugar_config(raw: dict) -> tuple[dict, dict[str, PlainInfo]]:
     if not isinstance(strategies, dict):
         return raw, {}
     strategy_names = set(strategies)
-    known_names = BUILTIN_ADAPTERS.keys() | strategy_names | set(PRESET_NAMES)
+    # A provider profile in the same file is a backend id here even before any surface installs
+    # it, because desugaring reads the file and the file is what defines the profile.
+    providers = raw.get("providers")
+    backend_ids = frozenset(known_backends()) | frozenset(str(p) for p in providers or {})
+    known_names = set(backend_ids) | strategy_names | set(PRESET_NAMES)
 
     out_strategies: dict[str, Any] = {}
     info: dict[str, PlainInfo] = {}
     for name, body in strategies.items():
         if _is_plain_map(body):
-            desugared, provenance, warnings = _desugar_body(name, body, strategy_names, known_names)
+            desugared, provenance, warnings = _desugar_body(
+                name, body, strategy_names, known_names, backend_ids
+            )
             out_strategies[name] = desugared
             info[name] = PlainInfo("plain", True, provenance or None, tuple(warnings))
         else:
@@ -624,20 +630,28 @@ _Desugared = tuple[dict, dict[str, dict[str, str]], list[tuple[str, str]]]
 
 
 def _desugar_body(
-    name: str, body: dict, strategy_names: set[str], known_names: set[str]
+    name: str,
+    body: dict,
+    strategy_names: set[str],
+    known_names: set[str],
+    backend_ids: frozenset[str],
 ) -> _Desugared:
     if "try" in body:
-        return _desugar_try(name, body, strategy_names, known_names)
+        return _desugar_try(name, body, strategy_names, known_names, backend_ids)
     if "race" in body:
-        return _desugar_race(name, body, strategy_names, known_names)
-    return _desugar_compare(name, body, strategy_names, known_names)
+        return _desugar_race(name, body, strategy_names, known_names, backend_ids)
+    return _desugar_compare(name, body, strategy_names, known_names, backend_ids)
 
 
 # --------------------------------------------------------------------------- node desugars
 
 
 def _desugar_try(
-    name: str, body: dict, strategy_names: set[str], known_names: set[str]
+    name: str,
+    body: dict,
+    strategy_names: set[str],
+    known_names: set[str],
+    backend_ids: frozenset[str],
 ) -> _Desugared:
     raw_items = body["try"]
     items = raw_items if isinstance(raw_items, list) else [raw_items]
@@ -659,7 +673,7 @@ def _desugar_try(
     provenance: dict[str, dict[str, str]] = {}
     warnings: list[tuple[str, str]] = []
     for idx, item in enumerate(items):
-        node = _resolve_item(name, item, strategy_names, known_names, at=f"try[{idx}]")
+        node = _resolve_item(name, item, strategy_names, known_names, backend_ids, at=f"try[{idx}]")
         is_last = idx == len(items) - 1
         if gate is not None and not is_last:
             if "use" in node:  # a strategy reference runs its own rules; the outer gate can't apply
@@ -681,12 +695,16 @@ def _desugar_try(
 
 
 def _desugar_race(
-    name: str, body: dict, strategy_names: set[str], known_names: set[str]
+    name: str,
+    body: dict,
+    strategy_names: set[str],
+    known_names: set[str],
+    backend_ids: frozenset[str],
 ) -> _Desugared:
     items = body["race"]
     _check_no_dup(name, "race", items)
     branches = [
-        _resolve_item(name, it, strategy_names, known_names, at=f"race[{i}]")
+        _resolve_item(name, it, strategy_names, known_names, backend_ids, at=f"race[{i}]")
         for i, it in enumerate(items)
     ]
     out: dict[str, Any] = {"parallel": branches, "pick": "fastest", "on_win": "cancel"}
@@ -695,12 +713,16 @@ def _desugar_race(
 
 
 def _desugar_compare(
-    name: str, body: dict, strategy_names: set[str], known_names: set[str]
+    name: str,
+    body: dict,
+    strategy_names: set[str],
+    known_names: set[str],
+    backend_ids: frozenset[str],
 ) -> _Desugared:
     items = body["compare"]
     _check_no_dup(name, "compare", items)
     branches = [
-        _resolve_item(name, it, strategy_names, known_names, at=f"compare[{i}]")
+        _resolve_item(name, it, strategy_names, known_names, backend_ids, at=f"compare[{i}]")
         for i, it in enumerate(items)
     ]
 
@@ -722,7 +744,7 @@ def _desugar_compare(
     gate, predicates = _compile_gate(escalate_when)
 
     parallel_step = {"parallel": branches, "pick": "best", "require": "all", "escalate_if": gate}
-    then_node = _resolve_item(name, then, strategy_names, known_names, at="then")
+    then_node = _resolve_item(name, then, strategy_names, known_names, backend_ids, at="then")
     out = {"steps": [parallel_step, then_node]}
     _attach_budget(out, body)
     return out, {"steps[0]": predicates}, []
@@ -736,6 +758,7 @@ def _resolve_item(
     item: str,
     strategy_names: set[str],
     known_names: set[str],
+    backend_ids: frozenset[str],
     *,
     at: str,
 ) -> dict:
@@ -750,7 +773,7 @@ def _resolve_item(
             f"deployment's order once in policy.backends"
         )
 
-    is_backend = item in BUILTIN_ADAPTERS
+    is_backend = item in backend_ids
     is_strategy = item in strategy_names or item in PRESET_NAMES
     if is_backend and is_strategy:
         raise ConfigError(

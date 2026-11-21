@@ -55,9 +55,10 @@ EXTRA_NAME_EXCEPTIONS: dict[str, str] = {
 # `[project.optional-dependencies]` outside this set (and outside the reversed
 # EXTRA_NAME_EXCEPTIONS values) must name a real registry slug.
 # `server` is deliberately never folded into `all` (`all` is the adapter-runtime-deps union;
-# pulling in fastapi/uvicorn there would misrepresent what "all" means).
+# pulling in fastapi/uvicorn there would misrepresent what "all" means). `setup` is the one
+# non-adapter extra `all` does include, because saving a key belongs to every install.
 NON_ADAPTER_EXTRAS: frozenset[str] = frozenset(
-    {"http", "server", "agent", "parsebench", "extractbench", "all"}
+    {"http", "server", "agent", "setup", "parsebench", "extractbench", "all"}
 )
 
 ALL_EXTRA_NAME = "all"

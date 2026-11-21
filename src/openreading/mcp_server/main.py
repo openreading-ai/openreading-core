@@ -3,6 +3,10 @@
 Exit 0 means normal transport closure, 2 means invalid configuration or missing extras,
 and 130 means interruption. No environment variable selects roots or backend behavior.
 The launcher supplies all configuration through arguments before accepting tool calls.
+It skips dotenv and working-directory config discovery because an MCP client's directory is
+arbitrary. --config PATH explicitly selects the file whose provider profiles it reports.
+--keychain opts this process into keychain reads for its lifetime (openreading.credentials.use_keychain). Without it, no
+code path in the process calls the keychain, so a desktop never sees an unlock dialog.
 The serve library entry point also accepts a trusted service_factory and ImportExecution.
 These Python-only hooks let a packager own external imports without model-selected code.
 For example, its fixed child dispatch can reconstruct a validated destination snapshot.
@@ -14,7 +18,8 @@ import argparse
 import json
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -28,6 +33,16 @@ from openreading.artifacts.limits import ArtifactError, DoclingLimits, ProfileCo
 
 
 def arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--keychain",
+        action="store_true",
+        help="also read keys saved with `openreading keys set` (default: environment only)",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        help="openreading.yaml whose provider profiles this server reports (never ./openreading.yaml)",
+    )
     parser.add_argument(
         "--document-response-bytes",
         type=int,
@@ -112,6 +127,7 @@ async def serve(
     execution: ImportExecution | None = None,
 ) -> None:
     from openreading.artifacts.service import ArtifactService
+    from openreading.mcp_server.backends import backends_report
     from openreading.mcp_server.session import serve as serve_session
 
     await serve_session(
@@ -122,6 +138,9 @@ async def serve(
         document_export_root=document_export_root,
         service_factory=service_factory or ArtifactService,
         execution=execution,
+        # With an execution the configured Core server holds the keys, so this process's
+        # environment would answer the wrong question.
+        backends=backends_report if execution is None else None,
     )
 
 
@@ -141,6 +160,17 @@ def main(
         selection_provider=selection_provider,
         selection_timeout_seconds=selection_timeout_seconds,
     )
+
+
+@contextmanager
+def _restoring(previous: bool) -> Iterator[None]:
+    """Hand the keychain opt-in back when serving ends, so an in-process caller starts clean."""
+    from openreading.credentials import use_keychain
+
+    try:
+        yield
+    finally:
+        use_keychain(previous)
 
 
 def launch(
@@ -171,6 +201,18 @@ def launch(
             print(str(error), file=sys.stderr)
             return 2
 
+        from openreading.adapters.registry import install_profiles
+        from openreading.config import ConfigError
+        from openreading.config import load as load_config
+
+        explicit = getattr(args, "config", None)
+        if explicit is not None:
+            try:
+                loaded = load_config(explicit)
+                install_profiles(loaded.providers if loaded is not None else None)
+            except ConfigError as error:
+                print(str(error), file=sys.stderr)
+                return 2
         if not args.input_root.is_absolute() or not args.artifact_root.is_absolute():
             raise ArtifactError("configuration_required")
         try:
@@ -179,7 +221,10 @@ def launch(
             config = profile_config(args)
         except (OSError, RuntimeError):
             raise ArtifactError("configuration_required") from None
-        with _terminate_as_interrupt():
+        from openreading.credentials import use_keychain
+
+        previous = use_keychain(bool(getattr(args, "keychain", False)))
+        with _terminate_as_interrupt(), _restoring(previous):
             from functools import partial
 
             operation = (

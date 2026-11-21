@@ -121,7 +121,13 @@ from pydantic_core import ValidationError as PydanticValidationError
 from starlette.concurrency import run_in_threadpool
 
 from openreading import __version__, api, config, schemas
-from openreading.adapters.registry import BUILTIN_ADAPTERS, build_registry, make_adapter
+from openreading.adapters.registry import (
+    build_profiles,
+    build_registry,
+    known_backends,
+    make_adapter,
+    profile_scope,
+)
 from openreading.batch.sources import DEFAULT_MAX_ITEMS
 from openreading.credentials import (
     DEFAULT_DEADLINE_MS,
@@ -717,6 +723,7 @@ def _readiness_dict(r: BackendReadiness, liveness_probe: str = "none") -> dict[s
         "missing_deps": r.missing_deps,
         "creds_found": r.creds_found,
         "creds_missing": r.creds_missing,
+        **({"keychain_blocked_by": r.keychain_blocked_by} if r.keychain_blocked_by else {}),
         "ready": r.ready,
         "liveness_probe": liveness_probe,
     }
@@ -936,7 +943,11 @@ def create_app(*, cors_origins: list[str] | None = None):
     from openreading.strategies.loader import build_config as _build_strategy_config
 
     _loaded = config.load(None, allow_cwd=False)
-    _strategy = _build_strategy_config(_loaded)
+    # BL-162: only the deployment file chooses a profile endpoint. Discovery, compilation and
+    # dispatch must all see this app's snapshot, even while another app serves requests.
+    profiles = build_profiles(_loaded.providers if _loaded else None)
+    with profile_scope(profiles):
+        _strategy = _build_strategy_config(_loaded)
     app.state.strategy_config = _strategy.config if _strategy else None
     # Read deployment defaults once. Explicit backend ids bypass `policy.backends`, while a null
     # backend uses that list as its default chain.
@@ -958,22 +969,22 @@ def create_app(*, cors_origins: list[str] | None = None):
         # AC-1: zero keys configured ⇒ skip entirely — byte-for-byte today's behavior, the same
         # "off by default" contract every other OPENREADING_* deploy knob in this file honors.
         # AC-8: the two intentionally-open paths stay open whether or not any key is configured.
-        if not api_key_config.enabled or _is_auth_exempt_path(request.url.path):
+        if api_key_config.enabled and not _is_auth_exempt_path(request.url.path):
+            scheme, _, presented = request.headers.get("authorization", "").partition(" ")
+            matched_key = (
+                _token_authorized(presented, api_key_config) if scheme.lower() == "bearer" else None
+            )
+            if matched_key is None:
+                return _unauthorized_response()
+            # Stashed for the handler's own scope check (AC-3/AC-4) — None means unscoped (reaches
+            # every backend), matching a disabled-auth request's own
+            # `getattr(request.state, "api_key_scope", None)` default exactly.
+            request.state.api_key_scope = api_key_config.scopes.get(matched_key)
+            # M4: the per-principal job allowance needs an identity to meter, and this is the only
+            # place a verified one exists. A digest, never `matched_key` itself — see `_principal_id`.
+            request.state.principal = _principal_id(matched_key)
+        with profile_scope(profiles):
             return await call_next(request)
-        scheme, _, presented = request.headers.get("authorization", "").partition(" ")
-        matched_key = (
-            _token_authorized(presented, api_key_config) if scheme.lower() == "bearer" else None
-        )
-        if matched_key is None:
-            return _unauthorized_response()
-        # Stashed for the handler's own scope check (AC-3/AC-4) — None means unscoped (reaches
-        # every backend), matching a disabled-auth request's own
-        # `getattr(request.state, "api_key_scope", None)` default exactly.
-        request.state.api_key_scope = api_key_config.scopes.get(matched_key)
-        # M4: the per-principal job allowance needs an identity to meter, and this is the only
-        # place a verified one exists. A digest, never `matched_key` itself — see `_principal_id`.
-        request.state.principal = _principal_id(matched_key)
-        return await call_next(request)
 
     # M2: registered next (still BEFORE the optional CORS block), same prepend rule as above — CORS
     # stays outermost of all three when configured, so even a 413 this middleware raises still
@@ -1070,7 +1081,7 @@ def create_app(*, cors_origins: list[str] | None = None):
         # DECLARATION is added, which is a descriptor read (internal/design/liveness.md §6.1).
         broker = EnvCredentialBroker()
         rows = []
-        for s in sorted(BUILTIN_ADAPTERS):
+        for s in sorted(known_backends()):
             adapter = make_adapter(s)
             rows.append(
                 _readiness_dict(

@@ -418,6 +418,7 @@ The labels below are milestone names, not released package versions: ``pyproject
 - "One file": strategy-config v0.3 (the closed `policy` block).
 - Ledger: adapter-descriptor v0.6 and v0.7, step v0.1, journal v0.1, leaderboard-report v0.1.
 - Security review (M12): request v0.2.
+- Provider profiles: strategy-config v0.5.
 
 Schema version history (oldest first)
 -------------------------------------
@@ -482,6 +483,11 @@ Schema version history (oldest first)
   rides the MINOR slot per the channel-semantics rule (named here, not shipped silently); a
   caller who was relying on an unknown nested key being silently ignored is the only one affected,
   and no such caller could pass pydantic construction anyway. request.v0.1.json is unchanged.
+- Provider profiles: strategy-config v0.5 (additive over v0.4, config ``version`` const stays
+  1): the optional ``providers`` block. Each key is a backend id and each value an
+  ``openai-compatible`` profile with ``kind``, ``base_url``, ``model`` and an optional
+  ``key_env`` variable NAME. ``openreading.config`` adds the checks a schema cannot express, such
+  as refusing a name that shadows a built-in backend id.
 """
 
 from __future__ import annotations
@@ -562,7 +568,9 @@ DESCRIPTOR_SCHEMA_FILE = "adapter-descriptor.v0.8.json"
 # With the file the only spelling, a typo and a quoted boolean are refused here rather than by a
 # validator standing in for the schema. No file that was valid and meaningful becomes invalid: a
 # key outside this set was already refused, one rung later. The config `version` const stays 1.
-STRATEGY_CONFIG_SCHEMA_FILE = "strategy-config.v0.4.json"
+# v0.5 (Provider profiles): the optional `providers:` block, named `openai-compatible` endpoints
+# that become backend ids. Additive over v0.4, so every v0.4 file still validates.
+STRATEGY_CONFIG_SCHEMA_FILE = "strategy-config.v0.5.json"
 # v0.4 (Compare): the read-only cross-backend comparison report (the openreading.comparison
 # docstring).
 # v0.5 (Canon): the `structure` finding code + content-first `headline`; finding-

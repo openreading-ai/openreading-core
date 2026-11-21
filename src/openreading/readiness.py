@@ -1,7 +1,8 @@
 """Backend readiness: is a backend runnable here, and if not, exactly
 which env vars are missing? Drives `openreading backends` and the server's GET /v1/backends. All
 resolution is offline (no network, no key validation): it reports what the broker CAN find in the
-environment, never whether the provider would accept it.
+environment, and in the OS keychain when the process opted in (`openreading.credentials`), never
+whether the provider would accept it.
 
 It also owns the other half of the credential story, the key the broker DID find but the provider
 REJECTED (`backend_code="auth_rejected"`). `auth_rejected_hint` renders the one sentence the
@@ -17,7 +18,13 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
-from openreading.credentials import EnvCredentialBroker, redact, secret_values
+from openreading.credentials import (
+    EnvCredentialBroker,
+    bound_origin,
+    env_ignored_reason,
+    redact,
+    secret_values,
+)
 from openreading.types.errors import AdapterError
 from openreading.types.request import OpenReadingRequest
 from openreading.types.runtime import ResolvedCredentials
@@ -47,6 +54,12 @@ class BackendReadiness:
     required_missing: list[str] = field(default_factory=list)  # required-and-unresolved → not ready
     signup_url: str | None = None
     ready: bool = False
+    # Set in the environment but not read, because the backend is a provider profile whose
+    # origin the operator has not allowed (`EnvCredentialBroker.env_allowed`). Each one is also
+    # in `creds_missing`. `key_origin` is that profile's origin, for `env_ignored_hint`.
+    env_ignored: list[str] = field(default_factory=list)
+    key_origin: str | None = None
+    keychain_blocked_by: str | None = None
 
 
 def missing_reason(readiness: BackendReadiness) -> list[str]:
@@ -59,13 +72,37 @@ def missing_reason(readiness: BackendReadiness) -> list[str]:
     about the same backend. Keeping three copies of `a or b or c` is how one registry grew two
     vocabularies, and that is the defect this replaced (internal/design/ui-app/qa-ive-v2.md, H11).
     """
+    if readiness.keychain_blocked_by:
+        return [readiness.keychain_blocked_by]
     return list(readiness.required_missing or readiness.creds_missing or readiness.missing_deps)
+
+
+def keychain_blocked_hint(setting: str) -> str:
+    return (
+        f"{setting} came from a dotenv file. Export {setting} in your shell "
+        "to use saved credentials with this destination."
+    )
+
+
+def env_ignored_hint(readiness: BackendReadiness) -> str | None:
+    """Explain when an origin prevents credential lookup, using only operator setting names."""
+    if readiness.keychain_blocked_by:
+        return f"{readiness.slug}: {keychain_blocked_hint(readiness.keychain_blocked_by)}"
+    if not readiness.env_ignored:
+        return None
+    names = ", ".join(readiness.env_ignored)
+    return (
+        f"{readiness.slug}: {names} is set in the environment but not sent to "
+        f"{readiness.key_origin}, {env_ignored_reason()} Save the key with openreading keys "
+        f"set {readiness.slug}, or export the origin in OPENREADING_PROVIDER_ORIGINS."
+    )
 
 
 def missing_required(descriptor, ctx) -> list[str]:
     """The primary env var of every required credential/config field the broker did NOT resolve
-    into `ctx`. Empty → the backend has everything it declared it needs (ambient-chain backends,
-    whose fields are all optional, are never blocked here)."""
+    into `ctx`, or the dotenv setting that prevented a keychain lookup."""
+    if ctx.credentials and ctx.credentials.keychain_blocked_by:
+        return [ctx.credentials.keychain_blocked_by]
     creds = ctx.credentials.values if ctx.credentials else {}
     runtime = ctx.runtime or {}
     out: list[str] = []
@@ -202,7 +239,11 @@ def backend_readiness(adapter, *, broker: EnvCredentialBroker | None = None) -> 
         env_name = f.env[0] if f.env else f.key
         resolved = f.key in creds.values or f.key in runtime
         (found if resolved else missing).append(env_name)
-        if f.required and not resolved:
+        if (
+            f.required
+            and not resolved
+            and not (creds.keychain_blocked_by and getattr(f, "secret", False))
+        ):
             required_missing.append(env_name)
 
     # `live_gate_env` names the vars an ambient-chain backend (credentials_spec/config_spec fields
@@ -225,5 +266,11 @@ def backend_readiness(adapter, *, broker: EnvCredentialBroker | None = None) -> 
         creds_missing=missing,
         required_missing=required_missing,
         signup_url=desc.signup_url,
-        ready=health.ready and not required_missing and not live_gate_missing,
+        ready=health.ready
+        and not required_missing
+        and not live_gate_missing
+        and not creds.keychain_blocked_by,
+        env_ignored=broker.ignored_env(desc),
+        key_origin=bound_origin(desc),
+        keychain_blocked_by=creds.keychain_blocked_by,
     )

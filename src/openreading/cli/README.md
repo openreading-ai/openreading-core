@@ -256,10 +256,9 @@ You get a refusal, never geometry-only output pretending to be an answer.
 - stdout carries the result only, because a progress line there would break every `| jq` consumer.
   `openreading.cli.app` enforces this by redirecting stdout during the run.
 - A printed envelope is schema-validated first, so a non-conforming document never reaches stdout.
-- No flag widens the eligible set. The `policy:` block of your `openreading.yaml` sets it, and
-  three of its keys widen it deliberately. A policy that leaves nothing to run is exit 3 from every verb that
-  executes. Bare `route` prints the empty plan and exits 4 ([Routing and
-  keys](../router/README.md)).
+- A named backend runs directly. Otherwise `policy.backends` supplies the default chain in order.
+  An empty chain exits 3 on execution. Bare `route` prints the empty plan and exits 4.
+  See [Routing and keys](../router/README.md).
 - Keys never travel on the command line, so they never land in shell history or `ps`.
 - A batch never raises out of one item. The `[i/N]` stderr line carries a failed item's message
   instead.
@@ -332,8 +331,11 @@ runs](../batch/README.md) covers what a batch does not save.
 
 ### Time budgets, and what the engine retries for you
 
-One document gets 120 seconds, and a natively dispatched batch gets one hour. Those two numbers are
-the whole timeout policy. Inside that budget the router retries a backend that returned a retryable
+A directly named built-in gets 120 seconds per document by default. A natively dispatched batch gets one hour.
+An OpenAI-compatible provider profile allows 300 seconds per chat call by default. An explicit document
+deadline bounds all its calls together. If time runs out between parse pages, completed pages are returned
+with `status.state` set to `partial` and an `output_truncated` warning.
+Within its retry budget the router retries a backend that returned a retryable
 error, waiting 500 milliseconds and doubling to a 30 second ceiling. A backend that names its own
 `retry_after` wins whenever its value is larger. The bound is the deadline rather than an attempt
 count, so a slow vendor spends the budget instead of a fixed number of tries.

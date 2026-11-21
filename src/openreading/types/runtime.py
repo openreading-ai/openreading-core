@@ -17,6 +17,7 @@ class ResolvedCredentials:
 
     values: dict[str, Any] = field(default_factory=dict)
     source: str | None = None  # e.g. "env", "vault:...", "aws-role:arn:..."
+    keychain_blocked_by: str | None = None  # dotenv setting that withheld keychain access
 
     def __repr__(self) -> str:
         # NEVER print credential VALUES (a stray log/repr must not leak a secret). Keys only.
@@ -32,6 +33,7 @@ class RunContext:
     )
     deadline_ms: int | None = None
     workdir: str | None = None  # sandboxed temp dir for subprocess/upload spooling
+    deadline_is_default: bool = False  # the context factory supplied its generic time budget
 
 
 @dataclass

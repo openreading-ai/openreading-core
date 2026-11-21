@@ -14,10 +14,12 @@ Exports and return shapes
 -------------------------
 An envelope is the schema-valid JSON object returned by a completed operation.
 
-- `run(source, backend=None, **options)` returns a `response.v0.3` envelope.
+- `run(source, backend=None, **options)` returns a `response.v0.3` envelope. `keychain=True`
+  (on `run`, `run_batch` and `resume_run`) also reads keys saved with `openreading keys set`.
 - `run_batch(sources, backend=None, **options)` returns a `batch-result.v0.2` envelope.
 - `route(source, **options)` returns a `RoutePlan` without executing a backend.
-- `resume_run(run_id)` returns a response and is exported as `openreading.resume`.
+- `resume_run(run_id, keychain=False)` returns a response and is exported as
+  `openreading.resume`.
 - `build_request`, `run_request`, `prepare_named_backend`, and `materialize_document` support
   the CLI and server through the same lower-level seams.
 
@@ -45,6 +47,10 @@ Every active scope intersects with the resolved chain, and an empty intersection
 An `openreading.yaml` comes from explicit `config`, `OPENREADING_CONFIG`, or the working directory.
 The server disables working-directory discovery. A malformed file raises `ConfigError` before
 dispatch, including an unknown policy key or a value with the wrong type.
+Each call sees only the profiles from its resolved configuration. Batch workers inherit that
+selection, including an empty set. Resuming a journaled strategy checks the recorded profile
+configuration before dispatch. Changing a model or even the path or port of its endpoint
+requires a fresh run.
 
 Execution and errors
 --------------------
@@ -83,6 +89,9 @@ A backend that fetches URLs itself resolves the hostname later, so its DNS answe
 
 `env_file` loads key-value lines without overriding existing process variables. A library call
 with no `env_file` never discovers `.env` from the working directory.
+`keychain=True` on `run`, `run_batch` and `resume_run` also reads keys saved with `keys set`.
+The keychain sits after the environment and `.env`, and its values never enter `os.environ`.
+Without it a library call never touches the keychain, so a notebook behaves as it always did.
 Backend credentials and aliases are read indirectly through `openreading.credentials`.
 `OPENREADING_CONFIG` is read through `openreading.config` during configuration discovery.
 
@@ -101,25 +110,34 @@ from __future__ import annotations
 import base64
 import dataclasses
 import errno
+import functools
 import hashlib
 import os
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, ParamSpec, TypeVar
 from urllib.parse import ParseResult
 
 from openreading.adapters._http import error_for_status
-from openreading.adapters.registry import build_registry, make_adapter
+from openreading.adapters.registry import (
+    build_registry,
+    make_adapter,
+    reset_call_profiles,
+    set_call_profiles,
+)
 from openreading.batch.runner import MAX_BATCH_JOBS
 from openreading.batch.sources import DEFAULT_MAX_ITEMS
 from openreading.config import LoadedFile
 from openreading.config import apply as apply_config
-from openreading.config import load as load_config_file
+from openreading.config import load as _read_config_file
 from openreading.credentials import (
     DEFAULT_NATIVE_BATCH_DEADLINE_MS,
     EnvCredentialBroker,
+    bound_origin,
     build_run_context,
+    env_ignored_reason,
+    keychain_environ,
     load_dotenv,
     secret_values,
 )
@@ -143,7 +161,7 @@ from openreading.ledger.jsonl import JsonlJournal
 from openreading.ledger.localfs import LocalFsBlobStore
 from openreading.ledger.ports import Executor, LedgerArmingError
 from openreading.ledger.sanitizer import Sanitizer
-from openreading.readiness import auth_hinted, missing_required
+from openreading.readiness import auth_hinted, keychain_blocked_hint, missing_required
 from openreading.router.clock import RealClock
 from openreading.router.cost import apply_cost_report
 from openreading.router.driver import run_to_completion
@@ -162,6 +180,8 @@ from openreading.types.request import OpenReadingRequest
 # Reserved `backend.id` prefix for a strategy reference (spec §1.3 / loader.STRATEGY_PREFIX).
 # Inlined here so a plain named-backend run never imports the strategy package (guardrail T10).
 _STRATEGY_PREFIX = "strategy:"
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 _MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
 # Removed keywords that `**request_overrides` would otherwise swallow. `policy=` is the one that
@@ -172,6 +192,40 @@ _REMOVED_KWARGS = {
     "policy": "the policy keyword was removed; pass the file's own shape as "
     'config={"version": 1, "policy": {...}}, or a path to an openreading.yaml',
 }
+
+
+def _load_config_file(
+    config: str | os.PathLike[str] | dict | LoadedFile | None,
+) -> LoadedFile | None:
+    """`openreading.config.load`, then scope the file's provider profiles to this call.
+
+    Every call that reads the file here dispatches next, and a profile named in `backend=` or in
+    `policy.backends` must already resolve when it does. No file means no profile for the call
+    (law P5), whatever an earlier call or `install_profiles` left in the process. The entry
+    point's `_scoped_profiles` wrapper restores the context when the call returns.
+    """
+    loaded = _read_config_file(config)
+    set_call_profiles(loaded.providers if loaded is not None else None)
+    return loaded
+
+
+def _scoped_profiles(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+    """Run a public entry point with a provider profile set of its own (`openreading.adapters.registry.set_call_profiles`).
+
+    The set starts empty and `_load_config_file` fills it from the call's file. Profiles used to
+    be installed process-wide here, so two threads with two files swapped endpoints between load
+    and dispatch, and a call with no file inherited the last call's profiles.
+    """
+
+    @functools.wraps(fn)
+    def scoped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        token = set_call_profiles(None)
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            reset_call_profiles(token)
+
+    return scoped
 
 
 def _refuse_removed_kwargs(overrides: dict[str, Any]) -> None:
@@ -419,6 +473,7 @@ def materialize_document(req: OpenReadingRequest, descriptor=None, *, transport=
     return req.model_copy(update={"document": new_doc})
 
 
+@_scoped_profiles
 def route(
     source: str | bytes,
     *,
@@ -429,7 +484,7 @@ def route(
     """The routing plan for a document (no execution): the chain that would be tried, in order.
     `config` is a path to an openreading.yaml or a dict of its shape, and without it
     `./openreading.yaml` is discovered. The file's `policy.backends` IS the plan."""
-    loaded = load_config_file(config)
+    loaded = _load_config_file(config)
     req = build_request(source, None, operation=operation, mime_type=mime_type)
     req, cfg = apply_config(req, loaded.policy if loaded else None, RouterConfig())
     return Router(build_registry(), cfg).route(req)
@@ -687,13 +742,27 @@ def prepare_named_backend(
     ctx = build_run_context(req, adapter.descriptor, broker=broker, deadline_ms=deadline_ms)
     missing = missing_required(adapter.descriptor, ctx)
     if missing:
+        if ctx.credentials and ctx.credentials.keychain_blocked_by:
+            raise MissingCredentialsError(
+                keychain_blocked_hint(ctx.credentials.keychain_blocked_by), missing=missing
+            )
         signup = (
             f" Sign up / configure: {adapter.descriptor.signup_url}"
             if adapter.descriptor.signup_url
             else ""
         )
+        # A provider profile's key exported in this shell but not read looks like a bug unless
+        # the message says why. It names the setting and the origin, never the value.
+        ignored = broker.ignored_env(adapter.descriptor)
+        why = (
+            f" {', '.join(ignored)} is set in the environment but not sent to "
+            f"{bound_origin(adapter.descriptor)}, {env_ignored_reason()}"
+            if ignored
+            else ""
+        )
         raise MissingCredentialsError(
-            f"missing required credentials/config: {', '.join(missing)}.{signup}", missing=missing
+            f"missing required credentials/config: {', '.join(missing)}.{why}{signup}",
+            missing=missing,
         )
     return adapter, req, ctx
 
@@ -869,6 +938,17 @@ def run_request(
         raise TerminalError(str(e)) from e
 
 
+def _keychain_broker(
+    broker: EnvCredentialBroker | None, keychain: bool
+) -> EnvCredentialBroker | None:
+    """`keychain=True` builds a broker that reads the OS keychain after the environment. An
+    explicit `broker` wins, because the caller already chose where keys come from."""
+    if broker is None and keychain:
+        return EnvCredentialBroker(keychain_environ())
+    return broker
+
+
+@_scoped_profiles
 def run(
     source: str | bytes,
     backend: str | None = None,
@@ -877,6 +957,7 @@ def run(
     config: str | os.PathLike[str] | dict | LoadedFile | None = None,
     operation: str | None = None,
     env_file: str | None = None,
+    keychain: bool = False,
     mime_type: str | None = None,
     broker: EnvCredentialBroker | None = None,
     transport=None,
@@ -898,8 +979,9 @@ def run(
 
     `deadline_ms` (BL-169) is the caller's absolute time budget for a DIRECTLY-NAMED backend only,
     forwarded to `run_request`'s named-backend branch (`prepare_named_backend`, BL-153's own
-    plumbing). Omitted (the default), a named backend resolves to `credentials.DEFAULT_DEADLINE_MS`
-    (2 minutes), which is too short for some hosted async backends' ordinary workload. The CLI
+    plumbing). With no override, built-ins use `credentials.DEFAULT_DEADLINE_MS` (2 minutes).
+    A provider profile instead allows 300 seconds per chat call. If an explicit document budget
+    expires partway through a parse, the profile returns the completed pages as partial. The CLI
     spelling of the same knob is `parse --deadline`, documented in `openreading.cli`. It has no
     effect on resolved-chain or strategy dispatch, which manage their own node budgets.
 
@@ -911,11 +993,12 @@ def run(
     _refuse_removed_kwargs(request_overrides)
     if env_file:
         load_dotenv(env_file)
+    broker = _keychain_broker(broker, keychain)
     if strategy is not None:
         backend = f"strategy:{strategy}"
     # The file is read on every path so a null backend can resolve its configured chain. The
     # strategy half is built only when a strategy could engage through null or `strategy:`.
-    loaded = load_config_file(config)  # CLI/Python discover cwd; None uses built-in defaults.
+    loaded = _load_config_file(config)  # CLI/Python discover cwd, and None uses built-in defaults.
     strategy_file = None
     if backend is None or backend.startswith(_STRATEGY_PREFIX):
         from openreading.strategies.loader import build_config
@@ -981,7 +1064,8 @@ def _request_from_header(header: RunHeader, blobs: LocalFsBlobStore) -> OpenRead
     return OpenReadingRequest.model_validate(body)
 
 
-def resume_run(run_id: str) -> dict[str, Any]:
+@_scoped_profiles
+def resume_run(run_id: str, *, keychain: bool = False) -> dict[str, Any]:
     """`openreading resume <RUN_ID>` (internal/design/ledger.md §10, plan §4.4): re-derive the run's
     identity from the LIVE openreading.yaml + registry, compare it against the header written at
     the run's first arm, and — on a match — re-drive the SAME compiled strategy against the
@@ -1003,6 +1087,9 @@ def resume_run(run_id: str) -> dict[str, Any]:
       than a freshly recomputed one, so a policy edit between the two halves of a run cannot let
       the resume reach a backend the original could not.
 
+    `keychain=True` reads keys saved with `openreading keys set` after the environment, as `run`
+    does. Without it the resume reads the environment alone.
+
     Raises `LookupError` when `OPENREADING_LEDGER` is unset or no header exists for `run_id`, or
     `ledger.header.HeaderMismatch` when the live config/plan/journal-version identity no longer
     matches the run's original header (AC-4) — the CLI maps each to its own printed refusal."""
@@ -1021,11 +1108,11 @@ def resume_run(run_id: str) -> dict[str, Any]:
     blobs = LocalFsBlobStore(ledger_root / "blobs")
     req = _request_from_header(header, blobs)
 
-    loaded = load_config_file(None)
+    loaded = _load_config_file(None)
     strategy_file = build_config(loaded)
     strategy_config = strategy_file.config if strategy_file else StrategyConfig(version=1)
     registry = build_registry()
-    broker = EnvCredentialBroker()
+    broker = _keychain_broker(None, keychain) or EnvCredentialBroker()
     # §10: "no other flags" — a resume takes every option from the ledger and the live file.
     req, config = apply_config(req, loaded.policy if loaded else None, RouterConfig())
     compiled = compile_strategy(req, header.strategy_name, strategy_config, registry, config)
@@ -1062,6 +1149,7 @@ def resume_run(run_id: str) -> dict[str, Any]:
     return result.response.to_schema_dict()
 
 
+@_scoped_profiles
 def run_batch(
     sources: list[str],
     backend: str | None = None,
@@ -1073,6 +1161,7 @@ def run_batch(
     max_items: int = DEFAULT_MAX_ITEMS,
     deadline_ms: int | None = None,
     env_file: str | None = None,
+    keychain: bool = False,
     broker: EnvCredentialBroker | None = None,
     transport=None,
     idempotency_key: str | None = None,
@@ -1123,13 +1212,13 @@ def run_batch(
     # isolated into that item's `error` and never raised (M6) — correct for a document that could
     # not be read, wrong for a policy the operator mistyped, which would otherwise come back as N
     # identical item errors and a zero exit instead of one refusal.
-    loaded = load_config_file(config)
+    loaded = _load_config_file(config)
 
     if env_file:
         load_dotenv(env_file)
     if strategy is not None:
         backend = f"{_STRATEGY_PREFIX}{strategy}"
-    broker = broker or EnvCredentialBroker()
+    broker = _keychain_broker(broker, keychain) or EnvCredentialBroker()
 
     # No `supported_formats`: intake dispatches every source the caller named, and a backend that
     # cannot read one refuses first-hand. Computing the set meant sweeping readiness for every

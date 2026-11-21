@@ -1,5 +1,49 @@
 # Changelog
 
+## Unreleased keys in the OS keychain
+
+- Save backend keys once with `openreading keys set SLUG`, so every folder finds them through the OS keychain.
+  `keys list`, `keys unset` and `keys import` manage them, and `openreading backends` gains a SOURCE column once a key comes from the keychain.
+  The keychain is read after the environment and `.env`, never enters `os.environ`, and holds declared secrets only.
+  A read the keychain refuses with an error, such as a locked keychain, keeps the last key it returned and asks again next time.
+- `openreading serve --keychain` and `keychain=True` on `openreading.run`, `run_batch` and `resume` opt in. `OPENREADING_KEYCHAIN=off` turns it off for one process.
+- Built-ins can use saved keys with their default origin or loopback. For a custom dotenv endpoint,
+  export its variable or approve its origin in the shell. An unresolved required secret blocks dispatch.
+  A keyless Qwen endpoint or the AWS SDK's ambient credentials can still run.
+- `keys import` exits 2 before writing if one variable has conflicting values. Its output identifies
+  endpoint settings to export before removing an imported key from the file.
+- Add the `[setup]` extra (`keyring`, `questionary`, `rich`), included in `[all]`.
+- A usage error from `keys` or `setup`, and the `keys set --value` refusal, never print an argument back, so a key pasted on the command line stays off the screen.
+- Add `openreading setup`, a guided wizard: pick backends, paste each key into a hidden prompt, test it, and add what worked to `policy.backends`.
+  A key no probe answered is marked `-` as "saved, not tested", and joins `policy.backends` only when you say yes to its own question.
+  `setup --provider` adds an OpenAI-compatible endpoint as a `providers:` entry. Edits to `openreading.yaml` keep comments and other keys, or change nothing.
+- `keys set`, `keys list` and the keychain lookup now include provider profiles, so a profile's `key_env` can live in the keychain.
+  A profile's key is bound to its endpoint: the keychain holds it as `<VAR>@<origin>`, and a profile reads only its own origin's account.
+  A remote profile reads its key from the environment or `.env` only when `OPENREADING_PROVIDER_ORIGINS` lists its origin. Loopback profiles always do.
+  That setting counts only when your shell or service environment exports it. A value from `.env`, `--env-file` or `env_file=` is ignored, and the hint says to export it instead.
+  This stops a cloned `openreading.yaml` from naming `GITHUB_TOKEN`, or a key saved for another profile, and sending it to its author's host.
+  `backends`, `keys list` (SOURCE `env-ignored`) and the missing-credentials error name an ignored variable and the setting, never the value.
+  `keys import PATH SLUG` moves one backend's secrets, and a profile's key moves only this way.
+  `keys set` and `keys import` print `Binding VAR to <origin>` before they save a profile's key, and the import hint names each profile's origin.
+  `keys import` names a line it leaves in place only when some backend declares its variable. Every other line is counted, so a bare key line is never printed.
+- `openreading mcp --keychain` reads saved keys, and `--config PATH` names the project file. The new read-only
+  `openreading_backends` MCP tool reports readiness by variable name. No MCP tool accepts a key.
+
+## Unreleased provider profiles
+
+- Add `strategy-config` v0.5 with an optional `providers:` block. Each entry is an `openai-compatible`
+  profile with `base_url`, `model` and an optional `key_env` variable name, and its name becomes a backend id.
+  A name that shadows a built-in backend id is refused with exit 3.
+  A `key_env` that a built-in backend declares is refused, and a profile with `key_env` must use `https` unless its host is loopback.
+  A `base_url` scheme must be lowercase, and a Python mapping passed as `config=` is refused the same way a file is.
+- Each `openreading.run`, `run_batch`, `route` and `resume` call sees only its own file's profiles, so concurrent calls with different files never swap endpoints.
+  HTTP apps and batch workers keep their own configured profiles. Resume checks the recorded model and full endpoint URL.
+- Add the `openai-compatible` adapter. It parses page images through chat completions and extracts through
+  `response_format: json_schema`, and it never reports blocks, boxes or confidence.
+  A readable model list reports the endpoint as live even if the configured model is absent.
+  Profile chat calls default to 300 seconds each. An explicit document deadline returns completed
+  parse pages with an `output_truncated` warning if time runs out between pages.
+
 ## Unreleased security hardening
 
 - Validate Azure model identifiers before constructing authenticated vendor requests, preserving valid custom model identifiers.

@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from openreading.adapters.registry import BUILTIN_ADAPTERS, make_adapter
+from openreading.adapters.registry import known_backends, make_adapter
 from openreading.ledger.inline import descriptor_digest
 from openreading.ledger.localfs import VALID_RUN_ID
 from openreading.ledger.sanitizer import Sanitizer
@@ -128,14 +128,15 @@ def read_header(ledger_root: Path, run_id: str) -> RunHeader | None:
 
 
 def registry_fingerprint() -> str:
-    """sha256 over EVERY built-in adapter's own descriptor digest (`inline.descriptor_digest`) —
+    """sha256 over EVERY known adapter's own descriptor digest (`inline.descriptor_digest`),
     the whole registry's identity, distinct from the pinned ELIGIBLE subset (plan §4.2): a backend
     added or removed, or any existing one's descriptor changed, moves this value even for a
     backend outside this run's own eligible set. Computed from the installed adapter catalog
-    directly (`adapters.registry.BUILTIN_ADAPTERS`/`make_adapter`), not from a caller-supplied
+    directly (`adapters.registry.known_backends`/`make_adapter`), not from a caller-supplied
     `Registry` instance — `_arm_ledger`'s own callers (including tests) pass registries that only
-    implement `.get(bid)`, never a whole-catalog enumeration."""
-    digests = {bid: descriptor_digest(make_adapter(bid).descriptor) for bid in BUILTIN_ADAPTERS}
+    implement `.get(bid)`, never a whole-catalog enumeration. Installed provider profiles are in
+    it, so editing a profile's endpoint or model refuses a resume like any descriptor change."""
+    digests = {bid: descriptor_digest(make_adapter(bid).descriptor) for bid in known_backends()}
     return "sha256:" + hashlib.sha256(json.dumps(digests, sort_keys=True).encode()).hexdigest()
 
 

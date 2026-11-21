@@ -24,7 +24,21 @@ Search remains optional. The openreading_select_document tool accepts only an em
 Without an explicitly supplied provider, it returns selection_unavailable and opens no UI.
 Every successful call returns one JSON TextContent payload without
 structuredContent duplication. Domain failures set isError; malformed arguments receive
-sanitized protocol errors. The server never loads ambient routing files or credentials.
+sanitized protocol errors. The server never loads ambient routing files, and it reads no saved
+keychain credentials unless started with --keychain.
+
+The read-only openreading_backends tool reports each backend's readiness by variable name.
+For example, a row says ANTHROPIC_API_KEY was found in the keychain, and never shows its value.
+It points the user to `openreading setup` in a terminal, because no tool or argument accepts
+a key. A key typed into an agent conversation reaches the model provider and its transcript.
+A backend is one engine that reads a document, such as anthropic-claude or a provider profile.
+Readiness covers the built-ins plus profiles from the file that --config names explicitly.
+Only the engine launcher registers it, through create_server(backends=...), and only when
+no ImportExecution sends documents elsewhere. The client-only wheel has no such tool.
+Without --keychain the process reads the environment only and never calls the keychain.
+With it, the process reads saved keys after the environment and never copies them into it.
+No tool here runs a hosted backend. Imports use the fixed local profile or a packager's
+ImportExecution, which sends bytes to a Core server holding its own keys (serve --keychain).
 
 Artifact source, response, and passages persist until you remove their store directory.
 Retrieval shares selected document text with the calling agent. Document instructions

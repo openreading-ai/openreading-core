@@ -237,7 +237,7 @@ Surfaces
   or a native `submit_many` `RetryableError`/deadline); 6 interrupted with `OPENREADING_LEDGER` set (batch keys on the var, not on an armed run)
   (batch-level resume is not supported, so no run id is named).
 - Python: `openreading.run_batch(sources, backend=None, *, strategy, jobs=1, max_jobs=32,
-  max_items=200, deadline_ms=None, env_file, idempotency_key, on_progress, on_preflight,
+  max_items=200, deadline_ms=None, env_file=None, keychain=False, idempotency_key, on_progress, on_preflight,
   **request_overrides) -> batch-result dict`; `run()`'s signature is untouched.
 - Server: `POST /v1/batch` with `{"documents": [<request.document>...], <shared request
   fields>}` -> envelope, synchronous, `documents[]` capped at `MAX_BATCH_DOCUMENTS`. Directory

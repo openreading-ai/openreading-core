@@ -22,8 +22,9 @@ The [response guide](../schemas/README.md#understanding-the-response-json) expla
 Use it after a successful `POST /v1/parse`, not on an HTTP error body or the outer async job handle.
 
 A few endpoints report readiness and routing plans and never run a backend, among them
-`GET /healthz`, `GET /v1/backends`, and `POST /v1/route`. Keys come from the server's environment
-and never from a request body. You need `sample.pdf` and the install from the root README, which
+`GET /healthz`, `GET /v1/backends`, and `POST /v1/route`. The server reads backend keys from its
+environment. Start it with `openreading serve --keychain` to also use locally saved keys.
+You need `sample.pdf` and the install from the root README, which
 includes the server's dependencies.
 
 For local OCR, first follow the [engine setup walkthrough](../adapters/README.md#local-setup-walkthrough)
@@ -422,7 +423,8 @@ sample through `/v1/parse` and `/v1/batch`, asserts schema-valid responses, and 
   on the resolved path, so a symlink pointing outside that directory cannot escape it. The file is
   read at the gate, so no backend re-opens a path that could have been swapped meanwhile.
   `openreading.server.app._gate_document_path` enforces it.
-- Tokens and backend credentials come from the environment only, never a body or a flag.
+- Caller tokens come from the server environment. Backend credentials may also come from the
+  OS keychain when the server starts with `--keychain`. Request bodies carry no credential values.
   Nothing lands in `ps` or shell history, and no caller can attest on the operator's behalf.
 - A scope only narrows what the deployment's own `policy.backends` already resolves to. A directly
   named backend is checked at the door, before any adapter is built. An out-of-scope name therefore
