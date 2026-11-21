@@ -261,6 +261,8 @@ def test_ocr_orientation_uses_only_selected_tessdata(tmp_path, monkeypatch):
     converter = pipeline.create_converter(selected)
     converter.initialize_pipeline(InputFormat.PDF)
     active = next(iter(converter.initialized_pipelines.values()))
+    assert commands == []
+    assert active.ocr_model._native_codes == ["eng"]
     frame = active.ocr_model._perform_osd(str(tmp_path / "image.png"))
     assert str(frame.loc[frame.key == "Orientation in degrees", "value"].iloc[0]).strip() == "0"
     assert len(commands) == 1

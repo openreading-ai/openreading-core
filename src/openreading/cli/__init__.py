@@ -1572,7 +1572,7 @@ before relying on extracted amounts.
 Local Docling Slim with OCR
 --------------------------
 You get Core's pinned CPU layout pipeline through the docling_local backend.
-Its extra installs docling-slim 2.126.0 and selected conversion dependencies.
+Its extra installs docling-slim 2.142.0 and selected conversion dependencies.
 Slim uses the Docling codebase with selected dependencies. It is not a
 separate OCR engine and does not include every model or system executable.
 Core's local pipeline disables table recognition and uses ONNX layout.

@@ -1,7 +1,9 @@
 """Initialize only the selected Docling stages while preserving its PDF execution.
 
-Docling 2.126.0 imports torch during CPU device selection and disabled table-plugin
+Docling 2.142.0 imports torch during CPU device selection and disabled table-plugin
 loading. Explicit initialization avoids both paths without patching global factories.
+Its Tesseract stage also probes installed languages and orientation data outside the selected
+tessdata directory. Both probes are replaced so only the configured language files decide.
 Transformers 5 preprocessing uses its explicit PIL implementation with NumPy tensors.
 The generic AutoImageProcessor instead requires Torchvision.
 The upstream standard pipeline still owns threading, layout postprocessing, and reading order.
@@ -29,7 +31,7 @@ from openreading.adapters.docling_local.formats import SIMPLE_FORMATS
 
 def create_converter(config: LocalDoclingConfig):
     config.validate_assets()
-    if importlib.metadata.version("docling-slim") != "2.126.0":
+    if importlib.metadata.version("docling-slim") != "2.142.0":
         raise ValueError("The local pipeline requires its tested Docling version.")
     from docling.backend.docling_parse_backend import DoclingParseDocumentBackend
     from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
@@ -108,10 +110,11 @@ def create_converter(config: LocalDoclingConfig):
             self._unmapped_label_ids = set()
 
     class LocalTesseract(TesseractOcrCliModel):
-        def _set_languages_and_prefix(self):
-            # Setup selects explicit language files; ambient language discovery is irrelevant.
-            self._tesseract_languages = list(config.languages)
-            self._script_prefix = ""
+        def _set_languages(self):
+            # Upstream lists languages without the configured tessdata directory, so an
+            # ambient install would decide which languages pass. Setup already verified
+            # each selected file, including osd.traineddata.
+            self._tesseract_vocabulary = [*config.languages, "osd"]
 
         def _perform_osd(self, filename):
             import io
