@@ -30,6 +30,7 @@
   profile with `base_url`, `model` and an optional `key_env` variable name, and its name becomes a backend id.
   A name that shadows a built-in backend id is refused with exit 3.
   A `key_env` that a built-in backend declares is refused, and a profile with `key_env` must use `https` unless its host is loopback.
+  A `base_url` scheme must be lowercase, and a Python mapping passed as `config=` is refused the same way a file is.
 - Each `openreading.run`, `run_batch`, `route` and `resume` call sees only its own file's profiles, so concurrent calls with different files never swap endpoints.
 - Add the `openai-compatible` adapter. It parses page images through chat completions and extracts through
   `response_format: json_schema`, and it never reports blocks, boxes or confidence.

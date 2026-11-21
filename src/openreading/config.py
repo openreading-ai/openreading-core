@@ -33,7 +33,8 @@ chat-completions protocol:
 
 Four keys make up a profile, and any other key is refused. `kind`, `base_url` and `model` are
 required. `base_url` must be an `http` or `https` URL with a host and no user or password in it,
-because this file is committed. `key_env` must be an uppercase variable name outside the
+because this file is committed. The scheme is lowercase, as the schema pattern requires, and a
+Python mapping is held to the same rule as a file. `key_env` must be an uppercase variable name outside the
 `OPENREADING_` prefix, which belongs to operator settings. Absent, the endpoint is called with no
 key. The name is a backend id, so it follows the built-in slug shape (`openrouter-gpt`, lowercase
 and hyphenated).
@@ -161,6 +162,9 @@ _PROVIDER_KEYS = frozenset({"kind", "base_url", "model", "key_env"})
 _PROVIDER_REQUIRED = ("kind", "base_url", "model")
 _PROFILE_NAME_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 _ENV_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+# The schema's own `base_url` pattern, so a Python mapping and a file refuse alike. `urlsplit`
+# lowercases the scheme, so without this `HTTPS://...` passed here and failed at first use.
+_BASE_URL_RE = re.compile(r"^https?://[^\s]+$")
 _STRATEGY_PREFIX = "strategy:"
 
 
@@ -346,6 +350,8 @@ def _validated_profile(
         raise refuse(f"{at}/kind", "the only kind is 'openai-compatible'")
     base_url = profile["base_url"]
     if not isinstance(base_url, str):
+        raise refuse(f"{at}/base_url", "must be an http or https URL")
+    if not _BASE_URL_RE.match(base_url):
         raise refuse(f"{at}/base_url", "must be an http or https URL")
     try:
         parts = urlsplit(base_url)
