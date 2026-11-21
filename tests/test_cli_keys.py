@@ -428,6 +428,18 @@ def test_import_lists_only_variable_names_it_leaves_in_place(capsys, fake_keycha
     assert "Left in place, not a backend secret: ANTHROPIC_MODEL, and 2 other lines" in out
 
 
+def test_import_never_prints_an_uppercase_bare_key(capsys, fake_keychain, tmp_path):
+    """An AWS access key id is uppercase letters and digits, so it passes any name pattern. Only
+    a variable some backend declares is named, and every other line is counted."""
+    bare = "AKIAIOSFODNN7EXAMPLE"
+    src = tmp_path / "old.env"
+    src.write_text(f"REDUCTO_API_KEY=r-secret\n{bare}==\nMY_OWN_SETTING=1\n", encoding="utf-8")
+    code, out, err = _run(["keys", "import", str(src)], capsys)
+    assert code == 0, err
+    assert bare not in out + err and "MY_OWN_SETTING" not in out
+    assert "Left in place, not a backend secret: 2 other lines" in out
+
+
 def test_import_with_a_slug_never_calls_another_backends_secret_not_a_secret(
     capsys, fake_keychain, tmp_path
 ):

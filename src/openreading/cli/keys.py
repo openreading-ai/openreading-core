@@ -48,7 +48,6 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
-import re
 import sys
 from collections.abc import Callable, Iterable
 
@@ -266,7 +265,6 @@ def _print_binding(desc: AdapterDescriptor, names: Iterable[str]) -> None:
 
 # A dotenv line's left side is printed only when it reads as a variable name. A bare key line,
 # such as a base64 value ending in `==`, parses with the key itself on the left.
-_ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]*")
 
 
 def _select(
@@ -610,8 +608,16 @@ def cmd_keys_import(args) -> int:
         _err(str(e))
         return 2
     if left:
-        named = [n for n in dict.fromkeys(left) if _ENV_NAME.fullmatch(n)]
-        others = sum(1 for n in left if not _ENV_NAME.fullmatch(n))
+        # Only a variable some backend declares is named. A name pattern alone is not enough,
+        # because a bare AWS access key id is uppercase letters and digits and would pass it.
+        declared = {
+            name
+            for d in descs.values()
+            for f in (*d.credentials_spec, *d.config_spec)
+            for name in f.env
+        }
+        named = [n for n in dict.fromkeys(left) if n in declared]
+        others = sum(1 for n in left if n not in declared)
         listing = ", ".join(named)
         if others:
             tail = f"{others} other {'line' if others == 1 else 'lines'}"
