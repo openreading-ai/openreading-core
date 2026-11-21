@@ -230,11 +230,14 @@ def _select(
     the exit code. With no VARs, every secret field is selected under its primary variable."""
     descs = _descriptors()
     if slug not in descs:
-        from openreading.cli.app import _unknown_backends_line
-
-        # Only backends with a secret: a keyless one is never a valid answer here.
+        # Only backends with a secret: a keyless one is never a valid answer here. The argument
+        # itself is never printed, because a key pasted in the slug's place would be echoed.
         keyed = [s for s, d in descs.items() if _secret_fields(d)]
-        print(_unknown_backends_line(f"keys {verb}", [slug], keyed), file=sys.stderr)
+        print(
+            f"[keys {verb}] unknown backend: the first argument is not a backend id; "
+            f"known: {', '.join(sorted(keyed))}",
+            file=sys.stderr,
+        )
         return 2
     desc = descs[slug]
     fields = _secret_fields(desc)
@@ -257,7 +260,11 @@ def _select(
             )
             return 2
         else:
-            _err(f"{name} is not a secret {slug} declares. Its secrets: {declared}.")
+            # Never echo `name`: an argument that is not a declared variable may be the key itself.
+            _err(
+                f"An argument is not a secret variable {slug} declares. Name one of: {declared}. "
+                "The key itself goes to the hidden prompt or --stdin."
+            )
             return 2
     return desc, pairs
 
@@ -464,7 +471,8 @@ def cmd_keys_import(args) -> int:
     try:
         entries = dotenv_entries(args.path)
     except OSError as e:
-        _err(f"cannot read {args.path}: {e.strerror or e}")
+        # The path is not echoed: a key pasted in its place would otherwise reach the terminal.
+        _err(f"cannot read the file named on the command line ({e.strerror or type(e).__name__})")
         return 3
     declared = {name for d in _descriptors().values() for name in _secret_names(d)}
     first: dict[str, str] = {}

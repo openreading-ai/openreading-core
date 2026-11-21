@@ -241,6 +241,38 @@ def test_ps5_set_refuses_settings_and_undeclared_variables(
     assert fake_keychain.store == {}
 
 
+SECRET_ARG = "sk-live-SECRET123"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["keys", "set", "reducto", SECRET_ARG, "--stdin"],
+        ["keys", "unset", "reducto", SECRET_ARG],
+        ["keys", "set", SECRET_ARG, "--stdin"],
+        ["keys", "unset", SECRET_ARG],
+        ["keys", "import", SECRET_ARG],
+    ],
+)
+def test_ps4_an_argument_that_looks_like_a_key_is_never_echoed(
+    monkeypatch, capsys, fake_keychain, argv
+):
+    """A key pasted where a variable, slug or path belongs is refused without printing it."""
+    _stdin(monkeypatch, "value\n")
+    code, out, err = _run(argv, capsys)
+    assert code in (2, 3)
+    assert SECRET_ARG not in out + err
+    assert fake_keychain.store == {}
+
+
+def test_an_undeclared_variable_names_the_declared_ones(monkeypatch, capsys, fake_keychain):
+    _stdin(monkeypatch, "value\n")
+    code, _, err = _run(["keys", "set", "reducto", SECRET_ARG, "--stdin"], capsys)
+    assert code == 2
+    assert "not a secret variable reducto declares" in err
+    assert "REDUCTO_API_KEY" in err and "REDUCTO_WEBHOOK_SECRET" in err
+
+
 def test_set_refuses_an_unknown_slug_and_a_backend_with_no_secret(capsys, fake_keychain):
     code, _, err = _run(["keys", "set", "nope", "--stdin"], capsys)
     assert code == 2 and "unknown backend" in err
