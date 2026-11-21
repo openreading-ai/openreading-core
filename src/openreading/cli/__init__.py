@@ -747,7 +747,8 @@ environment or `openreading.yaml`. A provider profile in `openreading.yaml`
 counts as a backend, and its one secret is the variable its `key_env` names.
 
 A key never crosses the command line. There is no flag that takes a value,
-because argv shows up in `ps` and in shell history. Scripts pipe the value:
+because argv shows up in `ps` and in shell history. A `--value` you type out
+of habit exits 2 with that reason and is never echoed. Scripts pipe the value:
 
     pass show reducto | openreading keys set reducto --stdin
 

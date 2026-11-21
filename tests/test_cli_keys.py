@@ -190,15 +190,42 @@ def test_set_warns_when_the_environment_will_shadow_the_saved_key(
 
 
 def test_ps4_set_has_no_value_flag():
+    import argparse
+
     parser = cli.build_parser()
     set_parser = parser._subparsers._group_actions[0].choices["keys"]  # type: ignore[union-attr]
     keys_sub = next(
         a for a in set_parser._actions if a.__class__.__name__ == "_SubParsersAction"
     ).choices["set"]
-    flags = {opt for action in keys_sub._actions for opt in action.option_strings}
+    flags = {
+        opt
+        for action in keys_sub._actions
+        if action.help != argparse.SUPPRESS
+        for opt in action.option_strings
+    }
     assert flags == {"-h", "--help", "--stdin"}
-    with pytest.raises(SystemExit):
-        parser.parse_args(["keys", "set", "anthropic-claude", "--value", KEY])
+    assert "--value" not in keys_sub.format_help()
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["keys", "set", "anthropic-claude", "--value", KEY],
+        ["keys", "set", "anthropic-claude", f"--value={KEY}"],
+        ["keys", "set", "nosuch", "--value", KEY],
+        ["keys", "set", "anthropic-claude", "--value"],
+    ],
+)
+def test_ps4_a_value_on_the_command_line_is_refused_with_the_reason(
+    monkeypatch, capsys, fake_keychain, argv
+):
+    _stdin(monkeypatch, "")
+    code, out, err = _run(argv, capsys)
+    assert code == 2
+    assert "ps" in err and "shell history" in err and "--stdin" in err and "hidden" in err
+    assert "usage:" not in err
+    assert KEY not in out + err
+    assert fake_keychain.store == {}
 
 
 @pytest.mark.parametrize(
@@ -217,6 +244,9 @@ def test_ps5_set_refuses_settings_and_undeclared_variables(
 def test_set_refuses_an_unknown_slug_and_a_backend_with_no_secret(capsys, fake_keychain):
     code, _, err = _run(["keys", "set", "nope", "--stdin"], capsys)
     assert code == 2 and "unknown backend" in err
+    known = err.split("known:", 1)[1]
+    assert "anthropic-claude" in known
+    assert "pymupdf" not in known and "tesseract" not in known  # they declare no secret
     code, _, err = _run(["keys", "set", "pymupdf", "--stdin"], capsys)
     assert code == 2 and "declares no secret" in err
 

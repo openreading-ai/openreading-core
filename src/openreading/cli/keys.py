@@ -10,7 +10,9 @@ the keychain and names the lines to delete. The user-facing chapter is the `keys
 The rules every verb follows
 ----------------------------
 - A value never crosses argv, stdout, stderr or a log line (law PS4). There is no value flag,
-  because argv shows up in `ps` and in shell history. `--stdin` is the scripted path.
+  because argv shows up in `ps` and in shell history. A hidden `--value` exists only to refuse
+  with that reason and exit 2, because argparse's own error echoed the key it rejected.
+  `--stdin` is the scripted path.
 - Only secrets a backend declares reach the keychain (law PS5). `keys set` takes a backend slug,
   and an optional variable must be one of that backend's secret variables. A setting such as
   `ANTHROPIC_MODEL` or a knob such as `OPENREADING_LEDGER` is refused with exit 2.
@@ -160,6 +162,11 @@ def add_parser(sub: argparse._SubParsersAction, common: argparse.ArgumentParser)
         action="store_true",
         help="read one line per secret from stdin instead of asking (for scripts)",
     )
+    # Hidden and refused (law PS4). Without it a habitual `--value sk-...` reached argparse's
+    # generic "unrecognized arguments" error, which echoed the key back to the terminal.
+    set_p.add_argument(
+        "--value", dest="value_flag", nargs="?", const="", default=None, help=argparse.SUPPRESS
+    )
     set_p.set_defaults(func=cmd_keys_set)
 
     list_p = verbs.add_parser(
@@ -225,7 +232,9 @@ def _select(
     if slug not in descs:
         from openreading.cli.app import _unknown_backends_line
 
-        print(_unknown_backends_line(f"keys {verb}", [slug], descs), file=sys.stderr)
+        # Only backends with a secret: a keyless one is never a valid answer here.
+        keyed = [s for s, d in descs.items() if _secret_fields(d)]
+        print(_unknown_backends_line(f"keys {verb}", [slug], keyed), file=sys.stderr)
         return 2
     desc = descs[slug]
     fields = _secret_fields(desc)
@@ -324,6 +333,14 @@ def _offer_probe(slug: str) -> None:
 
 def cmd_keys_set(args) -> int:
     """`keys set SLUG [VAR ...] [--stdin]`."""
+    if args.value_flag is not None:
+        # Never echo the value: it is the key this refusal exists to keep out of sight.
+        _err(
+            "A key never goes on the command line, because argv is visible in `ps` and in "
+            f"shell history. Run openreading keys set {args.slug} to type it at a hidden "
+            "prompt, or pipe it in with --stdin."
+        )
+        return 2
     selected = _select(args.slug, args.vars, "set")
     if isinstance(selected, int):
         return selected
