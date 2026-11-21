@@ -46,8 +46,10 @@ parsed mapping, which would drop every comment. `with_policy_backends` adds the 
 block-style `backends:` list as `- id` lines after its last item, so every comment inside or
 after the list stays where it was. It replaces a one-line `backends: [...]` list, and refuses
 when that line carries a comment, which a rewrite would drop. With no list, it inserts one
-`backends:` line under `policy:`. `with_provider` appends one entry under `providers:`. Each
-then parses the result with `openreading.config.parse` and compares it with the original mapping
+`backends:` line under `policy:`. `with_provider` appends one entry under `providers:`. A key
+may be plain or quoted. A key spelled any other way, such as with an escape, is never located,
+and the edit is refused rather than appending a second block. The file's line endings are kept,
+so a CRLF file stays CRLF. Each then parses the result with `openreading.config.parse` and compares it with the original mapping
 plus the one intended change. Any other difference raises `EditRefused`, the file stays as it
 was, and the wizard prints the block to add by hand. A flow-style `policy: {...}` is one shape
 that is refused rather than rewritten. The file is the one `--config` names, else the one
@@ -245,8 +247,27 @@ class EditRefused(ValueError):
     """The file could not take the change without another difference. Nothing was written."""
 
 
-_TOP_KEY = re.compile(r"^([A-Za-z_][\w-]*)\s*:(.*)$")
+# A mapping key at the start of a line: plain, or quoted without an escape. A key spelled any
+# other way is never located, and the edit is refused rather than appending a second block.
+_KEY_LINE = re.compile(
+    r"""^(?:"(?P<dq>[^"\\]*)"|'(?P<sq>[^']*)'|(?P<plain>[A-Za-z_][\w-]*))\s*:(?P<rest>.*)$"""
+)
 _PLAIN_SCALAR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/:@+-]*$")
+
+
+def _key(line: str) -> tuple[str, str] | None:
+    """`(key, rest)` when `line` opens with a mapping key, else None. `rest` follows the colon."""
+    m = _KEY_LINE.match(line)
+    if m is None:
+        return None
+    key = m.group("dq") if m.group("dq") is not None else m.group("sq") or m.group("plain")
+    return key, m.group("rest")
+
+
+def _rest(line: str) -> str:
+    """What follows the colon of a line `_key` already located."""
+    found = _key(line)
+    return found[1] if found is not None else ""
 
 
 def _strip_comment(rest: str) -> str:
@@ -260,9 +281,7 @@ def _indent(line: str) -> str:
 def _block(lines: list[str], key: str) -> tuple[int, int] | None:
     """The top-level `key:` line and the index just past its last indented line. A flush-left
     line, comment included, ends the block, so an insertion lands above the next section."""
-    start = next(
-        (i for i, ln in enumerate(lines) if (m := _TOP_KEY.match(ln)) and m.group(1) == key), None
-    )
+    start = next((i for i, ln in enumerate(lines) if (k := _key(ln)) and k[0] == key), None)
     if start is None:
         return None
     last = start
@@ -290,10 +309,15 @@ def _scalar(value: str) -> str:
     return json.dumps(value)
 
 
-def _join(lines: list[str]) -> str:
+def _newline(text: str) -> str:
+    """The file's own line ending. A CRLF file stays CRLF, so the edit is one block in a diff."""
+    return "\r\n" if "\r\n" in text else "\n"
+
+
+def _join(lines: list[str], newline: str = "\n") -> str:
     while lines and not lines[-1].strip():
         lines.pop()
-    return "\n".join(lines) + "\n"
+    return newline.join(lines) + newline
 
 
 def _checked(new_text: str, expected: dict) -> str:
@@ -314,12 +338,15 @@ def with_policy_backends(text: str, backends: Sequence[str]) -> str:
     expected = copy.deepcopy(old)
     expected["policy"] = {**(old.get("policy") or {}), "backends": list(backends)}
     flow = f"backends: [{', '.join(backends)}]"
+    nl = _newline(text)
     lines = text.splitlines()
     found = _block(lines, "policy")
     if found is None:
-        return _checked(_join([*lines, "policy:", f"  {flow}"]), expected)
+        if "policy" in old:
+            raise EditRefused("policy is spelled in a way the wizard cannot locate")
+        return _checked(_join([*lines, "policy:", f"  {flow}"], nl), expected)
     start, end = found
-    if _strip_comment(lines[start].split(":", 1)[1]):
+    if _strip_comment(_rest(lines[start])):
         raise EditRefused("policy is written on one line")
     children = _content(lines, start + 1, end)
     indent = _indent(lines[children[0]]) if children else "  "
@@ -327,22 +354,24 @@ def with_policy_backends(text: str, backends: Sequence[str]) -> str:
         (
             i
             for i in children
-            if lines[i].startswith(indent + "backends")
-            and _indent(lines[i]) == indent
-            and _TOP_KEY.match(lines[i].lstrip())
+            if _indent(lines[i]) == indent
+            and (k := _key(lines[i][len(indent) :]))
+            and k[0] == "backends"
         ),
         None,
     )
     if key is None:
+        if "backends" in (old.get("policy") or {}):
+            raise EditRefused("policy.backends is spelled in a way the wizard cannot locate")
         lines.insert(start + 1, indent + flow)
-        return _checked(_join(lines), expected)
-    rest = lines[key].split(":", 1)[1]
+        return _checked(_join(lines, nl), expected)
+    rest = _rest(lines[key][len(indent) :])
     if _strip_comment(rest):
         # A flow list is one line, so replacing it would drop a comment written on it.
         if _strip_comment(rest) != rest.strip():
             raise EditRefused("the backends line carries a comment")
         lines[key] = indent + flow
-        return _checked(_join(lines), expected)
+        return _checked(_join(lines, nl), expected)
     # A block sequence: `- item` lines deeper than the key or at its own indent. New items go
     # after the last one at that item's indent, so every comment, inside or after, stays put.
     current = list((old.get("policy") or {}).get("backends") or [])
@@ -363,7 +392,7 @@ def with_policy_backends(text: str, backends: Sequence[str]) -> str:
         break
     added = [f"{item_indent}- {_scalar(b)}" for b in backends[len(current) :]]
     lines[last + 1 : last + 1] = added
-    return _checked(_join(lines), expected)
+    return _checked(_join(lines, nl), expected)
 
 
 def with_provider(text: str, name: str, profile: dict[str, str]) -> str:
@@ -372,13 +401,16 @@ def with_provider(text: str, name: str, profile: dict[str, str]) -> str:
     old = config.parse(text)
     expected = copy.deepcopy(old)
     expected["providers"] = {**(old.get("providers") or {}), name: dict(profile)}
+    nl = _newline(text)
     lines = text.splitlines()
     found = _block(lines, "providers")
     if found is None:
+        if "providers" in old:
+            raise EditRefused("providers is spelled in a way the wizard cannot locate")
         entry = [f"  {name}:", *(f"    {k}: {_scalar(v)}" for k, v in profile.items())]
-        return _checked(_join([*lines, "providers:", *entry]), expected)
+        return _checked(_join([*lines, "providers:", *entry], nl), expected)
     start, end = found
-    if _strip_comment(lines[start].split(":", 1)[1]):
+    if _strip_comment(_rest(lines[start])):
         raise EditRefused("providers is written on one line")
     children = _content(lines, start + 1, end)
     child = _indent(lines[children[0]]) if children else "  "
@@ -387,13 +419,14 @@ def with_provider(text: str, name: str, profile: dict[str, str]) -> str:
     )
     entry = [f"{child}{name}:", *(f"{deeper}{k}: {_scalar(v)}" for k, v in profile.items())]
     lines[end:end] = entry
-    return _checked(_join(lines), expected)
+    return _checked(_join(lines, nl), expected)
 
 
 def _write(path: Path, text: str) -> None:
     """Replace the file in one step, so an interrupted write never leaves half a config."""
     tmp = path.with_name(path.name + ".openreading-setup.tmp")
-    tmp.write_text(text, encoding="utf-8")
+    # `newline=""` writes the line endings `text` carries, so a CRLF file stays CRLF everywhere.
+    tmp.write_text(text, encoding="utf-8", newline="")
     if path.exists():
         shutil.copymode(path, tmp)
     os.replace(tmp, path)
@@ -672,7 +705,12 @@ class _Wizard:
     # -- the file
 
     def _text(self) -> str:
-        return self.target.read_text(encoding="utf-8") if self.target.exists() else "version: 1\n"
+        if not self.target.exists():
+            return "version: 1\n"
+        # `newline=""` keeps CRLF as written. A universal-newline read turned it into LF, and the
+        # rewrite then changed every line of the file.
+        with self.target.open(encoding="utf-8", newline="") as f:
+            return f.read()
 
     def _write_failed(self, exc: Exception, then: str) -> None:
         if isinstance(exc, config.ConfigError):

@@ -467,6 +467,77 @@ def test_providers_edit_refuses_a_one_line_block():
         )
 
 
+PROFILE_X = {"kind": "openai-compatible", "base_url": "http://h/v1", "model": "m"}
+
+
+@pytest.mark.parametrize("quote", ['"', "'"])
+def test_policy_edit_finds_a_quoted_top_level_key(quote):
+    text = f"version: 1\n{quote}policy{quote}:\n  backends: [docling]\n"
+    new = cli_setup.with_policy_backends(text, ["docling", "pymupdf"])
+    assert config.parse(new)["policy"] == {"backends": ["docling", "pymupdf"]}
+    assert sum(1 for ln in new.splitlines() if "policy" in ln) == 1
+
+
+@pytest.mark.parametrize("quote", ['"', "'"])
+def test_providers_edit_finds_a_quoted_top_level_key(quote):
+    text = f"version: 1\n{quote}providers{quote}:\n  a-llm:\n" + "".join(
+        f"    {k}: {v}\n" for k, v in PROFILE_X.items()
+    )
+    new = cli_setup.with_provider(text, "x-llm", PROFILE_X)
+    assert set(config.parse(new)["providers"]) == {"a-llm", "x-llm"}
+    assert sum(1 for ln in new.splitlines() if "providers" in ln) == 1
+
+
+def test_an_edit_refuses_a_key_it_cannot_locate_instead_of_appending_a_second_block():
+    # YAML reads the escape as "policy", so the parsed mapping has the key, but no line spells it.
+    policy = 'version: 1\n"pol\\x69cy":\n  backends: [docling]\n'
+    assert config.parse(policy)["policy"] == {"backends": ["docling"]}
+    with pytest.raises(cli_setup.EditRefused):
+        cli_setup.with_policy_backends(policy, ["docling", "pymupdf"])
+    providers = (
+        'version: 1\n"provider\\x73":\n  a-llm: {kind: openai-compatible, '
+        'base_url: "http://h/v1", model: m}\n'
+    )
+    assert "a-llm" in config.parse(providers)["providers"]
+    with pytest.raises(cli_setup.EditRefused):
+        cli_setup.with_provider(providers, "x-llm", PROFILE_X)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "version: 1\r\n",
+        "version: 1\r\npolicy:\r\n  backends: [docling]\r\n",
+        "version: 1\r\npolicy:\r\n  backends:\r\n    - docling\r\n",
+    ],
+)
+def test_an_edit_keeps_crlf_line_endings(text):
+    for new in (
+        cli_setup.with_policy_backends(text, ["docling", "pymupdf"]),
+        cli_setup.with_provider(text, "x-llm", PROFILE_X),
+    ):
+        assert new.count("\r\n") == new.count("\n")
+
+
+def test_the_wizard_keeps_a_crlf_file_crlf(wizard, monkeypatch, capsys, fake_keychain, tmp_path):
+    _probe_script(monkeypatch, LivenessStatus.LIVE)
+    path = tmp_path / "openreading.yaml"
+    path.write_bytes(b"# team file\r\nversion: 1\r\npolicy:\r\n  backends: [pymupdf]\r\n")
+    code, _, err, _ = wizard(
+        [
+            ("checkbox", _pick("anthropic-claude")),
+            ("password", KEY),
+            ("confirm", True),  # test the key
+            ("confirm", True),  # write policy.backends
+        ],
+        capsys=capsys,
+    )
+    assert code == 0, err
+    data = path.read_bytes()
+    assert data.count(b"\r\n") == data.count(b"\n") == 4
+    assert b"backends: [pymupdf, anthropic-claude]" in data
+
+
 def test_the_questionary_prompter_asks_with_unsafe_ask(monkeypatch):
     import questionary
 
