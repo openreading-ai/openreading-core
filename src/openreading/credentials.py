@@ -331,7 +331,9 @@ def load_dotenv(
         if key in env:
             continue
         env[key] = val
-        if environ is None:
+        # Tracked whenever the target is the process environment, including an explicit
+        # `os.environ`. Untracked, a `.env` OPENREADING_PROVIDER_ORIGINS passed for an exported one.
+        if env is os.environ:
             _DOTENV_NAMES.add(key)
         count += 1
     return count

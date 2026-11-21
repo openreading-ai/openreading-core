@@ -260,6 +260,12 @@ SECRET_ARG = "sk-live-SECRET123"
         # The --value refusal must not quote a slug it never validated.
         ["keys", "set", SECRET_ARG, "--value"],
         ["keys", "set", SECRET_ARG, "--value", "x"],
+        # The startup scan reads `--config` for every verb, so its file report must not quote it.
+        ["keys", "set", "anthropic-claude", "--config", SECRET_ARG],
+        ["keys", "list", f"--config={SECRET_ARG}"],
+        # A token before the verb must not become the command argparse names as invalid.
+        ["--key", SECRET_ARG, "keys", "list"],
+        ["-x", SECRET_ARG, "keys", "set", "anthropic-claude"],
     ],
 )
 def test_ps4_an_argument_that_looks_like_a_key_is_never_echoed(

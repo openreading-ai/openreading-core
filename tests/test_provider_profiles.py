@@ -118,9 +118,12 @@ _BAD_PROFILES = [
     pytest.param({**PROFILE, "base_url": "https://"}, "base_url", id="no-host"),
     # urlsplit lowercases the scheme, so only the schema's lowercase pattern catches this one.
     pytest.param({**PROFILE, "base_url": "HTTPS://llm.example.test/v1"}, "base_url", id="upper"),
+    # Python's `$` also matches before a final newline, so the whole string must be the URL.
+    pytest.param({**PROFILE, "base_url": "https://llm.example.test/v1\n"}, "base_url", id="nl"),
     pytest.param({**PROFILE, "model": ""}, "model", id="empty-model"),
     pytest.param({**PROFILE, "key_env": "sk-live-abc123"}, "key_env", id="key-value"),
     pytest.param({**PROFILE, "key_env": "openrouter_key"}, "key_env", id="lowercase-var"),
+    pytest.param({**PROFILE, "key_env": "OPENROUTER_API_KEY\n"}, "key_env", id="var-nl"),
 ]
 
 

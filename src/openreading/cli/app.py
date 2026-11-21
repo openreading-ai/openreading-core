@@ -3545,6 +3545,16 @@ _FILE_COMMANDS = frozenset(
 )
 
 
+def _prescan_flags(argv: list[str]) -> dict[str, str | None]:
+    """The `--config` and `--env-file` values in argv, read before argparse runs."""
+    flags: dict[str, str | None] = {"--config": None, "--env-file": None}
+    for i, arg in enumerate(argv):
+        name, eq, value = arg.partition("=")
+        if name in flags:
+            flags[name] = value if eq else (argv[i + 1] if i + 1 < len(argv) else None)
+    return flags
+
+
 def _install_file_profiles(argv: list[str]) -> ConfigError | None:
     """Install the provider profiles of the `openreading.yaml` this invocation will read.
 
@@ -3563,11 +3573,7 @@ def _install_file_profiles(argv: list[str]) -> ConfigError | None:
     command = next((a for a in argv if not a.startswith("-")), None)
     if command in (None, "serve", "mcp"):
         return None
-    flags: dict[str, str | None] = {"--config": None, "--env-file": None}
-    for i, arg in enumerate(argv):
-        name, eq, value = arg.partition("=")
-        if name in flags:
-            flags[name] = value if eq else (argv[i + 1] if i + 1 < len(argv) else None)
+    flags = _prescan_flags(argv)
     load_dotenv(flags["--env-file"])
     explicit = flags["--config"]
     if command == "setup" and explicit is not None and not Path(explicit).exists():
@@ -3597,7 +3603,14 @@ def _parse_args_reporting_config(
     parser = build_parser()
     if command in _KEY_COMMANDS:
         if broken is not None:
-            why = " ".join(str(broken).split()).rstrip(".")
+            # The scan reads `--config` for every verb, so its value may be a key pasted in the
+            # wrong place. A path that came from argv is therefore never quoted back here.
+            raw = list(sys.argv[1:] if argv is None else argv)
+            why = (
+                "The openreading.yaml named on the command line could not be loaded"
+                if _prescan_flags(raw)["--config"] is not None
+                else " ".join(str(broken).split()).rstrip(".")
+            )
             print(
                 f"[config] {why}. Provider profiles from this file are not loaded.", file=sys.stderr
             )
@@ -3662,7 +3675,11 @@ def main(argv: list[str] | None = None) -> int:
     signals to uvicorn."""
     raw = list(sys.argv[1:] if argv is None else argv)
     broken = _install_file_profiles(raw)
-    command = next((a for a in raw if not a.startswith("-")), None)
+    # Any `keys` or `setup` token selects the no-echo parse. A key typed before the verb, as in
+    # `--key sk-... setup`, otherwise became the command argparse quoted as an invalid choice.
+    command = next((a for a in raw if a in _KEY_COMMANDS), None) or next(
+        (a for a in raw if not a.startswith("-")), None
+    )
     parsed = _parse_args_reporting_config(argv, command, broken)
     if isinstance(parsed, int):
         return parsed

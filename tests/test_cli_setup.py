@@ -334,6 +334,9 @@ def test_no_terminal_is_usage_and_names_the_script_commands(monkeypatch, capsys,
         ["setup", "--key", KEY],
         ["setup", f"--key={KEY}"],
         ["setup", "--provider", KEY],
+        # A token before the verb must not become the command argparse names as invalid.
+        ["--key", KEY, "setup"],
+        ["-x", KEY, "setup"],
     ],
 )
 def test_ps4_a_key_pasted_after_setup_is_never_echoed(capsys, fake_keychain, argv):

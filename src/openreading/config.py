@@ -160,6 +160,8 @@ _ALT_FILENAME = "openreading.yml"
 _PROVIDER_KINDS = frozenset({"openai-compatible"})
 _PROVIDER_KEYS = frozenset({"kind", "base_url", "model", "key_env"})
 _PROVIDER_REQUIRED = ("kind", "base_url", "model")
+# Every pattern here is applied with `fullmatch`, because `match` lets `$` end before a final
+# newline and `https://x.example/v1\n` passed.
 _PROFILE_NAME_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 _ENV_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 # The schema's own `base_url` pattern, so a Python mapping and a file refuse alike. `urlsplit`
@@ -294,7 +296,7 @@ def validate_providers(block: Any, *, source: str = "<providers>") -> dict[str, 
                 f"{source}: invalid config at '{at}': a profile name is a backend id, and the "
                 f"'{_STRATEGY_PREFIX}' prefix names a strategy"
             )
-        if not _PROFILE_NAME_RE.match(name):
+        if not _PROFILE_NAME_RE.fullmatch(name):
             raise ConfigError(
                 f"{source}: invalid config at '{at}': a profile name must be lowercase and "
                 "hyphenated, such as 'openrouter-gpt'"
@@ -351,7 +353,7 @@ def _validated_profile(
     base_url = profile["base_url"]
     if not isinstance(base_url, str):
         raise refuse(f"{at}/base_url", "must be an http or https URL")
-    if not _BASE_URL_RE.match(base_url):
+    if not _BASE_URL_RE.fullmatch(base_url):
         raise refuse(f"{at}/base_url", "must be an http or https URL")
     try:
         parts = urlsplit(base_url)
@@ -370,7 +372,7 @@ def _validated_profile(
         raise refuse(f"{at}/model", "must be a non-empty model id")
     key_env = profile.get("key_env")
     if key_env is not None:
-        if not isinstance(key_env, str) or not _ENV_NAME_RE.match(key_env):
+        if not isinstance(key_env, str) or not _ENV_NAME_RE.fullmatch(key_env):
             raise refuse(
                 f"{at}/key_env",
                 "must be an environment variable NAME such as OPENROUTER_API_KEY, never a key",

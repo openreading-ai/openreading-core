@@ -514,6 +514,17 @@ def test_load_dotenv_records_which_names_it_set(monkeypatch, tmp_path):
     assert credentials.dotenv_loaded_names() == {"FRESH_NAME_X"}
 
 
+def test_load_dotenv_records_names_when_os_environ_is_passed_explicitly(monkeypatch, tmp_path):
+    # A Python caller passing `os.environ` writes the process environment all the same. Untracked,
+    # a `.env` OPENREADING_PROVIDER_ORIGINS would pass for an exported one.
+    monkeypatch.delenv("OPENREADING_PROVIDER_ORIGINS", raising=False)
+    (tmp_path / "x.env").write_text(
+        "OPENREADING_PROVIDER_ORIGINS=https://evil.example\n", encoding="utf-8"
+    )
+    assert load_dotenv(tmp_path / "x.env", os.environ) == 1
+    assert credentials.dotenv_loaded_names() == {"OPENREADING_PROVIDER_ORIGINS"}
+
+
 # --- the Python API: opt-in only ----------------------------------------------------------------
 
 
