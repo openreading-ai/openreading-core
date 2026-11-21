@@ -38,6 +38,11 @@ message over a key written to disk in clear text is the failure this avoids. A c
 is unwrapped to its best acceptable member, because the chainer writes to the next member when
 one fails, and the next member can be a plaintext file.
 
+A read the backend refuses with an error, such as a locked keychain raising `KeyringLocked`, is
+not an answer. It returns the last answer for that name, or nothing, and caches nothing, so the
+next read asks again. Caching "nothing saved" there would make a `serve --keychain` drop a key it
+held for a full `CACHE_TTL_S`.
+
 Why every call has a timeout
 ----------------------------
 On Linux without a desktop session, `keyring` can block while it waits for a Secret Service that
@@ -100,6 +105,10 @@ class KeychainUnavailable(RuntimeError):
 
 class _Timeout(Exception):
     pass
+
+
+class _Failed(Exception):
+    """The backend raised on a read, so the read has no answer to cache."""
 
 
 def disabled() -> bool:
@@ -172,7 +181,9 @@ def _remember(name: str, value: str | None, *, since: int | None = None) -> None
 
 
 def _refresh(name: str) -> str | None:
-    """Ask the keychain for `name` and cache the answer. Raises `_Timeout` after `TIMEOUT_S`.
+    """Ask the keychain for `name` and cache the answer. Raises `_Timeout` after `TIMEOUT_S`,
+    and `_Failed` when the backend raised, such as `KeyringLocked`. A failure caches nothing,
+    because it says nothing about what is saved.
 
     The abandoned worker keeps running, and its answer still reaches the cache when it arrives.
     A locked keychain that answers after the timeout therefore fills the cache for the next read
@@ -181,11 +192,11 @@ def _refresh(name: str) -> str | None:
         since = _generation.get(name, 0)
 
     def lookup() -> str | None:
+        backend = _backend()
         try:
-            backend = _backend()
             value = None if backend is None else backend.get_password(SERVICE, name)
         except Exception:
-            value = None
+            raise _Failed from None
         value = value if isinstance(value, str) and value else None
         _remember(name, value, since=since)
         return value
@@ -229,6 +240,8 @@ def get(name: str) -> str | None:
     except _Timeout:
         with _lock:
             _reads_paused_until = _clock() + READ_COOLDOWN_S
+        return last
+    except _Failed:
         return last
 
 

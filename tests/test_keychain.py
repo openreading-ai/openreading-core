@@ -261,6 +261,33 @@ def test_timeout_after_a_cached_hit_returns_the_cached_value(monkeypatch, fake_k
     assert keychain.get("REDUCTO_API_KEY") is None  # never known, so nothing to serve
 
 
+def test_a_keyring_error_after_a_cached_hit_keeps_the_key_and_caches_nothing(
+    monkeypatch, fake_keychain, clock
+):
+    """A locked keychain that raised once used to cache None over a held key, so a
+    `serve --keychain` lost a working key until the TTL ended."""
+    import keyring.errors
+
+    _save(fake_keychain, "ANTHROPIC_API_KEY", KEY)
+    assert keychain.get("ANTHROPIC_API_KEY") == KEY
+    clock.now += keychain.CACHE_TTL_S + 1
+    real = fake_keychain.get_password
+
+    def locked(*_):
+        raise keyring.errors.KeyringLocked("locked")
+
+    monkeypatch.setattr(fake_keychain, "get_password", locked)
+    assert keychain.get("ANTHROPIC_API_KEY") == KEY
+    assert keychain.get("REDUCTO_API_KEY") is None  # never known, so nothing to serve
+    # Recovered one second later: the next read asks again instead of serving a cached None.
+    clock.now += 1
+    monkeypatch.setattr(fake_keychain, "get_password", real)
+    _save(fake_keychain, "ANTHROPIC_API_KEY", "sk-ant-rotated")
+    _save(fake_keychain, "REDUCTO_API_KEY", "r1")
+    assert keychain.get("ANTHROPIC_API_KEY") == "sk-ant-rotated"
+    assert keychain.get("REDUCTO_API_KEY") == "r1"
+
+
 def test_a_late_read_result_updates_the_cache(monkeypatch, fake_keychain, clock):
     monkeypatch.setattr(keychain, "TIMEOUT_S", 0.2)
     _save(fake_keychain, "ANTHROPIC_API_KEY", KEY)
