@@ -105,16 +105,22 @@ from __future__ import annotations
 import base64
 import dataclasses
 import errno
+import functools
 import hashlib
 import os
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, ParamSpec, TypeVar
 from urllib.parse import ParseResult
 
 from openreading.adapters._http import error_for_status
-from openreading.adapters.registry import build_registry, install_profiles, make_adapter
+from openreading.adapters.registry import (
+    build_registry,
+    make_adapter,
+    reset_call_profiles,
+    set_call_profiles,
+)
 from openreading.batch.runner import MAX_BATCH_JOBS
 from openreading.batch.sources import DEFAULT_MAX_ITEMS
 from openreading.config import LoadedFile
@@ -167,6 +173,8 @@ from openreading.types.request import OpenReadingRequest
 # Reserved `backend.id` prefix for a strategy reference (spec §1.3 / loader.STRATEGY_PREFIX).
 # Inlined here so a plain named-backend run never imports the strategy package (guardrail T10).
 _STRATEGY_PREFIX = "strategy:"
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 _MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
 # Removed keywords that `**request_overrides` would otherwise swallow. `policy=` is the one that
@@ -182,16 +190,35 @@ _REMOVED_KWARGS = {
 def _load_config_file(
     config: str | os.PathLike[str] | dict | LoadedFile | None,
 ) -> LoadedFile | None:
-    """`openreading.config.load`, then install the file's provider profiles as backend ids.
+    """`openreading.config.load`, then scope the file's provider profiles to this call.
 
     Every call that reads the file here dispatches next, and a profile named in `backend=` or in
-    `policy.backends` must already resolve when it does. No file leaves the installed set alone,
-    so a caller who called `install_profiles` directly keeps those profiles.
+    `policy.backends` must already resolve when it does. No file means no profile for the call
+    (law P5), whatever an earlier call or `install_profiles` left in the process. The entry
+    point's `_scoped_profiles` wrapper restores the context when the call returns.
     """
     loaded = _read_config_file(config)
-    if loaded is not None:
-        install_profiles(loaded.providers)
+    set_call_profiles(loaded.providers if loaded is not None else None)
     return loaded
+
+
+def _scoped_profiles(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+    """Run a public entry point with a provider profile set of its own (`openreading.adapters.registry.set_call_profiles`).
+
+    The set starts empty and `_load_config_file` fills it from the call's file. Profiles used to
+    be installed process-wide here, so two threads with two files swapped endpoints between load
+    and dispatch, and a call with no file inherited the last call's profiles.
+    """
+
+    @functools.wraps(fn)
+    def scoped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        token = set_call_profiles(None)
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            reset_call_profiles(token)
+
+    return scoped
 
 
 def _refuse_removed_kwargs(overrides: dict[str, Any]) -> None:
@@ -439,6 +466,7 @@ def materialize_document(req: OpenReadingRequest, descriptor=None, *, transport=
     return req.model_copy(update={"document": new_doc})
 
 
+@_scoped_profiles
 def route(
     source: str | bytes,
     *,
@@ -899,6 +927,7 @@ def _keychain_broker(
     return broker
 
 
+@_scoped_profiles
 def run(
     source: str | bytes,
     backend: str | None = None,
@@ -1013,6 +1042,7 @@ def _request_from_header(header: RunHeader, blobs: LocalFsBlobStore) -> OpenRead
     return OpenReadingRequest.model_validate(body)
 
 
+@_scoped_profiles
 def resume_run(run_id: str) -> dict[str, Any]:
     """`openreading resume <RUN_ID>` (internal/design/ledger.md §10, plan §4.4): re-derive the run's
     identity from the LIVE openreading.yaml + registry, compare it against the header written at
@@ -1094,6 +1124,7 @@ def resume_run(run_id: str) -> dict[str, Any]:
     return result.response.to_schema_dict()
 
 
+@_scoped_profiles
 def run_batch(
     sources: list[str],
     backend: str | None = None,

@@ -48,8 +48,9 @@ A name that shadows a built-in backend id is a `ConfigError`, exit 3 on the CLI.
 replace `pymupdf` would make one id mean two backends depending on the folder you ran from. A
 `strategy:` prefix is refused for the same reason, since it names a strategy and never a backend.
 `validate_providers` holds every one of these checks, so a mapping built in Python is refused
-exactly where a file is. `openreading.adapters.registry.install_profiles` turns the validated
-block into backends. Each surface that reads this file calls it before dispatch.
+exactly where a file is. `openreading.adapters.registry` turns the validated block into
+backends before dispatch: `install_profiles` once per process for the CLI, the server and MCP,
+and `set_call_profiles` for the length of one Python API call.
 
 Discovery order (first hit wins; sources are NEVER merged):
   1. an explicit path or an inline dict — CLI `--config PATH`, Python `openreading.run(config=…)`;

@@ -3,8 +3,8 @@
 You get a backend for OpenAI, OpenRouter, Groq, Ollama, vLLM or LM Studio by writing a provider
 profile in `openreading.yaml`, with no adapter code. A provider profile is a named backend whose
 endpoint, model and key variable come from that file. `openreading.config` documents the
-`providers:` grammar, and `openreading.adapters.registry.install_profiles` builds one instance of
-this class per profile.
+`providers:` grammar, and `openreading.adapters.registry` builds one instance of this class per
+profile.
 
 Flow
 ----

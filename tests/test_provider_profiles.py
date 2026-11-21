@@ -345,17 +345,62 @@ def test_request_endpoint_is_refused_for_a_profile_backend(monkeypatch):
     assert route.call_count == 0
 
 
-def test_api_with_no_file_leaves_installed_profiles_alone(pdf):
+def test_api_with_no_file_sees_no_profiles_and_leaves_the_process_set_alone(pdf, yaml_file):
+    """Law P5 per call: a library call that finds no file sees no profile, even right after a
+    call that found one, and never touches the set the CLI or server installed."""
     install_profiles({"example-llm": PROFILE})
-    api.run(pdf, backend="pymupdf")
+    path = yaml_file()
+    api.route(pdf, config=str(path))
+    path.unlink()
+    with pytest.raises(KeyError):
+        api.run(pdf, backend="example-llm")
     assert "example-llm" in installed_profiles()
+    assert "example-llm" in known_backends()  # outside a call, the process set answers
 
 
-def test_api_dict_config_installs_its_profiles(pdf):
+def test_api_dict_config_profiles_last_only_for_the_call(pdf):
     api.run(pdf, backend="pymupdf", config={"version": 1, "providers": {"example-llm": PROFILE}})
-    assert "example-llm" in installed_profiles()
-    api.route(pdf, config={"version": 1})
     assert installed_profiles() == {}
+    assert "example-llm" not in known_backends()
+
+
+@respx.mock
+def test_concurrent_api_calls_each_reach_their_own_profile(pdf, monkeypatch):
+    """Two threads, one profile name, two endpoints. A process-wide set let the second call's
+    file replace the first's between loading it and dispatching."""
+    import threading
+
+    keyless = {k: v for k, v in PROFILE.items() if k != "key_env"}
+    urls = {"a": "https://a.example.test/v1", "b": "https://b.example.test/v1"}
+    for tag, url in urls.items():
+        respx.post(f"{url}/chat/completions").mock(
+            return_value=httpx.Response(200, json=_reply(f"# from {tag}"))
+        )
+    loaded_both = threading.Barrier(2, timeout=10)
+    real_read = api._read_config_file
+
+    def read_then_wait(cfg):
+        loaded = real_read(cfg)
+        loaded_both.wait()  # both files loaded before either call dispatches
+        return loaded
+
+    monkeypatch.setattr(api, "_read_config_file", read_then_wait)
+    results: dict[str, object] = {}
+
+    def call(tag: str) -> None:
+        cfg = {"version": 1, "providers": {"shared": {**keyless, "base_url": urls[tag]}}}
+        try:
+            results[tag] = api.run(pdf, backend="shared", config=cfg)["document"]["markdown"]
+        except Exception as exc:  # reported below, on the main thread
+            results[tag] = exc
+
+    threads = [threading.Thread(target=call, args=(t,)) for t in urls]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(30)
+    assert str(results["a"]).startswith("# from a"), results
+    assert str(results["b"]).startswith("# from b"), results
 
 
 def test_server_installs_profiles_from_its_config_and_lists_them(tmp_path, monkeypatch):
