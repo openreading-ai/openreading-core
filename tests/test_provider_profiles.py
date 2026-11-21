@@ -227,6 +227,35 @@ def test_profiles_move_the_ledger_registry_fingerprint():
     assert registry_fingerprint() != before
 
 
+@pytest.mark.parametrize(
+    "replacement", ["http://localhost:11435/v1", "http://localhost:11434/other"]
+)
+@respx.mock
+def test_resume_refuses_a_changed_profile_endpoint(
+    replacement, yaml_file, pdf, tmp_path, monkeypatch
+):
+    from openreading.ledger.header import HeaderMismatch
+
+    monkeypatch.setenv("OPENREADING_LEDGER", str(tmp_path / "ledger"))
+    source = YAML + "strategies:\n  read-one:\n    steps:\n      - backend: local-llm\n"
+    monkeypatch.setenv("OPENREADING_CONFIG", str(yaml_file(source)))
+    armed = []
+
+    def stop(run_id):
+        armed.append(run_id)
+        raise InterruptedError("stopped before submission")
+
+    with pytest.raises(InterruptedError):
+        api.run(pdf, strategy="read-one", on_run_armed=stop)
+    header = (tmp_path / "ledger" / f"{armed[0]}.header.json").read_text()
+    assert "http://localhost:11434" not in header
+    yaml_file(source.replace("http://localhost:11434/v1", replacement))
+    with pytest.raises(HeaderMismatch) as mismatch:
+        api.resume_run(armed[0])
+    assert "config_hash" in {field[0] for field in mismatch.value.fields}
+    assert not respx.calls
+
+
 def test_loading_a_file_with_profiles_never_imports_the_strategy_engine(yaml_file):
     """Law P6 with a `providers:` block present, in a fresh process."""
     path = yaml_file()
@@ -474,6 +503,37 @@ def test_server_installs_profiles_from_its_config_and_lists_them(tmp_path, monke
     r = client.post("/v1/parse", json=body)
     assert r.status_code >= 400
     assert "endpoint" in r.text
+
+
+@respx.mock
+def test_server_profiles_belong_to_each_app_including_batch_workers(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from openreading.server import create_app
+
+    path = tmp_path / "server.yaml"
+    monkeypatch.setenv("OPENREADING_CONFIG", str(path))
+    path.write_text(YAML)
+    first = TestClient(create_app())
+    path.write_text(YAML.replace("local-llm", "other-llm"))
+    second = TestClient(create_app())
+    monkeypatch.delenv("OPENREADING_CONFIG")
+    empty = TestClient(create_app())
+    for client, expected in [(first, {"local-llm"}), (second, {"other-llm"}), (empty, set())]:
+        slugs = {row["slug"] for row in client.get("/v1/backends").json()}
+        assert slugs & {"local-llm", "other-llm"} == expected
+    route = respx.post("http://localhost:11434/v1/chat/completions").mock(
+        return_value=httpx.Response(200, json=_reply("from first"))
+    )
+    doc = {
+        "bytes_base64": base64.b64encode(build_sample_pdf()).decode(),
+        "mime_type": "application/pdf",
+    }
+    response = first.post(
+        "/v1/batch", json={"backend": "local-llm", "documents": [doc, doc], "jobs": 2}
+    )
+    assert response.status_code == 200 and response.json()["summary"]["succeeded"] == 2
+    assert route.call_count == 4
 
 
 def test_plain_strategy_resolves_a_profile_named_in_the_same_file():

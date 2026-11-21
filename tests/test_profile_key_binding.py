@@ -95,6 +95,57 @@ def _resolved_key(slug: str, broker: EnvCredentialBroker) -> object:
     return broker.resolve(make_adapter(slug).descriptor, _req(slug)).values.get("api_key")
 
 
+@pytest.mark.parametrize(
+    ("slug", "setting", "secret"),
+    [
+        ("llamaparse-fast", "LLAMA_CLOUD_BASE_URL", "LLAMA_CLOUD_API_KEY"),
+        ("chunkr", "OPENREADING_CHUNKR_BASE_URL", "CHUNKR_API_KEY"),
+        ("nuextract", "NUEXTRACT_BASE_URL", "NUMIND_API_KEY"),
+        (
+            "azure-document-intelligence",
+            "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT",
+            "AZURE_DOCUMENT_INTELLIGENCE_KEY",
+        ),
+        ("qwen-vl", "QWEN_VL_ENDPOINT", "QWEN_VL_API_KEY"),
+        ("aws-textract", "AWS_ENDPOINT_URL_TEXTRACT", "AWS_SESSION_TOKEN"),
+        ("aws-textract", "AWS_ENDPOINT_URL_S3", "AWS_SECRET_ACCESS_KEY"),
+        ("anthropic-claude", "ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"),
+    ],
+)
+def test_saved_builtin_key_requires_a_trusted_destination_from_dotenv(
+    slug, setting, secret, monkeypatch, fake_keychain, tmp_path
+):
+    from openreading.credentials import load_dotenv
+
+    origin = "https://provider.example.test"
+    path = tmp_path / "settings.env"
+    path.write_text(f"{setting}={origin}/v1\n")
+    monkeypatch.delenv(setting, raising=False)
+    load_dotenv(path)
+    fake_keychain.store[("openreading", secret)] = "saved"
+    broker = EnvCredentialBroker(keychain_environ())
+    desc = make_adapter(slug).descriptor
+    assert not broker.resolve(desc, _req(slug)).values
+    assert ("get", secret) not in fake_keychain.calls
+    assert broker.var_source(secret, make_adapter(slug).descriptor) == "missing"
+    monkeypatch.setenv("OPENREADING_PROVIDER_ORIGINS", origin)
+    assert "saved" in broker.resolve(desc, _req(slug)).values.values()
+
+
+def test_file_selected_sdk_configuration_requires_an_export(tmp_path, monkeypatch, fake_keychain):
+    from openreading.credentials import load_dotenv
+
+    settings = tmp_path / "settings.env"
+    settings.write_text(f"AWS_CONFIG_FILE={tmp_path / 'aws-config'}\n")
+    monkeypatch.delenv("AWS_CONFIG_FILE", raising=False)
+    load_dotenv(settings)
+    fake_keychain.store[("openreading", "AWS_SESSION_TOKEN")] = "saved"
+    broker = EnvCredentialBroker(keychain_environ())
+    desc = make_adapter("aws-textract").descriptor
+    assert "aws_session_token" not in broker.resolve(desc, _req(desc.id)).values
+    assert ("get", "AWS_SESSION_TOKEN") not in fake_keychain.calls
+
+
 def _stdin(monkeypatch, text: str) -> None:
     stream = io.StringIO(text)
     stream.isatty = lambda: False  # type: ignore[method-assign]

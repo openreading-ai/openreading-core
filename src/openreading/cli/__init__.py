@@ -762,6 +762,9 @@ shell or service environment exports it. A value from `.env` is ignored.
 When neither holds, `keys list` shows SOURCE `env-ignored`, and a line on
 stderr names the setting, never the value.
 
+When a dotenv file selects a built-in endpoint, export its origin in
+`OPENREADING_PROVIDER_ORIGINS` to use a saved key there.
+
 A key never crosses the command line. There is no flag that takes a value,
 because argv shows up in `ps` and in shell history. A `--value` you type out
 of habit exits 2 with that reason and is never echoed. Scripts pipe the value:
@@ -773,7 +776,8 @@ blank line skips one, and more lines than secrets is refused before anything
 is saved. So `aws-textract` reads `AWS_ACCESS_KEY_ID`, then
 `AWS_SECRET_ACCESS_KEY`, then the optional `AWS_SESSION_TOKEN`. A probe is a
 network call, so `keys set` offers one only at a terminal, and only after
-asking.
+asking. The probe uses the selected saved key even when your shell supplies
+another value for normal runs.
 
 `keys list` prints where each declared secret resolves from. SOURCE is `env`
 (exported), `.env`, `keychain`, `env-ignored`, or `missing`, and `--json`
@@ -792,8 +796,8 @@ built-in backend's secret in a `.env` file into the keychain. A provider
 profile's key moves only with `keys import PATH SLUG`, because the variable
 alone cannot say which endpoint the key is for. The output prints `Binding
 VAR to <origin>` before it saves a profile's key, and `keys set` does too.
-The file stays untouched, and the output names the lines to delete, because a
-`.env` line still beats the keychain whenever you run from that folder.
+The output names the lines you can delete after each key has been copied.
+Conflicting values for one variable stop the import before any key is saved.
 
 A machine with no usable keychain reads as "nothing saved", silently, so a CLI
 call on a server stays quiet. That covers a missing `[setup]` extra, a locked

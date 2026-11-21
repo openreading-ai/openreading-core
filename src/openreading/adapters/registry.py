@@ -11,23 +11,22 @@ and each profile becomes one `openreading.adapters.openai_compatible` instance u
 profiles. `make_adapter` and `build_registry` read it too, so the router resolves a profile like
 any other id and never needs to know one is a profile.
 
-Who installs: a long-running surface installs one process-wide set, once. The CLI does it in
+The CLI installs its process-wide set in
 `openreading.cli.app.main` before parsing arguments, so `--backend` accepts a profile id.
-`openreading serve` does it at startup in `create_app`, and `openreading mcp --config` in its
-launcher. A file without a `providers:` block empties the set.
+The MCP launcher installs its configured profiles at startup. Each HTTP application owns a
+separate profile snapshot, including an empty one when its deployment supplies no configuration.
 
 A library call scopes its set to itself instead. Each `openreading.api` entry point reads its own
 file and calls `set_call_profiles`, which sets a `ContextVar` that `known_backends`, `make_adapter` and
 `build_registry` consult before the process set. No file found means no profile for that call
 (law P5 in `openreading.config`). A process-wide set let two threads with two files swap
-profiles between load and dispatch, so a document went to the other file's endpoint. A thread
-started with `threading.Thread` does not inherit the context, which is why `run_batch` hands
-each item to `run`, and `run` sets the item's own set.
+profiles between load and dispatch, so a document went to the other file's endpoint. Batch workers inherit their caller's profile context for each submitted item.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from functools import partial
 from typing import Any
@@ -94,7 +93,8 @@ _CALL_PROFILES: ContextVar[dict[str, ProviderProfile] | None] = ContextVar(
 )
 
 
-def _built(providers: Mapping[str, Mapping[str, Any]] | None) -> dict[str, ProviderProfile]:
+def build_profiles(providers: Mapping[str, Mapping[str, Any]] | None) -> dict[str, ProviderProfile]:
+    """Build an independent snapshot of the validated provider profiles in a configuration."""
     from openreading.config import validate_providers  # lazy: config reads this module lazily
 
     validated = validate_providers(dict(providers) if providers is not None else None)
@@ -118,7 +118,7 @@ def install_profiles(providers: Mapping[str, Mapping[str, Any]] | None) -> None:
     every profile. Raises `openreading.config.ConfigError` and installs nothing on a bad block.
     """
     global _PROFILES
-    _PROFILES = _built(providers)
+    _PROFILES = build_profiles(providers)
 
 
 def set_call_profiles(
@@ -127,12 +127,22 @@ def set_call_profiles(
     """Give the current context its own profile set, validated like `install_profiles`. `None`
     or `{}` means no profile, whatever the process set holds. Pass the returned token to
     `reset_call_profiles` when the call ends."""
-    return _CALL_PROFILES.set(_built(providers))
+    return _CALL_PROFILES.set(build_profiles(providers))
 
 
 def reset_call_profiles(token: Token[dict[str, ProviderProfile] | None]) -> None:
     """Restore the profile set the context had before `set_call_profiles` returned `token`."""
     _CALL_PROFILES.reset(token)
+
+
+@contextmanager
+def profile_scope(profiles: dict[str, ProviderProfile]) -> Iterator[None]:
+    """Use an application-owned snapshot for every catalog read within the current request."""
+    token = _CALL_PROFILES.set(profiles)
+    try:
+        yield
+    finally:
+        _CALL_PROFILES.reset(token)
 
 
 def installed_profiles() -> dict[str, ProviderProfile]:

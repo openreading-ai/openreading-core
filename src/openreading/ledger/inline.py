@@ -37,6 +37,7 @@ from openreading.ledger.ports import BlobStore, Journal
 from openreading.ledger.sanitizer import Sanitizer
 from openreading.ledger.step import BlobRef, ExecResult, StepError, StepRef, StepRequest, StepResult
 from openreading.router.clock import Clock
+from openreading.types.descriptor import descriptor_digest as descriptor_digest
 from openreading.types.errors import (
     AdapterError,
     RetryableError,
@@ -101,14 +102,6 @@ class NullJournal:
 
     def get(self, ref: Any) -> list[StepResult]:
         return []
-
-
-def descriptor_digest(descriptor: Any) -> str:
-    """sha256 of a descriptor's schema dict — the same computation `strategies/prune.py`'s
-    `config_hash` already makes per eligible backend (BL-163), reused here for the L2 gate."""
-    return hashlib.sha256(
-        json.dumps(descriptor.to_schema_dict(), sort_keys=True, default=str).encode()
-    ).hexdigest()
 
 
 class InlineExecutor:

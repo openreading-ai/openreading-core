@@ -77,6 +77,7 @@ def test_set_interactive_probe_runs_only_when_you_say_yes(monkeypatch, capsys, f
     from openreading.types.liveness import LivenessStatus
 
     _stdin(monkeypatch, "", tty=True)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "shell-value")
     monkeypatch.setattr(cli_keys.getpass, "getpass", lambda _p: KEY)
     monkeypatch.setattr("builtins.input", lambda _p: "y")
     seen = {}
@@ -99,6 +100,7 @@ def test_set_interactive_probe_runs_only_when_you_say_yes(monkeypatch, capsys, f
     code, out, _ = _run(["keys", "set", "anthropic-claude"], capsys)
     assert code == 0
     assert seen["key"] == KEY
+    assert _anthropic_key() == "shell-value"
     assert "anthropic-claude is working (412 ms)" in out
 
     _Report.status = LivenessStatus.UNAUTHORIZED
@@ -106,6 +108,26 @@ def test_set_interactive_probe_runs_only_when_you_say_yes(monkeypatch, capsys, f
     code, out, _ = _run(["keys", "set", "anthropic-claude"], capsys)
     assert code == 0
     assert "✗ anthropic-claude" in out and "check ANTHROPIC_API_KEY" in out
+
+
+def test_probe_reads_the_selected_saved_alias(monkeypatch, fake_keychain):
+    from openreading.liveness import probe_request
+
+    slug = "llamaparse-fast"
+    monkeypatch.setenv("LLAMA_CLOUD_API_KEY", "shell")
+    fake_keychain.store[("openreading", "LLAMA_PARSE_API_KEY")] = KEY
+    credentials.use_keychain(True)
+    seen = []
+
+    def probe(adapter, *, broker):
+        seen.append(broker.resolve(adapter.descriptor, probe_request(slug)).values["api_key"])
+
+    monkeypatch.setattr(cli_keys, "check_liveness", probe)
+    cli_keys.run_probe(slug, ["LLAMA_PARSE_API_KEY"])
+    assert seen == [KEY]
+    assert EnvCredentialBroker().resolve(
+        make_adapter(slug).descriptor, probe_request(slug)
+    ).values == {"api_key": "shell"}
 
 
 def test_set_stdin_never_offers_a_probe(monkeypatch, capsys, fake_keychain):
@@ -391,6 +413,32 @@ def test_unset_refuses_an_undeclared_variable(capsys, fake_keychain):
 
 
 # --- keys import ---------------------------------------------------------------------------------
+
+
+def test_unset_reports_a_store_that_refuses_reads(monkeypatch, capsys, fake_keychain):
+    def locked(*args):
+        raise RuntimeError("private store message")
+
+    monkeypatch.setattr(fake_keychain, "get_password", locked)
+    code, out, err = _run(["keys", "unset", "anthropic-claude"], capsys)
+    assert code == 2
+    assert "ANTHROPIC_API_KEY" in err and "private store message" not in out + err
+
+
+@pytest.mark.parametrize("second, expected_code", [(KEY, 0), ("another-value", 2)])
+def test_import_only_recommends_removing_copied_values(
+    tmp_path, capsys, fake_keychain, second, expected_code
+):
+    src = tmp_path / "old.env"
+    src.write_text(f"REDUCTO_API_KEY=earlier\nMISTRAL_API_KEY={KEY}\nMISTRAL_API_KEY={second}\n")
+    code, out, err = _run(["keys", "import", str(src)], capsys)
+    assert code == expected_code
+    assert KEY not in out + err and "another-value" not in out + err
+    if code:
+        assert "MISTRAL_API_KEY" in err and "2" in err and "3" in err
+        assert not fake_keychain.store and "Delete" not in out
+    else:
+        assert _saved(fake_keychain, "MISTRAL_API_KEY") == KEY and "lines 1, 2, 3" in out
 
 
 def test_import_moves_declared_secrets_and_names_the_lines_to_delete(

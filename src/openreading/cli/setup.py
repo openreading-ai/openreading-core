@@ -74,8 +74,10 @@ import re
 import shutil
 import sys
 from collections.abc import Sequence
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any, Protocol
 
 from openreading import config, keychain
@@ -424,12 +426,22 @@ def with_provider(text: str, name: str, profile: dict[str, str]) -> str:
 
 def _write(path: Path, text: str) -> None:
     """Replace the file in one step, so an interrupted write never leaves half a config."""
-    tmp = path.with_name(path.name + ".openreading-setup.tmp")
-    # `newline=""` writes the line endings `text` carries, so a CRLF file stays CRLF everywhere.
-    tmp.write_text(text, encoding="utf-8", newline="")
-    if path.exists():
-        shutil.copymode(path, tmp)
-    os.replace(tmp, path)
+    with ExitStack() as cleanup:
+        with NamedTemporaryFile(
+            mode="w",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            encoding="utf-8",
+            newline="",
+            delete=False,
+        ) as stream:
+            tmp = Path(stream.name)
+            cleanup.callback(tmp.unlink, missing_ok=True)
+            stream.write(text)
+        # Windows requires the temporary file to be closed before replacement.
+        if path.exists():
+            shutil.copymode(path, tmp)
+        os.replace(tmp, path)
 
 
 # --- the flow -------------------------------------------------------------------------------------
@@ -513,6 +525,7 @@ class _Wizard:
         fields = keys_cli._secret_fields(desc)
         broker = EnvCredentialBroker()
         in_keychain = [f.env[0] for f in fields if broker.var_source(f.env[0], desc) == "keychain"]
+        saved_names = in_keychain
         ask_keys = True
         if in_keychain:
             action = self.ask.select(
@@ -537,7 +550,8 @@ class _Wizard:
                 if not saved:
                     self.rows.append(_Row(slug, "skipped", NONE))
                     return
-            state, outcome = self._offer_probe(desc, keyed=bool(fields))
+                saved_names = saved
+            state, outcome = self._offer_probe(desc, saved_names)
             if state != FAILED or not fields:
                 self.rows.append(_Row(slug, outcome, state))
                 return
@@ -559,10 +573,9 @@ class _Wizard:
                 self.rows.append(_Row(slug, outcome, FAILED))
             return
 
-    def _ask_keys(self, desc: AdapterDescriptor) -> int | None:
-        """Ask for each secret, save what was typed. The count saved, or None when the keychain
-        refused a write (already reported)."""
-        count = 0
+    def _ask_keys(self, desc: AdapterDescriptor) -> list[str] | None:
+        """Return the names saved during this visit, or None after a write failure."""
+        saved = []
         for f in keys_cli._secret_fields(desc):
             name = f.env[0]
             value = (self.ask.password(f"{name}  (hidden, Enter to skip)") or "").strip()
@@ -579,18 +592,22 @@ class _Wizard:
                 self.saved.append(name)
             for ln in lines:
                 self.out.line(ln)
-            count += 1
-        return count
+            saved.append(name)
+        return saved
 
-    def _offer_probe(self, desc: AdapterDescriptor, *, keyed: bool) -> tuple[str, str]:
+    def _offer_probe(self, desc: AdapterDescriptor, saved_names: list[str]) -> tuple[str, str]:
         """Ask before one probe, then report it. Returns the row state and its outcome words."""
         slug = desc.id
+        keyed = bool(saved_names)
         what = "the key" if keyed else "it"
         if not self.ask.confirm(f"Test {what} now? This makes one small request.", default=False):
             self.out.note(f"- {slug} {'saved, ' if keyed else ''}not tested")
             return UNTESTED, "saved, not tested" if keyed else "not tested"
         try:
-            report = keys_cli.run_probe(slug)
+            report = keys_cli.run_probe(slug, saved_names)
+        except keychain.KeychainUnavailable as e:
+            self.out.fail(str(e))
+            return FAILED, "not tested"
         except Exception as e:  # noqa: BLE001 - a probe failure is an ✗ line, never a traceback
             # The type alone: an exception message can echo a request, and the key with it.
             self.out.fail(f"{slug} could not be tested ({type(e).__name__})")

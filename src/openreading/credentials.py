@@ -54,6 +54,11 @@ keychain. A blank variable counts as unset, so an empty `ANTHROPIC_API_KEY=` lin
 does not hide a saved key. `EnvCredentialBroker.var_source` names where a variable resolves from
 (`env`, `.env`, `keychain`, `missing`) for `openreading backends` and `openreading keys list`.
 
+A built-in uses its saved key with the default destination or an endpoint exported by the
+operator. When a dotenv file selects the endpoint, export its origin in
+`OPENREADING_PROVIDER_ORIGINS` to authorize the keychain lookup. For example, an unlisted
+`LLAMA_CLOUD_BASE_URL` in a project file cannot redirect a saved LlamaParse key.
+
 A provider profile's key is bound to its endpoint
 -------------------------------------------------
 A provider profile is a backend that `openreading.yaml` defines (`openreading.config`), and that
@@ -154,7 +159,8 @@ Per-backend reference
   open-ocr  [open-ocr]  auth: OPENOCR_API_KEY   config: OPENOCR_ENGINE (default openocr/tesseract)
             ops: parse   limits: OCR aggregator (~20 engines behind one API); plain text only (NO
             blocks/bboxes); 10MB body cap
-  anthropic-claude [anthropic-claude]   auth: ANTHROPIC_API_KEY   config: ANTHROPIC_MODEL (opt)
+  anthropic-claude [anthropic-claude]   auth: ANTHROPIC_API_KEY   config: ANTHROPIC_MODEL and
+            the SDK endpoint ANTHROPIC_BASE_URL (both optional)
             ops: parse, extract   limits: native-PDF ~100 pages / 32MB ceiling -> `doc_too_large`
   aws-textract [textract]   auth: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN (opt,
             STS/temporary creds) — or the ambient boto3 chain
@@ -374,15 +380,11 @@ def endpoint_origin(url: str) -> str:
 def bound_origin(descriptor: AdapterDescriptor) -> str | None:
     """The origin a provider profile's key is bound to, or None for every other backend.
 
-    A backend is a profile when the profile set active in this context
-    (`openreading.adapters.registry.active_profiles`) holds its id with a `key_env`. Profiles
-    cannot shadow a built-in id (`openreading.config`), so a built-in never answers here."""
-    from openreading.adapters.registry import active_profiles
-
-    profile = active_profiles().get(descriptor.id)
-    if profile is None or profile.key_env is None:
-        return None
-    return endpoint_origin(profile.base_url)
+    The descriptor carries the endpoint of the instance that will actually receive the key.
+    Looking up the id again could bind credentials to a different application's profile."""
+    if descriptor._profile_base_url is not None and descriptor.credentials_spec:
+        return endpoint_origin(descriptor._profile_base_url)
+    return None
 
 
 def keychain_account(descriptor: AdapterDescriptor, name: str) -> str:
@@ -529,6 +531,14 @@ def _slug_env(slug: str, key: str) -> str:
     return f"OPENREADING_{slug.replace('-', '_').upper()}_{key.upper()}"
 
 
+def _first_set(env: Mapping[str, str], names: Iterable[str]) -> tuple[str, str] | None:
+    for name in names:
+        value = env.get(name)
+        if value:
+            return name, value
+    return None
+
+
 def _credentials_ref_aliases(env: Mapping[str, str]) -> frozenset[str]:
     """BL-162: `credentials_ref: "env:<alias>"` may only select a prefix the OPERATOR has
     explicitly allow-listed via `OPENREADING_CREDENTIALS_REF_ALIASES` (comma-separated) — never an
@@ -549,7 +559,10 @@ class EnvCredentialBroker:
     `environ` mapping in tests. The default is `os.environ`, or `keychain_environ()` once the
     process called `use_keychain(True)`."""
 
-    def __init__(self, environ: Mapping[str, str] | None = None) -> None:
+    def __init__(
+        self, environ: Mapping[str, str] | None = None, *, probe_saved: Iterable[str] = ()
+    ) -> None:
+        self._probe_saved = frozenset(probe_saved)
         if environ is None:
             environ = keychain_environ() if _USE_KEYCHAIN else os.environ
         self._env: Mapping[str, str] = environ
@@ -567,6 +580,40 @@ class EnvCredentialBroker:
             return True
         return origin in provider_origins(self._layers()[0])
 
+    def _env_item(
+        self, slug: str, field: CredentialField | ConfigField, prefix: str | None
+    ) -> tuple[str, str] | None:
+        names = [_slug_env(slug, field.key), *field.env]
+        if prefix:
+            names.insert(0, f"{prefix}_{field.key.upper()}")
+        return _first_set(self._layers()[0], names)
+
+    def untrusted_endpoint(
+        self, descriptor: AdapterDescriptor, prefix: str | None = None
+    ) -> str | None:
+        """Name a dotenv destination that requires operator approval before reading a saved key."""
+        env = self._layers()[0]
+        if env is not os.environ or not _DOTENV_NAMES:
+            return None
+        for name in descriptor._sdk_config_envs:
+            if name in _DOTENV_NAMES and env.get(name):
+                return name
+        settings = [
+            self._env_item(descriptor.id, field, prefix)
+            for field in descriptor.config_spec
+            if field.key in {"endpoint", "base_url"}
+        ]
+        settings.extend(_first_set(env, names) for names in descriptor._sdk_endpoint_envs)
+        for item in settings:
+            if item and item[0] in _DOTENV_NAMES:
+                try:
+                    origin = endpoint_origin(item[1])
+                except ValueError:
+                    return item[0]
+                if origin not in provider_origins(env):
+                    return item[0]
+        return None
+
     def var_source(self, name: str, descriptor: AdapterDescriptor | None = None) -> str:
         """Where `name` resolves from for this broker: `env` (exported), `.env` (set by
         `load_dotenv`), `keychain`, or `missing`. Names a place, never a value. With a provider
@@ -577,6 +624,8 @@ class EnvCredentialBroker:
         first = layers[0]
         if first.get(name) and self.env_allowed(origin):
             return ".env" if first is os.environ and name in _DOTENV_NAMES else "env"
+        if descriptor is not None and self.untrusted_endpoint(descriptor):
+            return "missing"
         account = name if origin is None else f"{name}@{origin}"
         if any(layer.get(account) for layer in layers[1:]):
             return "keychain"
@@ -599,7 +648,7 @@ class EnvCredentialBroker:
     def secret_sources(self, descriptor: AdapterDescriptor) -> list[tuple[str, str]]:
         """One `(VAR, SOURCE)` pair per secret credential field, in descriptor order. VAR is the
         name that resolves (the `OPENREADING_<SLUG>_<KEY>` form included), else the field's
-        primary variable with SOURCE `missing`. The pick follows `_lookup`: every name in the
+        primary variable with SOURCE `missing`. The pick follows `resolve`: every name in the
         environment first, then the keychain. `openreading keys list` prints these rows."""
         rows: list[tuple[str, str]] = []
         for f in descriptor.credentials_spec:
@@ -640,50 +689,34 @@ class EnvCredentialBroker:
             )
         return alias
 
-    def _lookup(
-        self,
-        slug: str,
-        field: CredentialField | ConfigField,
-        ref_prefix: str | None,
-        request_value: str | None = None,
-        *,
-        origin: str | None = None,
-    ) -> str | None:
-        if request_value is not None:
-            return request_value
-        names = [_slug_env(slug, field.key), *field.env]
-        if ref_prefix is not None:
-            names.insert(0, f"{ref_prefix}_{field.key.upper()}")
-        # Law PS2: every name is tried in the environment before any name in the keychain. Asked
-        # name by name through the chain, a value saved under LLAMA_CLOUD_API_KEY beat an exported
-        # LLAMA_PARSE_API_KEY, so an export made for this shell lost to a key saved weeks ago.
-        layers = self._layers()
-        for index, layer in enumerate(layers):
-            if index == 0 and not self.env_allowed(origin):
-                # A profile's key reaches its endpoint from the environment only with the
-                # operator's consent. Without it, a committed openreading.yaml could name
-                # GITHUB_TOKEN with its author's base_url and receive your token.
-                continue
-            for name in names:
-                account = name if index == 0 or origin is None else f"{name}@{origin}"
-                v = layer.get(account)
-                if v:
-                    return v
-        return None
-
     def resolve(
         self, descriptor: AdapterDescriptor, req: OpenReadingRequest
     ) -> ResolvedCredentials:
-        """Secrets/credentials from credentials_spec → ResolvedCredentials.values. Keys the broker
-        can't find are left out (the adapter's ambient SDK chain, if any, takes over). A provider
-        profile's key follows the binding in the module docstring."""
+        """Resolve each credential from the environment, then its eligible keychain accounts.
+
+        A post-save probe reads the selected accounts directly. Other fields retain their
+        normal precedence, including operator settings for the actual destination.
+        """
         prefix = self._ref_prefix(req)
         origin = bound_origin(descriptor)
+        layers = self._layers()
+        can_read_store = len(layers) > 1 and not self.untrusted_endpoint(descriptor, prefix)
         values: dict[str, object] = {}
-        for f in descriptor.credentials_spec:
-            v = self._lookup(descriptor.id, f, prefix, origin=origin)
-            if v is not None:
-                values[f.key] = v
+        for field in descriptor.credentials_spec:
+            selected = [name for name in field.env if name in self._probe_saved]
+            # PS2: an exported LLAMA_PARSE_API_KEY wins even when the keychain holds the
+            # primary LLAMA_CLOUD_API_KEY. A remote profile also needs consent for its origin.
+            if not selected and self.env_allowed(origin):
+                item = self._env_item(descriptor.id, field, prefix)
+                if item:
+                    values[field.key] = item[1]
+                    continue
+            if field.secret and can_read_store:
+                for name in selected or field.env:
+                    value = layers[1].get(keychain_account(descriptor, name))
+                    if value:
+                        values[field.key] = value
+                        break
         return ResolvedCredentials(values=values, source="env" if values else None)
 
     def resolve_config(self, descriptor: AdapterDescriptor, req: OpenReadingRequest) -> dict:
@@ -710,9 +743,11 @@ class EnvCredentialBroker:
             )
         out: dict[str, object] = dict(runtime_req)  # pass through remaining typed runtime fields
         for f in descriptor.config_spec:
-            v = self._lookup(descriptor.id, f, prefix, request_value=runtime_req.get(f.key))
-            if v is not None:
-                out[f.key] = v
+            if f.key not in out and (item := self._env_item(descriptor.id, f, prefix)):
+                out[f.key] = item[1]
+        for names, key in descriptor._sdk_endpoint_envs.items():
+            if key is not None and (item := _first_set(self._layers()[0], names)):
+                out[key] = item[1]
         return out
 
 
@@ -739,8 +774,8 @@ def build_run_context(
     `_default_idempotency_key`, so every submit carries a stable key before it ever reaches an
     adapter, without the caller having to think about it."""
     broker = broker or EnvCredentialBroker()
-    creds = broker.resolve(descriptor, req)
     runtime = broker.resolve_config(descriptor, req)
+    creds = broker.resolve(descriptor, req)
     return RunContext(
         credentials=creds if creds.values else None,
         runtime=runtime or None,

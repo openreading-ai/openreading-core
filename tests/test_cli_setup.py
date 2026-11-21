@@ -684,7 +684,7 @@ def test_provider_preset_writes_a_valid_profile_saves_its_key_and_probes(
     wizard, monkeypatch, capsys, fake_keychain, tmp_path
 ):
     models = respx.get("https://openrouter.ai/api/v1/models").mock(
-        return_value=httpx.Response(200, json={"data": []})
+        return_value=httpx.Response(200, json={"data": [{"id": "openai/gpt-5.1"}]})
     )
     code, out, err, prompter = wizard(
         [
@@ -912,3 +912,23 @@ def test_a_file_that_cannot_be_written_is_a_cross_line(
     assert code == 0, err
     assert "✗ Could not write ./openreading.yaml (Permission denied)" in out
     assert not (tmp_path / "openreading.yaml").exists()
+
+
+def test_atomic_write_preserves_siblings_mode_and_line_endings(tmp_path, monkeypatch):
+    path = tmp_path / "config.yaml"
+    path.write_bytes(b"before\r\n")
+    path.chmod(0o640)
+    sibling = tmp_path / "config.yaml.openreading-setup.tmp"
+    sibling.write_text("other work")
+    cli_setup._write(path, "after\r\n")
+    assert path.read_bytes() == b"after\r\n" and path.stat().st_mode & 0o777 == 0o640
+    assert sibling.read_text() == "other work"
+
+    def refuse(*args):
+        raise OSError("replace refused")
+
+    monkeypatch.setattr(cli_setup.os, "replace", refuse)
+    with pytest.raises(OSError, match="replace refused"):
+        cli_setup._write(path, "incomplete")
+    assert path.read_bytes() == b"after\r\n"
+    assert set(tmp_path.iterdir()) == {path, sibling}

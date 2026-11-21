@@ -152,13 +152,19 @@ def test_client_is_built_from_the_resolved_api_key(monkeypatch):
     seen: dict = {}
 
     class _Stub:
-        def __init__(self, api_key) -> None:
-            seen["api_key"] = api_key
+        def __init__(self, api_key, base_url) -> None:
+            seen.update(api_key=api_key, base_url=base_url)
 
     monkeypatch.setattr(adapter_mod, "_RealAnthropicClient", _Stub)
-    ctx = RunContext(credentials=ResolvedCredentials(values={"api_key": "sk-test"}))
+    ctx = RunContext(
+        credentials=ResolvedCredentials(values={"api_key": "sk-test"}),
+        runtime={"base_url": "https://proxy.example.test"},
+    )
     client = AnthropicClaudeAdapter()._get_client(ctx)
-    assert isinstance(client, _Stub) and seen["api_key"] == "sk-test"
+    assert isinstance(client, _Stub) and seen == {
+        "api_key": "sk-test",
+        "base_url": "https://proxy.example.test",
+    }
 
 
 def test_get_client_raises_missing_credentials_without_api_key(monkeypatch):

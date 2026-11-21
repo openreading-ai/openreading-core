@@ -17,7 +17,7 @@ Both operations are INLINE: `submit()` makes the calls and returns a finished jo
 - extract: one call carries every selected page image, the caller's instructions, and
   `response_format: {type: json_schema, json_schema: {name, schema}}` when the request has a JSON
   Schema. A request with instructions only sends `{type: json_object}`. The reply's JSON object
-  becomes `typed_fields`.
+  becomes `typed_fields` after local validation against the supplied schema.
 
 The request body holds `model` and `messages` and nothing else. `max_tokens` and `temperature`
 are left out on purpose: some OpenAI models refuse `max_tokens`, and some reasoning models refuse
@@ -37,7 +37,7 @@ carries generated text and nothing else, so this adapter fills only that.
   measured one downstream. A requested X channel gets a `channel_unavailable` warning.
 - `finish_reason: length` marks the response PARTIAL with an `output_truncated` warning.
 
-Whether a given model accepts images or honours `json_schema` is not something core can verify.
+Each submitted reply must satisfy the requested schema using only references within that schema.
 A model that refuses answers with an HTTP error, which maps to a normal `TerminalError`, so that
 one call fails and the router moves to the next backend in the chain. A 401 or 403 maps to
 `auth_rejected`, and `openreading.readiness` names the profile's `key_env` in the hint.
@@ -54,11 +54,12 @@ operator's file and never from the environment or a request. `backend.runtime.en
 request is refused by `openreading.credentials` before this adapter runs (BL-162), and this
 adapter never reads `ctx.runtime` for a destination.
 
-`usage` carries `prompt_tokens` and `completion_tokens`, summed over the calls, and
-`report_cost` returns their sum in tokens. Core carries no price.
+Each usage counter is reported only when every call supplies it. The cost report uses the
+observed total or the sum of both observed counters for each call. Missing totals produce
+`cost_unavailable`. One deadline covers rendering and all chat calls for the document.
 
 Liveness: `GET {base_url}/models` with the key, the model list every OpenAI-compatible server
-exposes. It never generates a token, so it is never billed.
+exposes. The probe confirms the configured model only when the returned list contains its id.
 
 Sources: https://platform.openai.com/docs/api-reference/chat/create and
 https://platform.openai.com/docs/api-reference/models/list (accessed 2026-11-20).
@@ -68,7 +69,9 @@ from __future__ import annotations
 
 import base64
 import json
+from contextlib import ExitStack
 from dataclasses import dataclass
+from time import monotonic
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
@@ -162,18 +165,22 @@ class OpenAICompatibleClient(Protocol):
 
 
 class _HttpxChatClient:
-    def __init__(self, base_url: str, api_key: str | None) -> None:
+    def __init__(self, base_url: str, api_key: str | None, deadline: float | None) -> None:
         from openreading.adapters._http import build_httpx_client
 
+        self._deadline = deadline
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         self._http = build_httpx_client(
             base_url=base_url.rstrip("/"), headers=headers, timeout=300.0
         )
 
+    def close(self) -> None:
+        self._http.close()
+
     def chat(self, body: dict[str, Any]) -> dict[str, Any]:
         from openreading.adapters._http import error_for_status
 
-        r = self._http.post("/chat/completions", json=body)
+        r = self._http.post("/chat/completions", json=body, timeout=_remaining(self._deadline))
         if r.status_code >= 400:
             raise error_for_status(r.status_code, r.headers, message=_error_message(r))
         return r.json()
@@ -197,7 +204,7 @@ def _origin(url: str) -> str:
 
 def _descriptor(profile: ProviderProfile) -> AdapterDescriptor:
     keyed = profile.key_env is not None
-    return AdapterDescriptor(
+    descriptor = AdapterDescriptor(
         id=profile.name,
         # A keyed endpoint is somebody's service, and a keyless one is usually your own server.
         # Neither is verifiable, and nothing routes on `type`, so this only labels the catalog.
@@ -275,6 +282,9 @@ def _descriptor(profile: ProviderProfile) -> AdapterDescriptor:
         ],
     )
 
+    descriptor._profile_base_url = profile.base_url.rstrip("/")
+    return descriptor
+
 
 class OpenAICompatibleAdapter(BackendAdapter):
     """One provider profile as a backend. `client` and `probe_client` are the test seams."""
@@ -307,7 +317,9 @@ class OpenAICompatibleAdapter(BackendAdapter):
         value = creds.get("api_key")
         return str(value) if value else None
 
-    def _get_client(self, ctx: RunContext) -> OpenAICompatibleClient:
+    def _get_client(
+        self, ctx: RunContext, deadline: float | None, stack: ExitStack
+    ) -> OpenAICompatibleClient:
         if self._client is not None:
             return self._client
         api_key = self._api_key(ctx)
@@ -316,7 +328,9 @@ class OpenAICompatibleAdapter(BackendAdapter):
                 f"{self.profile.name} needs {self.profile.key_env}",
                 backend_code="no_credentials",
             )
-        return _HttpxChatClient(self.profile.base_url, api_key)
+        client = _HttpxChatClient(self.profile.base_url, api_key, deadline)
+        stack.callback(client.close)
+        return client
 
     def probe_liveness(self, ctx: RunContext, *, timeout_s: float) -> ProbeResult:
         """`GET {base_url}/models`. The env hint names the key variable for a keyed profile and
@@ -327,42 +341,67 @@ class OpenAICompatibleAdapter(BackendAdapter):
             timeout_s=timeout_s,
             headers={"Authorization": f"Bearer {api_key}"} if api_key else None,
             env_hint=self.profile.key_env or f"providers.{self.profile.name}",
-            on_ok=lambda _r: ProbeResult.live("responding", version=self.profile.model),
+            on_ok=self._check_models,
             client=self._probe_client,
         )
 
+    def _check_models(self, response: Any) -> ProbeResult:
+        try:
+            body = response.json()
+        except ValueError:
+            return ProbeResult.error("The endpoint returned an unreadable model list.")
+        models = body.get("data") if isinstance(body, dict) else None
+        if isinstance(models, list):
+            for model in models:
+                if isinstance(model, dict) and model.get("id") == self.profile.model:
+                    return ProbeResult.live("configured model listed", version=model["id"])
+        return ProbeResult.error("The endpoint did not list the configured model.")
+
     # ---- submit --------------------------------------------------------------------------
     def submit(self, req: OpenReadingRequest, ctx: RunContext) -> Job:
-        client = self._get_client(ctx)
-        mode = (
-            "extract" if (req.extraction_schema or req.backend.operation == "extract") else "parse"
-        )
-        try:
-            images = self._render(req)
-        except (RetryableError, TerminalError):
-            raise
-        except Exception as e:  # noqa: BLE001
-            raise self._map_error(e, "rasterization failed") from e
-
-        calls: list[tuple[int | None, dict[str, Any]]]
-        if mode == "extract":
-            calls = [(None, self._extract_body(req, [url for url, _ in images]))]
-        else:
-            calls = [(page, self._parse_body(url)) for url, page in images]
-
-        pages: list[dict[str, Any]] = []
-        usage = {"prompt_tokens": 0, "completion_tokens": 0}
-        for page, body in calls:
+        deadline = None if ctx.deadline_ms is None else monotonic() + ctx.deadline_ms / 1000
+        _remaining(deadline)
+        with ExitStack() as stack:
+            client = self._get_client(ctx, deadline, stack)
+            mode = (
+                "extract"
+                if (req.extraction_schema or req.backend.operation == "extract")
+                else "parse"
+            )
             try:
-                reply = client.chat(body)
+                images = self._render(req, deadline)
             except (RetryableError, TerminalError):
                 raise
             except Exception as e:  # noqa: BLE001
-                raise self._map_error(e) from e
-            content, finish_reason = self._choice(reply)
-            pages.append({"page": page, "content": content, "finish_reason": finish_reason})
-            for key in usage:
-                usage[key] += int((reply.get("usage") or {}).get(key) or 0)
+                raise self._map_error(e, "rasterization failed") from e
+
+            calls: list[tuple[int | None, dict[str, Any]]]
+            if mode == "extract":
+                calls = [(None, self._extract_body(req, [url for url, _ in images]))]
+            else:
+                calls = [(page, self._parse_body(url)) for url, page in images]
+
+            pages: list[dict[str, Any]] = []
+            totals: dict[str, int] | None = None
+            for page, body in calls:
+                _remaining(deadline)
+                try:
+                    reply = client.chat(body)
+                except (RetryableError, TerminalError):
+                    raise
+                except Exception as e:  # noqa: BLE001
+                    _remaining(deadline)
+                    raise self._map_error(e) from e
+                _remaining(deadline)
+                content, finish_reason = self._choice(reply)
+                pages.append({"page": page, "content": content, "finish_reason": finish_reason})
+                counts = _token_counts(reply.get("usage"))
+                if totals is None:
+                    totals = counts
+                else:
+                    totals = {
+                        key: totals[key] + counts[key] for key in totals.keys() & counts.keys()
+                    }
 
         job = self.new_job(
             WaitMode.INLINE, state=JobState.SUCCEEDED, idempotency_key=ctx.idempotency_key
@@ -373,7 +412,7 @@ class OpenAICompatibleAdapter(BackendAdapter):
                 "model": self.profile.model,
                 "page_count": len(images),
                 "pages": pages,
-                "usage": usage,
+                "usage": totals or {},
             },
             media_type="application/json",
             encoding="json",
@@ -439,7 +478,7 @@ class OpenAICompatibleAdapter(BackendAdapter):
         msg = f"{context}: {e}" if context else str(e)
         return TerminalError(msg, backend_code=type(e).__name__)
 
-    def _render(self, req: OpenReadingRequest) -> list[tuple[str, int]]:
+    def _render(self, req: OpenReadingRequest, deadline: float | None) -> list[tuple[str, int]]:
         """Each tuple is (data_url, source_page). `source_page` is the 1-based page number in
         the source document, kept under page subsetting so pages are never renumbered."""
         d = req.document
@@ -454,15 +493,18 @@ class OpenAICompatibleAdapter(BackendAdapter):
             )
         mime = (d.mime_type or "").lower()
         if mime == "application/pdf" or data[:5] == b"%PDF-":
-            return self._rasterize(data, req)
+            return self._rasterize(data, req, deadline)
         if mime in _IMAGE_MIME:
+            _selected(1, req)
             return [(_data_url(data, "image/jpeg" if mime == "image/jpg" else mime), 1)]
         raise TerminalError(
             f"{self.profile.name} reads PDF and image documents, not {mime or 'this input'}",
             backend_code="unsupported_input",
         )
 
-    def _rasterize(self, data: bytes, req: OpenReadingRequest) -> list[tuple[str, int]]:
+    def _rasterize(
+        self, data: bytes, req: OpenReadingRequest, deadline: float | None
+    ) -> list[tuple[str, int]]:
         try:
             import pymupdf
         except ImportError as e:  # pragma: no cover - the dev group installs pymupdf
@@ -474,6 +516,7 @@ class OpenAICompatibleAdapter(BackendAdapter):
         try:
             out = []
             for index in _selected(doc.page_count, req):
+                _remaining(deadline)
                 png = doc[index].get_pixmap(dpi=self._dpi).tobytes("png")
                 out.append((_data_url(png, "image/png"), index + 1))
             return out
@@ -498,12 +541,13 @@ class OpenAICompatibleAdapter(BackendAdapter):
         if mode == "extract":
             content = calls[0]["content"] if calls else ""
             parsed = _parse_json_object(content)
-            if parsed is None:
+            schema = slim_req.extraction_schema.json_schema if slim_req.extraction_schema else None
+            if parsed is None or (schema is not None and not _matches_schema(parsed, schema)):
                 status = Status(
                     state=ResponseState.PARTIAL,
                     error=ResponseError(
                         code="backend_validation",
-                        message="the model's reply was not a JSON object",
+                        message="The reply must be a JSON object that satisfies the requested extraction schema.",
                     ),
                 )
             else:
@@ -586,8 +630,46 @@ class OpenAICompatibleAdapter(BackendAdapter):
 
     def report_cost(self, job: Job) -> CostReport:
         u = ((job.raw.payload or {}).get("usage") or {}) if job.raw else {}
-        tokens = int(u.get("prompt_tokens") or 0) + int(u.get("completion_tokens") or 0)
-        return CostReport(native_unit="token", native_quantity=float(tokens))
+        total = _token_counts(u).get("total_tokens")
+        if total is None:
+            raise ValueError("The provider omitted token usage for one or more calls.")
+        return CostReport(native_unit="token", native_quantity=float(total))
+
+
+def _remaining(deadline: float | None) -> float:
+    if deadline is None:
+        return 300.0
+    remaining = deadline - monotonic()
+    if remaining <= 0:
+        raise RetryableError("The document deadline expired.", backend_code="deadline_exceeded")
+    return min(300.0, remaining)
+
+
+def _token_counts(usage: Any) -> dict[str, int]:
+    if not isinstance(usage, dict):
+        return {}
+    counts = {}
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        value = usage.get(key)
+        if type(value) is int and value >= 0:
+            counts[key] = value
+    if "prompt_tokens" in counts and "completion_tokens" in counts:
+        counts.setdefault("total_tokens", counts["prompt_tokens"] + counts["completion_tokens"])
+    return counts
+
+
+def _matches_schema(value: dict, schema: dict) -> bool:
+    from jsonschema import Draft202012Validator
+    from jsonschema.exceptions import SchemaError
+    from referencing import Registry
+    from referencing.exceptions import Unresolvable
+
+    try:
+        Draft202012Validator.check_schema(schema)
+        # An empty registry resolves local references and makes no network requests.
+        return Draft202012Validator(schema, registry=Registry()).is_valid(value)
+    except (SchemaError, Unresolvable, RecursionError):
+        return False
 
 
 def _data_url(data: bytes, mime: str) -> str:

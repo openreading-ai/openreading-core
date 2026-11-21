@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from typing import Any, Literal
 
 from openreading.batch.sources import ResolvedSource
@@ -163,7 +164,9 @@ def run_batch(
     else:
         with ThreadPoolExecutor(max_workers=jobs) as pool:
             futures = {
-                pool.submit(_run_item, sources[idx], run_one, idempotency_key): idx
+                pool.submit(
+                    copy_context().run, _run_item, sources[idx], run_one, idempotency_key
+                ): idx
                 for idx in to_run
             }
             from concurrent.futures import as_completed

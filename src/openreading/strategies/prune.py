@@ -27,6 +27,7 @@ from openreading.strategies.model import DeciderLLM, StrategyConfig
 from openreading.strategies.normalize import normalize_strategy
 from openreading.strategies.presets import PRESET_NAMES
 from openreading.strategies.trace import DropRecord
+from openreading.types.descriptor import descriptor_digest
 from openreading.types.errors import ScopeRefused
 from openreading.types.request import OpenReadingRequest
 
@@ -259,12 +260,11 @@ def _compute_config_hash(
     than a reason to widen the identity.
 
     Never include `credentials_ref`, resolved credentials, or anything secret-bearing — every
-    input here is either the pruned tree, router settings, written policy, or public adapter
-    descriptors."""
+    input here is either the pruned tree, router settings, written policy, or adapter execution digests."""
     router_config_canonical = _canonical_router_config(router_config)
     participating_ids = set(plan.eligible_ids) | set(plan.dropped) | set(concrete_ids or [])
     descriptor_digests = sorted(
-        f"{bid}:{_hash_json(adapter.descriptor.to_schema_dict())}"
+        f"{bid}:{descriptor_digest(adapter.descriptor)}"
         for bid in participating_ids
         if (adapter := registry.get(bid)) is not None
     )

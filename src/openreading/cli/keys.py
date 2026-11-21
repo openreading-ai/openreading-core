@@ -28,11 +28,11 @@ The rules every verb follows
   save and exits 2.
 - `keys import` names a line it leaves in place only when its variable is one some backend
   declares, and every other line is counted. A bare key line ending in `==` parses with the key
-  on the left, so a name-shaped test would print it.
+  on the left, so a name-shaped test would print it. Conflicting values stop the import before any write.
 - No acceptable keychain means exit 2 with the sentence `openreading.keychain` raises, and
   nothing is written anywhere else (law PS6).
-- A probe is a network call, so `keys set` offers one only at an interactive terminal, and only
-  after asking.
+- The interactive probe uses the selected saved keys after you confirm the network call.
+  Ordinary runs keep their environment-first credential precedence.
 
 `--stdin` reads one line per secret the command selects, in descriptor order. For example,
 `aws-textract` reads `AWS_ACCESS_KEY_ID`, then `AWS_SECRET_ACCESS_KEY`, then the optional
@@ -61,7 +61,7 @@ from openreading.credentials import (
     env_ignored_reason,
     keychain_account,
 )
-from openreading.liveness import check_liveness
+from openreading.liveness import check_liveness, probe_request
 from openreading.types.descriptor import AdapterDescriptor, CredentialField
 from openreading.types.liveness import LivenessReport, LivenessStatus
 
@@ -365,17 +365,37 @@ def save_secret(
     return lines
 
 
-def run_probe(slug: str) -> LivenessReport:
-    """One liveness check through a fresh broker, so a key saved a moment ago is the key tested.
-    The probe `openreading backends --check` runs, shared with `openreading setup`."""
-    return check_liveness(make_adapter(slug), broker=EnvCredentialBroker())
+def run_probe(slug: str, saved_names: Iterable[str]) -> LivenessReport:
+    """Test the selected saved credentials, retaining ordinary settings for this backend."""
+    names = frozenset(saved_names)
+    adapter = make_adapter(slug)
+    desc = adapter.descriptor
+    broker = EnvCredentialBroker(probe_saved=names)
+    if names:
+        setting = broker.untrusted_endpoint(desc)
+        if setting:
+            raise keychain.KeychainUnavailable(
+                f"The saved key cannot be tested at the endpoint from {setting}. "
+                f"Export {setting} in your shell to use it with a saved key."
+            )
+        values = broker.resolve(desc, probe_request(slug)).values
+        for f in desc.credentials_spec:
+            if names.intersection(f.env) and f.key not in values:
+                raise keychain.KeychainUnavailable(
+                    "The saved key could not be read for this probe."
+                )
+    return check_liveness(adapter, broker=broker)
 
 
-def _offer_probe(slug: str) -> None:
+def _offer_probe(slug: str, saved_names: Iterable[str]) -> None:
     answer = input("Test the key now? This makes one small request. [y/N] ").strip().lower()
     if answer not in ("y", "yes"):
         return
-    report = run_probe(slug)
+    try:
+        report = run_probe(slug, saved_names)
+    except keychain.KeychainUnavailable as e:
+        print(f"  ✗ {slug}: {e}")
+        return
     if report.status is LivenessStatus.LIVE:
         latency = f" ({report.latency_ms:.0f} ms)" if report.latency_ms is not None else ""
         print(f"  ✓ {slug} is working{latency}")
@@ -454,7 +474,7 @@ def cmd_keys_set(args) -> int:
         return 0
     if interactive:
         try:
-            _offer_probe(desc.id)
+            _offer_probe(desc.id, saved)
         except (KeyboardInterrupt, EOFError):
             print()
     return 0
@@ -478,6 +498,12 @@ def cmd_keys_list(args) -> int:
             if source == "missing" and var in ignored:
                 source = "env-ignored"
             rows.append({"backend": slug, "var": var, "source": source})
+        blocked = broker.untrusted_endpoint(desc)
+        if blocked and _secret_fields(desc):
+            hints.append(
+                f"{slug}: {blocked} was set by a dotenv file. Export this setting in your shell "
+                "to use the keychain with this destination."
+            )
         if ignored:
             hints.append(
                 f"{slug}: {', '.join(ignored)} is set in the environment but not sent to "
@@ -565,14 +591,20 @@ def cmd_keys_import(args) -> int:
             if bound_origin(d) is not None:
                 for name in _secret_names(d):
                     profile_vars.setdefault(name, []).append(s)
-    first: dict[str, str] = {}
+    first: dict[str, tuple[int, str]] = {}
     lines: list[int] = []
     left: list[str] = []
     held: list[str] = []
     for number, name, value in entries:
         if name in accounts:
             if value:
-                first.setdefault(name, value)
+                first_line, saved_value = first.setdefault(name, (number, value))
+                if saved_value != value:
+                    _err(
+                        f"{name} has conflicting values on lines {first_line} and {number}. "
+                        "Choose the value to import and run the command again."
+                    )
+                    return 2
                 lines.append(number)
         elif name in profile_vars:
             held.append(name)
@@ -598,7 +630,7 @@ def cmd_keys_import(args) -> int:
     if args.slug is not None:
         _print_binding(scope[args.slug], first)
     try:
-        for name, value in first.items():
+        for name, (_, value) in first.items():
             keychain.set(accounts[name], value)
             print(f"  ✓ Saved {name}{where} to the {label}")
     except keychain.KeychainUnavailable as e:

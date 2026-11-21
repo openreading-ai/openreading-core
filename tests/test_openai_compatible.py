@@ -208,6 +208,47 @@ def test_image_document_is_sent_as_one_page():
 
 
 @respx.mock
+def test_image_outside_selected_pages_sends_nothing():
+    req = _req(
+        document={"bytes_base64": base64.b64encode(PNG_1PX).decode(), "mime_type": "image/png"},
+        pages={"ranges": [{"start": 2, "end": 2}]},
+    )
+    with pytest.raises(TerminalError, match="selection matches no page"):
+        OpenAICompatibleAdapter(KEYED).submit(req, _ctx())
+    assert not respx.calls
+
+
+@respx.mock
+def test_expired_budget_stops_before_rendering(monkeypatch):
+    adapter = OpenAICompatibleAdapter(KEYLESS)
+    monkeypatch.setattr(adapter, "_render", lambda *args: pytest.fail("rendered after deadline"))
+    with pytest.raises(RetryableError) as failure:
+        adapter.submit(_req(), RunContext(deadline_ms=0))
+    assert failure.value.backend_code == "deadline_exceeded"
+    assert not respx.calls
+
+
+@respx.mock
+def test_pages_share_one_deadline(monkeypatch):
+    from openreading.adapters.openai_compatible import adapter as module
+
+    now = [10.0]
+    monkeypatch.setattr(module, "monotonic", lambda: now[0], raising=False)
+    timeouts = []
+
+    def reply(request):
+        timeouts.append(request.extensions["timeout"]["read"])
+        now[0] += 0.75
+        return httpx.Response(200, json=_reply("page"))
+
+    respx.post(CHAT).mock(side_effect=reply)
+    with pytest.raises(RetryableError) as failure:
+        OpenAICompatibleAdapter(KEYLESS).submit(_req(pages=None), RunContext(deadline_ms=1000))
+    assert failure.value.backend_code == "deadline_exceeded"
+    assert timeouts == pytest.approx([1.0, 0.25])
+
+
+@respx.mock
 def test_truncated_reply_is_partial_with_a_warning():
     respx.post(CHAT).mock(return_value=httpx.Response(200, json=_reply(MARKDOWN, "length")))
     resp = _run(OpenAICompatibleAdapter(KEYED), _req())
@@ -275,6 +316,38 @@ def test_extract_reply_that_is_not_json_is_partial():
     assert resp.status.state is ResponseState.PARTIAL
     assert resp.status.error is not None and resp.status.error.code == "backend_validation"
     assert resp.typed_fields is None
+
+
+@pytest.mark.parametrize(
+    ("schema", "reply", "valid"),
+    [
+        ({"required": ["total"]}, {}, False),
+        ({"type": "unknown-type"}, {"total": 42}, False),
+        ({"$ref": "#"}, {"total": 42}, False),
+        ({"properties": {"total": {"type": "number"}}}, {"total": "private text"}, False),
+        (
+            {
+                "$defs": {"number": {"type": "number"}},
+                "properties": {"total": {"$ref": "#/$defs/number"}},
+            },
+            {"total": 42},
+            True,
+        ),
+        ({"$ref": "https://schema.example.test/total"}, {"total": 42}, False),
+    ],
+)
+@respx.mock
+def test_extraction_checks_the_callers_schema_offline(schema, reply, valid):
+    respx.post(CHAT).mock(return_value=httpx.Response(200, json=_reply(json.dumps(reply))))
+    response = _run(OpenAICompatibleAdapter(KEYED), _req(extraction_schema={"json_schema": schema}))
+    if valid:
+        assert response.status.state is ResponseState.SUCCEEDED
+        assert response.typed_fields["total"].value == 42
+    else:
+        assert response.status.state is ResponseState.PARTIAL
+        assert response.status.error.code == "backend_validation"
+        assert "private text" not in response.status.error.message
+        assert response.typed_fields is None
 
 
 # --- failures ---------------------------------------------------------------------------------
@@ -387,10 +460,45 @@ def test_path_document_is_read(tmp_path):
     assert len(fake.bodies) == resp.document.page_count
 
 
-def test_report_cost_sums_tokens_and_tolerates_no_result():
+def test_report_cost_needs_observed_usage():
     adapter = OpenAICompatibleAdapter(KEYED)
     job = adapter.new_job(adapter.descriptor.wait_modes[0])
-    assert adapter.report_cost(job).native_quantity == 0.0
+    with pytest.raises(ValueError, match="usage"):
+        adapter.report_cost(job)
+
+
+@pytest.mark.parametrize(
+    ("first", "last", "expected"),
+    [
+        ({"prompt_tokens": 3, "completion_tokens": 2}, {}, (None, None, None)),
+        ({"total_tokens": 4}, {"total_tokens": 3}, (None, None, 7)),
+        (
+            {"prompt_tokens": 0, "completion_tokens": 0},
+            {"prompt_tokens": 0, "total_tokens": 2},
+            (0, None, 2),
+        ),
+    ],
+)
+@respx.mock
+def test_metering_requires_a_count_for_every_page(first, last, expected):
+    respx.post(CHAT).mock(
+        side_effect=[
+            httpx.Response(200, json={**_reply("page"), "usage": usage}) for usage in (first, last)
+        ]
+    )
+    adapter = OpenAICompatibleAdapter(KEYLESS)
+    req = _req(pages=None)
+    job = adapter.submit(req, RunContext())
+    response = adapter.normalize(job, RunContext(), req)
+    assert (response.usage.input_tokens, response.usage.output_tokens) == expected[:2]
+    if expected[2] is None:
+        from openreading.router.cost import apply_cost_report
+
+        metered = apply_cost_report(adapter, job, response)
+        assert metered.status.state is ResponseState.SUCCEEDED
+        assert "cost_unavailable" in {warning.code for warning in metered.warnings}
+    else:
+        assert adapter.report_cost(job).native_quantity == expected[2]
 
 
 @respx.mock
@@ -412,17 +520,19 @@ def test_health_without_a_client_reports_the_endpoint():
 
 @respx.mock
 def test_probe_is_live_when_models_answers(monkeypatch):
+    monkeypatch.setenv("OPENREADING_PROVIDER_ORIGINS", BASE)
     monkeypatch.setenv("EXAMPLE_LLM_API_KEY", "sk-probe")
     route = respx.get(f"{BASE}/models").mock(
         return_value=httpx.Response(200, json={"data": [{"id": "vision-1"}]})
     )
     report = check_liveness(OpenAICompatibleAdapter(KEYED))
-    assert report.status is LivenessStatus.LIVE
+    assert report.status is LivenessStatus.LIVE and report.version == "vision-1"
     assert route.calls.last.request.headers["authorization"] == "Bearer sk-probe"
 
 
 @respx.mock
 def test_probe_reports_a_rejected_key_by_its_variable(monkeypatch):
+    monkeypatch.setenv("OPENREADING_PROVIDER_ORIGINS", BASE)
     monkeypatch.setenv("EXAMPLE_LLM_API_KEY", "sk-wrong")
     respx.get(f"{BASE}/models").mock(return_value=httpx.Response(401, json={"error": "no"}))
     report = check_liveness(OpenAICompatibleAdapter(KEYED))
@@ -433,10 +543,21 @@ def test_probe_reports_a_rejected_key_by_its_variable(monkeypatch):
 
 @respx.mock
 def test_keyless_probe_sends_no_key():
-    route = respx.get(f"{BASE}/models").mock(return_value=httpx.Response(200, json={}))
+    route = respx.get(f"{BASE}/models").mock(
+        return_value=httpx.Response(200, json={"data": [{"id": KEYLESS.model}]})
+    )
     report = check_liveness(OpenAICompatibleAdapter(KEYLESS))
     assert report.status is LivenessStatus.LIVE
     assert "authorization" not in route.calls.last.request.headers
+
+
+@pytest.mark.parametrize("models", [{"data": [{"id": "another-model"}]}, {}, ["llava"]])
+@respx.mock
+def test_probe_only_confirms_a_listed_model(models):
+    respx.get(f"{BASE}/models").mock(return_value=httpx.Response(200, json=models))
+    report = check_liveness(OpenAICompatibleAdapter(KEYLESS))
+    assert report.status is LivenessStatus.ERROR
+    assert report.version is None
 
 
 # --- live -------------------------------------------------------------------------------------

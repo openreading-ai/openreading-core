@@ -11,6 +11,13 @@ needs the doc in S3). Tests inject fakes that replay real captured Block-graph f
 Geometry: Textract is normalized 0-1 top-left, so its BoundingBox is already canonical. It still
 goes through to_canonical (unit=normalized, page dims 1.0) so bbox_native is recorded and the
 convention stays uniform. Confidence is 0-100 → /100. AnalyzeID carries no Geometry.
+
+Environment variables this module reads
+---------------------------------------
+For each AWS client, the service endpoint variable overrides the global `AWS_ENDPOINT_URL`.
+The broker checks `AWS_ENDPOINT_URL_TEXTRACT` and `AWS_ENDPOINT_URL_S3` before releasing a saved
+key. A dotenv-selected SDK configuration file or profile can also change the service destination.
+Export those selectors in the shell to use credentials from the keychain.
 """
 
 from __future__ import annotations
@@ -178,7 +185,7 @@ class _DefaultS3Uploader:  # pragma: no cover - real AWS path
 
 
 def _descriptor() -> AdapterDescriptor:
-    return AdapterDescriptor(
+    descriptor = AdapterDescriptor(
         id="aws-textract",
         type=BackendType.HOSTED_API,
         # Ledger T4a (AC-8): poll() builds its client fresh from ctx on every call (no
@@ -281,6 +288,19 @@ def _descriptor() -> AdapterDescriptor:
             ),
         ],
     )
+
+    descriptor._sdk_endpoint_envs = {
+        ("AWS_ENDPOINT_URL_TEXTRACT", "AWS_ENDPOINT_URL"): None,
+        ("AWS_ENDPOINT_URL_S3", "AWS_ENDPOINT_URL"): None,
+    }
+    descriptor._sdk_config_envs = (
+        "AWS_CONFIG_FILE",
+        "AWS_SHARED_CREDENTIALS_FILE",
+        "AWS_PROFILE",
+        "AWS_DEFAULT_PROFILE",
+        "AWS_DATA_PATH",
+    )
+    return descriptor
 
 
 class AWSTextractAdapter(BackendAdapter):

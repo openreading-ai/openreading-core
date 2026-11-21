@@ -204,22 +204,6 @@ def _refresh(name: str) -> str | None:
     return _call(lookup, TIMEOUT_S)
 
 
-def _read(name: str, *, timeout: float) -> str | None:
-    """Ask the keychain for `name`. Raises `_Timeout` when it does not answer in `timeout`."""
-
-    def lookup() -> str | None:
-        backend = _backend()
-        return None if backend is None else backend.get_password(SERVICE, name)
-
-    try:
-        value = _call(lookup, timeout)
-    except _Timeout:
-        raise
-    except Exception:
-        return None
-    return value if isinstance(value, str) and value else None
-
-
 def get(name: str) -> str | None:
     """The saved value of `name`, or None. Never raises, never prints."""
     global _reads_paused_until
@@ -316,13 +300,10 @@ def delete(name: str) -> bool:
     """Remove `name`. True when an entry was there to remove."""
     backend = _writable_backend()
     try:
-        present = _read(name, timeout=WRITE_TIMEOUT_S) is not None
-    except _Timeout:
-        raise KeychainUnavailable(_UNAVAILABLE_MESSAGE) from None
-    if not present:
-        _remember(name, None)
-        return False
-    try:
+        present = _call(lambda: backend.get_password(SERVICE, name), WRITE_TIMEOUT_S)
+        if present is None:
+            _remember(name, None)
+            return False
         _call(lambda: backend.delete_password(SERVICE, name), WRITE_TIMEOUT_S)
     except _Timeout:
         raise KeychainUnavailable(_UNAVAILABLE_MESSAGE) from None

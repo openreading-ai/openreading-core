@@ -63,8 +63,8 @@ replace `pymupdf` would make one id mean two backends depending on the folder yo
 `strategy:` prefix is refused for the same reason, since it names a strategy and never a backend.
 `validate_providers` holds every one of these checks, so a mapping built in Python is refused
 exactly where a file is. `openreading.adapters.registry` turns the validated block into
-backends before dispatch: `install_profiles` once per process for the CLI, the server and MCP,
-and `set_call_profiles` for the length of one Python API call.
+backends before dispatch: the CLI and MCP launcher install their process profiles, each HTTP app scopes
+its deployment snapshot per request, and each Python API call scopes its own configuration.
 
 Discovery order (first hit wins; sources are NEVER merged):
   1. an explicit path or an inline dict — CLI `--config PATH`, Python `openreading.run(config=…)`;
@@ -316,8 +316,9 @@ def _builtin_env_owners(adapters: dict[str, Any]) -> dict[str, str]:
     owners: dict[str, str] = {}
     for slug, factory in adapters.items():
         descriptor = factory().descriptor
-        for field in (*descriptor.credentials_spec, *descriptor.config_spec):
-            for env in field.env:
+        names = [field.env for field in (*descriptor.credentials_spec, *descriptor.config_spec)]
+        for group in (*names, *descriptor._sdk_endpoint_envs, descriptor._sdk_config_envs):
+            for env in group:
                 owners.setdefault(env, slug)
     return owners
 
