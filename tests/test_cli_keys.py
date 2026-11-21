@@ -411,6 +411,35 @@ def test_import_moves_declared_secrets_and_names_the_lines_to_delete(
     assert "REDUCTO_API_KEY=r-secret" in src.read_text(encoding="utf-8")
 
 
+BARE_KEY = "c2stbGl2ZS1TRUNSRVQtYmFzZTY0"
+
+
+def test_import_lists_only_variable_names_it_leaves_in_place(capsys, fake_keychain, tmp_path):
+    """A bare base64 key line ending in `==` parses with the key as its name, so printing every
+    name left in place printed the key."""
+    src = tmp_path / "old.env"
+    src.write_text(
+        f"REDUCTO_API_KEY=r-secret\n{BARE_KEY}==\nANTHROPIC_MODEL=x\nlower_name=1\n",
+        encoding="utf-8",
+    )
+    code, out, err = _run(["keys", "import", str(src)], capsys)
+    assert code == 0, err
+    assert BARE_KEY not in out + err and "lower_name" not in out
+    assert "Left in place, not a backend secret: ANTHROPIC_MODEL, and 2 other lines" in out
+
+
+def test_import_with_a_slug_never_calls_another_backends_secret_not_a_secret(
+    capsys, fake_keychain, tmp_path
+):
+    src = tmp_path / "old.env"
+    src.write_text("REDUCTO_API_KEY=r-secret\nANTHROPIC_API_KEY=a-secret\n", encoding="utf-8")
+    code, out, err = _run(["keys", "import", str(src), "reducto"], capsys)
+    assert code == 0, err
+    assert "not a backend secret" not in out
+    assert "Left in place, not a secret reducto declares: ANTHROPIC_API_KEY" in out
+    assert "a-secret" not in out + err
+
+
 def test_import_with_nothing_to_move_and_an_unreadable_file(capsys, fake_keychain, tmp_path):
     src = tmp_path / "plain.env"
     src.write_text("ANTHROPIC_MODEL=x\n", encoding="utf-8")

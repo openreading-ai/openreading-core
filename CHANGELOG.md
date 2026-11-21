@@ -19,6 +19,8 @@
   This stops a cloned `openreading.yaml` from naming `GITHUB_TOKEN`, or a key saved for another profile, and sending it to its author's host.
   `backends`, `keys list` (SOURCE `env-ignored`) and the missing-credentials error name an ignored variable and the setting, never the value.
   `keys import PATH SLUG` moves one backend's secrets, and a profile's key moves only this way.
+  `keys set` and `keys import` print `Binding VAR to <origin>` before they save a profile's key, and the import hint names each profile's origin.
+  `keys import` lists a line it leaves in place by variable name only and counts the rest, so a bare key line is never printed.
 - `openreading mcp --keychain` reads saved keys, and `--config PATH` names the project file. The new read-only
   `openreading_backends` MCP tool reports readiness by variable name. No MCP tool accepts a key.
 

@@ -365,6 +365,32 @@ def test_keys_import_binds_a_profile_var_only_when_you_name_the_profile(
     assert "sk-shared" not in out + err
 
 
+def test_keys_import_names_the_endpoint_before_binding_a_key(tmp_path, capsys, fake_keychain):
+    _write(tmp_path, SHARED)
+    env = tmp_path / "old.env"
+    env.write_text("SHARED_LLM_KEY=sk-shared\n", encoding="utf-8")
+    code, out, err = _run(["keys", "import", str(env)], capsys)
+    assert code == 0, err
+    # The hint names each profile's origin, so you see where the key would go before you bind it.
+    assert "a-llm at https://a.example.test" in out
+    assert "b-llm at https://b.example.test" in out
+    code, out, err = _run(["keys", "import", str(env), "b-llm"], capsys)
+    assert code == 0, err
+    binding = out.index("Binding SHARED_LLM_KEY to https://b.example.test")
+    assert binding < out.index("Saved SHARED_LLM_KEY")
+
+
+def test_keys_set_stdin_names_the_endpoint_before_binding_a_key(
+    tmp_path, capsys, monkeypatch, fake_keychain
+):
+    _write(tmp_path, SHARED)
+    _stdin(monkeypatch, "sk-a\n")
+    code, out, err = _run(["keys", "set", "a-llm", "--stdin"], capsys)
+    assert code == 0, err
+    binding = out.index("Binding SHARED_LLM_KEY to https://a.example.test")
+    assert binding < out.index("Saved SHARED_LLM_KEY")
+
+
 def test_keys_import_with_an_unknown_slug_moves_nothing(tmp_path, capsys, fake_keychain):
     _write(tmp_path, SHARED)
     env = tmp_path / "old.env"

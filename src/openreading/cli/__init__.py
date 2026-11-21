@@ -788,9 +788,10 @@ can serve several backends: the four `llamaparse-*` slugs read one key, so
 the output names the others it affects. `keys import PATH` copies every
 built-in backend's secret in a `.env` file into the keychain. A provider
 profile's key moves only with `keys import PATH SLUG`, because the variable
-alone cannot say which endpoint the key is for. The file stays untouched,
-and the output names the lines to delete, because a `.env` line still beats
-the keychain whenever you run from that folder.
+alone cannot say which endpoint the key is for. The output prints `Binding
+VAR to <origin>` before it saves a profile's key, and `keys set` does too.
+The file stays untouched, and the output names the lines to delete, because a
+`.env` line still beats the keychain whenever you run from that folder.
 
 A machine with no usable keychain reads as "nothing saved", silently, so a CLI
 call on a server stays quiet. That covers a missing `[setup]` extra, a locked

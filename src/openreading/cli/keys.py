@@ -23,7 +23,11 @@ The rules every verb follows
   names, saved under an account bound to the profile's origin. `keys set openrouter-gpt` saves
   `OPENROUTER_API_KEY@https://openrouter.ai`, which no other endpoint reads
   (`openreading.credentials`). `keys import` moves a profile's key only when you name the
-  profile. A profile with no `key_env` has nothing to save and exits 2.
+  profile. Before a profile's key is saved, the output prints `Binding VAR to <origin>`, because
+  the profile may come from a file you did not write. A profile with no `key_env` has nothing to
+  save and exits 2.
+- `keys import` names a line it leaves in place only when its left side reads as a variable
+  name, and counts the rest. A bare key line ending in `==` parses with the key on the left.
 - No acceptable keychain means exit 2 with the sentence `openreading.keychain` raises, and
   nothing is written anywhere else (law PS6).
 - A probe is a network call, so `keys set` offers one only at an interactive terminal, and only
@@ -44,8 +48,9 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import re
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 from openreading import keychain
 from openreading.adapters.registry import known_backends, make_adapter
@@ -250,6 +255,20 @@ def _for_origin(desc: AdapterDescriptor) -> str:
     return f" for {origin}" if origin else ""
 
 
+def _print_binding(desc: AdapterDescriptor, names: Iterable[str]) -> None:
+    """Name the endpoint a provider profile's key is bound to, before the key is saved. The
+    profile comes from a file you may not have written, so the origin is shown first."""
+    origin = bound_origin(desc)
+    if origin is not None:
+        for name in dict.fromkeys(names):
+            print(f"  Binding {name} to {origin}")
+
+
+# A dotenv line's left side is printed only when it reads as a variable name. A bare key line,
+# such as a base64 value ending in `==`, parses with the key itself on the left.
+_ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]*")
+
+
 def _select(
     slug: str, wanted: list[str], verb: str
 ) -> tuple[AdapterDescriptor, list[tuple[CredentialField, str]]] | int:
@@ -409,6 +428,7 @@ def cmd_keys_set(args) -> int:
         print(desc.id)
         if desc.signup_url:
             print(f"  Get a key: {desc.signup_url}")
+    _print_binding(desc, names)
 
     saved: list[str] = []
     ask: Callable[[str], str] = getpass.getpass
@@ -564,7 +584,10 @@ def cmd_keys_import(args) -> int:
         else:
             left.append(name)
     if held:
-        named = [f"{n} ({', '.join(profile_vars[n])})" for n in dict.fromkeys(held)]
+        named = [
+            f"{n} ({', '.join(f'{s} at {bound_origin(descs[s])}' for s in profile_vars[n])})"
+            for n in dict.fromkeys(held)
+        ]
         example = profile_vars[held[0]][0]
         print(
             f"  Not moved, a provider profile's key: {', '.join(named)}. Name the profile to "
@@ -577,6 +600,8 @@ def cmd_keys_import(args) -> int:
     if isinstance(label, int):
         return label
     where = _for_origin(next(iter(scope.values()))) if args.slug is not None else ""
+    if args.slug is not None:
+        _print_binding(scope[args.slug], first)
     try:
         for name, value in first.items():
             keychain.set(accounts[name], value)
@@ -585,7 +610,19 @@ def cmd_keys_import(args) -> int:
         _err(str(e))
         return 2
     if left:
-        print(f"  Left in place, not a backend secret: {', '.join(dict.fromkeys(left))}")
+        named = [n for n in dict.fromkeys(left) if _ENV_NAME.fullmatch(n)]
+        others = sum(1 for n in left if not _ENV_NAME.fullmatch(n))
+        listing = ", ".join(named)
+        if others:
+            tail = f"{others} other {'line' if others == 1 else 'lines'}"
+            listing = f"{listing}, and {tail}" if listing else tail
+        # With SLUG, another backend's real secret is left too, so "not a backend secret" lies.
+        what = (
+            f"not a secret {args.slug} declares"
+            if args.slug is not None
+            else "not a backend secret"
+        )
+        print(f"  Left in place, {what}: {listing}")
     which = "line" if len(lines) == 1 else "lines"
     print(
         f"Delete {which} {', '.join(map(str, lines))} from {args.path}, so each key lives in one "
