@@ -784,6 +784,63 @@ does not declare as a secret, `keys set` with no terminal and no `--stdin`, or
 no keychain. 3 a `keys import` file that cannot be read. 130 `keys set`
 stopped with Ctrl+C, after naming the keys already saved.
 
+setup [--provider] [--config PATH]
+----------------------------------
+Get a hosted backend working without reading anything else first. `setup` is
+a short run of questions: pick backends, paste each key into a hidden prompt,
+test it, and add what worked to `openreading.yaml`. It needs the `[setup]`
+extra and a terminal.
+
+    OpenReading setup
+    Keys are saved to the macOS Keychain. Your shell and .env still take
+    priority.
+
+    ? Which backends do you want to set up?  anthropic-claude
+
+    anthropic-claude
+      Get a key: https://console.anthropic.com
+    ? ANTHROPIC_API_KEY  (hidden, Enter to skip)  ****************
+      ✓ Saved ANTHROPIC_API_KEY to the macOS Keychain
+    ? Test the key now? This makes one small request.  Yes
+      ✓ anthropic-claude is working (412 ms)
+
+      policy:
+        backends: [anthropic-claude, pymupdf]
+    ? Add these to policy.backends in ./openreading.yaml?  Yes
+      ✓ Written to ./openreading.yaml.
+
+    Next: openreading parse FILE
+
+`setup` adds no capability of its own. It reads readiness the way `backends`
+does, saves keys the way `keys set` does, and probes the way `backends
+--check` does, so the wizard and a script never disagree about a backend.
+
+Enter always takes the safe choice: no backend picked, keep a saved key, and
+no to every question. The probe is a network call and the file is committed,
+so each asks first. Every step ends with a ✓ or ✗ line. After a rejected key,
+the ✗ line names the variable, and you can enter the key again, keep it, or
+remove it. A backend already in the keychain shows as "set up, from keychain",
+and picking it again offers keep, replace or remove. Colour is only a hint, so
+`NO_COLOR` keeps every mark and every word.
+
+The `policy.backends` edit keeps the rest of the file as you wrote it,
+comments included. When it cannot change that one block alone, it changes
+nothing and prints the block to add by hand. The file is `--config PATH`,
+else the one other commands read here, else `./openreading.yaml`.
+
+`setup --provider`, or "Add an LLM provider" in the list, adds an
+OpenAI-compatible endpoint as a backend. A provider profile is a named backend
+in the `providers:` block of `openreading.yaml`. The starting points (OpenAI,
+OpenRouter, Groq, Ollama, LM Studio, other) fill in a base URL and a key
+variable for you to confirm. You type the model id. No price, model list or
+capability claim comes with a starting point. The wizard writes the entry,
+saves its key, and offers a probe. The name may not be a built-in backend id.
+
+Exits: 0 done, with every ✗ already reported. 2 no terminal (use `keys set
+--stdin` and `keys list` instead), no `[setup]` extra, or no usable keychain.
+3 an `openreading.yaml` that does not load. 130 stopped with Ctrl+C, after
+naming the keys already saved.
+
 compare <subjects...>
 ---------------------
 Usage: `compare a.json b.json ...`, or one document with `--backends a,b`,
@@ -1759,7 +1816,8 @@ Exit codes
      required), target, preset, `--jobs`, terms, package, or preparation
      errors; `replay` with no strategy name anywhere; `help` with an unknown
      topic; `keys` with an unknown slug, an undeclared variable, no terminal
-     and no `--stdin`, or no usable keychain.
+     and no `--stdin`, or no usable keychain; `setup` with no terminal,
+     without the `[setup]` extra, or with no usable keychain.
   3  cannot run: missing credentials (names the exact vars + signup URL),
      `auth_rejected`, `unsupported_format` on a named single-document parse,
      `unsupported_feature`, an unreadable `--config` / document / `--trace` /
@@ -1783,7 +1841,8 @@ Exit codes
      poll job past its deadline /
      `openreading.router.driver.MAX_CONSECUTIVE_FAULTS` -- a named backend has
      no next rung to fall back to); `help` under `python -OO`, which discarded
-     the manual's docstrings; a `keys import` file that cannot be read.
+     the manual's docstrings; a `keys import` file that cannot be read; an
+     `openreading.yaml` that does not load when `setup` starts.
   4  `route`: no registered backend permitted by policy (the empty plan is
      printed as JSON); batch `parse`: partial -- some items failed.
   5  `compare`: inputs are not schema-valid responses, or `--from` on a run
@@ -1800,8 +1859,8 @@ Exit codes
      variable is set, so an interrupted `--backend` batch exits 6 and names no
      id, and there is nothing for `resume` to replay. Arm the ledger for the
      strategy runs you mean to resume.
-130  `keys set` stopped with Ctrl+C. The keys saved before the stop stay saved,
-     and one `[keys]` line names them.
+130  `keys set` or `setup` stopped with Ctrl+C. The keys saved before the stop
+     stay saved, and one `[keys]` or `[setup]` line names them.
 143  terminated by SIGTERM with no ledger armed (MCP instead exits 130).
      Nothing was resumable, so one
      `[openreading]` line says so and names `OPENREADING_LEDGER`. Unarmed

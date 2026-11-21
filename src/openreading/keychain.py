@@ -47,7 +47,8 @@ Environment variables this module reads
 and `make verify` set it, so a developer's real keys never reach a test run.
 
 Relation to its siblings: `openreading.credentials` decides when the keychain is consulted and in
-what order. `openreading.cli.keys` is the only writer.
+what order. `openreading.cli.keys` is the only writer, and `openreading setup`
+(`openreading.cli.setup`) saves through it.
 """
 
 from __future__ import annotations

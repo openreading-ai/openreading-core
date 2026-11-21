@@ -46,7 +46,7 @@ from openreading.adapters.registry import known_backends, make_adapter
 from openreading.credentials import EnvCredentialBroker, dotenv_entries
 from openreading.liveness import check_liveness
 from openreading.types.descriptor import AdapterDescriptor, CredentialField
-from openreading.types.liveness import LivenessStatus
+from openreading.types.liveness import LivenessReport, LivenessStatus
 
 EPILOGS: dict[str, str] = {
     "keys": """\
@@ -290,11 +290,29 @@ def _shadow_note(name: str) -> str | None:
     return None
 
 
+def save_secret(name: str, value: str, label: str) -> list[str]:
+    """Save one secret and return the lines to print: the confirmation, then a note when the
+    environment or `.env` will shadow it. `openreading setup` calls this too, so both commands
+    save and report a key the same way. Raises `keychain.KeychainUnavailable`."""
+    keychain.set(name, value)
+    lines = [f"  ✓ Saved {name} to the {label}"]
+    note = _shadow_note(name)
+    if note:
+        lines.append(note)
+    return lines
+
+
+def run_probe(slug: str) -> LivenessReport:
+    """One liveness check through a fresh broker, so a key saved a moment ago is the key tested.
+    The probe `openreading backends --check` runs, shared with `openreading setup`."""
+    return check_liveness(make_adapter(slug), broker=EnvCredentialBroker())
+
+
 def _offer_probe(slug: str) -> None:
     answer = input("Test the key now? This makes one small request. [y/N] ").strip().lower()
     if answer not in ("y", "yes"):
         return
-    report = check_liveness(make_adapter(slug), broker=EnvCredentialBroker())
+    report = run_probe(slug)
     if report.status is LivenessStatus.LIVE:
         latency = f" ({report.latency_ms:.0f} ms)" if report.latency_ms is not None else ""
         print(f"  ✓ {slug} is working{latency}")
@@ -347,12 +365,9 @@ def cmd_keys_set(args) -> int:
             if not value:
                 print(f"  - Skipped {name} (no value given)")
                 continue
-            keychain.set(name, value)
+            lines = save_secret(name, value, label)
             saved.append(name)
-            print(f"  ✓ Saved {name} to the {label}")
-            note = _shadow_note(name)
-            if note:
-                print(note)
+            print("\n".join(lines))
     except KeyboardInterrupt:
         kept = f"Saved before the stop: {', '.join(saved)}. " if saved else ""
         print(f"\n[keys] Stopped. {kept}Nothing else was changed.", file=sys.stderr)

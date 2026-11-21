@@ -413,6 +413,9 @@ the order: your shell and `.env` still win over a saved key.
 uv run openreading keys set reducto
 ```
 
+For a guided version, `uv run openreading setup` lists the backends, asks for each key with hidden
+input, offers one test request, and can add what worked to `policy.backends`.
+
 Never run `cp .env.example .env`. That file ships `DOCLING_SERVE_URL` and `QWEN_VL_ENDPOINT` with
 values rather than blanks. A copy therefore marks `docling` and `qwen-vl` configured on a machine
 where neither is running. What it costs you is a different data path rather than extra

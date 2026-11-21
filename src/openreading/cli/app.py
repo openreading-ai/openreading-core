@@ -12,7 +12,8 @@ Credentials never travel on the CLI: they are read from the environment by the b
 (OPENREADING_<SLUG>_<KEY> or the service-native var, e.g. REDUCTO_API_KEY). A `.env` in the
 working directory is loaded automatically (never overriding an already-set var). Every verb but
 `serve` and `mcp` then reads the OS keychain last (`credentials.use_keychain`); `serve` reads it
-only with `--keychain`. The `keys` verbs live in `openreading.cli.keys`.
+only with `--keychain`. The `keys` verbs live in `openreading.cli.keys`, and the `setup` wizard
+in `openreading.cli.setup`.
 
 The user-facing reference (every subcommand, flags, exit codes 0-6, 130 and 143) is the
 `openreading.cli` package docstring; this module holds the `cmd_*` handlers, `build_parser`, and
@@ -73,6 +74,7 @@ from openreading.batch.sources import (
     looks_batch,
 )
 from openreading.cli import keys as keys_cli
+from openreading.cli import setup as setup_cli
 from openreading.cli.help import cmd_help
 from openreading.credentials import EnvCredentialBroker, load_dotenv, use_keychain
 from openreading.ledger.header import HeaderMismatch
@@ -2509,6 +2511,7 @@ More: openreading help leaderboard, openreading help datasets""",
 # quickstart goes in the description on purpose: a first-time reader must reach something they
 # can paste inside the first screen, and a thirteen-verb listing pushes an epilog past the fold.
 EPILOGS.update(keys_cli.EPILOGS)
+EPILOGS["setup"] = setup_cli.EPILOG
 
 TOP_DESCRIPTION = """\
 One JSON shape from every document parser, so switching or comparing parsers
@@ -2526,6 +2529,7 @@ QUICKSTART. No key or account. Install dependencies first (see the README).
 TOP_EPILOG = """\
 I WANT TO ...                          RUN
   see what works here, with no keys    openreading backends
+  get a hosted backend working, guided openreading setup
   save a key once, for every folder    openreading keys set SLUG
   read one document                    openreading parse FILE --backend SLUG
   understand the response JSON         openreading help response
@@ -2860,6 +2864,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.set_defaults(func=cmd_serve)
 
     keys_cli.add_parser(sub, common)
+    setup_cli.add_parser(sub, common)
 
     # `openreading strategy <show|list|normalize|validate|plan>` inspects the openreading.yaml
     # orchestration config. The verbs that work on a run instead sit at the top level: `explain`
