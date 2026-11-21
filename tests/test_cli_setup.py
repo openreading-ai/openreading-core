@@ -343,12 +343,57 @@ def test_policy_edit_keeps_comments_and_every_other_key(tmp_path):
     [
         "version: 1\n",
         "version: 1\npolicy:\n  backends: [docling]\n",
+        "version: 1\npolicy:\n  backends: [docling]\n",
         "version: 1\npolicy:\n  backends:\n  - docling\n# trailing\n",
     ],
 )
 def test_policy_edit_handles_each_shape(text):
-    new = cli_setup.with_policy_backends(text, ["anthropic-claude", "pymupdf"])
-    assert config.parse(new)["policy"]["backends"] == ["anthropic-claude", "pymupdf"]
+    want = ["docling", "anthropic-claude", "pymupdf"] if "docling" in text else ["pymupdf"]
+    new = cli_setup.with_policy_backends(text, want)
+    assert config.parse(new)["policy"]["backends"] == want
+
+
+BLOCK_WITH_COMMENTS = """\
+version: 1
+policy:
+  backends:
+    # Hosted first.
+    - reducto   # the team's contract
+    # Local fallback.
+    - pymupdf   # always works
+    # More go here.
+  # Trailing note under policy.
+strategies:
+  quick: [pymupdf]
+"""
+
+
+def test_policy_edit_appends_to_a_block_list_and_touches_nothing_else():
+    new = cli_setup.with_policy_backends(
+        BLOCK_WITH_COMMENTS, ["reducto", "pymupdf", "anthropic-claude", "tesseract"]
+    )
+    old_lines = BLOCK_WITH_COMMENTS.splitlines()
+    new_lines = new.splitlines()
+    at = old_lines.index("    - pymupdf   # always works") + 1
+    assert new_lines == [
+        *old_lines[:at],
+        "    - anthropic-claude",
+        "    - tesseract",
+        *old_lines[at:],
+    ]
+
+
+def test_policy_edit_refuses_to_reorder_or_drop_a_block_list_item():
+    with pytest.raises(cli_setup.EditRefused):
+        cli_setup.with_policy_backends(BLOCK_WITH_COMMENTS, ["pymupdf", "reducto"])
+    with pytest.raises(cli_setup.EditRefused):
+        cli_setup.with_policy_backends(BLOCK_WITH_COMMENTS, ["reducto"])
+
+
+def test_policy_edit_refuses_a_flow_list_that_carries_a_comment():
+    text = "version: 1\npolicy:\n  backends: [docling]   # keep docling first\n"
+    with pytest.raises(cli_setup.EditRefused):
+        cli_setup.with_policy_backends(text, ["docling", "pymupdf"])
 
 
 @pytest.mark.parametrize(

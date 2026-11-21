@@ -38,8 +38,11 @@ The rules the flow follows
 Editing openreading.yaml
 ------------------------
 The file is committed and often commented, so the wizard edits text rather than re-dumping a
-parsed mapping, which would drop every comment. `with_policy_backends` replaces or inserts one
-`backends:` line under `policy:`, and `with_provider` appends one entry under `providers:`. Each
+parsed mapping, which would drop every comment. `with_policy_backends` adds the new ids to a
+block-style `backends:` list as `- id` lines after its last item, so every comment inside or
+after the list stays where it was. It replaces a one-line `backends: [...]` list, and refuses
+when that line carries a comment, which a rewrite would drop. With no list, it inserts one
+`backends:` line under `policy:`. `with_provider` appends one entry under `providers:`. Each
 then parses the result with `openreading.config.parse` and compares it with the original mapping
 plus the one intended change. Any other difference raises `EditRefused`, the file stays as it
 was, and the wizard prints the block to add by hand. A flow-style `policy: {...}` is one shape
@@ -329,19 +332,33 @@ def with_policy_backends(text: str, backends: Sequence[str]) -> str:
     if key is None:
         lines.insert(start + 1, indent + flow)
         return _checked(_join(lines), expected)
+    rest = lines[key].split(":", 1)[1]
+    if _strip_comment(rest):
+        # A flow list is one line, so replacing it would drop a comment written on it.
+        if _strip_comment(rest) != rest.strip():
+            raise EditRefused("the backends line carries a comment")
+        lines[key] = indent + flow
+        return _checked(_join(lines), expected)
+    # A block sequence: `- item` lines deeper than the key or at its own indent. New items go
+    # after the last one at that item's indent, so every comment, inside or after, stays put.
+    current = list((old.get("policy") or {}).get("backends") or [])
+    if list(backends[: len(current)]) != current:
+        raise EditRefused("the wizard only adds to an existing backends list")
     last = key
-    if not _strip_comment(lines[key].split(":", 1)[1]):
-        # A block sequence: deeper lines, or `- item` lines at the key's own indent.
-        for j in range(key + 1, end):
-            stripped = lines[j].strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            depth = len(_indent(lines[j]))
-            if depth > len(indent) or (depth == len(indent) and stripped.startswith("-")):
-                last = j
-                continue
-            break
-    lines[key : last + 1] = [indent + flow]
+    item_indent = indent + "  "
+    for j in range(key + 1, end):
+        stripped = lines[j].strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        depth = len(_indent(lines[j]))
+        if depth > len(indent) or (depth == len(indent) and stripped.startswith("-")):
+            if stripped.startswith("-") and last == key:
+                item_indent = _indent(lines[j])
+            last = j
+            continue
+        break
+    added = [f"{item_indent}- {_scalar(b)}" for b in backends[len(current) :]]
+    lines[last + 1 : last + 1] = added
     return _checked(_join(lines), expected)
 
 
