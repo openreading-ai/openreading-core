@@ -14,7 +14,8 @@ Exports and return shapes
 -------------------------
 An envelope is the schema-valid JSON object returned by a completed operation.
 
-- `run(source, backend=None, **options)` returns a `response.v0.3` envelope.
+- `run(source, backend=None, **options)` returns a `response.v0.3` envelope. `keychain=True`
+  (on `run` and `run_batch`) also reads keys saved with `openreading keys set`.
 - `run_batch(sources, backend=None, **options)` returns a `batch-result.v0.2` envelope.
 - `route(source, **options)` returns a `RoutePlan` without executing a backend.
 - `resume_run(run_id)` returns a response and is exported as `openreading.resume`.
@@ -83,6 +84,9 @@ A backend that fetches URLs itself resolves the hostname later, so its DNS answe
 
 `env_file` loads key-value lines without overriding existing process variables. A library call
 with no `env_file` never discovers `.env` from the working directory.
+`keychain=True` on `run` and `run_batch` also reads keys saved with `openreading keys set`.
+The keychain sits after the environment and `.env`, and its values never enter `os.environ`.
+Without it a library call never touches the keychain, so a notebook behaves as it always did.
 Backend credentials and aliases are read indirectly through `openreading.credentials`.
 `OPENREADING_CONFIG` is read through `openreading.config` during configuration discovery.
 
@@ -120,6 +124,7 @@ from openreading.credentials import (
     DEFAULT_NATIVE_BATCH_DEADLINE_MS,
     EnvCredentialBroker,
     build_run_context,
+    keychain_environ,
     load_dotenv,
     secret_values,
 )
@@ -869,6 +874,16 @@ def run_request(
         raise TerminalError(str(e)) from e
 
 
+def _keychain_broker(
+    broker: EnvCredentialBroker | None, keychain: bool
+) -> EnvCredentialBroker | None:
+    """`keychain=True` builds a broker that reads the OS keychain after the environment. An
+    explicit `broker` wins, because the caller already chose where keys come from."""
+    if broker is None and keychain:
+        return EnvCredentialBroker(keychain_environ())
+    return broker
+
+
 def run(
     source: str | bytes,
     backend: str | None = None,
@@ -877,6 +892,7 @@ def run(
     config: str | os.PathLike[str] | dict | LoadedFile | None = None,
     operation: str | None = None,
     env_file: str | None = None,
+    keychain: bool = False,
     mime_type: str | None = None,
     broker: EnvCredentialBroker | None = None,
     transport=None,
@@ -911,6 +927,7 @@ def run(
     _refuse_removed_kwargs(request_overrides)
     if env_file:
         load_dotenv(env_file)
+    broker = _keychain_broker(broker, keychain)
     if strategy is not None:
         backend = f"strategy:{strategy}"
     # The file is read on every path so a null backend can resolve its configured chain. The
@@ -1073,6 +1090,7 @@ def run_batch(
     max_items: int = DEFAULT_MAX_ITEMS,
     deadline_ms: int | None = None,
     env_file: str | None = None,
+    keychain: bool = False,
     broker: EnvCredentialBroker | None = None,
     transport=None,
     idempotency_key: str | None = None,
@@ -1129,7 +1147,7 @@ def run_batch(
         load_dotenv(env_file)
     if strategy is not None:
         backend = f"{_STRATEGY_PREFIX}{strategy}"
-    broker = broker or EnvCredentialBroker()
+    broker = _keychain_broker(broker, keychain) or EnvCredentialBroker()
 
     # No `supported_formats`: intake dispatches every source the caller named, and a backend that
     # cannot read one refuses first-hand. Computing the set meant sweeping readiness for every

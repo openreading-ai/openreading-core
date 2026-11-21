@@ -5,9 +5,11 @@ surface (CLI, server, Python API, evals, chain executor, strategy engine) runs t
 
 Posture — pure BYO-key pass-through
 -----------------------------------
-You bring the provider's own credential; it is read from the process environment per request,
-held in memory only for that call, and the charge lands on your own account. This package never
-stores, logs, or echoes the key, and never sends it anywhere but the provider.
+You bring the provider's own credential; it is read per request, held in memory only for that
+call, and the charge lands on your own account. This package never logs or echoes the key, and
+never sends it anywhere but the provider. OpenReading writes a key in exactly one case: you ran
+`openreading keys set` or `openreading keys import`, and it writes to your OS keychain
+(`openreading.keychain`). It never writes a key to a file.
 The broker never branches on backend type — it is driven entirely by the descriptor's spec. Each
 run gets a fresh adapter instance (D-v2-6 / D-v2-8.1), so a credential-bound client is never
 shared across requests. Keys never travel in a request body — only `credentials_ref` handles do —
@@ -20,15 +22,34 @@ Precedence (D-v2-1), highest first
      `OPENREADING_CREDENTIALS_REF_ALIASES` (comma-separated; unset/empty accepts none — closed)
   3. `OPENREADING_<SLUG>_<KEY>` (slug `-` -> `_`, e.g. `OPENREADING_REDUCTO_API_KEY`)
   4. the service-native var(s), in `spec.env` order (e.g. `REDUCTO_API_KEY`)
+Steps 3 and 4 read the process environment, which holds `.env` once it is loaded. When the
+process opted into the keychain, the OS keychain sits below both, for the secret variables a
+backend declares in step 4 only. For example, an exported `ANTHROPIC_API_KEY` beats the same line
+in `.env`, which beats the saved key. The keychain never beats the shell or `.env`, so an export
+you made for one shell cannot lose to a value saved weeks ago.
   5. the provider SDK's own ambient chain (boto3 default chain, GCP ADC, the anthropic SDK's own
      `ANTHROPIC_API_KEY`)
 Step 5 is NOT resolved here: when the broker finds nothing it leaves the value unset and the
 adapter's SDK falls through to its own chain. That is why aws-textract, google-document-ai and
 anthropic-claude work with no OpenReading-specific env on a machine their own provider tooling
-already configured. `openreading backends` reads the environment only. A backend whose credentials
-sit in `~/.aws/credentials` or in an ADC file prints `no` under CONFIGURED and still runs.
-Readiness also requires the vars a descriptor's `live_gate_env` names, and only the environment can
-satisfy those (`openreading.readiness`). `openreading backends` names missing VARS, never values.
+already configured. `openreading backends` reads the environment and the keychain only. A backend
+whose credentials sit in `~/.aws/credentials` or in an ADC file prints `no` under CONFIGURED and
+still runs. Readiness also requires the vars a descriptor's `live_gate_env` names, and only the
+environment or the keychain can satisfy those (`openreading.readiness`). `openreading backends` names missing VARS, never values.
+
+The keychain, opt-in
+--------------------
+The CLI opts in through `use_keychain(True)` for every verb except `serve` and `mcp`, which read
+the keychain only when started with `--keychain`. A long-running server that reaches for a
+keychain can hang at boot or pop an unlock dialog, which is why it waits for the flag. The Python
+API reads it only with `keychain=True`, matching `env_file=`. A broker that reads the keychain
+uses `keychain_environ()`, a `ChainMap` over `os.environ` and `openreading.keychain.
+KeychainMapping`. A saved value is therefore never copied into `os.environ`, so a subprocess such
+as the liteparse worker or `tesseract` never inherits it. With `OPENREADING_KEYCHAIN=off`, without
+the `[setup]` extra, or with nothing saved, every lookup resolves exactly as it does without the
+keychain. A blank variable counts as unset, so an empty `ANTHROPIC_API_KEY=` line left in `.env`
+does not hide a saved key. `EnvCredentialBroker.var_source` names where a variable resolves from
+(`env`, `.env`, `keychain`, `missing`) for `openreading backends` and `openreading keys list`.
 
 `.env` loading (`load_dotenv`): `KEY=VALUE` lines from a dotenv file enter the environment WITHOUT
 overriding an already-set process var — an exported shell variable always wins over the file, so a
@@ -179,8 +200,10 @@ line each in `.env.example` and in the module that reads them (`openreading.api`
 from __future__ import annotations
 
 import os
-from collections.abc import MutableMapping
+from collections import ChainMap
+from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from pathlib import Path
+from typing import Any
 
 from openreading.router.cache import content_key, document_identity
 from openreading.types.descriptor import AdapterDescriptor, ConfigField, CredentialField
@@ -205,20 +228,13 @@ DEFAULT_DEADLINE_MS = 120_000
 DEFAULT_NATIVE_BATCH_DEADLINE_MS = 3_600_000
 
 
-def load_dotenv(
-    path: str | os.PathLike[str] | None = None,
-    environ: MutableMapping[str, str] | None = None,
-) -> int:
-    """Load `KEY=VALUE` lines from a `.env` file into the environment WITHOUT overriding a var
-    that is already set (explicit process env always wins). `export KEY=VALUE`, `#` comments,
-    blank lines, and single/double-quoted values are handled. Returns the number of vars set.
-    With `path=None`, loads `./.env` if it exists (missing file → no-op, returns 0)."""
-    env = environ if environ is not None else os.environ
-    p = Path(path) if path is not None else Path(".env")
-    if not p.is_file():
-        return 0
-    count = 0
-    for raw in p.read_text(encoding="utf-8").splitlines():
+def dotenv_entries(path: str | os.PathLike[str]) -> list[tuple[int, str, str]]:
+    """Parse a dotenv file into `(line_number, KEY, value)` triples, in file order. `export KEY=`,
+    `#` comments, blank lines, and single/double-quoted values are handled. A missing file raises
+    `OSError`. `load_dotenv` and `openreading keys import` share this one parser, so the two never
+    disagree about what a line means."""
+    out: list[tuple[int, str, str]] = []
+    for number, raw in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), start=1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
@@ -241,11 +257,121 @@ def load_dotenv(
                 if ch == "#" and (i == 0 or val[i - 1] in " \t"):
                     val = val[:i].rstrip()
                     break
-        if not key or key in env:
+        if key:
+            out.append((number, key, val))
+    return out
+
+
+# The names `load_dotenv` wrote into `os.environ` in this process. `openreading backends` and
+# `openreading keys list` read it to tell a `.env` value from an exported one.
+_DOTENV_NAMES: set[str] = set()
+
+
+def load_dotenv(
+    path: str | os.PathLike[str] | None = None,
+    environ: MutableMapping[str, str] | None = None,
+) -> int:
+    """Load `KEY=VALUE` lines from a `.env` file into the environment WITHOUT overriding a var
+    that is already set (explicit process env always wins). Returns the number of vars set.
+    With `path=None`, loads `./.env` if it exists (missing file → no-op, returns 0). The line
+    grammar is `dotenv_entries`."""
+    env = environ if environ is not None else os.environ
+    p = Path(path) if path is not None else Path(".env")
+    if not p.is_file():
+        return 0
+    count = 0
+    for _, key, val in dotenv_entries(p):
+        if key in env:
             continue
         env[key] = val
+        if environ is None:
+            _DOTENV_NAMES.add(key)
         count += 1
     return count
+
+
+def dotenv_loaded_names() -> frozenset[str]:
+    """The variables `load_dotenv` set in `os.environ` during this process."""
+    return frozenset(_DOTENV_NAMES)
+
+
+def declared_secret_envs(descriptors: Iterable[AdapterDescriptor]) -> frozenset[str]:
+    """Every service-native variable a backend declares for a SECRET credential field. These are
+    the only names the keychain is ever asked about (law PS5). The `OPENREADING_<SLUG>_<KEY>` form
+    and every `config_spec` field stay environment-only."""
+    return frozenset(
+        name for d in descriptors for f in d.credentials_spec if f.secret for name in f.env
+    )
+
+
+def _registered_secret_envs() -> frozenset[str]:
+    # Imported here, not at module top: the adapter registry imports modules that import this one.
+    from openreading.adapters.registry import BUILTIN_ADAPTERS, make_adapter
+
+    return declared_secret_envs(make_adapter(slug).descriptor for slug in BUILTIN_ADAPTERS)
+
+
+class _KeychainChain(ChainMap[str, str]):
+    """`ChainMap(os.environ, KeychainMapping)` with the broker's own notion of "set".
+
+    The broker already treats an empty variable as unset and moves to the next name. A blank
+    `ANTHROPIC_API_KEY=` line left in `.env` would otherwise hide the saved key behind a value the
+    broker then ignores. So a lookup skips an empty value and returns the first non-empty one, and
+    returns the empty one only when no later layer has a value. Writes go to `os.environ` as with
+    any `ChainMap`, and the broker never writes."""
+
+    def __getitem__(self, key: str) -> str:
+        empty: str | None = None
+        for mapping in self.maps:
+            try:
+                value = mapping[key]
+            except KeyError:
+                continue
+            if value:
+                return value
+            if empty is None:
+                empty = value
+        if empty is not None:
+            return empty
+        raise KeyError(key)
+
+    def get(self, key: str, default: Any = None) -> Any:  # type: ignore[override]
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+
+def keychain_environ(names: Iterable[str] | None = None) -> MutableMapping[str, str]:
+    """The process environment with the keychain behind it: `os.environ` first, then the keychain
+    for the declared secret variables only. `names` narrows the set, and defaults to every
+    variable a registered backend declares. Keychain values are read through this view and are
+    never copied into `os.environ` (law PS3)."""
+    from openreading.keychain import KeychainMapping
+
+    allowed: Iterable[str] | Callable[[], Iterable[str]] = (
+        _registered_secret_envs if names is None else frozenset(names)
+    )
+    return _KeychainChain(os.environ, KeychainMapping(allowed))
+
+
+# The process-level opt-in. False until a surface asks: the CLI does for every verb but `serve`
+# and `mcp`, and `openreading serve --keychain` does for the server.
+_USE_KEYCHAIN = False
+
+
+def use_keychain(on: bool) -> bool:
+    """Make every `EnvCredentialBroker()` built without an explicit `environ` read the keychain
+    (`on=True`) or the environment alone (`on=False`). Returns the previous setting, so a caller
+    can restore it."""
+    global _USE_KEYCHAIN
+    previous, _USE_KEYCHAIN = _USE_KEYCHAIN, on
+    return previous
+
+
+def keychain_in_use() -> bool:
+    """True when this process opted in through `use_keychain(True)`."""
+    return _USE_KEYCHAIN
 
 
 def _slug_env(slug: str, key: str) -> str:
@@ -253,7 +379,7 @@ def _slug_env(slug: str, key: str) -> str:
     return f"OPENREADING_{slug.replace('-', '_').upper()}_{key.upper()}"
 
 
-def _credentials_ref_aliases(env: MutableMapping[str, str]) -> frozenset[str]:
+def _credentials_ref_aliases(env: Mapping[str, str]) -> frozenset[str]:
     """BL-162: `credentials_ref: "env:<alias>"` may only select a prefix the OPERATOR has
     explicitly allow-listed via `OPENREADING_CREDENTIALS_REF_ALIASES` (comma-separated) — never an
     arbitrary caller-chosen env-var prefix. Before this, `env:<anything>` resolved every
@@ -270,10 +396,39 @@ def _credentials_ref_aliases(env: MutableMapping[str, str]) -> frozenset[str]:
 
 class EnvCredentialBroker:
     """Resolves a descriptor's credential/config spec from the environment. Inject an explicit
-    `environ` dict in tests; defaults to `os.environ`."""
+    `environ` mapping in tests. The default is `os.environ`, or `keychain_environ()` once the
+    process called `use_keychain(True)`."""
 
-    def __init__(self, environ: MutableMapping[str, str] | None = None) -> None:
-        self._env: MutableMapping[str, str] = environ if environ is not None else os.environ
+    def __init__(self, environ: Mapping[str, str] | None = None) -> None:
+        if environ is None:
+            environ = keychain_environ() if _USE_KEYCHAIN else os.environ
+        self._env: Mapping[str, str] = environ
+
+    def var_source(self, name: str) -> str:
+        """Where `name` resolves from for this broker: `env` (exported), `.env` (set by
+        `load_dotenv`), `keychain`, or `missing`. Names a place, never a value."""
+        layers = self._env.maps if isinstance(self._env, _KeychainChain) else [self._env]
+        first = layers[0]
+        if first.get(name):
+            return ".env" if first is os.environ and name in _DOTENV_NAMES else "env"
+        if any(layer.get(name) for layer in layers[1:]):
+            return "keychain"
+        return "missing"
+
+    def secret_sources(self, descriptor: AdapterDescriptor) -> list[tuple[str, str]]:
+        """One `(VAR, SOURCE)` pair per secret credential field, in descriptor order. VAR is the
+        name that resolves (the `OPENREADING_<SLUG>_<KEY>` form included), else the field's
+        primary variable with SOURCE `missing`. `openreading keys list` prints these rows."""
+        rows: list[tuple[str, str]] = []
+        for f in descriptor.credentials_spec:
+            if not f.secret:
+                continue
+            names = [_slug_env(descriptor.id, f.key), *f.env]
+            found = next(
+                ((n, src) for n in names if (src := self.var_source(n)) != "missing"), None
+            )
+            rows.append(found or (f.env[0] if f.env else names[0], "missing"))
+        return rows
 
     def _ref_prefix(self, req: OpenReadingRequest) -> str | None:
         ref = req.backend.credentials_ref

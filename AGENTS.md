@@ -183,6 +183,7 @@ src/openreading/
   config.py       the one reader of `openreading.yaml`         (docstring: discovery, the nine
                                                                 policy keys, the union, P4-P6)
   credentials.py  BYO-key broker                               (docstring: precedence, per-backend vars)
+  keychain.py     the OS keychain, read last and written only by `openreading keys`
   readiness.py    is a backend runnable here, and which vars are missing
   liveness.py     is a backend answering right now
 tests/         offline suite + keyed live lane                 (conftest.py docstring: the runbook)

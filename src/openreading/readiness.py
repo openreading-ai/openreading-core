@@ -1,7 +1,8 @@
 """Backend readiness: is a backend runnable here, and if not, exactly
 which env vars are missing? Drives `openreading backends` and the server's GET /v1/backends. All
 resolution is offline (no network, no key validation): it reports what the broker CAN find in the
-environment, never whether the provider would accept it.
+environment, and in the OS keychain when the process opted in (`openreading.credentials`), never
+whether the provider would accept it.
 
 It also owns the other half of the credential story, the key the broker DID find but the provider
 REJECTED (`backend_code="auth_rejected"`). `auth_rejected_hint` renders the one sentence the

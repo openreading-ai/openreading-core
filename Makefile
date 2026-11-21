@@ -1,3 +1,8 @@
+# The offline gate must never read or write a developer's OS keychain, so every target here runs
+# with it switched off (`openreading.keychain`). A real `openreading keys set` outside make is
+# unaffected.
+export OPENREADING_KEYCHAIN = off
+
 .PHONY: verify lint typecheck typecheck-mypy test schema-validate extras-parity smoke strategy-smoke compare-smoke leaderboard-smoke serve-smoke audit audit-client verify-live sync clean
 
 # `make verify` is the gate. CI runs it on every pull request and on every push to main.
