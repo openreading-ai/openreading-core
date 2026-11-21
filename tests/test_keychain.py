@@ -238,6 +238,55 @@ def test_a_blocking_keychain_gives_up_and_pauses_reads_for_a_cooldown(
     assert keychain.get("ANTHROPIC_API_KEY") == KEY
 
 
+def _wait_for_abandoned_reads(timeout: float = 5.0) -> None:
+    import threading
+
+    deadline = time.monotonic() + timeout
+    while any(t.name == "openreading-keychain" and t.is_alive() for t in threading.enumerate()):
+        assert time.monotonic() < deadline, "the abandoned read never finished"
+        time.sleep(0.01)
+
+
+def test_timeout_after_a_cached_hit_returns_the_cached_value(monkeypatch, fake_keychain, clock):
+    """A `serve --keychain` that once read a key keeps it when a later refresh hangs."""
+    monkeypatch.setattr(keychain, "TIMEOUT_S", 0.2)
+    _save(fake_keychain, "ANTHROPIC_API_KEY", KEY)
+    assert keychain.get("ANTHROPIC_API_KEY") == KEY
+    clock.now += keychain.CACHE_TTL_S + 1
+    fake_keychain.block.set()
+    assert keychain.get("ANTHROPIC_API_KEY") == KEY  # the refresh timed out
+    calls = len(fake_keychain.calls)
+    assert keychain.get("ANTHROPIC_API_KEY") == KEY  # during the cooldown, no new read
+    assert len(fake_keychain.calls) == calls
+    assert keychain.get("REDUCTO_API_KEY") is None  # never known, so nothing to serve
+
+
+def test_a_late_read_result_updates_the_cache(monkeypatch, fake_keychain, clock):
+    monkeypatch.setattr(keychain, "TIMEOUT_S", 0.2)
+    _save(fake_keychain, "ANTHROPIC_API_KEY", KEY)
+    fake_keychain.block.set()
+    assert keychain.get("ANTHROPIC_API_KEY") is None  # abandoned after the timeout
+    fake_keychain.release.set()
+    _wait_for_abandoned_reads()
+    calls = len(fake_keychain.calls)
+    assert keychain.get("ANTHROPIC_API_KEY") == KEY
+    assert len(fake_keychain.calls) == calls  # answered from the cache the late read filled
+
+
+def test_a_late_read_result_never_overwrites_a_newer_write(monkeypatch, fake_keychain, clock):
+    monkeypatch.setattr(keychain, "TIMEOUT_S", 0.2)
+    _save(fake_keychain, "ANTHROPIC_API_KEY", "old")
+    fake_keychain.block.set()
+    assert keychain.get("ANTHROPIC_API_KEY") is None
+    keychain.set("ANTHROPIC_API_KEY", "new")
+    # The abandoned read answers with what the store holds at release. Put the old value back,
+    # so a late overwrite of the newer write would show.
+    fake_keychain.store[("openreading", "ANTHROPIC_API_KEY")] = "old"
+    fake_keychain.release.set()
+    _wait_for_abandoned_reads()
+    assert keychain.get("ANTHROPIC_API_KEY") == "new"
+
+
 def test_writes_ignore_a_read_timeout_and_update_the_cache(monkeypatch, fake_keychain, clock):
     monkeypatch.setattr(keychain, "TIMEOUT_S", 0.2)
     _save(fake_keychain, "PULSE_API_KEY", "p")

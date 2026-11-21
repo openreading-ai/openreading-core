@@ -41,7 +41,10 @@ On Linux without a desktop session, `keyring` can block while it waits for a Sec
 never answers. Each read runs in a daemon thread and is abandoned after `TIMEOUT_S` seconds (2).
 A timeout pauses every read for `READ_COOLDOWN_S` seconds (60), so one lookup over many names
 costs at most one timeout. The pause ends on its own, because a locked keychain that made one
-read wait can answer the next minute. A write ignores the pause and waits up to
+read wait can answer the next minute. During a timeout or a pause, a name read before keeps its
+last answer, even an expired one, so a `serve --keychain` that held a key does not lose it to one
+slow refresh. An abandoned read still records its answer when it arrives, unless a `set` or
+`delete` for that name came first. A write ignores the pause and waits up to
 `WRITE_TIMEOUT_S` seconds (60), which leaves you time to answer an unlock prompt.
 
 Environment variables this module reads
@@ -78,10 +81,13 @@ _UNAVAILABLE_MESSAGE = (
 )
 
 # Process-wide state. A read timeout sets `_reads_paused_until`, and `_cache` maps a name to its
-# answer and the clock reading after which that answer is asked again.
+# answer and the clock reading after which that answer is asked again. An expired entry stays, so
+# a refresh that times out can still serve it. `_generation` counts the answers recorded per
+# name, so a read that finishes late can tell whether a newer answer arrived while it waited.
 _lock = threading.Lock()
 _reads_paused_until = 0.0
 _cache: dict[str, tuple[str | None, float]] = {}
+_generation: dict[str, int] = {}
 _clock = time.monotonic
 
 
@@ -151,9 +157,37 @@ def _reads_paused() -> bool:
     return _clock() < _reads_paused_until
 
 
-def _remember(name: str, value: str | None) -> None:
+def _remember(name: str, value: str | None, *, since: int | None = None) -> None:
+    """Cache `value` for `name`. With `since`, only when no answer was recorded after that
+    generation, so a late read never replaces a newer write."""
     with _lock:
+        current = _generation.get(name, 0)
+        if since is not None and current != since:
+            return
+        _generation[name] = current + 1
         _cache[name] = (value, _clock() + CACHE_TTL_S)
+
+
+def _refresh(name: str) -> str | None:
+    """Ask the keychain for `name` and cache the answer. Raises `_Timeout` after `TIMEOUT_S`.
+
+    The abandoned worker keeps running, and its answer still reaches the cache when it arrives.
+    A locked keychain that answers after the timeout therefore fills the cache for the next read
+    instead of wasting the wait."""
+    with _lock:
+        since = _generation.get(name, 0)
+
+    def lookup() -> str | None:
+        try:
+            backend = _backend()
+            value = None if backend is None else backend.get_password(SERVICE, name)
+        except Exception:
+            value = None
+        value = value if isinstance(value, str) and value else None
+        _remember(name, value, since=since)
+        return value
+
+    return _call(lookup, TIMEOUT_S)
 
 
 def _read(name: str, *, timeout: float) -> str | None:
@@ -181,16 +215,18 @@ def get(name: str) -> str | None:
         hit = _cache.get(name)
         if hit is not None and _clock() < hit[1]:
             return hit[0]
+    # The last answer, even an expired one. A refresh that cannot reach the keychain serves it
+    # rather than nothing, because a long-running server that lost a key it held a minute ago
+    # fails every request until the keychain answers again.
+    last = hit[0] if hit is not None else None
     if _reads_paused():
-        return None
+        return last
     try:
-        value = _read(name, timeout=TIMEOUT_S)
+        return _refresh(name)
     except _Timeout:
         with _lock:
             _reads_paused_until = _clock() + READ_COOLDOWN_S
-        return None
-    _remember(name, value)
-    return value
+        return last
 
 
 def _writable_backend() -> Any:
@@ -288,6 +324,7 @@ def _reset() -> None:
     with _lock:
         _reads_paused_until = 0.0
         _cache.clear()
+        _generation.clear()
 
 
 class KeychainMapping(MutableMapping[str, str]):
