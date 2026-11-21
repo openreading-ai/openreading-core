@@ -368,7 +368,8 @@ The `<profile>` rows above are the template every profile fills. `key_env` names
 that holds the key, and the file never holds the key itself. The key reaches only that profile's
 endpoint. Save it with `openreading keys set openrouter-gpt`, which binds it to
 `https://openrouter.ai`. An exported key is read only when `OPENREADING_PROVIDER_ORIGINS` lists
-that origin, or when the host is loopback. `uv run python -m pydoc openreading.credentials`
+that origin, or when the host is loopback. That setting counts only when your shell or service
+environment exports it, and a value in `.env` is ignored. `uv run python -m pydoc openreading.credentials`
 explains the binding. A profile claims only what the
 protocol carries: markdown and text from parse, typed fields from extract, and never blocks,
 boxes or confidence. A model that refuses images fails that one call, and the chain moves on.

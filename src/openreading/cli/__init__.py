@@ -757,8 +757,10 @@ author's host. `keys set openrouter-gpt` saves `OPENROUTER_API_KEY` for
 `https://openrouter.ai` only, so another profile naming the same variable for
 another host never reads it. The environment and `.env` reach a profile only
 when its host is loopback, or when `OPENREADING_PROVIDER_ORIGINS` lists its
-origin, such as `https://openrouter.ai`. Otherwise `keys list` shows SOURCE
-`env-ignored`, and a line on stderr names the setting, never the value.
+origin, such as `https://openrouter.ai`. That setting counts only when your
+shell or service environment exports it. A value from `.env` is ignored.
+When neither holds, `keys list` shows SOURCE `env-ignored`, and a line on
+stderr names the setting, never the value.
 
 A key never crosses the command line. There is no flag that takes a value,
 because argv shows up in `ps` and in shell history. A `--value` you type out

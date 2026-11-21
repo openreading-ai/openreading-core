@@ -26,8 +26,9 @@ The rules every verb follows
   profile. Before a profile's key is saved, the output prints `Binding VAR to <origin>`, because
   the profile may come from a file you did not write. A profile with no `key_env` has nothing to
   save and exits 2.
-- `keys import` names a line it leaves in place only when its left side reads as a variable
-  name, and counts the rest. A bare key line ending in `==` parses with the key on the left.
+- `keys import` names a line it leaves in place only when its variable is one some backend
+  declares, and every other line is counted. A bare key line ending in `==` parses with the key
+  on the left, so a name-shaped test would print it.
 - No acceptable keychain means exit 2 with the sentence `openreading.keychain` raises, and
   nothing is written anywhere else (law PS6).
 - A probe is a network call, so `keys set` offers one only at an interactive terminal, and only
@@ -261,10 +262,6 @@ def _print_binding(desc: AdapterDescriptor, names: Iterable[str]) -> None:
     if origin is not None:
         for name in dict.fromkeys(names):
             print(f"  Binding {name} to {origin}")
-
-
-# A dotenv line's left side is printed only when it reads as a variable name. A bare key line,
-# such as a base64 value ending in `==`, parses with the key itself on the left.
 
 
 def _select(
