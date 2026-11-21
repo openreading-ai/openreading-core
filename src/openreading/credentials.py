@@ -66,8 +66,9 @@ which is the `scheme://host[:port]` of its `base_url`, lowercased, with the defa
   account for its own origin, never the plain `<VAR>` account a built-in uses. Two profiles that
   share `key_env` for two hosts never share a saved key.
 - The environment and `.env` reach a profile only when its host is loopback, or its origin is
-  listed in `OPENREADING_PROVIDER_ORIGINS` (`EnvCredentialBroker.env_allowed`). Otherwise the
-  value is ignored, and the variable reads as missing. `openreading backends`, `keys list`
+  listed in an exported `OPENREADING_PROVIDER_ORIGINS` (`EnvCredentialBroker.env_allowed`). A
+  value a `.env` file set never counts. Otherwise the value is ignored, and the variable reads as
+  missing. `openreading backends`, `keys list`
   (SOURCE `env-ignored`), the MCP backends report and the missing-credentials error each say so,
   by name and setting, never by value. `openreading keys set <profile>` and `openreading setup`
   need no setting, because they save to the bound account.
@@ -234,8 +235,10 @@ Environment variables this module reads
   key from the environment and `.env`, such as `https://openrouter.ai,https://api.groq.com`. Each
   entry is normalized like a profile's origin, so a path, a default port or upper case does not
   matter. An entry without a scheme matches nothing. Unset or empty lists none, so only loopback
-  profiles read the environment. It is read from the environment alone, never the keychain (law
-  PS5), because a setting that widens where a key goes must sit where you can review it.
+  profiles read the environment. It counts only when the process environment exported it. A
+  value `load_dotenv` set, from `./.env`, `--env-file` or `env_file=`, is ignored, and so is the
+  keychain (law PS5). A cloned repository can carry a `.env` that lists its author's origin, so
+  a setting that widens where a key goes must come from your shell or service environment.
 - Every variable a backend declares in `credentials_spec` and `config_spec`, per the precedence
   above.
 """
@@ -399,10 +402,23 @@ def keychain_accounts(descriptors: Iterable[AdapterDescriptor]) -> frozenset[str
     )
 
 
+def provider_origins_from_dotenv(environ: Mapping[str, str] | None = None) -> bool:
+    """True when `OPENREADING_PROVIDER_ORIGINS` in `environ` (default `os.environ`) was set by
+    `load_dotenv`, from `./.env`, `--env-file` or `env_file=`, rather than exported."""
+    env = os.environ if environ is None else environ
+    return (
+        env is os.environ and PROVIDER_ORIGINS_ENV in _DOTENV_NAMES and PROVIDER_ORIGINS_ENV in env
+    )
+
+
 def provider_origins(environ: Mapping[str, str] | None = None) -> frozenset[str]:
     """The origins `OPENREADING_PROVIDER_ORIGINS` lists, normalized by `endpoint_origin`. An
-    entry without a scheme and a host matches nothing. Unset or empty lists none."""
+    entry without a scheme and a host matches nothing. Unset or empty lists none, and so does a
+    value a dotenv file set (`provider_origins_from_dotenv`). A cloned repository's `.env` would
+    otherwise allow-list its author's host for the profile its `openreading.yaml` declares."""
     env = os.environ if environ is None else environ
+    if provider_origins_from_dotenv(env):
+        return frozenset()
     out: set[str] = set()
     for entry in env.get(PROVIDER_ORIGINS_ENV, "").split(","):
         if "://" not in entry:
@@ -414,6 +430,17 @@ def provider_origins(environ: Mapping[str, str] | None = None) -> frozenset[str]
         if not origin.endswith("://"):
             out.add(origin)
     return frozenset(out)
+
+
+def env_ignored_reason() -> str:
+    """Why a remote provider profile does not read its key from the environment, as text that
+    follows "not sent to <origin>,". Names the setting, never a value."""
+    if provider_origins_from_dotenv():
+        return (
+            f"because {PROVIDER_ORIGINS_ENV} was set by a .env file, and a file cannot widen "
+            "where a key goes. To allow that origin, export it in your shell instead."
+        )
+    return f"because {PROVIDER_ORIGINS_ENV} does not list that origin."
 
 
 def _loopback_origin(origin: str) -> bool:

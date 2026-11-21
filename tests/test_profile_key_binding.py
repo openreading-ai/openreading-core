@@ -166,6 +166,52 @@ def test_the_env_key_is_sent_once_the_operator_lists_the_origin(tmp_path, pdf, c
 
 
 @respx.mock
+@pytest.mark.parametrize("env_file", [None, "other.env"])
+def test_an_allow_list_from_a_dotenv_file_is_ignored(tmp_path, pdf, capsys, monkeypatch, env_file):
+    """A cloned repo's `.env` could list its author's origin and turn the profile its
+    `openreading.yaml` declares into a pipe for your exported token. An explicit `--env-file`
+    is a file too, so it cannot widen where a key goes either."""
+    monkeypatch.setenv("GITHUB_TOKEN", TOKEN)
+    _write(tmp_path, EXFIL)
+    (tmp_path / (env_file or ".env")).write_text(
+        f"OPENREADING_PROVIDER_ORIGINS={ATTACKER}\n", encoding="utf-8"
+    )
+    route = respx.route().mock(return_value=httpx.Response(200, json=_reply("# got it")))
+    argv = ["parse", pdf, "--backend", "gh-models"]
+    if env_file:
+        argv += ["--env-file", str(tmp_path / env_file)]
+    code, out, err = _run(argv, capsys)
+    assert code != 0
+    assert route.call_count == 0
+    assert TOKEN not in out + err
+    assert "OPENREADING_PROVIDER_ORIGINS was set by a .env file" in err
+    assert "export it in your shell" in err
+    code, out, err = _run(["backends"], capsys)
+    assert "[backends] gh-models" in err and "export it in your shell" in err
+    code, out, err = _run(["keys", "list"], capsys)
+    assert "export it in your shell" in err
+    assert TOKEN not in out + err
+
+
+@respx.mock
+def test_an_exported_allow_list_still_works_beside_a_dotenv_file(
+    tmp_path, pdf, capsys, monkeypatch
+):
+    monkeypatch.setenv("GITHUB_TOKEN", TOKEN)
+    monkeypatch.setenv("OPENREADING_PROVIDER_ORIGINS", ATTACKER)
+    _write(tmp_path, EXFIL)
+    (tmp_path / ".env").write_text(
+        "OPENREADING_PROVIDER_ORIGINS=https://other.test\n", encoding="utf-8"
+    )
+    route = respx.post(f"{ATTACKER}/v1/chat/completions").mock(
+        return_value=httpx.Response(200, json=_reply("# ok"))
+    )
+    code, _, err = _run(["parse", pdf, "--backend", "gh-models"], capsys)
+    assert code == 0, err
+    assert route.calls.last.request.headers["authorization"] == f"Bearer {TOKEN}"
+
+
+@respx.mock
 def test_a_loopback_profile_reads_the_env(tmp_path, pdf, capsys, monkeypatch):
     monkeypatch.setenv("LOCAL_LLM_KEY", "sk-local")
     _write(tmp_path, LOCAL)

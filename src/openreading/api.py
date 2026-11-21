@@ -129,10 +129,10 @@ from openreading.config import apply as apply_config
 from openreading.config import load as _read_config_file
 from openreading.credentials import (
     DEFAULT_NATIVE_BATCH_DEADLINE_MS,
-    PROVIDER_ORIGINS_ENV,
     EnvCredentialBroker,
     bound_origin,
     build_run_context,
+    env_ignored_reason,
     keychain_environ,
     load_dotenv,
     secret_values,
@@ -748,8 +748,7 @@ def prepare_named_backend(
         ignored = broker.ignored_env(adapter.descriptor)
         why = (
             f" {', '.join(ignored)} is set in the environment but not sent to "
-            f"{bound_origin(adapter.descriptor)}, because {PROVIDER_ORIGINS_ENV} does not list "
-            "that origin."
+            f"{bound_origin(adapter.descriptor)}, {env_ignored_reason()}"
             if ignored
             else ""
         )

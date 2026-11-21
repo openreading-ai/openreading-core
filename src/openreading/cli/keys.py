@@ -51,6 +51,7 @@ from openreading.credentials import (
     EnvCredentialBroker,
     bound_origin,
     dotenv_entries,
+    env_ignored_reason,
     keychain_account,
 )
 from openreading.liveness import check_liveness
@@ -461,8 +462,8 @@ def cmd_keys_list(args) -> int:
         if ignored:
             hints.append(
                 f"{slug}: {', '.join(ignored)} is set in the environment but not sent to "
-                f"{bound_origin(desc)}. Add that origin to OPENREADING_PROVIDER_ORIGINS, or save "
-                f"the key with openreading keys set {slug}."
+                f"{bound_origin(desc)}, {env_ignored_reason()} Save the key with openreading "
+                f"keys set {slug}, or export the origin in OPENREADING_PROVIDER_ORIGINS."
             )
     for hint in hints:
         _err(hint)

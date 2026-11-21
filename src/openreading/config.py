@@ -48,7 +48,9 @@ a host its author chose.
   `::1`, so no key travels in clear text.
 - A remote profile reads `key_env` from the environment or `.env` only when the operator lists
   its origin in `OPENREADING_PROVIDER_ORIGINS`. Without that, a profile naming `GITHUB_TOKEN` with
-  its author's `base_url` would receive the token your shell exports.
+  its author's `base_url` would receive the token your shell exports. The list counts only when
+  your shell or service environment exports it. A `.env` file that sets it is ignored, because
+  the repository that ships this file can ship a `.env` too.
 - A key saved in the keychain for a profile sits under the account `<VAR>@<origin>`, and a
   profile reads only the account for its own origin. Two profiles that share `key_env` for two
   hosts therefore never share a saved key.

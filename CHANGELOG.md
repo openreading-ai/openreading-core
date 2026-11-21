@@ -13,6 +13,7 @@
 - `keys set`, `keys list` and the keychain lookup now include provider profiles, so a profile's `key_env` can live in the keychain.
   A profile's key is bound to its endpoint: the keychain holds it as `<VAR>@<origin>`, and a profile reads only its own origin's account.
   A remote profile reads its key from the environment or `.env` only when `OPENREADING_PROVIDER_ORIGINS` lists its origin. Loopback profiles always do.
+  That setting counts only when your shell or service environment exports it. A value from `.env`, `--env-file` or `env_file=` is ignored, and the hint says to export it instead.
   This stops a cloned `openreading.yaml` from naming `GITHUB_TOKEN`, or a key saved for another profile, and sending it to its author's host.
   `backends`, `keys list` (SOURCE `env-ignored`) and the missing-credentials error name an ignored variable and the setting, never the value.
   `keys import PATH SLUG` moves one backend's secrets, and a profile's key moves only this way.

@@ -18,7 +18,13 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
-from openreading.credentials import EnvCredentialBroker, bound_origin, redact, secret_values
+from openreading.credentials import (
+    EnvCredentialBroker,
+    bound_origin,
+    env_ignored_reason,
+    redact,
+    secret_values,
+)
 from openreading.types.errors import AdapterError
 from openreading.types.request import OpenReadingRequest
 from openreading.types.runtime import ResolvedCredentials
@@ -76,9 +82,8 @@ def env_ignored_hint(readiness: BackendReadiness) -> str | None:
     names = ", ".join(readiness.env_ignored)
     return (
         f"{readiness.slug}: {names} is set in the environment but not sent to "
-        f"{readiness.key_origin}, because OPENREADING_PROVIDER_ORIGINS does not list that origin. "
-        f"Save the key with openreading keys set {readiness.slug}, or add the origin to "
-        "OPENREADING_PROVIDER_ORIGINS."
+        f"{readiness.key_origin}, {env_ignored_reason()} Save the key with openreading keys "
+        f"set {readiness.slug}, or export the origin in OPENREADING_PROVIDER_ORIGINS."
     )
 
 
