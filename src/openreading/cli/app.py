@@ -3547,7 +3547,8 @@ def _install_file_profiles(argv: list[str]) -> ConfigError | None:
     command will: `--config PATH`, then `OPENREADING_CONFIG`, then the working directory. The
     dotenv file loads first, so an `OPENREADING_CONFIG` set there counts, and loading it again
     in `main` changes nothing. `serve` reads its file in `create_app`, and `mcp` reads only its
-    own `--config`, so both are skipped.
+    own `--config`, so both are skipped. `setup --config PATH` naming a file that does not exist
+    yet installs nothing and reports nothing, because `setup` creates that file.
 
     A file that fails to load installs nothing and is returned for `main` to report. Swallowed,
     it left `backends` and `keys list` silently short of every profile, and a user who forgot
@@ -3563,6 +3564,10 @@ def _install_file_profiles(argv: list[str]) -> ConfigError | None:
             flags[name] = value if eq else (argv[i + 1] if i + 1 < len(argv) else None)
     load_dotenv(flags["--env-file"])
     explicit = flags["--config"]
+    if command == "setup" and explicit is not None and not Path(explicit).exists():
+        # `setup` creates the file it names, so a missing one is the normal first run, not a
+        # problem to report. `cmd_setup` still refuses a file that exists and does not load.
+        return None
     try:
         loaded = config.load(explicit)
     except ConfigError as e:

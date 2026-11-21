@@ -351,6 +351,36 @@ def test_a_broken_config_file_exits_3(wizard, capsys, tmp_path):
     assert code == 3 and "openreading.yaml" in err
 
 
+def test_setup_config_naming_a_new_file_reports_no_missing_file(
+    wizard, monkeypatch, capsys, fake_keychain, tmp_path
+):
+    """`setup` creates the file `--config` names, so its absence is not a config problem."""
+    _probe_script(monkeypatch, LivenessStatus.LIVE)
+    path = tmp_path / "proj" / "new.yaml"
+    path.parent.mkdir()
+    code, out, err, _ = wizard(
+        [
+            ("checkbox", _pick("anthropic-claude")),
+            ("password", KEY),
+            ("confirm", True),
+            ("confirm", True),
+        ],
+        argv=["--config", str(path)],
+        capsys=capsys,
+    )
+    assert code == 0, err
+    assert "[config]" not in err and "not found" not in err
+    loaded = config.load(path)
+    assert loaded is not None and loaded.policy is not None
+
+
+def test_only_setup_treats_a_missing_explicit_file_as_new(tmp_path):
+    missing = str(tmp_path / "missing.yaml")
+    assert cli._install_file_profiles(["setup", "--config", missing]) is None
+    broken = cli._install_file_profiles(["parse", "x.pdf", "--config", missing])
+    assert isinstance(broken, config.ConfigError) and "not found" in str(broken)
+
+
 # --- the openreading.yaml edit --------------------------------------------------------------------
 
 EXISTING = """\
