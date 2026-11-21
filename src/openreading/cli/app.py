@@ -3595,13 +3595,13 @@ def _parse_args_reporting_config(
     unchanged.
     """
     parser = build_parser()
-    if command == "keys":
+    if command in _KEY_COMMANDS:
         if broken is not None:
             why = " ".join(str(broken).split()).rstrip(".")
             print(
                 f"[config] {why}. Provider profiles from this file are not loaded.", file=sys.stderr
             )
-        return _parse_keys_args(parser, argv)
+        return _parse_args_without_echo(parser, argv, command)
     if broken is None:
         return parser.parse_args(argv)
     why = " ".join(str(broken).split()).rstrip(".")
@@ -3620,10 +3620,15 @@ def _parse_args_reporting_config(
     return 3
 
 
-def _parse_keys_args(
-    parser: argparse.ArgumentParser, argv: list[str] | None
+# The commands a user reaches for while holding a key. A key pasted on their command line must not
+# come back in a usage error.
+_KEY_COMMANDS = frozenset({"keys", "setup"})
+
+
+def _parse_args_without_echo(
+    parser: argparse.ArgumentParser, argv: list[str] | None, command: str
 ) -> argparse.Namespace | int:
-    """Parse a `keys` command without letting argparse quote a token back (law PS4).
+    """Parse a `_KEY_COMMANDS` command without letting argparse quote a token back (law PS4).
 
     argparse names the offending token in every usage error, such as "unrecognized arguments:
     --token sk-...". A key pasted after a mistyped flag would reach the terminal and the scrollback.
@@ -3638,9 +3643,14 @@ def _parse_keys_args(
         if exit_.code != 2:
             sys.stderr.write(usage.getvalue())
             raise
+    where = (
+        "Setup asks for each key at a hidden prompt"
+        if command == "setup"
+        else "Use the hidden prompt or --stdin"
+    )
     print(
-        "[keys] Those arguments are not valid here. Run openreading keys --help for usage. "
-        "A key never goes on the command line. Use the hidden prompt or --stdin.",
+        f"[{command}] Those arguments are not valid here. Run openreading {command} --help for "
+        f"usage. A key never goes on the command line. {where}.",
         file=sys.stderr,
     )
     return 2

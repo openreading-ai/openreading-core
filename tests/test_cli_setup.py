@@ -327,6 +327,25 @@ def test_no_terminal_is_usage_and_names_the_script_commands(monkeypatch, capsys,
     assert "keys set" in err and "--stdin" in err and "keys list" in err
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["setup", KEY],
+        ["setup", "--key", KEY],
+        ["setup", f"--key={KEY}"],
+        ["setup", "--provider", KEY],
+    ],
+)
+def test_ps4_a_key_pasted_after_setup_is_never_echoed(capsys, fake_keychain, argv):
+    """argparse quotes the offending token in a usage error, and here that token is a key."""
+    code = cli.main(argv)
+    out, err = capsys.readouterr()
+    assert code == 2
+    assert KEY not in out + err
+    assert "[setup]" in err and "openreading setup --help" in err
+    assert fake_keychain.store == {}
+
+
 def test_without_the_setup_extra_it_names_the_install_command(monkeypatch, capsys, fake_keychain):
     monkeypatch.setitem(sys.modules, "questionary", None)
     code = cli.main(["setup"])

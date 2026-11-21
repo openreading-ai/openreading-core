@@ -11,8 +11,10 @@ The rules every verb follows
 ----------------------------
 - A value never crosses argv, stdout, stderr or a log line (law PS4). There is no value flag,
   because argv shows up in `ps` and in shell history. A hidden `--value` exists only to refuse
-  with that reason and exit 2, because argparse's own error echoed the key it rejected.
-  `--stdin` is the scripted path.
+  with that reason and exit 2, because argparse's own error echoed the key it rejected. That
+  refusal names the slug only when it is a known backend. A usage error from `keys` or `setup`
+  quotes no token (`openreading.cli.app._parse_args_without_echo`). `--stdin` is the scripted
+  path.
 - Only secrets a backend declares reach the keychain (law PS5). `keys set` takes a backend slug,
   and an optional variable must be one of that backend's secret variables. A setting such as
   `ANTHROPIC_MODEL` or a knob such as `OPENREADING_LEDGER` is refused with exit 2.
@@ -372,10 +374,12 @@ def _offer_probe(slug: str) -> None:
 def cmd_keys_set(args) -> int:
     """`keys set SLUG [VAR ...] [--stdin]`."""
     if args.value_flag is not None:
-        # Never echo the value: it is the key this refusal exists to keep out of sight.
+        # Never echo the value: it is the key this refusal exists to keep out of sight. The slug
+        # is quoted only once it names a backend, because a key pasted in its place would be too.
+        slug = args.slug if args.slug in _descriptors() else "SLUG"
         _err(
             "A key never goes on the command line, because argv is visible in `ps` and in "
-            f"shell history. Run openreading keys set {args.slug} to type it at a hidden "
+            f"shell history. Run openreading keys set {slug} to type it at a hidden "
             "prompt, or pipe it in with --stdin."
         )
         return 2

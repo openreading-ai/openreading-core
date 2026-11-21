@@ -257,6 +257,9 @@ SECRET_ARG = "sk-live-SECRET123"
         ["keys", "set", "reducto", f"--token={SECRET_ARG}"],
         ["keys", SECRET_ARG],
         ["keys", "list", SECRET_ARG],
+        # The --value refusal must not quote a slug it never validated.
+        ["keys", "set", SECRET_ARG, "--value"],
+        ["keys", "set", SECRET_ARG, "--value", "x"],
     ],
 )
 def test_ps4_an_argument_that_looks_like_a_key_is_never_echoed(
