@@ -202,8 +202,25 @@ def test_get_keyring_raising_counts_as_no_keychain(monkeypatch, fake_keychain):
 # --- timeout --------------------------------------------------------------------------------------
 
 
-def test_a_blocking_keychain_gives_up_within_the_timeout_and_stays_given_up(
-    monkeypatch, fake_keychain
+class _Clock:
+    """A monotonic clock the test moves by hand, installed as `keychain._clock`."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    fake = _Clock()
+    monkeypatch.setattr(keychain, "_clock", fake)
+    return fake
+
+
+def test_a_blocking_keychain_gives_up_and_pauses_reads_for_a_cooldown(
+    monkeypatch, fake_keychain, clock
 ):
     monkeypatch.setattr(keychain, "TIMEOUT_S", 0.2)
     _save(fake_keychain, "ANTHROPIC_API_KEY", KEY)
@@ -212,11 +229,40 @@ def test_a_blocking_keychain_gives_up_within_the_timeout_and_stays_given_up(
     assert keychain.get("ANTHROPIC_API_KEY") is None
     assert time.monotonic() - started < 1.5
     calls = len(fake_keychain.calls)
-    # The first timeout marks the keychain gone for the process, so a second name costs nothing.
+    # One timeout pauses every read, so a second name costs nothing while the pause lasts.
     assert keychain.get("REDUCTO_API_KEY") is None
     assert len(fake_keychain.calls) == calls
-    with pytest.raises(keychain.KeychainUnavailable):
-        keychain.set("REDUCTO_API_KEY", "x")
+    # The pause is not forever: once the keychain answers again, reads resume.
+    fake_keychain.block.clear()
+    clock.now += keychain.READ_COOLDOWN_S + 1
+    assert keychain.get("ANTHROPIC_API_KEY") == KEY
+
+
+def test_writes_ignore_a_read_timeout_and_update_the_cache(monkeypatch, fake_keychain, clock):
+    monkeypatch.setattr(keychain, "TIMEOUT_S", 0.2)
+    _save(fake_keychain, "PULSE_API_KEY", "p")
+    fake_keychain.block.set()
+    assert keychain.get("ANTHROPIC_API_KEY") is None  # times out, reads pause
+    keychain.set("REDUCTO_API_KEY", "r")
+    assert fake_keychain.store[("openreading", "REDUCTO_API_KEY")] == "r"
+    assert keychain.get("REDUCTO_API_KEY") == "r"  # answered from the cache, no read
+    fake_keychain.block.clear()
+    assert keychain.delete("PULSE_API_KEY") is True
+    assert ("openreading", "PULSE_API_KEY") not in fake_keychain.store
+    assert keychain.get("PULSE_API_KEY") is None
+
+
+def test_cached_answers_expire_so_a_long_running_process_sees_later_changes(fake_keychain, clock):
+    """`serve --keychain` runs for days, and `keys set` in another shell must reach it."""
+    assert keychain.get("REDUCTO_API_KEY") is None
+    _save(fake_keychain, "REDUCTO_API_KEY", "r1")
+    assert keychain.get("REDUCTO_API_KEY") is None  # still the cached answer
+    clock.now += keychain.CACHE_TTL_S + 1
+    assert keychain.get("REDUCTO_API_KEY") == "r1"
+    del fake_keychain.store[("openreading", "REDUCTO_API_KEY")]
+    clock.now += keychain.CACHE_TTL_S + 1
+    assert keychain.get("REDUCTO_API_KEY") is None
+    assert "REDUCTO_API_KEY" not in list(keychain.KeychainMapping(["REDUCTO_API_KEY"]))
 
 
 def test_a_write_that_never_returns_is_unavailable(monkeypatch, fake_keychain):
