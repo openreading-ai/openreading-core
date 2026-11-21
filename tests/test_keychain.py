@@ -285,6 +285,28 @@ def test_ps2_env_beats_dotenv_beats_keychain(monkeypatch, fake_keychain, tmp_pat
     assert broker.var_source("MISTRAL_API_KEY") == "missing"
 
 
+@pytest.mark.parametrize(
+    ("slug", "first", "second"),
+    [
+        ("llamaparse-fast", "LLAMA_CLOUD_API_KEY", "LLAMA_PARSE_API_KEY"),
+        ("nuextract", "NUEXTRACT_API_KEY", "NUMIND_API_KEY"),
+    ],
+)
+def test_ps2_an_exported_second_name_beats_a_saved_first_name(
+    monkeypatch, fake_keychain, slug, first, second
+):
+    """Every environment name is tried before any keychain name, so an export always wins."""
+    monkeypatch.delenv(first, raising=False)
+    _save(fake_keychain, first, "from-keychain")
+    monkeypatch.setenv(second, "from-shell")
+    broker = EnvCredentialBroker(keychain_environ())
+    assert _api_key(broker, slug) == "from-shell"
+    assert broker.secret_sources(make_adapter(slug).descriptor)[0] == (second, "env")
+    monkeypatch.delenv(second)
+    assert _api_key(broker, slug) == "from-keychain"
+    assert broker.secret_sources(make_adapter(slug).descriptor)[0] == (first, "keychain")
+
+
 def test_the_slug_override_still_beats_a_saved_service_var(monkeypatch, fake_keychain):
     _save(fake_keychain, "REDUCTO_API_KEY", "from-keychain")
     monkeypatch.setenv("OPENREADING_REDUCTO_API_KEY", "override")

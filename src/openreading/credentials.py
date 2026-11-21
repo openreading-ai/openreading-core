@@ -423,15 +423,16 @@ class EnvCredentialBroker:
     def secret_sources(self, descriptor: AdapterDescriptor) -> list[tuple[str, str]]:
         """One `(VAR, SOURCE)` pair per secret credential field, in descriptor order. VAR is the
         name that resolves (the `OPENREADING_<SLUG>_<KEY>` form included), else the field's
-        primary variable with SOURCE `missing`. `openreading keys list` prints these rows."""
+        primary variable with SOURCE `missing`. The pick follows `_lookup`: every name in the
+        environment first, then the keychain. `openreading keys list` prints these rows."""
         rows: list[tuple[str, str]] = []
         for f in descriptor.credentials_spec:
             if not f.secret:
                 continue
             names = [_slug_env(descriptor.id, f.key), *f.env]
-            found = next(
-                ((n, src) for n in names if (src := self.var_source(n)) != "missing"), None
-            )
+            sources = [(n, self.var_source(n)) for n in names]
+            found = next(((n, src) for n, src in sources if src in ("env", ".env")), None)
+            found = found or next(((n, src) for n, src in sources if src == "keychain"), None)
             rows.append(found or (f.env[0] if f.env else names[0], "missing"))
         return rows
 
@@ -472,17 +473,18 @@ class EnvCredentialBroker:
     ) -> str | None:
         if request_value is not None:
             return request_value
+        names = [_slug_env(slug, field.key), *field.env]
         if ref_prefix is not None:
-            v = self._env.get(f"{ref_prefix}_{field.key.upper()}")
-            if v:
-                return v
-        v = self._env.get(_slug_env(slug, field.key))
-        if v:
-            return v
-        for name in field.env:
-            v = self._env.get(name)
-            if v:
-                return v
+            names.insert(0, f"{ref_prefix}_{field.key.upper()}")
+        # Law PS2: every name is tried in the environment before any name in the keychain. Asked
+        # name by name through the chain, a value saved under LLAMA_CLOUD_API_KEY beat an exported
+        # LLAMA_PARSE_API_KEY, so an export made for this shell lost to a key saved weeks ago.
+        layers = self._env.maps if isinstance(self._env, _KeychainChain) else [self._env]
+        for layer in layers:
+            for name in names:
+                v = layer.get(name)
+                if v:
+                    return v
         return None
 
     def resolve(
