@@ -610,3 +610,16 @@ def test_declining_the_providers_write_adds_nothing(wizard, capsys, fake_keychai
     assert code == 0
     assert "No provider was added" in out
     assert not (tmp_path / "openreading.yaml").exists()
+
+
+def test_every_keyed_preset_passes_the_profile_checks():
+    from openreading import config
+    from openreading.cli.setup import PRESETS
+
+    for preset in PRESETS:
+        if not preset.base_url:
+            continue
+        profile = {"kind": "openai-compatible", "base_url": preset.base_url, "model": "m"}
+        if preset.key_env:
+            profile["key_env"] = preset.key_env
+        assert config.validate_providers({"preset-check": profile})

@@ -397,3 +397,55 @@ def test_plain_strategy_resolves_a_profile_named_in_the_same_file():
     assert registry.installed_profiles() == {}  # desugar reads the file, not the process set
     built = build_config(loaded)
     assert built is not None and "via-llm" in built.config.strategies
+
+
+# --- the trust model: a committed file cannot borrow another backend's key -------------------
+
+
+@pytest.mark.parametrize(
+    ("var", "owner"),
+    [
+        ("ANTHROPIC_API_KEY", "anthropic-claude"),
+        ("LLAMA_PARSE_API_KEY", "llamaparse"),
+        ("NUMIND_API_KEY", "nuextract"),
+        ("QWEN_VL_ENDPOINT", "qwen-vl"),
+    ],
+)
+def test_key_env_owned_by_a_built_in_is_refused(var, owner):
+    """A file pointing a built-in's key at its own host would exfiltrate that key."""
+    bad = {**PROFILE, "base_url": "https://attacker.example.test/v1", "key_env": var}
+    with pytest.raises(config.ConfigError) as ei:
+        config.load({"version": 1, "providers": {"example-llm": bad}})
+    message = str(ei.value)
+    assert var in message and owner in message
+    assert "EXAMPLE_LLM_API_KEY" in message  # a name of its own, suggested by profile name
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost:11434/v1",
+        "http://127.0.0.1:8000/v1",
+        "http://127.8.9.10/v1",
+        "http://[::1]:8000/v1",
+        "https://llm.example.test/v1",
+    ],
+)
+def test_a_keyed_profile_may_use_https_or_loopback_http(url):
+    assert config.validate_providers({"example-llm": {**PROFILE, "base_url": url}})
+
+
+@pytest.mark.parametrize(
+    "url", ["http://llm.example.test/v1", "http://10.0.0.5/v1", "http://localhost.evil.test/v1"]
+)
+def test_a_keyed_profile_over_plain_http_to_another_host_is_refused(url):
+    with pytest.raises(config.ConfigError) as ei:
+        config.validate_providers({"example-llm": {**PROFILE, "base_url": url}})
+    assert "https" in str(ei.value) and "base_url" in str(ei.value)
+
+
+def test_a_keyless_profile_may_use_plain_http_anywhere():
+    keyless = {k: v for k, v in PROFILE.items() if k != "key_env"}
+    assert config.validate_providers(
+        {"example-llm": {**keyless, "base_url": "http://gpu-box.lan:8000/v1"}}
+    )

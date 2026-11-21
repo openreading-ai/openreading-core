@@ -17,6 +17,7 @@ A provider profile is a named backend you define in this file instead of in code
 `providers:` block maps each name to one profile, and every profile speaks the OpenAI
 chat-completions protocol:
 
+    version: 1
     providers:
       openrouter-gpt:
         kind: openai-compatible           # the only kind
@@ -36,6 +37,12 @@ because this file is committed. `key_env` must be an uppercase variable name out
 `OPENREADING_` prefix, which belongs to operator settings. Absent, the endpoint is called with no
 key. The name is a backend id, so it follows the built-in slug shape (`openrouter-gpt`, lowercase
 and hyphenated).
+
+`openreading.yaml` is operator configuration, and it often arrives with a repository you cloned.
+So a profile can never name a variable a built-in backend declares, such as `ANTHROPIC_API_KEY`.
+A profile with `key_env` must also use `https`, unless its host is `localhost`, `127.0.0.0/8` or
+`::1`. Together they stop a committed file from sending a key you saved for one vendor, or any key
+in clear text, to a host the file's author chose.
 
 A name that shadows a built-in backend id is a `ConfigError`, exit 3 on the CLI. Letting a file
 replace `pymupdf` would make one id mean two backends depending on the folder you ran from. A
@@ -113,6 +120,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import ipaddress
 import json
 import os
 import re
@@ -254,10 +262,12 @@ def validate_providers(block: Any, *, source: str = "<providers>") -> dict[str, 
     if not isinstance(block, dict):
         raise ConfigError(f"{source}: invalid config at 'providers': must be a mapping")
     builtins: frozenset[str] = frozenset()
+    owned: dict[str, str] = {}
     if block:
         from openreading.adapters.registry import BUILTIN_ADAPTERS
 
         builtins = frozenset(BUILTIN_ADAPTERS)
+        owned = _builtin_env_owners(BUILTIN_ADAPTERS)
     out: dict[str, dict[str, Any]] = {}
     for name, profile in block.items():
         at = f"providers/{name}"
@@ -276,11 +286,34 @@ def validate_providers(block: Any, *, source: str = "<providers>") -> dict[str, 
                 f"{source}: invalid config at '{at}': {name!r} is a built-in backend id. Rename "
                 "the profile, because one id cannot name two backends"
             )
-        out[name] = _validated_profile(profile, at=at, source=source)
+        out[name] = _validated_profile(profile, at=at, source=source, owned=owned, name=name)
     return out
 
 
-def _validated_profile(profile: Any, *, at: str, source: str) -> dict[str, Any]:
+def _builtin_env_owners(adapters: dict[str, Any]) -> dict[str, str]:
+    """Every variable a built-in backend declares, credential or config, mapped to the first
+    backend id that declares it."""
+    owners: dict[str, str] = {}
+    for slug, factory in adapters.items():
+        descriptor = factory().descriptor
+        for field in (*descriptor.credentials_spec, *descriptor.config_spec):
+            for env in field.env:
+                owners.setdefault(env, slug)
+    return owners
+
+
+def _is_loopback(host: str) -> bool:
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _validated_profile(
+    profile: Any, *, at: str, source: str, owned: dict[str, str], name: str
+) -> dict[str, Any]:
     def refuse(where: str, why: str) -> ConfigError:
         return ConfigError(f"{source}: invalid config at '{where}': {why}")
 
@@ -326,6 +359,19 @@ def _validated_profile(profile: Any, *, at: str, source: str) -> dict[str, Any]:
             raise refuse(
                 f"{at}/key_env",
                 "the OPENREADING_ prefix belongs to operator settings, so it cannot name a key",
+            )
+        if key_env in owned:
+            own = name.replace("-", "_").upper() + "_API_KEY"
+            raise refuse(
+                f"{at}/key_env",
+                f"{key_env} belongs to the built-in backend {owned[key_env]}, so a profile "
+                f"cannot reuse it. Pick a name of its own, such as {own}",
+            )
+        if parts.scheme != "https" and not _is_loopback(parts.hostname):
+            raise refuse(
+                f"{at}/base_url",
+                "a profile with key_env must use https, because plain http would send the key "
+                "in clear text. Plain http is allowed only for localhost, 127.0.0.0/8 and ::1",
             )
     return dict(profile)
 
