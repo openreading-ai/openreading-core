@@ -197,6 +197,54 @@ def test_a_rejected_key_can_be_removed(wizard, monkeypatch, capsys, fake_keychai
     assert "✓ Removed ANTHROPIC_API_KEY" in out
 
 
+def test_a_declined_probe_is_untested_and_stays_out_of_the_policy_by_default(
+    wizard, monkeypatch, capsys, fake_keychain, tmp_path
+):
+    probed = _probe_script(monkeypatch)
+    code, out, _, prompter = wizard(
+        [
+            ("checkbox", _pick("anthropic-claude")),
+            ("password", KEY),
+            ("confirm", False),  # no probe
+            ("confirm", DEFAULT),  # Enter on "add the untested ones?"
+        ],
+        capsys=capsys,
+    )
+    assert code == 0
+    assert probed == []
+    assert "- anthropic-claude saved, not tested" in out
+    summary = out.split("Summary", 1)[1]
+    row = next(ln for ln in summary.splitlines() if "anthropic-claude" in ln)
+    assert row.strip().startswith("-") and "not tested" in row
+    assert "✓ anthropic-claude" not in out
+    ask = prompter.seen[-1]
+    assert "saved, not tested" in ask["message"] and ask["default"] is False
+    assert not (tmp_path / "openreading.yaml").exists()
+    assert "openreading backends --check anthropic-claude" in out.splitlines()[-1]
+
+
+def test_a_backend_without_a_free_probe_is_untested_not_working(
+    wizard, monkeypatch, capsys, fake_keychain, tmp_path
+):
+    _probe_script(monkeypatch, LivenessStatus.CONFIGURED_UNVERIFIED)
+    code, out, _, _ = wizard(
+        [
+            ("checkbox", _pick("anthropic-claude")),
+            ("password", KEY),
+            ("confirm", True),  # test it, but it has no free probe
+            ("confirm", True),  # add the untested one anyway
+            ("confirm", True),  # write policy.backends
+        ],
+        capsys=capsys,
+    )
+    assert code == 0
+    assert "- anthropic-claude has no free test call" in out
+    assert "✓ anthropic-claude has no free test call" not in out
+    loaded = config.load(tmp_path / "openreading.yaml")
+    assert loaded is not None and loaded.policy is not None
+    assert loaded.policy["backends"][0] == "anthropic-claude"
+
+
 def test_ctrl_c_mid_flow_names_what_was_saved_and_exits_130(
     wizard, monkeypatch, capsys, fake_keychain, tmp_path
 ):
@@ -455,8 +503,9 @@ def test_the_wizard_writes_into_an_existing_file_without_losing_anything(
         [
             ("checkbox", _pick("anthropic-claude")),
             ("password", KEY),
-            ("confirm", False),
-            ("confirm", True),
+            ("confirm", False),  # no probe
+            ("confirm", True),  # add it although it is untested
+            ("confirm", True),  # write policy.backends
         ],
         capsys=capsys,
     )
@@ -476,8 +525,9 @@ def test_a_refused_edit_leaves_the_file_and_prints_the_block(
         [
             ("checkbox", _pick("anthropic-claude")),
             ("password", KEY),
-            ("confirm", False),
-            ("confirm", True),
+            ("confirm", False),  # no probe
+            ("confirm", True),  # add it although it is untested
+            ("confirm", True),  # write policy.backends
         ],
         capsys=capsys,
     )
@@ -588,7 +638,7 @@ def test_the_menu_choice_runs_the_provider_step(
             ("text", DEFAULT),
             ("confirm", True),  # write the providers entry
             ("confirm", False),  # no probe
-            ("confirm", False),  # no policy edit
+            ("confirm", False),  # leave the untested backend out of policy.backends
         ],
         capsys=capsys,
     )

@@ -8,6 +8,7 @@
 - `openreading serve --keychain` and `keychain=True` on `openreading.run`, `run_batch` and `resume` opt in. `OPENREADING_KEYCHAIN=off` turns it off for one process.
 - Add the `[setup]` extra (`keyring`, `questionary`, `rich`), included in `[all]`.
 - Add `openreading setup`, a guided wizard: pick backends, paste each key into a hidden prompt, test it, and add what worked to `policy.backends`.
+  A key no probe answered is marked `-` as "saved, not tested", and joins `policy.backends` only when you say yes to its own question.
   `setup --provider` adds an OpenAI-compatible endpoint as a `providers:` entry. Edits to `openreading.yaml` keep comments and other keys, or change nothing.
 - `keys set`, `keys list` and the keychain lookup now include provider profiles, so a profile's `key_env` can live in the keychain.
 - `openreading mcp --keychain` reads saved keys, and `--config PATH` names the project file. The new read-only

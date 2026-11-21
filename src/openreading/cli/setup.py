@@ -25,9 +25,13 @@ The rules the flow follows
   yes/no question.
 - The liveness probe and every write to `openreading.yaml` ask first, because one is a network
   call and the other changes a committed file.
-- Every step ends with a ✓ or ✗ line. An ✗ after a probe names the variable to check and offers
-  to enter the key again, keep it, or remove it. A skipped variable prints a `-` line, because
-  skipping is a choice and not a failure.
+- Every step ends with a ✓, ✗ or `-` line. An ✗ after a probe names the variable to check and
+  offers to enter the key again, keep it, or remove it. A skipped variable prints a `-` line,
+  because skipping is a choice and not a failure.
+- A saved key that no probe answered is untested, marked `-`. That covers a declined probe and a
+  backend with no free probe. Only a backend whose probe answered is offered for
+  `policy.backends` as working. An untested one is offered in a separate question that says
+  "saved, not tested", and Enter leaves it out.
 - Ctrl+C anywhere exits 130 and names the keys already saved, then says nothing else changed.
 - Colour is a hint only. The marks and their words carry the meaning, so `NO_COLOR` loses
   nothing.
@@ -418,11 +422,18 @@ PRESETS: tuple[Preset, ...] = (
 )
 
 
+# A summary row's state and its mark. `untested` is a key that was saved but never answered a
+# probe, because you declined one or the backend has no free one. It is neither a success nor a
+# failure, so it takes the neutral mark and is never offered for policy.backends as working.
+OK, FAILED, UNTESTED, NONE = "ok", "failed", "untested", "none"
+_MARK = {OK: "✓", FAILED: "✗", UNTESTED: "-", NONE: "-"}
+
+
 @dataclass
 class _Row:
     slug: str
     outcome: str
-    ok: bool | None  # None: removed or skipped, so it is neither a success nor a failure
+    state: str  # OK, FAILED, UNTESTED, or NONE for removed or skipped
 
 
 class _Wizard:
@@ -491,11 +502,11 @@ class _Wizard:
                 if saved is None:
                     return
                 if not saved:
-                    self.rows.append(_Row(slug, "skipped", None))
+                    self.rows.append(_Row(slug, "skipped", NONE))
                     return
-            ok, outcome = self._offer_probe(desc, keyed=bool(fields))
-            if ok or not fields:
-                self.rows.append(_Row(slug, outcome, ok))
+            state, outcome = self._offer_probe(desc, keyed=bool(fields))
+            if state != FAILED or not fields:
+                self.rows.append(_Row(slug, outcome, state))
                 return
             choice = self.ask.select(
                 "What now?",
@@ -512,7 +523,7 @@ class _Wizard:
             if choice == "remove":
                 self._remove(desc)
             else:
-                self.rows.append(_Row(slug, outcome, False))
+                self.rows.append(_Row(slug, outcome, FAILED))
             return
 
     def _ask_keys(self, desc: AdapterDescriptor) -> int | None:
@@ -529,7 +540,7 @@ class _Wizard:
                 lines = keys_cli.save_secret(name, value, self.label)
             except keychain.KeychainUnavailable as e:
                 self.out.fail(f"Could not save {name}. {e}")
-                self.rows.append(_Row(desc.id, "not saved", False))
+                self.rows.append(_Row(desc.id, "not saved", FAILED))
                 return None
             if name not in self.saved:
                 self.saved.append(name)
@@ -538,31 +549,35 @@ class _Wizard:
             count += 1
         return count
 
-    def _offer_probe(self, desc: AdapterDescriptor, *, keyed: bool) -> tuple[bool, str]:
+    def _offer_probe(self, desc: AdapterDescriptor, *, keyed: bool) -> tuple[str, str]:
+        """Ask before one probe, then report it. Returns the row state and its outcome words."""
         slug = desc.id
         what = "the key" if keyed else "it"
         if not self.ask.confirm(f"Test {what} now? This makes one small request.", default=False):
-            return True, "not tested"
+            self.out.note(f"- {slug} {'saved, ' if keyed else ''}not tested")
+            return UNTESTED, "saved, not tested" if keyed else "not tested"
         try:
             report = keys_cli.run_probe(slug)
         except Exception as e:  # noqa: BLE001 - a probe failure is an ✗ line, never a traceback
             # The type alone: an exception message can echo a request, and the key with it.
             self.out.fail(f"{slug} could not be tested ({type(e).__name__})")
-            return False, "not tested"
+            return FAILED, "not tested"
         detail = (report.detail or "").strip()
         if report.status is LivenessStatus.LIVE:
             latency = f" ({report.latency_ms:.0f} ms)" if report.latency_ms is not None else ""
             self.out.ok(f"{slug} is working{latency}")
-            return True, "working"
+            return OK, "working"
         if report.status is LivenessStatus.CONFIGURED_UNVERIFIED:
-            self.out.ok(f"{slug} has no free test call, so the key was not tested. Try a parse.")
-            return True, "not tested"
+            self.out.note(
+                f"- {slug} has no free test call, so the key was not tested. Try a parse."
+            )
+            return UNTESTED, "saved, not tested"
         if report.status is LivenessStatus.UNAUTHORIZED:
             var = primary_secret_env(desc) or "its key"
             self.out.fail(f"{slug} rejected the key. Check {var}.")
-            return False, "key rejected"
+            return FAILED, "key rejected"
         self.out.fail(f"{slug} did not answer ({report.status.value}). {detail}".rstrip())
-        return False, report.status.value.replace("_", " ")
+        return FAILED, report.status.value.replace("_", " ")
 
     def _remove(self, desc: AdapterDescriptor) -> None:
         removed = False
@@ -571,7 +586,7 @@ class _Wizard:
                 gone = keychain.delete(name)
             except keychain.KeychainUnavailable as e:
                 self.out.fail(f"Could not remove {name}. {e}")
-                self.rows.append(_Row(desc.id, "not removed", False))
+                self.rows.append(_Row(desc.id, "not removed", FAILED))
                 return
             if gone:
                 removed = True
@@ -580,7 +595,7 @@ class _Wizard:
                     self.saved.remove(name)
         if not removed:
             self.out.ok(f"Nothing saved for {desc.id} in the {self.label}")
-        self.rows.append(_Row(desc.id, "removed", None))
+        self.rows.append(_Row(desc.id, "removed", NONE))
 
     # -- the provider step
 
@@ -681,16 +696,30 @@ class _Wizard:
             source = next((s for _, s in broker.secret_sources(desc) if s != "missing"), "-")
             if not keys_cli._secret_fields(desc):
                 source = "no key"
-            mark = {True: "✓", False: "✗", None: "-"}[r.ok]
+            mark = _MARK[r.state]
             self.out.line(f"  {mark} {r.slug:<{width}}  {source:<9}  {r.outcome}")
 
     def offer_policy(self, fallback: list[str]) -> bool:
-        good = [r.slug for r in self.rows if r.ok]
-        if not good:
+        good = [r.slug for r in self.rows if r.state == OK]
+        untested = [r.slug for r in self.rows if r.state == UNTESTED]
+        if not good and not untested:
             return False
         loaded = config.load(self.target) if self.target.exists() else None
         policy = (loaded.policy if loaded is not None else None) or {}
         current = policy.get("backends")
+        # An untested backend joins only when you say so, and Enter leaves it out. Offered as
+        # "worked", a key nobody tested became the first backend every document was sent to.
+        untested = [s for s in untested if current is None or s not in current]
+        if untested:
+            self.out.line()
+            if self.ask.confirm(
+                f"Also add {', '.join(untested)} to policy.backends? It is saved, not tested, "
+                "so it may not work yet.",
+                default=False,
+            ):
+                good = [*good, *untested]
+        if not good:
+            return False
         if current is None:
             # One backend that needs no key goes last, so the chain still reads a document
             # when every hosted backend in it is down or out of credit.
@@ -756,12 +785,15 @@ class _Wizard:
                 self.add_provider()
         self.summary()
         wrote_policy = self.offer_policy(fallback)
-        good = [r.slug for r in self.rows if r.ok]
+        good = [r.slug for r in self.rows if r.state == OK]
+        untested = [r.slug for r in self.rows if r.state == UNTESTED]
         self.out.line()
         if wrote_policy:
             self.out.line("Next: openreading parse FILE")
         elif good:
             self.out.line(f"Next: openreading parse FILE --backend {good[0]}")
+        elif untested:
+            self.out.line(f"Next: openreading backends --check {untested[0]}")
         else:
             self.out.line("Next: openreading backends   # what runs here, and what each one needs")
         return 0

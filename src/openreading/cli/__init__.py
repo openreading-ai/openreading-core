@@ -821,9 +821,12 @@ does, saves keys the way `keys set` does, and probes the way `backends
 
 Enter always takes the safe choice: no backend picked, keep a saved key, and
 no to every question. The probe is a network call and the file is committed,
-so each asks first. Every step ends with a ✓ or ✗ line. After a rejected key,
-the ✗ line names the variable, and you can enter the key again, keep it, or
-remove it. A backend already in the keychain shows as "set up, from keychain",
+so each asks first. Every step ends with a ✓, ✗ or - line. After a rejected
+key, the ✗ line names the variable, and you can enter the key again, keep it,
+or remove it. A key no probe answered, because you declined the test or the
+backend has no free one, is "saved, not tested" and marked -. It is offered
+for `policy.backends` only in its own question, and Enter leaves it out.
+A backend already in the keychain shows as "set up, from keychain",
 and picking it again offers keep, replace or remove. Colour is only a hint, so
 `NO_COLOR` keeps every mark and every word.
 
