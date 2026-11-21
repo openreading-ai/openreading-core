@@ -11,12 +11,12 @@ and prints the one response schema.
 Credentials never travel on the CLI: they are read from the environment by the broker
 (OPENREADING_<SLUG>_<KEY> or the service-native var, e.g. REDUCTO_API_KEY). A `.env` in the
 working directory is loaded automatically (never overriding an already-set var). Every verb but
-`serve` and `mcp` then reads the OS keychain last (`credentials.use_keychain`); those two read
+`serve` and `mcp` then reads the OS keychain last (`credentials.use_keychain`). Those two read
 it only with `--keychain`. The `keys` verbs live in `openreading.cli.keys`, and the `setup`
 wizard in `openreading.cli.setup`.
 
 The user-facing reference (every subcommand, flags, exit codes 0-6, 130 and 143) is the
-`openreading.cli` package docstring; this module holds the `cmd_*` handlers, `build_parser`, and
+`openreading.cli` package docstring. This module holds the `cmd_*` handlers, `build_parser`, and
 `main`.
 
 Environment this module reads itself
@@ -3595,6 +3595,13 @@ def _parse_args_reporting_config(
     unchanged.
     """
     parser = build_parser()
+    if command == "keys":
+        if broken is not None:
+            why = " ".join(str(broken).split()).rstrip(".")
+            print(
+                f"[config] {why}. Provider profiles from this file are not loaded.", file=sys.stderr
+            )
+        return _parse_keys_args(parser, argv)
     if broken is None:
         return parser.parse_args(argv)
     why = " ".join(str(broken).split()).rstrip(".")
@@ -3611,6 +3618,32 @@ def _parse_args_reporting_config(
             raise
     print(f"[{command}] {broken}", file=sys.stderr)
     return 3
+
+
+def _parse_keys_args(
+    parser: argparse.ArgumentParser, argv: list[str] | None
+) -> argparse.Namespace | int:
+    """Parse a `keys` command without letting argparse quote a token back (law PS4).
+
+    argparse names the offending token in every usage error, such as "unrecognized arguments:
+    --token sk-...". A key pasted after a mistyped flag would reach the terminal and the scrollback.
+    The usage error is therefore replaced by a key-free sentence with the same exit 2. Help output
+    and every other exit pass through unchanged.
+    """
+    usage = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(usage):
+            return parser.parse_args(argv)
+    except SystemExit as exit_:
+        if exit_.code != 2:
+            sys.stderr.write(usage.getvalue())
+            raise
+    print(
+        "[keys] Those arguments are not valid here. Run openreading keys --help for usage. "
+        "A key never goes on the command line. Use the hidden prompt or --stdin.",
+        file=sys.stderr,
+    )
+    return 2
 
 
 def main(argv: list[str] | None = None) -> int:

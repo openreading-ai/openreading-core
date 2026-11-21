@@ -252,6 +252,11 @@ SECRET_ARG = "sk-live-SECRET123"
         ["keys", "set", SECRET_ARG, "--stdin"],
         ["keys", "unset", SECRET_ARG],
         ["keys", "import", SECRET_ARG],
+        # argparse's own usage errors echo the offending token, so these never reach keys.py.
+        ["keys", "set", "reducto", "--token", SECRET_ARG],
+        ["keys", "set", "reducto", f"--token={SECRET_ARG}"],
+        ["keys", SECRET_ARG],
+        ["keys", "list", SECRET_ARG],
     ],
 )
 def test_ps4_an_argument_that_looks_like_a_key_is_never_echoed(

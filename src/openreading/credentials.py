@@ -5,7 +5,7 @@ surface (CLI, server, Python API, evals, chain executor, strategy engine) runs t
 
 Posture — pure BYO-key pass-through
 -----------------------------------
-You bring the provider's own credential; it is read per request, and the charge lands on your own
+You bring the provider's own credential. It is read per request, and the charge lands on your own
 account. A key from the environment or `.env` is read where it already lives. A key from the OS
 keychain is cached in this process's memory for up to 60 seconds
 (`openreading.keychain.CACHE_TTL_S`), so one run asks the keychain once per variable. That cache
