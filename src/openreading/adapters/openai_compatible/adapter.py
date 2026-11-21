@@ -56,10 +56,13 @@ adapter never reads `ctx.runtime` for a destination.
 
 Each usage counter is reported only when every call supplies it. The cost report uses the
 observed total or the sum of both observed counters for each call. Missing totals produce
-`cost_unavailable`. One deadline covers rendering and all chat calls for the document.
+`cost_unavailable`. Each chat call checks a 300-second budget while reading the reply.
+An explicit document budget limits when the next page can start and clips its timeout.
+If the budget runs out between pages, the response includes the completed pages.
 
 Liveness: `GET {base_url}/models` with the key, the model list every OpenAI-compatible server
-exposes. The probe confirms the configured model only when the returned list contains its id.
+exposes. A valid model list confirms reachability. A matching id also confirms the model,
+including an untagged Ollama model listed with its default `:latest` tag.
 
 Sources: https://platform.openai.com/docs/api-reference/chat/create and
 https://platform.openai.com/docs/api-reference/models/list (accessed 2026-11-20).
@@ -178,23 +181,44 @@ class _HttpxChatClient:
         self._http.close()
 
     def chat(self, body: dict[str, Any]) -> dict[str, Any]:
-        from openreading.adapters._http import error_for_status
+        import httpx
 
-        r = self._http.post("/chat/completions", json=body, timeout=_remaining(self._deadline))
-        if r.status_code >= 400:
-            raise error_for_status(r.status_code, r.headers, message=_error_message(r))
-        return r.json()
+        timeout = _remaining(self._deadline)
+        call_deadline = monotonic() + timeout
+        try:
+            with self._http.stream("POST", "/chat/completions", json=body, timeout=timeout) as r:
+                return _read_chat_reply(r, call_deadline)
+        except httpx.TimeoutException as exc:
+            raise RetryableError("The chat request timed out.", backend_code="timeout") from exc
 
 
-def _error_message(response: Any) -> str:
-    """The provider's own `error.message` when the body carries the OpenAI error envelope, else
-    the bare status. The execution boundary redacts any resolved key out of it."""
+def _read_chat_reply(response: Any, deadline: float) -> dict[str, Any]:
+    """Keep complete JSON at the deadline. HTTP read timeouts restart for every chunk."""
+    from openreading.adapters._http import error_for_status
+
+    data = bytearray()
+    for chunk in response.iter_bytes():
+        data.extend(chunk)
+        if monotonic() >= deadline:
+            break
     try:
-        err = response.json().get("error")
-    except Exception:  # noqa: BLE001 - an unparseable error body still has a status
-        err = None
-    message = err.get("message") if isinstance(err, dict) else None
-    return f"HTTP {response.status_code}: {message}" if message else f"HTTP {response.status_code}"
+        payload = json.loads(data)
+    except ValueError:
+        if response.status_code < 400:
+            _remaining(deadline)
+            raise
+        payload = {}
+    if response.status_code >= 400:
+        # The execution boundary redacts resolved keys from the provider's error message.
+        err = payload.get("error") if isinstance(payload, dict) else None
+        message = err.get("message") if isinstance(err, dict) else None
+        status = f"HTTP {response.status_code}"
+        raise error_for_status(
+            response.status_code,
+            response.headers,
+            message=f"{status}: {message}" if message else status,
+        )
+    return payload
 
 
 def _origin(url: str) -> str:
@@ -346,20 +370,29 @@ class OpenAICompatibleAdapter(BackendAdapter):
         )
 
     def _check_models(self, response: Any) -> ProbeResult:
+        if not 200 <= response.status_code < 300:
+            return ProbeResult.error(f"The model endpoint returned HTTP {response.status_code}.")
         try:
             body = response.json()
         except ValueError:
             return ProbeResult.error("The endpoint returned an unreadable model list.")
-        models = body.get("data") if isinstance(body, dict) else None
-        if isinstance(models, list):
-            for model in models:
-                if isinstance(model, dict) and model.get("id") == self.profile.model:
-                    return ProbeResult.live("configured model listed", version=model["id"])
-        return ProbeResult.error("The endpoint did not list the configured model.")
+        models = body.get("data") if isinstance(body, dict) else body
+        if not isinstance(models, list):
+            return ProbeResult.error("The endpoint returned an unreadable model list.")
+        model = self.profile.model
+        for entry in models:
+            model_id = entry.get("id") if isinstance(entry, dict) else entry
+            if model_id == model or (
+                ":" not in model.rsplit("/", 1)[-1] and model_id == f"{model}:latest"
+            ):
+                return ProbeResult.live("configured model listed", version=model_id)
+        return ProbeResult.live("The configured model was not listed.")
 
     # ---- submit --------------------------------------------------------------------------
     def submit(self, req: OpenReadingRequest, ctx: RunContext) -> Job:
-        deadline = None if ctx.deadline_ms is None else monotonic() + ctx.deadline_ms / 1000
+        deadline = None
+        if ctx.deadline_ms is not None and not ctx.deadline_is_default:
+            deadline = monotonic() + ctx.deadline_ms / 1000
         _remaining(deadline)
         with ExitStack() as stack:
             client = self._get_client(ctx, deadline, stack)
@@ -384,15 +417,22 @@ class OpenAICompatibleAdapter(BackendAdapter):
             pages: list[dict[str, Any]] = []
             totals: dict[str, int] | None = None
             for page, body in calls:
-                _remaining(deadline)
                 try:
+                    _remaining(deadline)
                     reply = client.chat(body)
-                except (RetryableError, TerminalError):
+                except RetryableError as exc:
+                    if (
+                        exc.backend_code == "timeout"
+                        and pages
+                        and deadline is not None
+                        and monotonic() >= deadline
+                    ):
+                        break
+                    raise
+                except TerminalError:
                     raise
                 except Exception as e:  # noqa: BLE001
-                    _remaining(deadline)
                     raise self._map_error(e) from e
-                _remaining(deadline)
                 content, finish_reason = self._choice(reply)
                 pages.append({"page": page, "content": content, "finish_reason": finish_reason})
                 counts = _token_counts(reply.get("usage"))
@@ -532,7 +572,10 @@ class OpenAICompatibleAdapter(BackendAdapter):
         outputs = slim_req.outputs or Outputs()
         calls = data.get("pages", [])
         truncated = any((c.get("finish_reason") or "").lower() == "length" for c in calls)
-        status = Status(state=ResponseState.PARTIAL if truncated else ResponseState.SUCCEEDED)
+        missed_pages = mode == "parse" and len(calls) < data.get("page_count", 0)
+        status = Status(
+            state=ResponseState.PARTIAL if truncated or missed_pages else ResponseState.SUCCEEDED
+        )
         typed_fields: dict[str, TypedField] = {}
         pages: list[Page] = []
         markdown_parts: list[str] = []
@@ -590,6 +633,12 @@ class OpenAICompatibleAdapter(BackendAdapter):
             ),
         )
         resp.channel_provenance = _PROVENANCE.get(mode)
+        if missed_pages:
+            resp.add_warning(
+                "output_truncated",
+                f"The document deadline expired after {len(calls)} of {data['page_count']} selected pages.",
+                "status",
+            )
         if truncated:
             resp.add_warning(
                 "output_truncated",
@@ -641,7 +690,7 @@ def _remaining(deadline: float | None) -> float:
         return 300.0
     remaining = deadline - monotonic()
     if remaining <= 0:
-        raise RetryableError("The document deadline expired.", backend_code="deadline_exceeded")
+        raise RetryableError("The request deadline expired.", backend_code="timeout")
     return min(300.0, remaining)
 
 

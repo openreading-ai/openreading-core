@@ -482,6 +482,8 @@ Single-document flags:
                       `--strategy` / `--no-strategy`, which manage their own
                       per-node budget. `0` or negative means fail fast: do not
                       wait at all.
+                      Without a deadline, provider profiles use a timeout per
+                      chat call. An explicit budget limits which pages start.
 
 Single-document exits: 0 printed; 2 selector misuse, unknown backend/strategy,
 unresolvable source; 3 cannot run (missing credentials -- the message names the
@@ -762,8 +764,9 @@ shell or service environment exports it. A value from `.env` is ignored.
 When neither holds, `keys list` shows SOURCE `env-ignored`, and a line on
 stderr names the setting, never the value.
 
-When a dotenv file selects a built-in endpoint, export its origin in
-`OPENREADING_PROVIDER_ORIGINS` to use a saved key there.
+A built-in accepts a saved key at its default origin or a loopback endpoint.
+For other dotenv endpoints, export the endpoint setting in your shell or list
+its origin in an exported `OPENREADING_PROVIDER_ORIGINS`.
 
 A key never crosses the command line. There is no flag that takes a value,
 because argv shows up in `ps` and in shell history. A `--value` you type out

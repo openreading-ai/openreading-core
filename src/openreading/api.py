@@ -157,7 +157,7 @@ from openreading.ledger.jsonl import JsonlJournal
 from openreading.ledger.localfs import LocalFsBlobStore
 from openreading.ledger.ports import Executor, LedgerArmingError
 from openreading.ledger.sanitizer import Sanitizer
-from openreading.readiness import auth_hinted, missing_required
+from openreading.readiness import auth_hinted, keychain_blocked_hint, missing_required
 from openreading.router.clock import RealClock
 from openreading.router.cost import apply_cost_report
 from openreading.router.driver import run_to_completion
@@ -738,6 +738,10 @@ def prepare_named_backend(
     ctx = build_run_context(req, adapter.descriptor, broker=broker, deadline_ms=deadline_ms)
     missing = missing_required(adapter.descriptor, ctx)
     if missing:
+        if ctx.credentials and ctx.credentials.keychain_blocked_by:
+            raise MissingCredentialsError(
+                keychain_blocked_hint(ctx.credentials.keychain_blocked_by), missing=missing
+            )
         signup = (
             f" Sign up / configure: {adapter.descriptor.signup_url}"
             if adapter.descriptor.signup_url

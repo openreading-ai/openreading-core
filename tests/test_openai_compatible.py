@@ -224,13 +224,26 @@ def test_expired_budget_stops_before_rendering(monkeypatch):
     monkeypatch.setattr(adapter, "_render", lambda *args: pytest.fail("rendered after deadline"))
     with pytest.raises(RetryableError) as failure:
         adapter.submit(_req(), RunContext(deadline_ms=0))
-    assert failure.value.backend_code == "deadline_exceeded"
+    assert failure.value.backend_code == "timeout"
     assert not respx.calls
 
 
 @respx.mock
-def test_pages_share_one_deadline(monkeypatch):
+@pytest.mark.parametrize(
+    ("budget", "page_seconds", "timeout_on_second", "expected_timeouts", "returned_pages"),
+    [
+        (None, 75.0, False, [300, 300], 2),
+        (1000, 0.75, False, [1, 0.25], 2),
+        (120000, 130.0, False, [120], 1),
+        (1000, 0.75, True, [1, 0.25], 1),
+    ],
+)
+def test_pages_keep_completed_replies_and_observe_explicit_budgets(
+    monkeypatch, budget, page_seconds, timeout_on_second, expected_timeouts, returned_pages
+):
     from openreading.adapters.openai_compatible import adapter as module
+    from openreading.adapters.registry import profile_scope
+    from openreading.api import run_request
 
     now = [10.0]
     monkeypatch.setattr(module, "monotonic", lambda: now[0], raising=False)
@@ -238,14 +251,23 @@ def test_pages_share_one_deadline(monkeypatch):
 
     def reply(request):
         timeouts.append(request.extensions["timeout"]["read"])
-        now[0] += 0.75
+        now[0] += page_seconds
+        if timeout_on_second and len(timeouts) == 2:
+            raise httpx.ReadTimeout("page timed out", request=request)
         return httpx.Response(200, json=_reply("page"))
 
     respx.post(CHAT).mock(side_effect=reply)
-    with pytest.raises(RetryableError) as failure:
-        OpenAICompatibleAdapter(KEYLESS).submit(_req(pages=None), RunContext(deadline_ms=1000))
-    assert failure.value.backend_code == "deadline_exceeded"
-    assert timeouts == pytest.approx([1.0, 0.25])
+    req = _req(backend={"id": KEYLESS.name}, pages=None)
+    with profile_scope({KEYLESS.name: KEYLESS}):
+        resp = run_request(req, deadline_ms=budget)
+    assert timeouts == pytest.approx(expected_timeouts)
+    assert [p["page_number"] for p in resp["document"]["pages"]] == list(
+        range(1, returned_pages + 1)
+    )
+    assert resp["usage"]["input_tokens"] == 120 * returned_pages
+    assert resp["status"]["state"] == ("succeeded" if returned_pages == 2 else "partial")
+    if returned_pages < 2:
+        assert any("deadline" in w["message"] for w in resp["warnings"])
 
 
 @respx.mock
@@ -254,6 +276,31 @@ def test_truncated_reply_is_partial_with_a_warning():
     resp = _run(OpenAICompatibleAdapter(KEYED), _req())
     assert resp.status.state is ResponseState.PARTIAL
     assert any(w.code == "output_truncated" for w in resp.warnings or [])
+
+
+def test_slow_response_chunks_stop_at_the_call_budget(monkeypatch):
+    from openreading.adapters import _http
+    from openreading.adapters.openai_compatible import adapter as module
+
+    now = [0.0]
+    chunks = []
+    monkeypatch.setattr(module, "monotonic", lambda: now[0])
+
+    class SlowReply(httpx.SyncByteStream):
+        def __iter__(self):
+            for part in (b'{"choices":', b"[", b'{"message":{"content":"page"}}]}'):
+                now[0] += 0.6
+                chunks.append(part)
+                yield part
+
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, stream=SlowReply()))
+    monkeypatch.setattr(
+        _http, "build_httpx_client", lambda **kw: httpx.Client(transport=transport, **kw)
+    )
+    with pytest.raises(RetryableError) as failure:
+        OpenAICompatibleAdapter(KEYLESS).submit(_req(), RunContext(deadline_ms=1000))
+    assert failure.value.backend_code == "timeout"
+    assert len(chunks) == 2
 
 
 @respx.mock
@@ -551,13 +598,23 @@ def test_keyless_probe_sends_no_key():
     assert "authorization" not in route.calls.last.request.headers
 
 
-@pytest.mark.parametrize("models", [{"data": [{"id": "another-model"}]}, {}, ["llava"]])
+@pytest.mark.parametrize(
+    ("models", "status", "version"),
+    [
+        ({"data": [{"id": "another-model"}], "has_more": True}, LivenessStatus.LIVE, None),
+        ({"data": [{"id": "llava:latest"}]}, LivenessStatus.LIVE, "llava:latest"),
+        (["llava"], LivenessStatus.LIVE, "llava"),
+        ({}, LivenessStatus.ERROR, None),
+    ],
+)
 @respx.mock
-def test_probe_only_confirms_a_listed_model(models):
+def test_probe_distinguishes_reachability_from_a_listed_model(models, status, version):
     respx.get(f"{BASE}/models").mock(return_value=httpx.Response(200, json=models))
     report = check_liveness(OpenAICompatibleAdapter(KEYLESS))
-    assert report.status is LivenessStatus.ERROR
-    assert report.version is None
+    assert report.status is status
+    assert report.version == version
+    if status is LivenessStatus.LIVE and version is None:
+        assert "not listed" in report.detail
 
 
 # --- live -------------------------------------------------------------------------------------

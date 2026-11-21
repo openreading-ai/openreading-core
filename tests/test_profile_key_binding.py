@@ -117,7 +117,11 @@ def test_saved_builtin_key_requires_a_trusted_destination_from_dotenv(
 ):
     from openreading.credentials import load_dotenv
 
-    origin = "https://provider.example.test"
+    origin = (
+        "https://api.anthropic.com:8443"
+        if slug == "anthropic-claude"
+        else "https://provider.example.test"
+    )
     path = tmp_path / "settings.env"
     path.write_text(f"{setting}={origin}/v1\n")
     monkeypatch.delenv(setting, raising=False)
@@ -144,6 +148,74 @@ def test_file_selected_sdk_configuration_requires_an_export(tmp_path, monkeypatc
     desc = make_adapter("aws-textract").descriptor
     assert "aws_session_token" not in broker.resolve(desc, _req(desc.id)).values
     assert ("get", "AWS_SESSION_TOKEN") not in fake_keychain.calls
+
+
+@pytest.mark.parametrize(
+    ("slug", "setting", "url", "secret"),
+    [
+        ("qwen-vl", "QWEN_VL_ENDPOINT", "http://localhost:8000/v1", "QWEN_VL_API_KEY"),
+        (
+            "anthropic-claude",
+            "ANTHROPIC_BASE_URL",
+            "https://API.ANTHROPIC.COM:443",
+            "ANTHROPIC_API_KEY",
+        ),
+        (
+            "llamaparse-fast",
+            "LLAMA_CLOUD_BASE_URL",
+            "https://api.cloud.llamaindex.ai",
+            "LLAMA_CLOUD_API_KEY",
+        ),
+        ("chunkr", "CHUNKR_BASE_URL", "https://api.chunkr.ai", "CHUNKR_API_KEY"),
+        ("nuextract", "NUEXTRACT_BASE_URL", "https://nuextract.ai/v1", "NUMIND_API_KEY"),
+    ],
+)
+def test_saved_key_reaches_a_local_or_factory_destination(
+    slug, setting, url, secret, fake_keychain, tmp_path
+):
+    from openreading.credentials import load_dotenv
+
+    path = tmp_path / ".env"
+    path.write_text(f"{setting}={url}\n")
+    load_dotenv(path)
+    fake_keychain.store[("openreading", secret)] = "saved-test-key"
+    broker = EnvCredentialBroker(keychain_environ())
+    desc = make_adapter(slug).descriptor
+    assert "saved-test-key" in broker.resolve(desc, _req(slug)).values.values()
+
+
+@pytest.mark.parametrize(
+    ("slug", "setting", "secret"),
+    [
+        (
+            "azure-document-intelligence",
+            "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT",
+            "AZURE_DOCUMENT_INTELLIGENCE_KEY",
+        ),
+        ("qwen-vl", "QWEN_VL_ENDPOINT", "QWEN_VL_API_KEY"),
+    ],
+)
+def test_dotenv_hold_names_the_setting_in_readiness_and_parse(
+    slug, setting, secret, fake_keychain, tmp_path, pdf, capsys, monkeypatch
+):
+    from openreading.credentials import load_dotenv
+    from openreading.readiness import missing_reason
+
+    path = tmp_path / ".env"
+    path.write_text(f"{setting}=https://custom.example.test/v1\n")
+    load_dotenv(path)
+    fake_keychain.store[("openreading", secret)] = "saved-test-key"
+    broker = EnvCredentialBroker(keychain_environ())
+    ready = backend_readiness(make_adapter(slug), broker=broker)
+    assert not ready.ready and ready.keychain_blocked_by == setting
+    assert setting in missing_reason(ready)
+    code, out, err = _run(["parse", pdf, "--backend", slug], capsys)
+    assert code != 0 and setting in err and "export" in err.lower()
+    assert "saved-test-key" not in out + err
+    assert ("get", secret) not in fake_keychain.calls
+    if slug == "qwen-vl":
+        monkeypatch.setenv("OPENREADING_KEYCHAIN", "off")
+        assert backend_readiness(make_adapter(slug), broker=broker).ready
 
 
 def _stdin(monkeypatch, text: str) -> None:

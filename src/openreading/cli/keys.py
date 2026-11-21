@@ -387,7 +387,15 @@ def run_probe(slug: str, saved_names: Iterable[str]) -> LivenessReport:
     return check_liveness(adapter, broker=broker)
 
 
-def _offer_probe(slug: str, saved_names: Iterable[str]) -> None:
+def live_probe_message(desc: AdapterDescriptor, report: LivenessReport) -> str:
+    latency = f" ({report.latency_ms:.0f} ms)" if report.latency_ms is not None else ""
+    if desc._profile_base_url and report.version is None:
+        return f"{desc.id} endpoint responded{latency}. {report.detail}"
+    return f"{desc.id} is working{latency}"
+
+
+def _offer_probe(desc: AdapterDescriptor, saved_names: Iterable[str]) -> None:
+    slug = desc.id
     answer = input("Test the key now? This makes one small request. [y/N] ").strip().lower()
     if answer not in ("y", "yes"):
         return
@@ -397,8 +405,7 @@ def _offer_probe(slug: str, saved_names: Iterable[str]) -> None:
         print(f"  ✗ {slug}: {e}")
         return
     if report.status is LivenessStatus.LIVE:
-        latency = f" ({report.latency_ms:.0f} ms)" if report.latency_ms is not None else ""
-        print(f"  ✓ {slug} is working{latency}")
+        print(f"  ✓ {live_probe_message(desc, report)}")
     elif report.status is LivenessStatus.CONFIGURED_UNVERIFIED:
         print(f"  - {slug} has no free probe, so the key was not tested. Try a parse.")
     else:
@@ -474,7 +481,7 @@ def cmd_keys_set(args) -> int:
         return 0
     if interactive:
         try:
-            _offer_probe(desc.id, saved)
+            _offer_probe(desc, saved)
         except (KeyboardInterrupt, EOFError):
             print()
     return 0
@@ -659,6 +666,24 @@ def cmd_keys_import(args) -> int:
         )
         print(f"  Left in place, {what}: {listing}")
     which = "line" if len(lines) == 1 else "lines"
+    # Preview the imported file even when it differs from the CLI's active .env.
+    file_values = {name: value for _, name, value in reversed(entries)}
+    broker = EnvCredentialBroker()
+    blocked = {
+        setting
+        for desc in scope.values()
+        if first.keys() & set(_secret_names(desc))
+        if (setting := broker.untrusted_endpoint(desc, file_values=file_values))
+    }
+    if blocked:
+        for setting in sorted(blocked):
+            line = next((n for n, name, _ in entries if name == setting), None)
+            source = f" (line {line})" if line else ""
+            print(
+                f"  Export {setting}{source} in your shell before removing the key from the file."
+            )
+        print(f"After exporting, remove {which} {', '.join(map(str, lines))} from {args.path}.")
+        return 0
     print(
         f"Delete {which} {', '.join(map(str, lines))} from {args.path}, so each key lives in one "
         "place. Until then the file's value wins whenever you run from its folder."

@@ -277,6 +277,7 @@ def _descriptor() -> AdapterDescriptor:
     )
 
     descriptor._sdk_endpoint_envs = {("ANTHROPIC_BASE_URL",): "base_url"}
+    descriptor._default_origin = _DEFAULT_BASE_URL
     return descriptor
 
 

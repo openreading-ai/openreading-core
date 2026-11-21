@@ -257,6 +257,8 @@ class AdapterDescriptor(BaseModel):
 
     # Local connection settings participate in replay identity without entering the wire catalog.
     _profile_base_url: str | None = PrivateAttr(default=None)
+    # The built-in client's factory origin also accepts its saved key when repeated in dotenv.
+    _default_origin: str | None = PrivateAttr(default=None)
     # SDK-native destination selectors also govern whether a project can read a saved key.
     # A runtime key pins the resolved URL. None leaves SDK-specific precedence to its client.
     _sdk_endpoint_envs: dict[tuple[str, ...], str | None] = PrivateAttr(default_factory=dict)

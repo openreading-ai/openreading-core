@@ -614,9 +614,13 @@ class _Wizard:
             return FAILED, "not tested"
         detail = (report.detail or "").strip()
         if report.status is LivenessStatus.LIVE:
-            latency = f" ({report.latency_ms:.0f} ms)" if report.latency_ms is not None else ""
-            self.out.ok(f"{slug} is working{latency}")
-            return OK, "working"
+            self.out.ok(keys_cli.live_probe_message(desc, report))
+            return (
+                OK,
+                "endpoint reachable"
+                if desc._profile_base_url and report.version is None
+                else "working",
+            )
         if report.status is LivenessStatus.CONFIGURED_UNVERIFIED:
             self.out.note(
                 f"- {slug} has no free test call, so the key was not tested. Try a parse."

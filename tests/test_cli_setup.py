@@ -679,12 +679,15 @@ def test_providers_edit_appends_a_profile_and_keeps_the_rest():
 # --- adding an LLM provider -----------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("listed", [True, False])
 @respx.mock
 def test_provider_preset_writes_a_valid_profile_saves_its_key_and_probes(
-    wizard, monkeypatch, capsys, fake_keychain, tmp_path
+    wizard, monkeypatch, capsys, fake_keychain, tmp_path, listed
 ):
     models = respx.get("https://openrouter.ai/api/v1/models").mock(
-        return_value=httpx.Response(200, json={"data": [{"id": "openai/gpt-5.1"}]})
+        return_value=httpx.Response(
+            200, json={"data": [{"id": "openai/gpt-5.1"}] if listed else []}
+        )
     )
     code, out, err, prompter = wizard(
         [
@@ -716,7 +719,10 @@ def test_provider_preset_writes_a_valid_profile_saves_its_key_and_probes(
     assert _saved(fake_keychain, "OPENROUTER_API_KEY") is None
     assert "✓ Saved OPENROUTER_API_KEY for https://openrouter.ai to the" in out
     assert models.calls.last.request.headers["authorization"] == f"Bearer {KEY}"
-    assert "✓ openrouter is working" in out
+    if listed:
+        assert "✓ openrouter is working" in out
+    else:
+        assert "not listed" in out
     presets = next(p for p in prompter.seen if p["kind"] == "select")["choices"]
     assert [v for v, _ in presets] == [
         "openai",

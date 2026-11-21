@@ -400,6 +400,25 @@ def test_load_dotenv_missing_file_is_noop(tmp_path):
     assert load_dotenv(tmp_path / "nope.env", environ={}) == 0
 
 
+def test_dotenv_leaves_proxy_and_certificate_settings_to_the_shell(tmp_path):
+    path = tmp_path / ".env"
+    settings = (
+        "http_proxy",
+        "HTTPS_PROXY",
+        "All_Proxy",
+        "NO_PROXY",
+        "ssl_cert_file",
+        "SSL_CERT_DIR",
+        "requests_ca_bundle",
+        "CURL_CA_BUNDLE",
+        "AWS_CA_BUNDLE",
+    )
+    path.write_text("".join(f"{name}=from-file\n" for name in settings) + "ANTHROPIC_MODEL=m\n")
+    env = {"HTTPS_PROXY": "from-shell"}
+    assert load_dotenv(path, environ=env) == 1
+    assert env == {"HTTPS_PROXY": "from-shell", "ANTHROPIC_MODEL": "m"}
+
+
 def test_load_dotenv_strips_inline_comments(tmp_path):
     # THE live bug: `NUEXTRACT_BASE_URL=   # optional: on-prem…` parsed the comment as the VALUE —
     # a truthy scheme-less string that beat the adapter's default base URL and broke every request

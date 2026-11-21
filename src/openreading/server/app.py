@@ -723,6 +723,7 @@ def _readiness_dict(r: BackendReadiness, liveness_probe: str = "none") -> dict[s
         "missing_deps": r.missing_deps,
         "creds_found": r.creds_found,
         "creds_missing": r.creds_missing,
+        **({"keychain_blocked_by": r.keychain_blocked_by} if r.keychain_blocked_by else {}),
         "ready": r.ready,
         "liveness_probe": liveness_probe,
     }

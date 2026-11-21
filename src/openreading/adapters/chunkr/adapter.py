@@ -189,7 +189,7 @@ class _HttpxChunkrClient:  # pragma: no cover - real network path
 
 
 def _descriptor() -> AdapterDescriptor:
-    return AdapterDescriptor(
+    descriptor = AdapterDescriptor(
         id="chunkr",
         type=BackendType.HOSTED_API,
         # Ledger T4a (AC-8): poll()/cancel()/resolve_webhook() build their client fresh from ctx
@@ -281,6 +281,8 @@ def _descriptor() -> AdapterDescriptor:
             ),
         ],
     )
+    descriptor._default_origin = _DEFAULT_BASE_URL
+    return descriptor
 
 
 class ChunkrAdapter(BackendAdapter):

@@ -54,10 +54,10 @@ keychain. A blank variable counts as unset, so an empty `ANTHROPIC_API_KEY=` lin
 does not hide a saved key. `EnvCredentialBroker.var_source` names where a variable resolves from
 (`env`, `.env`, `keychain`, `missing`) for `openreading backends` and `openreading keys list`.
 
-A built-in uses its saved key with the default destination or an endpoint exported by the
-operator. When a dotenv file selects the endpoint, export its origin in
-`OPENREADING_PROVIDER_ORIGINS` to authorize the keychain lookup. For example, an unlisted
-`LLAMA_CLOUD_BASE_URL` in a project file cannot redirect a saved LlamaParse key.
+A built-in can use its saved key when a dotenv file selects loopback or the backend's default
+origin. For a custom remote destination, export the endpoint setting in your shell or list its
+origin in an exported `OPENREADING_PROVIDER_ORIGINS`. Proxy and certificate settings such as
+`HTTPS_PROXY` and `SSL_CERT_FILE` are read only from the process environment.
 
 A provider profile's key is bound to its endpoint
 -------------------------------------------------
@@ -258,6 +258,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from openreading import keychain
 from openreading.router.cache import content_key, document_identity
 from openreading.types.descriptor import AdapterDescriptor, ConfigField, CredentialField
 from openreading.types.errors import TerminalError
@@ -319,6 +320,21 @@ def dotenv_entries(path: str | os.PathLike[str]) -> list[tuple[int, str, str]]:
 # `openreading keys list` read it to tell a `.env` value from an exported one.
 _DOTENV_NAMES: set[str] = set()
 
+# A project file must not change the connection or its trust roots behind an approved endpoint.
+_TRANSPORT_ENV = frozenset(
+    {
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "AWS_CA_BUNDLE",
+    }
+)
+
 
 def load_dotenv(
     path: str | os.PathLike[str] | None = None,
@@ -334,7 +350,7 @@ def load_dotenv(
         return 0
     count = 0
     for _, key, val in dotenv_entries(p):
-        if key in env:
+        if key in env or key.upper() in _TRANSPORT_ENV:
             continue
         env[key] = val
         # Tracked whenever the target is the process environment, including an explicit
@@ -539,6 +555,15 @@ def _first_set(env: Mapping[str, str], names: Iterable[str]) -> tuple[str, str] 
     return None
 
 
+def _field_item(
+    env: Mapping[str, str], slug: str, field: CredentialField | ConfigField, prefix: str | None
+) -> tuple[str, str] | None:
+    names = [_slug_env(slug, field.key), *field.env]
+    if prefix:
+        names.insert(0, f"{prefix}_{field.key.upper()}")
+    return _first_set(env, names)
+
+
 def _credentials_ref_aliases(env: Mapping[str, str]) -> frozenset[str]:
     """BL-162: `credentials_ref: "env:<alias>"` may only select a prefix the OPERATOR has
     explicitly allow-listed via `OPENREADING_CREDENTIALS_REF_ALIASES` (comma-separated) — never an
@@ -580,37 +605,50 @@ class EnvCredentialBroker:
             return True
         return origin in provider_origins(self._layers()[0])
 
-    def _env_item(
-        self, slug: str, field: CredentialField | ConfigField, prefix: str | None
-    ) -> tuple[str, str] | None:
-        names = [_slug_env(slug, field.key), *field.env]
-        if prefix:
-            names.insert(0, f"{prefix}_{field.key.upper()}")
-        return _first_set(self._layers()[0], names)
-
     def untrusted_endpoint(
-        self, descriptor: AdapterDescriptor, prefix: str | None = None
+        self,
+        descriptor: AdapterDescriptor,
+        prefix: str | None = None,
+        *,
+        file_values: Mapping[str, str] | None = None,
     ) -> str | None:
-        """Name a dotenv destination that requires operator approval before reading a saved key."""
-        env = self._layers()[0]
-        if env is not os.environ or not _DOTENV_NAMES:
+        """Name the dotenv setting blocking a saved key. Import can preview a file before use."""
+        process_env = self._layers()[0]
+        file_names = _DOTENV_NAMES if process_env is os.environ else set()
+        env = process_env
+        if file_values:
+            file_names = file_names.union(file_values.keys() - process_env.keys())
+            env = {**file_values, **process_env}
+        if not file_names:
             return None
         for name in descriptor._sdk_config_envs:
-            if name in _DOTENV_NAMES and env.get(name):
+            if name in file_names and env.get(name):
                 return name
         settings = [
-            self._env_item(descriptor.id, field, prefix)
+            _field_item(env, descriptor.id, field, prefix)
             for field in descriptor.config_spec
             if field.key in {"endpoint", "base_url"}
         ]
         settings.extend(_first_set(env, names) for names in descriptor._sdk_endpoint_envs)
         for item in settings:
-            if item and item[0] in _DOTENV_NAMES:
+            if item and item[0] in file_names:
                 try:
+                    url = urlsplit(item[1])
+                    if (
+                        url.scheme not in _DEFAULT_PORTS
+                        or not url.hostname
+                        or url.username is not None
+                        or "\\" in item[1]
+                    ):
+                        return item[0]
                     origin = endpoint_origin(item[1])
                 except ValueError:
                     return item[0]
-                if origin not in provider_origins(env):
+                if not (
+                    _loopback_origin(origin)
+                    or origin == descriptor._default_origin
+                    or origin in provider_origins(process_env)
+                ):
                     return item[0]
         return None
 
@@ -700,24 +738,35 @@ class EnvCredentialBroker:
         prefix = self._ref_prefix(req)
         origin = bound_origin(descriptor)
         layers = self._layers()
-        can_read_store = len(layers) > 1 and not self.untrusted_endpoint(descriptor, prefix)
+        use_store = len(layers) > 1 and not keychain.disabled()
+        blocked = self.untrusted_endpoint(descriptor, prefix) if use_store else None
         values: dict[str, object] = {}
         for field in descriptor.credentials_spec:
             selected = [name for name in field.env if name in self._probe_saved]
             # PS2: an exported LLAMA_PARSE_API_KEY wins even when the keychain holds the
             # primary LLAMA_CLOUD_API_KEY. A remote profile also needs consent for its origin.
             if not selected and self.env_allowed(origin):
-                item = self._env_item(descriptor.id, field, prefix)
+                item = _field_item(layers[0], descriptor.id, field, prefix)
                 if item:
                     values[field.key] = item[1]
                     continue
-            if field.secret and can_read_store:
+            if field.secret and use_store and not blocked:
                 for name in selected or field.env:
                     value = layers[1].get(keychain_account(descriptor, name))
                     if value:
                         values[field.key] = value
                         break
-        return ResolvedCredentials(values=values, source="env" if values else None)
+        if blocked:
+            secrets = [f for f in descriptor.credentials_spec if f.secret]
+            # An optional key may be the backend's only authentication, as it is for Qwen.
+            needs_store = any(f.required and f.key not in values for f in secrets) or (
+                bool(secrets) and not any(f.key in values for f in secrets)
+            )
+            if not needs_store:
+                blocked = None
+        return ResolvedCredentials(
+            values=values, source="env" if values else None, keychain_blocked_by=blocked
+        )
 
     def resolve_config(self, descriptor: AdapterDescriptor, req: OpenReadingRequest) -> dict:
         """Non-secret config from config_spec → ctx.runtime dict, merged with the request's typed
@@ -743,7 +792,9 @@ class EnvCredentialBroker:
             )
         out: dict[str, object] = dict(runtime_req)  # pass through remaining typed runtime fields
         for f in descriptor.config_spec:
-            if f.key not in out and (item := self._env_item(descriptor.id, f, prefix)):
+            if f.key not in out and (
+                item := _field_item(self._layers()[0], descriptor.id, f, prefix)
+            ):
                 out[f.key] = item[1]
         for names, key in descriptor._sdk_endpoint_envs.items():
             if key is not None and (item := _first_set(self._layers()[0], names)):
@@ -777,9 +828,10 @@ def build_run_context(
     runtime = broker.resolve_config(descriptor, req)
     creds = broker.resolve(descriptor, req)
     return RunContext(
-        credentials=creds if creds.values else None,
+        credentials=creds if creds.values or creds.keychain_blocked_by else None,
         runtime=runtime or None,
         deadline_ms=deadline_ms if deadline_ms is not None else DEFAULT_DEADLINE_MS,
+        deadline_is_default=deadline_ms is None,
         idempotency_key=(
             req.idempotency_key
             if req.idempotency_key is not None

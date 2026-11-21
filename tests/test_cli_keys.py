@@ -465,6 +465,29 @@ def test_import_moves_declared_secrets_and_names_the_lines_to_delete(
     assert "REDUCTO_API_KEY=r-secret" in src.read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize(
+    ("filename", "approved"), [("old.env", False), (".env", False), ("old.env", True)]
+)
+def test_import_names_the_endpoint_to_export_before_removing_the_key(
+    capsys, fake_keychain, tmp_path, monkeypatch, filename, approved
+):
+    src = tmp_path / filename
+    setting = "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT"
+    secret = "AZURE_DOCUMENT_INTELLIGENCE_KEY"
+    origin = "https://custom.example.test"
+    src.write_text(f"{secret}={KEY}\n{setting}={origin}\nOPENREADING_PROVIDER_ORIGINS={origin}\n")
+    if approved:
+        monkeypatch.setenv("OPENREADING_PROVIDER_ORIGINS", origin)
+    code, out, err = _run(["keys", "import", str(src), "azure-document-intelligence"], capsys)
+    assert code == 0 and _saved(fake_keychain, secret) == KEY
+    if approved:
+        assert "Delete line 1" in out and f"Export {setting}" not in out
+    else:
+        assert f"Export {setting}" in out and "line 2" in out
+        assert "Delete line 1" not in out
+    assert KEY not in out + err and origin not in out + err
+
+
 BARE_KEY = "c2stbGl2ZS1TRUNSRVQtYmFzZTY0"
 
 
