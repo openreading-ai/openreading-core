@@ -68,7 +68,7 @@ def test_measured_identity_includes_dependency_lock_and_ocr_version(tmp_path, mo
     assert identity.core_commit is None
     assert identity.extraction_settings["tesseract_version"] == "tesseract 5.5.1"
     assert identity.extraction_settings["assets"]["dependency_lock"] == "a" * 64
-    assert identity.extraction_settings["dependencies"]["docling-slim"] == "2.126.0"
+    assert identity.extraction_settings["dependencies"]["docling-slim"] == "2.142.0"
     # Transitive distributions reach extraction too, so a drift in any of them is a new engine.
     assert {"docling-core", "pydantic", "onnxruntime"} <= set(
         identity.extraction_settings["dependencies"]
