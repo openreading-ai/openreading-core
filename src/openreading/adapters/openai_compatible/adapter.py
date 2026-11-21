@@ -595,13 +595,22 @@ def _data_url(data: bytes, mime: str) -> str:
 
 
 def _selected(n: int, req: OpenReadingRequest) -> list[int]:
-    """0-based page indexes the request selects, clamped to the document's page count."""
+    """0-based page indexes the request selects, clamped to the document's page count.
+
+    A selection that misses every page raises instead of widening to the whole document. The
+    widened set would upload pages the caller never chose to a hosted endpoint."""
     if req.pages is None:
         return list(range(n))
     idx: list[int] = []
     for rng in req.pages.ranges or []:
         end = min(rng.end or rng.start, n)
         idx += [p - 1 for p in range(rng.start, end + 1)]
+    if req.pages.ranges and not idx:
+        raise TerminalError(
+            f"the page selection matches no page, and the document has {n} "
+            f"page{'' if n == 1 else 's'}",
+            backend_code="unsupported_input",
+        )
     idx = idx or list(range(n))
     return sorted(set(idx[: req.pages.max_pages] if req.pages.max_pages else idx))
 

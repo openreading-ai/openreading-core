@@ -177,6 +177,17 @@ def test_parse_keeps_source_page_numbers_under_subsetting():
 
 
 @respx.mock
+def test_page_selection_outside_the_document_sends_nothing():
+    # Falling back to every page would upload pages the caller never selected.
+    route = respx.post(CHAT).mock(return_value=httpx.Response(200, json=_reply(MARKDOWN)))
+    req = _req(pages={"ranges": [{"start": 50, "end": 60}]})
+    with pytest.raises(TerminalError, match=r"has \d+ page") as exc:
+        OpenAICompatibleAdapter(KEYED).submit(req, _ctx())
+    assert exc.value.backend_code == "unsupported_input"
+    assert route.call_count == 0
+
+
+@respx.mock
 def test_keyless_profile_sends_no_authorization_header():
     route = respx.post(CHAT).mock(return_value=httpx.Response(200, json=_reply(MARKDOWN)))
     _run(OpenAICompatibleAdapter(KEYLESS), _req(), ctx=RunContext())
