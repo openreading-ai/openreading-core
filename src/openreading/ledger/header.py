@@ -128,7 +128,7 @@ def read_header(ledger_root: Path, run_id: str) -> RunHeader | None:
 
 
 def registry_fingerprint() -> str:
-    """sha256 over EVERY known adapter's own descriptor digest (`inline.descriptor_digest`) —
+    """sha256 over EVERY known adapter's own descriptor digest (`inline.descriptor_digest`),
     the whole registry's identity, distinct from the pinned ELIGIBLE subset (plan §4.2): a backend
     added or removed, or any existing one's descriptor changed, moves this value even for a
     backend outside this run's own eligible set. Computed from the installed adapter catalog
