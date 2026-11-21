@@ -27,8 +27,13 @@ default and explicit backend selection.
 
 ### Where credentials live, and for how long
 
-The credential broker reads backend keys from the process environment for each request. Some
-provider SDKs also use ambient credentials, such as AWS profiles or Google ADC. Request bodies
+Backend keys come from shell exports, a loaded dotenv file, or the OS keychain, in that order.
+`openreading keys set`, `keys import`, and `setup` save declared secrets in the keychain.
+The CLI can reuse them across projects. HTTP and MCP launchers require `--keychain` to read them.
+Python callers opt in with `keychain=True`. Cached keychain values stay in process memory.
+A provider profile's saved key is bound to its endpoint origin. For the rules on dotenv endpoints
+and the variables ignored during dotenv loading, see `openreading help keys` and `openreading.credentials`.
+Some provider SDKs also use ambient credentials, such as AWS profiles or Google ADC. Request bodies
 cannot supply credential values, and `backend.runtime.endpoint` cannot redirect a request carrying
 them. An allowed `credentials_ref` may select a configured environment alias. Read the
 `openreading.credentials` module docstring for the full precedence and alias rules.

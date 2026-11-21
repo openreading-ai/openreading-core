@@ -7,6 +7,11 @@
   The keychain is read after the environment and `.env`, never enters `os.environ`, and holds declared secrets only.
   A read the keychain refuses with an error, such as a locked keychain, keeps the last key it returned and asks again next time.
 - `openreading serve --keychain` and `keychain=True` on `openreading.run`, `run_batch` and `resume` opt in. `OPENREADING_KEYCHAIN=off` turns it off for one process.
+- Built-ins can use saved keys with their default origin or loopback. For a custom dotenv endpoint,
+  export its variable or approve its origin in the shell. An unresolved required secret blocks dispatch.
+  A keyless Qwen endpoint or the AWS SDK's ambient credentials can still run.
+- `keys import` exits 2 before writing if one variable has conflicting values. Its output identifies
+  endpoint settings to export before removing an imported key from the file.
 - Add the `[setup]` extra (`keyring`, `questionary`, `rich`), included in `[all]`.
 - A usage error from `keys` or `setup`, and the `keys set --value` refusal, never print an argument back, so a key pasted on the command line stays off the screen.
 - Add `openreading setup`, a guided wizard: pick backends, paste each key into a hidden prompt, test it, and add what worked to `policy.backends`.
@@ -32,8 +37,12 @@
   A `key_env` that a built-in backend declares is refused, and a profile with `key_env` must use `https` unless its host is loopback.
   A `base_url` scheme must be lowercase, and a Python mapping passed as `config=` is refused the same way a file is.
 - Each `openreading.run`, `run_batch`, `route` and `resume` call sees only its own file's profiles, so concurrent calls with different files never swap endpoints.
+  HTTP apps and batch workers keep their own configured profiles. Resume checks the recorded model and full endpoint URL.
 - Add the `openai-compatible` adapter. It parses page images through chat completions and extracts through
   `response_format: json_schema`, and it never reports blocks, boxes or confidence.
+  A readable model list reports the endpoint as live even if the configured model is absent.
+  Profile chat calls default to 300 seconds each. An explicit document deadline returns completed
+  parse pages with an `output_truncated` warning if time runs out between pages.
 
 ## Unreleased security hardening
 

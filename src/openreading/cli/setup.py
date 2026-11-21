@@ -37,7 +37,8 @@ The rules the flow follows
   nothing.
 - A preset for an LLM provider is a starting `base_url` and key variable name you confirm. It
   carries no price, no model list and no capability claim, because core cannot keep one true.
-  A stale URL fails the probe with an ✗ rather than a quieter success.
+  A readable model list confirms the endpoint answered. The wizard can offer that profile for
+  `policy.backends` even when the list omits the configured model.
 
 Editing openreading.yaml
 ------------------------
@@ -48,8 +49,9 @@ after the list stays where it was. It replaces a one-line `backends: [...]` list
 when that line carries a comment, which a rewrite would drop. With no list, it inserts one
 `backends:` line under `policy:`. `with_provider` appends one entry under `providers:`. A key
 may be plain or quoted. A key spelled any other way, such as with an escape, is never located,
-and the edit is refused rather than appending a second block. The file's line endings are kept,
-so a CRLF file stays CRLF. Each then parses the result with `openreading.config.parse` and compares it with the original mapping
+and the edit is refused rather than appending a second block. Saving replaces the file atomically
+and preserves an existing file's mode and line endings, including CRLF.
+Each edit parses the result with `openreading.config.parse` and compares it with the original mapping
 plus the one intended change. Any other difference raises `EditRefused`, the file stays as it
 was, and the wizard prints the block to add by hand. A flow-style `policy: {...}` is one shape
 that is refused rather than rewritten. The file is the one `--config` names, else the one
@@ -102,6 +104,7 @@ Examples:
 
 Enter always means the safe choice: skip, keep, or no. Keys go to your OS
 keychain and never to a file. The probe and every file edit ask first.
+A provider can answer the probe even if its list omits your model.
 
 Then:
   openreading backends               # CONFIGURED reads yes

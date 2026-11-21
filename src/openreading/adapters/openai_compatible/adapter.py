@@ -19,9 +19,8 @@ Both operations are INLINE: `submit()` makes the calls and returns a finished jo
   Schema. A request with instructions only sends `{type: json_object}`. The reply's JSON object
   becomes `typed_fields` after local validation against the supplied schema.
 
-The request body holds `model` and `messages` and nothing else. `max_tokens` and `temperature`
-are left out on purpose: some OpenAI models refuse `max_tokens`, and some reasoning models refuse
-any `temperature`, so the smallest body is the one most endpoints accept.
+The parse request body holds only `model` and `messages`. Extraction also sends `response_format`.
+Both omit `max_tokens` and `temperature` because some models reject those parameters.
 
 Channel posture (law PS7: a profile claims only what the protocol carries)
 -------------------------------------------------------------------------
@@ -37,10 +36,11 @@ carries generated text and nothing else, so this adapter fills only that.
   measured one downstream. A requested X channel gets a `channel_unavailable` warning.
 - `finish_reason: length` marks the response PARTIAL with an `output_truncated` warning.
 
-Each submitted reply must satisfy the requested schema using only references within that schema.
-A model that refuses answers with an HTTP error, which maps to a normal `TerminalError`, so that
-one call fails and the router moves to the next backend in the chain. A 401 or 403 maps to
-`auth_rejected`, and `openreading.readiness` names the profile's `key_env` in the hint.
+Extraction validates the returned object locally with JSON Schema Draft 2020-12 and no network
+retrieval. A validation failure returns PARTIAL without typed fields and sets
+`status.error.code` to `backend_validation`. An explicit model refusal becomes a `TerminalError`
+with code `model_refused`. A 401 or 403 maps to `auth_rejected`, and `openreading.readiness`
+names the profile's `key_env` in the hint.
 
 Descriptor
 ----------
@@ -60,8 +60,9 @@ observed total or the sum of both observed counters for each call. Missing total
 An explicit document budget limits when the next page can start and clips its timeout.
 If the budget runs out between pages, the response includes the completed pages.
 
-Liveness: `GET {base_url}/models` with the key, the model list every OpenAI-compatible server
-exposes. A valid model list confirms reachability. A matching id also confirms the model,
+The liveness probe calls `GET {base_url}/models` with the key when configured.
+A readable model list confirms reachability, even when empty or missing the model.
+A matching id also confirms the listing for the configured model,
 including an untagged Ollama model listed with its default `:latest` tag.
 
 Sources: https://platform.openai.com/docs/api-reference/chat/create and

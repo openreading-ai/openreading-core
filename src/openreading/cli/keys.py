@@ -40,8 +40,9 @@ The rules every verb follows
 refused before anything is saved, because a shifted line would save a key under the wrong name.
 Name one variable after the slug to save only that one.
 
-Exit codes: 0 done, 2 usage (unknown slug, undeclared variable, no terminal without `--stdin`,
-no keychain), 3 an unreadable `keys import` file, 130 stopped with Ctrl+C.
+Exit 2 covers invalid arguments, conflicting import values, a failed keychain operation,
+and an interactive save without a terminal. An unreadable import file exits 3.
+A completed command exits 0. Interrupting a save with Ctrl+C exits 130.
 """
 
 from __future__ import annotations
@@ -72,14 +73,14 @@ Examples:
   openreading keys list                      # where each key comes from
   openreading keys import .env               # move a .env's keys over
 
-Keys live in your OS keychain, never in a file. Your shell and .env still win
-over the keychain, so an export you made for one shell is never overridden.
+These commands save keys to your OS keychain. Eligible shell and .env
+values take precedence during normal runs.
 
 Then:
-  openreading backends               # CONFIGURED flips to yes
+  openreading backends               # check the backend's readiness
 
-Exits: 0 done. 2 usage, no terminal, or no keychain. 3 an unreadable import
-file. 130 stopped with Ctrl+C.
+Exits: 0 done. 2 invalid input, conflicting values, or a keychain failure.
+3 an unreadable import file. 130 stopped with Ctrl+C.
 
 More: openreading help keys""",
     "keys set": """\
@@ -105,9 +106,9 @@ Examples:
   openreading keys list              # BACKEND VAR SOURCE
   openreading keys list --json       # the same rows as JSON
 
-SOURCE is env (exported), .env, keychain, or missing. It never shows a value,
-a prefix or a length. Reading a keychain that is absent or locked is silent:
-those rows read missing.
+SOURCE is env, .env, keychain, env-ignored, or missing. For a provider
+profile, env-ignored means its key is set but its origin lacks approval.
+Each row names the backend, variable and source. Values stay private.
 
 Then:
   openreading keys set SLUG          # fill a missing row
@@ -135,15 +136,14 @@ Examples:
   openreading keys import .env       # move declared secrets to the keychain
   openreading keys import .env openrouter-gpt   # one backend, a profile too
 
-The file is never edited. The output names the lines to delete, because a
-.env line still beats the keychain whenever you run from that folder. Settings
-such as ANTHROPIC_MODEL stay where they are. A provider profile's key moves
-only when you name the profile, which binds it to that profile's endpoint.
+The file stays in place. The output names copied lines and any endpoint
+setting to export before removing them. Name the profile to import its key.
 
 Then:
   openreading keys list              # SOURCE reads keychain once deleted
 
-Exits: 0 moved, or nothing to move. 2 no keychain. 3 the file cannot be read.
+Exits: 0 copied or nothing to copy. 2 conflicting values, an invalid
+backend selection, or a keychain failure. 3 the file cannot be read.
 
 More: openreading help keys""",
 }
@@ -188,8 +188,7 @@ def add_parser(sub: argparse._SubParsersAction, common: argparse.ArgumentParser)
     list_p = verbs.add_parser(
         "list",
         help="show where each declared secret resolves from, never its value",
-        description="Print one row per backend secret: the backend, the variable, and whether "
-        "it comes from the environment, .env, the keychain, or nowhere.",
+        description="Show the variable and credential source for each backend secret.",
     )
     list_p.add_argument("--json", action="store_true", help="print the rows as a JSON array")
     list_p.set_defaults(func=cmd_keys_list)
@@ -208,8 +207,8 @@ def add_parser(sub: argparse._SubParsersAction, common: argparse.ArgumentParser)
     import_p = verbs.add_parser(
         "import",
         help="move the declared secrets in a .env into the OS keychain",
-        description="Copy every declared backend secret in a .env file into the OS keychain, "
-        "then name the lines to delete from that file.",
+        description="Copy declared secrets from a dotenv file to the OS keychain. "
+        "Name a backend to limit the import or bind a provider profile's key.",
     )
     import_p.add_argument("path", metavar="PATH", help="the .env file to read")
     import_p.add_argument(

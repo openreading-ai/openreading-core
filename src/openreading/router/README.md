@@ -14,8 +14,8 @@ of ids in preference order. `openreading route sample.pdf` prints the resulting 
 running any backend at all.
 
 A fallback is the next backend tried when one fails, and your list is the fallback chain. A
-strategy is a named plan over backends, and it can only reach backends your list already permits.
-Keys are read from your environment per request and go nowhere but the provider. You need
+strategy is a named plan over backends. Each backend resolves its declared keys for the request.
+`openreading help keys` explains shell, dotenv and OS keychain precedence. You need
 `sample.pdf` and an `openreading.yaml`, and no key.
 
 ## Mental model

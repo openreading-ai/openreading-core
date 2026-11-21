@@ -7,8 +7,8 @@ Posture — pure BYO-key pass-through
 -----------------------------------
 You bring the provider's own credential. It is read per request, and the charge lands on your own
 account. A key from the environment or `.env` is read where it already lives. A key from the OS
-keychain is cached in this process's memory for up to 60 seconds
-(`openreading.keychain.CACHE_TTL_S`), so one run asks the keychain once per variable. That cache
+keychain is cached in this process's memory. After 60 seconds the next read refreshes it
+(`openreading.keychain.CACHE_TTL_S`). A locked keychain can leave the last read in use. That cache
 never enters `os.environ`, so a subprocess never inherits it. This package never logs or echoes the
 key, and never sends it anywhere but the provider. OpenReading writes a key in exactly one case:
 you ran `openreading keys set`, `openreading keys import` or `openreading setup`, and it writes to
@@ -54,10 +54,16 @@ keychain. A blank variable counts as unset, so an empty `ANTHROPIC_API_KEY=` lin
 does not hide a saved key. `EnvCredentialBroker.var_source` names where a variable resolves from
 (`env`, `.env`, `keychain`, `missing`) for `openreading backends` and `openreading keys list`.
 
-A built-in can use its saved key when a dotenv file selects loopback or the backend's default
-origin. For a custom remote destination, export the endpoint setting in your shell or list its
-origin in an exported `OPENREADING_PROVIDER_ORIGINS`. Proxy and certificate settings such as
-`HTTPS_PROXY` and `SSL_CERT_FILE` are read only from the process environment.
+A built-in backend can use a saved key when a dotenv file selects loopback or its default
+origin. An origin consists of the scheme, host and port. For a custom remote endpoint,
+export the endpoint variable in your shell or export its origin in `OPENREADING_PROVIDER_ORIGINS`.
+An AWS configuration selector such as `AWS_PROFILE` must itself be exported to permit a
+keychain lookup. These rules govern saved keys. Built-ins still use credentials supplied
+through their environment under the precedence above.
+
+When the destination prevents a keychain lookup, a named backend with an unresolved required
+secret reports the setting to export. The default chain skips that backend. Optional secrets
+stay unset: Qwen can run anonymously and Textract can use the AWS SDK's ambient credentials.
 
 A provider profile's key is bound to its endpoint
 -------------------------------------------------
@@ -86,15 +92,18 @@ still apply on top.
 `.env` loading (`load_dotenv`): `KEY=VALUE` lines from a dotenv file enter the environment WITHOUT
 overriding an already-set process var — an exported shell variable always wins over the file, so a
 value exported in an earlier shell command silently beats the file you just edited. The CLI loads
-`./.env` (or `--env-file`) on every invocation, `openreading serve` included.
+`./.env` (or `--env-file`) for commands including `serve`. The `mcp` launcher skips dotenv.
+Set `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, `SSL_CERT_FILE`, `SSL_CERT_DIR`,
+`REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE` and `AWS_CA_BUNDLE` in the shell or service environment.
+The loader ignores those nine names in any letter case.
 Values are literal: the loader does not expand tilde, variable references, or shell commands.
 For example, use an absolute OCR model path rather than $HOME/models in this file. A program that
 imports `openreading.server.app.create_app` directly loads nothing, so it calls `load_dotenv`
 itself. `openreading.run(env_file=)` / `run_batch(env_file=)` load only when given. Do NOT copy
 `.env.example` wholesale: it pre-fills two localhost endpoints (`DOCLING_SERVE_URL`,
 `QWEN_VL_ENDPOINT`), which marks those backends configured on a machine where neither is running
-and sends a document there before the router falls back to one that works. Write only the keys
-you actually hold, one line at a time: `echo 'REDUCTO_API_KEY=sk_...' >> .env`.
+and sends a document there before the router falls back to one that works. Use an editor to
+enter only the keys you hold, or use the hidden prompt in `openreading keys set reducto`.
 
 Why the `credentials_ref` allow-list exists (BL-162): before it, `env:<anything>` resolved every
 credential key as `<anything>_<KEY>`, so an unauthenticated request (server auth is off by default)
@@ -221,7 +230,8 @@ Actionable failures
 
 Time budget: `ctx.deadline_ms` is a BUDGET, not an absolute deadline (DEFAULT_DEADLINE_MS, or
 DEFAULT_NATIVE_BATCH_DEADLINE_MS for native batch); callers convert it via
-`clock.now_ms() + budget`.
+`clock.now_ms() + budget`. The context also records whether the caller supplied a budget.
+An OpenAI-compatible profile uses its per-call timeout when the caller supplied none.
 
 Ledger storage: with `OPENREADING_LEDGER` armed, the ledger root holds headers, JSONL journals,
 and plaintext content-addressed blobs. The package never encrypts or expires them. Operators
@@ -237,7 +247,8 @@ Environment variables this module reads
 ---------------------------------------
 - `OPENREADING_CREDENTIALS_REF_ALIASES`: the `credentials_ref` allow-list above (BL-162).
   Unset or empty accepts no alias.
-- `OPENREADING_PROVIDER_ORIGINS`: comma-separated origins whose provider profiles may read their
+- `OPENREADING_PROVIDER_ORIGINS` also permits a built-in to use its saved key at a listed
+  dotenv-selected origin. It holds comma-separated origins whose provider profiles may read their
   key from the environment and `.env`, such as `https://openrouter.ai,https://api.groq.com`. Each
   entry is normalized like a profile's origin, so a path, a default port or upper case does not
   matter. An entry without a scheme matches nothing. Unset or empty lists none, so only loopback
@@ -343,7 +354,8 @@ def load_dotenv(
     """Load `KEY=VALUE` lines from a `.env` file into the environment WITHOUT overriding a var
     that is already set (explicit process env always wins). Returns the number of vars set.
     With `path=None`, loads `./.env` if it exists (missing file → no-op, returns 0). The line
-    grammar is `dotenv_entries`."""
+    grammar is `dotenv_entries`. The proxy and certificate settings listed in this module's
+    dotenv reference are skipped regardless of letter case."""
     env = environ if environ is not None else os.environ
     p = Path(path) if path is not None else Path(".env")
     if not p.is_file():

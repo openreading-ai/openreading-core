@@ -47,6 +47,10 @@ Every active scope intersects with the resolved chain, and an empty intersection
 An `openreading.yaml` comes from explicit `config`, `OPENREADING_CONFIG`, or the working directory.
 The server disables working-directory discovery. A malformed file raises `ConfigError` before
 dispatch, including an unknown policy key or a value with the wrong type.
+Each call sees only the profiles from its resolved configuration. Batch workers inherit that
+selection, including an empty set. Resuming a journaled strategy checks the recorded profile
+configuration before dispatch. Changing a model or even the path or port of its endpoint
+requires a fresh run.
 
 Execution and errors
 --------------------
@@ -975,8 +979,9 @@ def run(
 
     `deadline_ms` (BL-169) is the caller's absolute time budget for a DIRECTLY-NAMED backend only,
     forwarded to `run_request`'s named-backend branch (`prepare_named_backend`, BL-153's own
-    plumbing). Omitted (the default), a named backend resolves to `credentials.DEFAULT_DEADLINE_MS`
-    (2 minutes), which is too short for some hosted async backends' ordinary workload. The CLI
+    plumbing). With no override, built-ins use `credentials.DEFAULT_DEADLINE_MS` (2 minutes).
+    A provider profile instead allows 300 seconds per chat call. If an explicit document budget
+    expires partway through a parse, the profile returns the completed pages as partial. The CLI
     spelling of the same knob is `parse --deadline`, documented in `openreading.cli`. It has no
     effect on resolved-chain or strategy dispatch, which manage their own node budgets.
 

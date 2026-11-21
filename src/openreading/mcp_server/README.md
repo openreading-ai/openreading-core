@@ -14,9 +14,12 @@ For example, search for a renewal clause, read its passage, and cite the returne
 You start one process with explicit input and artifact directories before the client can call tools.
 The input root grants file access, while the separate artifact root retains copies until you remove them.
 The profile exposes `openreading_import`, `openreading_get_document`, `openreading_search`, `openreading_read`, and `openreading_select_document`.
-Long work uses `openreading_start_import`, `openreading_get_import`, and `openreading_cancel_import`.
+Long work uses `openreading_start_import`, `openreading_list_imports`, `openreading_get_import`, and `openreading_cancel_import`.
 Selection returns `selection_unavailable` unless a trusted launcher explicitly supplies a local chooser.
-`openreading_backends` reports which backends are configured, naming variables and their source, never a value.
+On the local Core launcher, call `openreading_backends` with `{}` for offline readiness.
+`found` gives variable names and sources. A profile's `env_ignored` lists environment keys withheld for its origin.
+The client-only launcher and launchers that delegate imports omit this tool. Query the configured
+Core server's `GET /v1/backends` for its own readiness when using HTTP.
 
 ## Walkthrough
 
@@ -119,7 +122,7 @@ Before uninstalling a client, cancel unwanted jobs and wait for terminal states.
 There is no uninstall cancellation hook; removing the client can leave detached work running.
 Reconnecting with the same input and artifact roots restores job discovery and cancellation.
 The local profile requires POSIX support. Explicit root symlinks resolve once before file access begins.
-The launcher never reads `./.env` or `./openreading.yaml`. `--config PATH` names the file whose provider profiles it reports.
+The launcher skips dotenv and config discovery. Pass `--config PATH` to report profiles from that file.
 Without `--keychain` the process reads the environment only. With it, keys saved by `openreading keys set` count too.
 No tool accepts a key. Run `openreading setup` in a terminal instead, because a pasted key enters the transcript.
 

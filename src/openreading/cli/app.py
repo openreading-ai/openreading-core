@@ -10,8 +10,8 @@ and prints the one response schema.
 
 Credentials never travel on the CLI: they are read from the environment by the broker
 (OPENREADING_<SLUG>_<KEY> or the service-native var, e.g. REDUCTO_API_KEY). A `.env` in the
-working directory is loaded automatically (never overriding an already-set var). Every verb but
-`serve` and `mcp` then reads the OS keychain last (`credentials.use_keychain`). Those two read
+working directory is loaded automatically except by `mcp`. Exported variables take precedence.
+Every verb but `serve` and `mcp` then reads the OS keychain last (`credentials.use_keychain`). Those two read
 it only with `--keychain`. The `keys` verbs live in `openreading.cli.keys`, and the `setup`
 wizard in `openreading.cli.setup`.
 
@@ -658,8 +658,8 @@ def cmd_backends(args) -> int:
     """List backends and whether they are CONFIGURED here. `--check` additionally probes the named
     backends for real liveness (internal/design/liveness.md §9).
 
-    `--check` never defaults to "everything": a bare `openreading backends` is byte-for-byte what
-    it has always been, offline and free. The literal `--check all` exists as explicit typed
+    Bare `openreading backends` is offline and free. A SOURCE column appears when a credential
+    resolves from the OS keychain. The literal `--check all` exists as explicit typed
     consent to probe every backend that declares a probe — on a CLI, a flag the user typed IS the
     consent that a page load can never be."""
     broker = EnvCredentialBroker()
@@ -2867,8 +2867,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument(
         "--keychain",
         action="store_true",
-        help="also read backend keys saved with `openreading keys set`. Off by default, "
-        "because a server has no keychain and waiting for one can hang its startup",
+        help="also read saved backend keys from this server's OS keychain (off by default)",
     )
     serve.set_defaults(func=cmd_serve)
 
@@ -3001,9 +3000,8 @@ def build_parser() -> argparse.ArgumentParser:
         dest="deadline_s",
         metavar="SECONDS",
         help="absolute time budget override, in seconds, applied to every fanned-out backend. "
-        "Raise it for a long-running hosted async job. Default, when omitted, is "
-        "the generic 120s single-document deadline. A non-positive value (0 or negative) means "
-        "fail fast: do not wait at all",
+        "Defaults to 120s for built-ins. Provider profiles allow 300s per chat call when "
+        "omitted. A non-positive value (0 or negative) means fail fast",
     )
     show = compare.add_argument_group("how it prints")
     show.add_argument(

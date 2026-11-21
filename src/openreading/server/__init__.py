@@ -4,9 +4,12 @@
 A null backend resolves ``policy.backends`` from ``openreading.yaml``, then falls back to
 ``pymupdf``. A named backend runs directly after API key scope checks. Strategy identifiers run
 through ``openreading.strategies``. The provider profiles in that file's ``providers:`` block
-become backend ids once, at startup. A profile's endpoint comes from the file only, so a request
+become backend ids once, at startup. Each app keeps its own profiles, including an empty set,
+and passes them to its batch workers. A profile's endpoint comes from the file only, so a request
 naming ``backend.runtime.endpoint`` is refused for a profile as for every backend.
 
+``GET /v1/backends`` reports readiness without contacting providers. When a dotenv setting
+blocks lookup of a required saved credential, its row names that setting in ``keychain_blocked_by``.
 ``POST /v1/route`` returns a router plan without executing it. ``POST /v1/compare`` compares
 existing responses. ``POST /v1/batch`` accepts explicit document objects plus four shared request
 fields: outputs, extraction schema, features, and pages. Batch items fail independently.
@@ -50,8 +53,9 @@ HTTP status codes
     A retryable failure exhausted its budget or execution exceeded its deadline.
 
 API keys come from ``OPENREADING_API_KEYS``. Optional backend scopes come from
-``OPENREADING_API_KEY_SCOPES`` and can only narrow access. Backend credentials remain in the
-server process environment. Request bodies never carry credential values.
+``OPENREADING_API_KEY_SCOPES`` and can only narrow access. The server resolves backend keys
+from its environment and, with ``--keychain``, the OS keychain. Request bodies never carry
+credential values.
 
 The process binds to ``127.0.0.1:8787`` by default. CORS is disabled unless the operator supplies
 an origin. Body, batch, compare, and job-store limits are defined and documented in

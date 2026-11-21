@@ -243,9 +243,9 @@ Environment variables this module reads
 Credentials never come from the command line. They come from the process
 environment, a `.env` file, or the OS keychain, so a key cannot land in your
 shell history or in a `ps` listing. `openreading help keys` covers the
-keychain. `--env-file PATH` picks the file (default `./.env` when
-present) and every verb accepts it. On `strategy` and `benchmark` it belongs
-BEFORE the sub-verb, because it is declared on the parent parser:
+keychain. Commands with `--env-file PATH` load that file or default to
+`./.env` when present. The MCP launcher skips dotenv loading. On `keys`,
+`strategy` and `benchmark`, put the flag before the subcommand:
 
     openreading strategy --env-file ci.env validate
 
@@ -482,8 +482,10 @@ Single-document flags:
                       `--strategy` / `--no-strategy`, which manage their own
                       per-node budget. `0` or negative means fail fast: do not
                       wait at all.
-                      Without a deadline, provider profiles use a timeout per
-                      chat call. An explicit budget limits which pages start.
+                      A provider profile instead allows 300s per chat call
+                      when you omit this flag. An explicit deadline covers
+                      all selected pages. If time runs out after some pages
+                      finish, parse returns them with status `partial`.
 
 Single-document exits: 0 printed; 2 selector misuse, unknown backend/strategy,
 unresolvable source; 3 cannot run (missing credentials -- the message names the
@@ -672,10 +674,10 @@ CONFIGURED and MISSING. It names where each backend's secrets come from:
 `env`, `.env` or `keychain`, and `-` for none. With nothing saved the table
 is unchanged, so a script reading it keeps working.
 
-A provider profile whose key is exported but not read, because
-`OPENREADING_PROVIDER_ORIGINS` does not list its origin, reads `no` with the
-variable under MISSING. One `[backends]` line on stderr names the variable,
-the origin and the setting, never the value (`keys` explains the binding).
+A remote profile can use a key saved for its origin. To use an exported key
+there, list the origin in an exported `OPENREADING_PROVIDER_ORIGINS`. With
+neither source available, the profile reads `no` with its key under MISSING.
+If an environment key was ignored, stderr names the variable and origin.
 
 "Configured" is not "reachable" -- a `DOCLING_SERVE_URL` pointing at a dead
 port is configured. `--check` answers the other question by actually probing,
@@ -689,10 +691,13 @@ hides the ones that already answered.
     docling  endpoint  not_configured  no        -        not configured:...
                                           (columns abridged for this page)
 
-Provider profiles follow the built-ins. A provider profile is a backend you
-name in the `providers:` block of the `openreading.yaml` this command finds
-(`--config`, then `OPENREADING_CONFIG`, then the working directory). A keyed
-profile lists its `key_env` variable as missing until you set it. A file that
+The table includes the provider profiles named in your file's `providers:`
+block. This example selects the file explicitly.
+
+    OPENREADING_CONFIG=./ci/openreading.yaml openreading backends
+
+Otherwise the command discovers the configuration in the working directory.
+A keyed profile lists its variable as missing until it resolves. A file that
 does not load lists the built-ins only, and one `[config]` line on stderr names
 the file and what is wrong with it, such as a missing `version: 1`. Every
 command that does not read the file itself prints that line too. `parse`,
@@ -767,6 +772,11 @@ stderr names the setting, never the value.
 A built-in accepts a saved key at its default origin or a loopback endpoint.
 For other dotenv endpoints, export the endpoint setting in your shell or list
 its origin in an exported `OPENREADING_PROVIDER_ORIGINS`.
+Until then, a required key blocks that backend. An optional saved key stays
+unread. For example, keyless Qwen can still run and Textract can use its
+AWS profile. Export `AWS_PROFILE` itself to use saved keys with that selector.
+`keys list` names the setting to export. If Anthropic reports a missing key
+after you saved one, check whether `ANTHROPIC_BASE_URL` came from dotenv.
 
 A key never crosses the command line. There is no flag that takes a value,
 because argv shows up in `ps` and in shell history. A `--value` you type out
@@ -799,21 +809,18 @@ built-in backend's secret in a `.env` file into the keychain. A provider
 profile's key moves only with `keys import PATH SLUG`, because the variable
 alone cannot say which endpoint the key is for. The output prints `Binding
 VAR to <origin>` before it saves a profile's key, and `keys set` does too.
-The output names the lines you can delete after each key has been copied.
-Conflicting values for one variable stop the import before any key is saved.
+The output names the copied lines and any setting to export before removing
+them. Conflicting values for one selected variable stop the import before any
+key is saved.
 
-A machine with no usable keychain reads as "nothing saved", silently, so a CLI
-call on a server stays quiet. That covers a missing `[setup]` extra, a locked
-or unreachable keyring, a lookup that takes over two seconds, and `keyring`'s
-plaintext or "fail" fallback, which core refuses. A write there exits 2 with
-"No keychain is available on this machine. Use an environment variable or
-.env instead." `OPENREADING_KEYCHAIN=off` turns the keychain off for one
-process, and `make verify` sets it.
+A failed or timed-out keychain refresh keeps the last value this process
+read. Without a cached value the lookup returns nothing. An unavailable
+keychain causes a save or deletion to exit 2. `OPENREADING_KEYCHAIN=off`
+disables keychain access for one process.
 
-Exits: 0 done, or nothing to do. 2 an unknown slug, a variable the backend
-does not declare as a secret, `keys set` with no terminal and no `--stdin`, or
-no keychain. 3 a `keys import` file that cannot be read. 130 `keys set`
-stopped with Ctrl+C, after naming the keys already saved.
+Exits: 0 done, or nothing to do. 2 invalid input, conflicting import values,
+a failed keychain operation, or an interactive save without a terminal.
+3 an unreadable import file. 130 a save interrupted with Ctrl+C.
 
 setup [--provider] [--config PATH]
 ----------------------------------
@@ -872,6 +879,11 @@ saves its key bound to that endpoint, as `keys set` does, and offers a probe.
 It needs no `OPENREADING_PROVIDER_ORIGINS`. The name may not be a built-in
 backend id.
 
+The probe requests the endpoint's model list. A matching id confirms the
+model, including an Ollama model listed with its default `:latest` tag.
+If the list omits your model, setup reports that the endpoint responded and
+still offers it for `policy.backends`. A parse tests the model itself.
+
 Exits: 0 done, with every ✗ already reported. 2 no terminal (use `keys set
 --stdin` and `keys list` instead), no `[setup]` extra, or no usable keychain.
 3 an `openreading.yaml` that does not load. 130 stopped with Ctrl+C, after
@@ -908,10 +920,9 @@ table and Markdown formats (hidden by default). `--baseline LABEL` signs deltas
 against one subject. Labels come from `backend.id`, not the response filename.
 Read `subjects[].label` in the JSON report when backend IDs repeat. A response
 path instead adds a new baseline subject. `--truth golden.json`
-scores each subject against a golden in the evals `expected` shape. `--deadline
-SECONDS` overrides the 120s single-document deadline for every fanned-out
-backend (the same escape hatch as `parse --backend --deadline`; `0` or negative
-means fail fast).
+scores each subject against a golden in the evals `expected` shape. The
+`--deadline SECONDS` flag gives each backend its own document budget, as in
+`parse --backend --deadline`. Zero or a negative value means fail fast.
 
 Corpus mode: when EVERY subject is a `batch-result` envelope (from `parse
 <dir>`), documents are paired across runs by identity (`relpath`, then
@@ -1735,8 +1746,7 @@ OCR assets, and a request that verifies the default backend.
 Keys come from the server's own environment: exported variables, a systemd
 `EnvironmentFile`, or a container secret mapped to variables. `--keychain`
 also reads keys saved with `openreading keys set`, for a server you run on
-your own laptop. It is off by default, because a server has no keychain, and
-waiting for one can hang startup or pop an unlock dialog.
+your own laptop. The default avoids keychain unlock prompts on headless hosts.
 
 A request may not name a local file by path unless
 `OPENREADING_SERVER_PATH_ROOT` is set to a directory. With it set,
@@ -1812,11 +1822,11 @@ Call openreading_select_document with {} when a trusted launcher supplies
 an optional local chooser. Import the returned path to create evidence.
 Without a chooser, selection returns selection_unavailable; other tools work.
 
-Call openreading_backends with {} to see which backends are configured.
+In the local Core launcher, call openreading_backends with {} for readiness.
 Each row names missing and found variables and their source, never a value.
 For example, ANTHROPIC_API_KEY found in the keychain shows source keychain.
 No tool accepts a key. Run `openreading setup` in a terminal to configure one.
-The launcher never reads ./.env or ./openreading.yaml from its directory.
+The launcher skips dotenv and never discovers a working-directory config.
 --config PATH names the openreading.yaml whose provider profiles it reports.
 Without --keychain, the process reads the environment only.
 --keychain also reads keys saved with `openreading keys set`.
@@ -1864,8 +1874,9 @@ Exit codes
      `benchmark` profile (unknown, or cataloged where a runnable one is
      required), target, preset, `--jobs`, terms, package, or preparation
      errors; `replay` with no strategy name anywhere; `help` with an unknown
-     topic; `keys` with an unknown slug, an undeclared variable, no terminal
-     and no `--stdin`, or no usable keychain; `setup` with no terminal,
+     topic; `keys` with conflicting import values, an unknown slug, an
+     undeclared variable, no terminal and no `--stdin`, or a keychain failure;
+     `setup` with no terminal,
      without the `[setup]` extra, or with no usable keychain.
   3  cannot run: missing credentials (names the exact vars + signup URL),
      `auth_rejected`, `unsupported_format` on a named single-document parse,

@@ -3,9 +3,9 @@
 Exit 0 means normal transport closure, 2 means invalid configuration or missing extras,
 and 130 means interruption. No environment variable selects roots or backend behavior.
 The launcher supplies all configuration through arguments before accepting tool calls.
-It never reads ./.env or ./openreading.yaml, because an MCP client's working directory is
-arbitrary. --config PATH installs that file's provider profiles. --keychain opts this process
-into keychain reads for its lifetime (openreading.credentials.use_keychain). Without it, no
+It skips dotenv and working-directory config discovery because an MCP client's directory is
+arbitrary. --config PATH explicitly selects the file whose provider profiles it reports.
+--keychain opts this process into keychain reads for its lifetime (openreading.credentials.use_keychain). Without it, no
 code path in the process calls the keychain, so a desktop never sees an unlock dialog.
 The serve library entry point also accepts a trusted service_factory and ImportExecution.
 These Python-only hooks let a packager own external imports without model-selected code.

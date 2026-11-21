@@ -353,6 +353,7 @@ the table and that output disagree, the output is right and the table needs fixi
 A provider profile gives you a backend for any endpoint that speaks the OpenAI chat API, with no
 adapter code. You name it in the `providers:` block of `openreading.yaml`, and the name becomes a
 backend id for `--backend`, `policy.backends` and strategies.
+Run `openreading setup --provider` for guided setup, or add the entry directly.
 
 ```yaml
 version: 1
@@ -375,6 +376,11 @@ protocol carries: markdown and text from parse, typed fields from extract, and n
 boxes or confidence. A model that refuses images fails that one call, and the chain moves on.
 `uv run python -m pydoc openreading.config` prints the grammar and the shadow rule.
 `uv run python -m pydoc openreading.adapters.openai_compatible.adapter` prints the wire flow.
+
+`openreading backends` checks local configuration without contacting the provider.
+`openreading backends --check openrouter-gpt` requests the provider's model list.
+A readable list reports `live` even if it omits your model. Only a parse or extraction
+exercises the model on a document and can incur vendor charges.
 
 ## Override form
 
