@@ -19,7 +19,8 @@ no key.
 ## What this is
 
 One command tells you which backends are ready on this machine. Each backend lives in its own
-package, and `BUILTIN_ADAPTERS` in `registry.py` is the only registration point. Run
+package, and `BUILTIN_ADAPTERS` in `registry.py` is the only registration point for a built-in.
+A [provider profile](#provider-profiles) adds a backend from `openreading.yaml` instead. Run
 `uv run openreading backends` to see readiness. "Configured" means the backend's install extra
 imports and its declared environment variables resolve. An install extra is a named optional
 dependency group in `pyproject.toml`, so a backend's client library installs only when you ask for
@@ -130,6 +131,7 @@ and that output disagree, the output is right and the table needs fixing.
 | `mistral-ocr` | pdf, docx, pptx, png, jpg, jpeg, avif |
 | `nuextract` | pdf, png, jpg, pptx, odt, txt |
 | `open-ocr` | pdf, png, jpg, gif, webp, tiff, bmp |
+| `<profile>` (`openai-compatible`) | pdf (rasterized), png, jpeg, webp, gif |
 | `pulse` | pdf, docx, pptx, xlsx, png, jpg |
 | `pymupdf` | pdf, xps, epub, mobi, cbz, svg |
 | `qwen-vl` | png, jpg, pdf (rasterized) |
@@ -159,6 +161,7 @@ none means the backend declares no variable of that kind.
 | `mistral-ocr` | hosted_api | `mistral-ocr` | `MISTRAL_API_KEY` | `MISTRAL_OCR_MODEL` |
 | `nuextract` | hosted_api | `nuextract` | `NUEXTRACT_API_KEY` or `NUMIND_API_KEY` | `NUEXTRACT_BASE_URL` |
 | `open-ocr` | hosted_api | `open-ocr` | `OPENOCR_API_KEY` | `OPENOCR_ENGINE` |
+| `<profile>` (`openai-compatible`) | hosted_api with `key_env`, else self_hosted_model | `http`, plus `pymupdf` for PDF input | the profile's `key_env`, if set | none |
 | `pulse` | hosted_api | `pulse` | `PULSE_API_KEY` | none |
 | `pymupdf` | oss_library | `pymupdf` | none | none |
 | `qwen-vl` | self_hosted_model | `qwen-vl` | `QWEN_VL_ENDPOINT` | `QWEN_VL_API_KEY`, `QWEN_VL_MODEL` |
@@ -196,6 +199,7 @@ machine and has nothing to sign up for.
 | `mistral-ocr` | hosted_api | proprietary | https://console.mistral.ai/api-keys |
 | `nuextract` | hosted_api | proprietary (open-weight NuExtract 2.0 [MIT 2B/8B] self-hostable via vLLM, different wire protocol, separate adapter) | https://nuextract.ai |
 | `open-ocr` | hosted_api | proprietary | https://open-ocr.com |
+| `<profile>` (`openai-compatible`) | hosted_api with `key_env`, else self_hosted_model | none | the origin of `base_url`, with `key_env` only |
 | `pulse` | hosted_api | proprietary | https://www.runpulse.com |
 | `pymupdf` | oss_library | AGPL-3.0 | none |
 | `qwen-vl` | self_hosted_model | Apache-2.0 (Qwen3-VL; Qwen2.5-VL per-size) | none |
@@ -275,6 +279,7 @@ Native batch max items is how many documents the vendor's own bulk endpoint acce
 | `mistral-ocr` | none | none | none |
 | `nuextract` | none | none | none |
 | `open-ocr` | engine-dependent: 200 (tesseract) / 5-20 (vision LLMs) | none | none |
+| `<profile>` (`openai-compatible`) | none | none | none |
 | `pulse` | none | none | none |
 | `pymupdf` | unbounded | none | none |
 | `qwen-vl` | none | none | none |
@@ -327,6 +332,7 @@ that grading enforces, C1 to C11.
 | `mistral-ocr` | `D` | `N` | `N` | `N` | `N` | `D` | `N` |
 | `nuextract` | `D` | `N` | `D` | `X` | `X` | `D` | `N` |
 | `open-ocr` | `N` | `D` | `X` | `X` | `X` | `X` | `X` |
+| `<profile>` (`openai-compatible`) | `D` | `D` | `X` | `X` | `X` | `X` | `D` |
 | `pulse` | `D` | `N` | `N` | `N` | `X` | `D` | `D` |
 | `pymupdf` | `N` | `D` | `N` | `N` | `X` | `N` | `X` |
 | `qwen-vl` | `D` | `D` | `D` | `D` | `X` | `D` | `D` |
@@ -341,6 +347,29 @@ Source: `OutputChannels` in `src/openreading/types/descriptor.py`, read through
 openreading.adapters.registry import make_adapter, BUILTIN_ADAPTERS; [print(i,
 make_adapter(i).descriptor.to_schema_dict()['output']['channels']) for i in BUILTIN_ADAPTERS]"`. If
 the table and that output disagree, the output is right and the table needs fixing.
+
+## Provider profiles
+
+A provider profile gives you a backend for any endpoint that speaks the OpenAI chat API, with no
+adapter code. You name it in the `providers:` block of `openreading.yaml`, and the name becomes a
+backend id for `--backend`, `policy.backends` and strategies.
+
+```yaml
+version: 1
+providers:
+  openrouter-gpt:
+    kind: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    model: openai/gpt-5.1
+    key_env: OPENROUTER_API_KEY
+```
+
+The `<profile>` rows above are the template every profile fills. `key_env` names the variable
+that holds the key, and the file never holds the key itself. A profile claims only what the
+protocol carries: markdown and text from parse, typed fields from extract, and never blocks,
+boxes or confidence. A model that refuses images fails that one call, and the chain moves on.
+`uv run python -m pydoc openreading.config` prints the grammar and the shadow rule.
+`uv run python -m pydoc openreading.adapters.openai_compatible.adapter` prints the wire flow.
 
 ## Override form
 

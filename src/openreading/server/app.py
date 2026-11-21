@@ -121,7 +121,12 @@ from pydantic_core import ValidationError as PydanticValidationError
 from starlette.concurrency import run_in_threadpool
 
 from openreading import __version__, api, config, schemas
-from openreading.adapters.registry import BUILTIN_ADAPTERS, build_registry, make_adapter
+from openreading.adapters.registry import (
+    build_registry,
+    install_profiles,
+    known_backends,
+    make_adapter,
+)
 from openreading.batch.sources import DEFAULT_MAX_ITEMS
 from openreading.credentials import (
     DEFAULT_DEADLINE_MS,
@@ -936,6 +941,10 @@ def create_app(*, cors_origins: list[str] | None = None):
     from openreading.strategies.loader import build_config as _build_strategy_config
 
     _loaded = config.load(None, allow_cwd=False)
+    # Provider profiles become backend ids here, once, before any request can name one. The file
+    # is the only source of a profile's endpoint, so a request can never redirect one (BL-162).
+    if _loaded is not None:
+        install_profiles(_loaded.providers)
     _strategy = _build_strategy_config(_loaded)
     app.state.strategy_config = _strategy.config if _strategy else None
     # Read deployment defaults once. Explicit backend ids bypass `policy.backends`, while a null
@@ -1070,7 +1079,7 @@ def create_app(*, cors_origins: list[str] | None = None):
         # DECLARATION is added, which is a descriptor read (internal/design/liveness.md §6.1).
         broker = EnvCredentialBroker()
         rows = []
-        for s in sorted(BUILTIN_ADAPTERS):
+        for s in sorted(known_backends()):
             adapter = make_adapter(s)
             rows.append(
                 _readiness_dict(

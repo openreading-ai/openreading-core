@@ -3,7 +3,9 @@
 ``POST /v1/parse`` accepts the vendored request schema and returns the vendored response schema.
 A null backend resolves ``policy.backends`` from ``openreading.yaml``, then falls back to
 ``pymupdf``. A named backend runs directly after API key scope checks. Strategy identifiers run
-through ``openreading.strategies``.
+through ``openreading.strategies``. The provider profiles in that file's ``providers:`` block
+become backend ids once, at startup. A profile's endpoint comes from the file only, so a request
+naming ``backend.runtime.endpoint`` is refused for a profile as for every backend.
 
 ``POST /v1/route`` returns a router plan without executing it. ``POST /v1/compare`` compares
 existing responses. ``POST /v1/batch`` accepts explicit document objects plus four shared request

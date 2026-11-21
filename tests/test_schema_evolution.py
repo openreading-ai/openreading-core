@@ -153,6 +153,7 @@ _UNRELEASED = {
     # One file — `policy` closed to its nine typed keys (freeze at milestone end):
     "strategy-config.v0.3.json",
     "strategy-config.v0.4.json",
+    "strategy-config.v0.5.json",
     # Leaderboard (BL-160) — brand-new family this milestone (not yet byte-frozen):
     "leaderboard-report.v0.1.json",
     # The removal set — batch intake dispatches every source, so `skip_reason`, the `skipped`

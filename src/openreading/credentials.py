@@ -152,6 +152,9 @@ Per-backend reference
             default mistral-ocr-latest)   ops: parse, extract
             limits: INLINE OCR/Document AI; public URL or base64 bytes; native Markdown, blocks,
             bounds and confidence
+  <profile> [http, + pymupdf for PDFs]   auth: the profile's `key_env` var, or none
+            config: none (base_url and model come from openreading.yaml)   ops: parse, extract
+            limits: one provider profile per `providers:` entry (`openreading.config`)
 textract and google-document-ai use IAM keypairs / ADC, not API keys — their descriptors say
 `byo_mode: cloud_credential` (D-v2-6.1b); the per-key truth is always `credentials_spec`.
 

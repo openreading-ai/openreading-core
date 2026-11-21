@@ -112,7 +112,10 @@ Files to EDIT -- each guarded by a test that fails if you forget it:
 
     adapters/registry.py            import + `BUILTIN_ADAPTERS["<slug>"]` entry. Guard:
                                     everything -- CLI `--backend` choices, server, strategies
-                                    all derive from this dict; no other registration point.
+                                    all derive from this dict through `known_backends()`, which
+                                    appends the provider profiles from `openreading.yaml`. A
+                                    backend that is one more OpenAI-compatible endpoint needs a
+                                    profile there, not an adapter here.
     pyproject.toml                  `[project.optional-dependencies]` -> `<slug> =
                                     ["httpx>=0.27"]` (or the SDK dep). Guard: extras-parity
                                     (`scripts/check_extras_parity.py`, wired into

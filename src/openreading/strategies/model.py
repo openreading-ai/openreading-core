@@ -1,4 +1,4 @@
-"""Pydantic mirror of `strategy-config.v0.4.json`, and the reference for what `openreading.yaml`
+"""Pydantic mirror of `strategy-config.v0.5.json`, and the reference for what `openreading.yaml`
 may contain — every node kind, every key, every gate predicate, and every validation rule.
 
 A **strategy** is a named recipe for which backends run — in what order or in parallel — and
@@ -929,7 +929,7 @@ satisfies "locate"). `validate` also resolves the file's default backend chain.
 10. JSON Schema and editor experience
 =====================================
 
-The config schema is vendored at `src/openreading/schemas/strategy-config.v0.4.json`. Earlier
+The config schema is vendored at `src/openreading/schemas/strategy-config.v0.5.json`. Earlier
 artifacts remain byte-frozen, while the config `version` const stays `1`. This follows the same schema-authority
 convention as request/response/descriptor (and the same wheel force-include gotcha). Shorthands
 are encoded as titled `oneOf: [string, array, object]` branches so editor completion stays clean.
@@ -1080,6 +1080,18 @@ class StrategyConfig(BaseModel):
     @classmethod
     def _strict_policy(cls, value: Any) -> Any:
         return coerce_policy(value)
+
+    # Provider profiles: named backends this file defines. `openreading.config.validate_providers`
+    # owns the grammar and the built-in shadow rule, so a config built here in Python gets the
+    # refusals a file gets. The strategy engine never reads the block. The adapter registry does.
+    providers: dict[str, dict[str, Any]] | None = None
+
+    @field_validator("providers", mode="before")
+    @classmethod
+    def _validated_providers(cls, value: Any) -> Any:
+        from openreading.config import validate_providers
+
+        return None if value is None else validate_providers(value)
 
     limits: Limits | None = None
     decider: DeciderConfig | None = None

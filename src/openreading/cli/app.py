@@ -58,7 +58,12 @@ from typing import Any, Literal, TypeGuard
 
 from openreading import __version__ as openreading_version
 from openreading import api, config, schemas
-from openreading.adapters.registry import BUILTIN_ADAPTERS, build_registry, make_adapter
+from openreading.adapters.registry import (
+    build_registry,
+    install_profiles,
+    known_backends,
+    make_adapter,
+)
 from openreading.batch.runner import MAX_BATCH_JOBS, JobsLimitError
 from openreading.batch.sources import (
     DEFAULT_MAX_ITEMS,
@@ -654,7 +659,7 @@ def cmd_backends(args) -> int:
     consent to probe every backend that declares a probe — on a CLI, a flag the user typed IS the
     consent that a page load can never be."""
     broker = EnvCredentialBroker()
-    slugs = sorted(BUILTIN_ADAPTERS)
+    slugs = sorted(known_backends())
     adapters = {s: make_adapter(s) for s in slugs}
     rows = [backend_readiness(adapters[s], broker=broker) for s in slugs]
 
@@ -1254,15 +1259,15 @@ def cmd_leaderboard(args) -> int:
         ids = [
             r.slug
             for r in (
-                backend_readiness(make_adapter(s), broker=broker) for s in sorted(BUILTIN_ADAPTERS)
+                backend_readiness(make_adapter(s), broker=broker) for s in sorted(known_backends())
             )
             if r.ready
         ]
     else:
         ids = [b.strip() for b in (args.backends or "").split(",") if b.strip()]
-        unknown = [b for b in ids if b not in BUILTIN_ADAPTERS]
+        unknown = [b for b in ids if b not in known_backends()]
         if unknown:
-            print(_unknown_backends_line("leaderboard", unknown, BUILTIN_ADAPTERS), file=sys.stderr)
+            print(_unknown_backends_line("leaderboard", unknown, known_backends()), file=sys.stderr)
             return 2
     if len(ids) < 2:
         print(
@@ -1286,7 +1291,7 @@ def cmd_leaderboard(args) -> int:
     # scored CaseResult — AC-1/AC-2), so _CLEAN_EXIT3_ERRORS is defensive symmetry with
     # compare/calibrate's coded-exit family (AC-6) rather than a path real backend behavior takes
     # today; ValueError/FileNotFoundError cover an empty/missing dataset_dir or (defensively, the
-    # CLI already validated every id against BUILTIN_ADAPTERS above) an unregistered backend.
+    # CLI already validated every id against known_backends() above) an unregistered backend.
     except (ValueError, FileNotFoundError, *_CLEAN_EXIT3_ERRORS) as e:
         print(f"[leaderboard] {e}", file=sys.stderr)
         return 3
@@ -1386,9 +1391,9 @@ def _benchmark_targets(args):
         # cannot see the adapter registry without the dependency running the wrong way. Identity
         # is checked here instead, where `compare` and `leaderboard` already check theirs. A typo
         # otherwise priced a run that could not exist, and said nothing.
-        if target.kind == "backend" and target.name not in BUILTIN_ADAPTERS:
+        if target.kind == "backend" and target.name not in known_backends():
             print(
-                _unknown_backends_line("benchmark", [target.name], BUILTIN_ADAPTERS),
+                _unknown_backends_line("benchmark", [target.name], known_backends()),
                 file=sys.stderr,
             )
             return None
@@ -1812,15 +1817,15 @@ def cmd_compare(args) -> int:
                 r.slug
                 for r in (
                     backend_readiness(make_adapter(s), broker=broker)
-                    for s in sorted(BUILTIN_ADAPTERS)
+                    for s in sorted(known_backends())
                 )
                 if r.ready
             ]
         else:
             ids = [b.strip() for b in args.backends.split(",") if b.strip()]
-            unknown = [b for b in ids if b not in BUILTIN_ADAPTERS]
+            unknown = [b for b in ids if b not in known_backends()]
             if unknown:
-                print(_unknown_backends_line("compare", unknown, BUILTIN_ADAPTERS), file=sys.stderr)
+                print(_unknown_backends_line("compare", unknown, known_backends()), file=sys.stderr)
                 return 2
         if len(ids) < 2:
             print(
@@ -2667,7 +2672,7 @@ def build_parser() -> argparse.ArgumentParser:
     choose.add_argument(
         "--backend",
         default=None,
-        choices=sorted(BUILTIN_ADAPTERS),
+        choices=sorted(known_backends()),
         # The choices still gate the value and still print in full on an invalid one; the metavar
         # only keeps fifteen slugs out of the usage line, where they buried the English.
         metavar="SLUG",
@@ -3510,10 +3515,41 @@ def _terminate_as_interrupt(*, enabled: bool = True):
             signal.signal(signal.SIGINT, signal.default_int_handler)
 
 
+def _install_file_profiles(argv: list[str]) -> None:
+    """Install the provider profiles of the `openreading.yaml` this invocation will read.
+
+    It runs before argument parsing because `--backend` checks its value against the known ids,
+    and a profile id only becomes known once its file is read. It finds the file the way the
+    command will: `--config PATH`, then `OPENREADING_CONFIG`, then the working directory. The
+    dotenv file loads first, so an `OPENREADING_CONFIG` set there counts, and loading it again
+    in `main` changes nothing. A file that fails to load installs nothing and prints nothing
+    here. The command's own load reports it with exit 3, and `backends` lists the built-ins.
+    `serve` reads its file in `create_app`, and `mcp` never reads an ambient file, so both are
+    skipped.
+    """
+    command = next((a for a in argv if not a.startswith("-")), None)
+    if command in (None, "serve", "mcp"):
+        return
+    flags: dict[str, str | None] = {"--config": None, "--env-file": None}
+    for i, arg in enumerate(argv):
+        name, eq, value = arg.partition("=")
+        if name in flags:
+            flags[name] = value if eq else (argv[i + 1] if i + 1 < len(argv) else None)
+    load_dotenv(flags["--env-file"])
+    explicit = flags["--config"]
+    try:
+        loaded = config.load(explicit)
+    except ConfigError:
+        return
+    if loaded is not None:
+        install_profiles(loaded.providers)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse argv, load ./.env or --env-file, dispatch the handler, and return its exit code.
     SIGTERM arrives as KeyboardInterrupt for every command but `serve`, which hands its own
     signals to uvicorn."""
+    _install_file_profiles(list(sys.argv[1:] if argv is None else argv))
     args = build_parser().parse_args(argv)
     if args.func is cmd_mcp:
         return cmd_mcp(args)
