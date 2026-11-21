@@ -14,6 +14,10 @@ The rules every verb follows
 - Only secrets a backend declares reach the keychain (law PS5). `keys set` takes a backend slug,
   and an optional variable must be one of that backend's secret variables. A setting such as
   `ANTHROPIC_MODEL` or a knob such as `OPENREADING_LEDGER` is refused with exit 2.
+- A provider profile in the project's `openreading.yaml` is a backend like any other
+  (`openreading.adapters.registry.known_backends`). Its one secret is the variable its `key_env`
+  names, so `keys set openrouter-gpt` saves `OPENROUTER_API_KEY`. A profile with no `key_env`
+  has nothing to save and exits 2.
 - No acceptable keychain means exit 2 with the sentence `openreading.keychain` raises, and
   nothing is written anywhere else (law PS6).
 - A probe is a network call, so `keys set` offers one only at an interactive terminal, and only
@@ -38,7 +42,7 @@ import sys
 from collections.abc import Callable
 
 from openreading import keychain
-from openreading.adapters.registry import BUILTIN_ADAPTERS, make_adapter
+from openreading.adapters.registry import known_backends, make_adapter
 from openreading.credentials import EnvCredentialBroker, dotenv_entries
 from openreading.liveness import check_liveness
 from openreading.types.descriptor import AdapterDescriptor, CredentialField
@@ -196,7 +200,8 @@ def _err(message: str) -> None:
 
 
 def _descriptors() -> dict[str, AdapterDescriptor]:
-    return {slug: make_adapter(slug).descriptor for slug in sorted(BUILTIN_ADAPTERS)}
+    """Every known backend's descriptor, provider profiles from `openreading.yaml` included."""
+    return {slug: make_adapter(slug).descriptor for slug in sorted(known_backends())}
 
 
 def _secret_fields(desc: AdapterDescriptor) -> list[CredentialField]:

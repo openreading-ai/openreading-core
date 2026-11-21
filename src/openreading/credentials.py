@@ -309,9 +309,11 @@ def declared_secret_envs(descriptors: Iterable[AdapterDescriptor]) -> frozenset[
 
 def _registered_secret_envs() -> frozenset[str]:
     # Imported here, not at module top: the adapter registry imports modules that import this one.
-    from openreading.adapters.registry import BUILTIN_ADAPTERS, make_adapter
+    # `known_backends`, not the built-ins alone: a provider profile's `key_env` is a declared
+    # secret too, so `openreading keys set <profile>` saves a key the broker can read back.
+    from openreading.adapters.registry import known_backends
 
-    return declared_secret_envs(make_adapter(slug).descriptor for slug in BUILTIN_ADAPTERS)
+    return declared_secret_envs(factory().descriptor for factory in known_backends().values())
 
 
 class _KeychainChain(ChainMap[str, str]):

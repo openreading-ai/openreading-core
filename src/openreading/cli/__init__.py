@@ -740,7 +740,8 @@ Only secrets reach the keychain. `keys set` takes a backend slug, never a free
 variable name. Naming one variable after the slug saves only that one, and it
 must be a secret the backend declares. `keys set anthropic-claude
 ANTHROPIC_MODEL` exits 2, because a model name is a setting that stays in the
-environment or `openreading.yaml`.
+environment or `openreading.yaml`. A provider profile in `openreading.yaml`
+counts as a backend, and its one secret is the variable its `key_env` names.
 
 A key never crosses the command line. There is no flag that takes a value,
 because argv shows up in `ps` and in shell history. Scripts pipe the value:

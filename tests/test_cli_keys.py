@@ -491,3 +491,74 @@ def test_without_the_setup_extra_backends_is_unchanged(monkeypatch, capsys, fake
     _stdin(monkeypatch, KEY + "\n")
     code, _, err = _run(["keys", "set", "anthropic-claude", "--stdin"], capsys)
     assert code == 2 and "[setup] extra" in err
+
+
+# --- provider profiles from openreading.yaml -----------------------------------------------------
+
+PROFILE_YAML = """\
+version: 1
+providers:
+  example-llm:
+    kind: openai-compatible
+    base_url: https://llm.example.test/v1
+    model: vision-1
+    key_env: EXAMPLE_LLM_API_KEY
+  local-llm:
+    kind: openai-compatible
+    base_url: http://localhost:11434/v1
+    model: llava
+"""
+
+
+def test_set_and_list_cover_a_profile_that_names_a_key_env(
+    monkeypatch, capsys, fake_keychain, tmp_path
+):
+    (tmp_path / "openreading.yaml").write_text(PROFILE_YAML, encoding="utf-8")
+    _stdin(monkeypatch, KEY + "\n")
+    code, out, err = _run(["keys", "set", "example-llm", "--stdin"], capsys)
+    assert code == 0, err
+    assert _saved(fake_keychain, "EXAMPLE_LLM_API_KEY") == KEY
+    code, out, _ = _run(["keys", "list"], capsys)
+    assert code == 0
+    rows = {tuple(line.split()) for line in out.splitlines()[1:]}
+    assert ("example-llm", "EXAMPLE_LLM_API_KEY", "keychain") in rows
+    assert not any(r[0] == "local-llm" for r in rows)
+    assert KEY not in out
+
+
+def test_a_profile_without_key_env_has_nothing_to_set(capsys, fake_keychain, tmp_path):
+    (tmp_path / "openreading.yaml").write_text(PROFILE_YAML, encoding="utf-8")
+    code, _, err = _run(["keys", "set", "local-llm", "--stdin"], capsys)
+    assert code == 2
+    assert "local-llm declares no secret" in err
+    assert fake_keychain.calls == []
+
+
+def test_a_profile_key_from_the_keychain_reaches_the_adapter_and_never_os_environ(
+    capsys, fake_keychain, tmp_path
+):
+    import os
+
+    import httpx
+    import respx
+
+    from openreading.testing.sample_pdf import build_sample_pdf
+
+    pytest.importorskip("pymupdf", reason="pymupdf (rasterizer) not installed")
+    (tmp_path / "openreading.yaml").write_text(PROFILE_YAML, encoding="utf-8")
+    fake_keychain.store[("openreading", "EXAMPLE_LLM_API_KEY")] = KEY
+    doc = tmp_path / "doc.pdf"
+    doc.write_bytes(build_sample_pdf())
+    reply = {
+        "choices": [{"message": {"content": "# Hi"}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+    }
+    with respx.mock:
+        route = respx.post("https://llm.example.test/v1/chat/completions").mock(
+            return_value=httpx.Response(200, json=reply)
+        )
+        code, out, err = _run(["parse", str(doc), "--backend", "example-llm"], capsys)
+    assert code == 0, err
+    assert route.calls.last.request.headers["authorization"] == f"Bearer {KEY}"
+    assert "EXAMPLE_LLM_API_KEY" not in os.environ
+    assert KEY not in out + err
