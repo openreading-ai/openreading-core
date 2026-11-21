@@ -261,6 +261,17 @@ def _offline_workspace(request: pytest.FixtureRequest, tmp_path: Path) -> Iterat
         yield
 
 
+@pytest.fixture(autouse=True)
+def _no_provider_profiles() -> Iterator[None]:
+    """Provider profiles are process-wide (`openreading.adapters.registry.install_profiles`), so
+    one test's `openreading.yaml` must not leave a backend id behind for the next test."""
+    from openreading.adapters import registry
+
+    registry.install_profiles(None)
+    yield
+    registry.install_profiles(None)
+
+
 # --- publisher benchmark corpora ---------------------------------------------------------------
 # Both benchmark test modules build these, so they live here rather than in one of them. The
 # shapes are the publishers' own, taken from `parse_bench.test_cases.loader`: ParseBench reads a

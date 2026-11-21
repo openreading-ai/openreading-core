@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from openreading import schemas
-from openreading.adapters.registry import BUILTIN_ADAPTERS, make_adapter
+from openreading.adapters.registry import known_backends, make_adapter
 from openreading.strategies.model import RawNode, StrategyConfig
 from openreading.strategies.normalize import (
     DEFAULT_BUNDLE,
@@ -211,7 +211,7 @@ def _checked_policy(
 
 
 def _descriptor(slug: str):
-    if slug not in BUILTIN_ADAPTERS:
+    if slug not in known_backends():
         return None
     return make_adapter(slug).descriptor
 
@@ -405,7 +405,7 @@ def _check_leaf(node: dict[str, Any], path: str, ctx: _Ctx, eff_deadline_ms: Any
     if desc is None:
         ctx.err(
             f"{path}.backend",
-            f"unknown backend {slug!r}; known: {', '.join(sorted(BUILTIN_ADAPTERS))}",
+            f"unknown backend {slug!r}; known: {', '.join(sorted(known_backends()))}",
         )
         return
     # leaf timeout larger than the effective deadline (clamped)

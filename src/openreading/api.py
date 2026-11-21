@@ -110,12 +110,12 @@ from typing import Any
 from urllib.parse import ParseResult
 
 from openreading.adapters._http import error_for_status
-from openreading.adapters.registry import build_registry, make_adapter
+from openreading.adapters.registry import build_registry, install_profiles, make_adapter
 from openreading.batch.runner import MAX_BATCH_JOBS
 from openreading.batch.sources import DEFAULT_MAX_ITEMS
 from openreading.config import LoadedFile
 from openreading.config import apply as apply_config
-from openreading.config import load as load_config_file
+from openreading.config import load as _read_config_file
 from openreading.credentials import (
     DEFAULT_NATIVE_BATCH_DEADLINE_MS,
     EnvCredentialBroker,
@@ -172,6 +172,21 @@ _REMOVED_KWARGS = {
     "policy": "the policy keyword was removed; pass the file's own shape as "
     'config={"version": 1, "policy": {...}}, or a path to an openreading.yaml',
 }
+
+
+def _load_config_file(
+    config: str | os.PathLike[str] | dict | LoadedFile | None,
+) -> LoadedFile | None:
+    """`openreading.config.load`, then install the file's provider profiles as backend ids.
+
+    Every call that reads the file here dispatches next, and a profile named in `backend=` or in
+    `policy.backends` must already resolve when it does. No file leaves the installed set alone,
+    so a caller who called `install_profiles` directly keeps those profiles.
+    """
+    loaded = _read_config_file(config)
+    if loaded is not None:
+        install_profiles(loaded.providers)
+    return loaded
 
 
 def _refuse_removed_kwargs(overrides: dict[str, Any]) -> None:
@@ -429,7 +444,7 @@ def route(
     """The routing plan for a document (no execution): the chain that would be tried, in order.
     `config` is a path to an openreading.yaml or a dict of its shape, and without it
     `./openreading.yaml` is discovered. The file's `policy.backends` IS the plan."""
-    loaded = load_config_file(config)
+    loaded = _load_config_file(config)
     req = build_request(source, None, operation=operation, mime_type=mime_type)
     req, cfg = apply_config(req, loaded.policy if loaded else None, RouterConfig())
     return Router(build_registry(), cfg).route(req)
@@ -915,7 +930,7 @@ def run(
         backend = f"strategy:{strategy}"
     # The file is read on every path so a null backend can resolve its configured chain. The
     # strategy half is built only when a strategy could engage through null or `strategy:`.
-    loaded = load_config_file(config)  # CLI/Python discover cwd; None uses built-in defaults.
+    loaded = _load_config_file(config)  # CLI/Python discover cwd; None uses built-in defaults.
     strategy_file = None
     if backend is None or backend.startswith(_STRATEGY_PREFIX):
         from openreading.strategies.loader import build_config
@@ -1021,7 +1036,7 @@ def resume_run(run_id: str) -> dict[str, Any]:
     blobs = LocalFsBlobStore(ledger_root / "blobs")
     req = _request_from_header(header, blobs)
 
-    loaded = load_config_file(None)
+    loaded = _load_config_file(None)
     strategy_file = build_config(loaded)
     strategy_config = strategy_file.config if strategy_file else StrategyConfig(version=1)
     registry = build_registry()
@@ -1123,7 +1138,7 @@ def run_batch(
     # isolated into that item's `error` and never raised (M6) — correct for a document that could
     # not be read, wrong for a policy the operator mistyped, which would otherwise come back as N
     # identical item errors and a zero exit instead of one refusal.
-    loaded = load_config_file(config)
+    loaded = _load_config_file(config)
 
     if env_file:
         load_dotenv(env_file)

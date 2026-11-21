@@ -672,6 +672,13 @@ hides the ones that already answered.
     docling  endpoint  not_configured  no        -        not configured:...
                                           (columns abridged for this page)
 
+Provider profiles follow the built-ins. A provider profile is a backend you
+name in the `providers:` block of the `openreading.yaml` this command finds
+(`--config`, then `OPENREADING_CONFIG`, then the working directory). A keyed
+profile lists its `key_env` variable as missing until you set it. A file that
+does not load lists the built-ins only. `pydoc openreading.config` prints the
+grammar.
+
 Status ladder (`openreading.types.liveness.LivenessStatus`), seven states
 ascending in what is known: `not_supported` (no probe AND nothing declared to
 infer from -- "every requirement resolves" is vacuous there, so it declines to

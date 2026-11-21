@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased provider profiles
+
+- Add `strategy-config` v0.5 with an optional `providers:` block. Each entry is an `openai-compatible`
+  profile with `base_url`, `model` and an optional `key_env` variable name, and its name becomes a backend id.
+  A name that shadows a built-in backend id is refused with exit 3.
+- Add the `openai-compatible` adapter. It parses page images through chat completions and extracts through
+  `response_format: json_schema`, and it never reports blocks, boxes or confidence.
+
 ## Unreleased security hardening
 
 - Validate Azure model identifiers before constructing authenticated vendor requests, preserving valid custom model identifiers.
