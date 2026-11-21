@@ -11,7 +11,7 @@ import threading
 from collections.abc import Callable
 from contextlib import nullcontext
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from openreading.artifacts.limits import ProfileConfig
 from openreading.artifacts.retained import RetainedService as ArtifactService
@@ -30,6 +30,7 @@ async def serve(
     document_export_root: Path | None = None,
     service_factory: Callable[[ProfileConfig], ArtifactService],
     execution: ImportExecution | None = None,
+    backends: Callable[[], dict] | None = None,
 ) -> None:
     import anyio
 
@@ -51,6 +52,12 @@ async def serve(
     receiver = anyio.open_signal_receiver(*signals) if signals else nullcontext()
     with receiver as received:
         service = service_factory(config)
+        # Only options a launcher set are passed, so a replacement create_server need not take them.
+        optional: dict[str, Any] = {}
+        if execution is not None:
+            optional["execution"] = execution
+        if backends is not None:
+            optional["backends"] = backends
         try:
             server = create_server(
                 service,
@@ -58,7 +65,7 @@ async def serve(
                 selection_timeout_seconds=selection_timeout_seconds,
                 document_response_bytes=document_response_bytes,
                 document_export_root=document_export_root,
-                **({"execution": execution} if execution is not None else {}),
+                **optional,
             )
             async with anyio.create_task_group() as group, cancellable_stdio() as (reader, writer):
 

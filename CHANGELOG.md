@@ -7,6 +7,8 @@
   The keychain is read after the environment and `.env`, never enters `os.environ`, and holds declared secrets only.
 - `openreading serve --keychain` and `openreading.run(..., keychain=True)` opt in. `OPENREADING_KEYCHAIN=off` turns it off for one process.
 - Add the `[setup]` extra (`keyring`, `questionary`, `rich`), included in `[all]`.
+- `openreading mcp --keychain` reads saved keys, and `--config PATH` names the project file. The new read-only
+  `openreading_backends` MCP tool reports readiness by variable name. No MCP tool accepts a key.
 
 ## Unreleased provider profiles
 

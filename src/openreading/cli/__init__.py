@@ -1678,7 +1678,7 @@ fire after that clean shutdown.
 
 mcp --profile local-document-proof-v1
 ------------------------------------
-Serve nine document tools over stdio with openreading[agent,pymupdf].
+Serve ten document tools over stdio with openreading[agent,pymupdf].
 You grant an absolute --input-root and a separate absolute --artifact-root.
 For example, use /absolute/documents and /absolute/evidence respectively.
 The server retains source bytes and page evidence until you remove the store.
@@ -1715,6 +1715,17 @@ Follow next_cursor when present. A failed search does not prove absence.
 Call openreading_select_document with {} when a trusted launcher supplies
 an optional local chooser. Import the returned path to create evidence.
 Without a chooser, selection returns selection_unavailable; other tools work.
+
+Call openreading_backends with {} to see which backends are configured.
+Each row names missing and found variables and their source, never a value.
+For example, ANTHROPIC_API_KEY found in the keychain shows source keychain.
+No tool accepts a key. Run `openreading setup` in a terminal to configure one.
+The launcher never reads ./.env or ./openreading.yaml from its directory.
+--config PATH names the openreading.yaml whose provider profiles it reports.
+Without --keychain, the process reads the environment only.
+--keychain also reads keys saved with `openreading keys set`.
+Your MCP client config then carries no env block with a key in it.
+No tool runs a hosted backend; imports use the fixed local profile.
 
 This profile accepts one PDF, at most 25 MiB and 100 physical pages.
 It uses local PyMuPDF without OCR, passwords, routing, or hosted fallback.
