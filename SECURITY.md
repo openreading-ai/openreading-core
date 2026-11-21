@@ -31,8 +31,9 @@ Backend keys come from shell exports, a loaded dotenv file, or the OS keychain, 
 `openreading keys set`, `keys import`, and `setup` save declared secrets in the keychain.
 The CLI can reuse them across projects. HTTP and MCP launchers require `--keychain` to read them.
 Python callers opt in with `keychain=True`. Cached keychain values stay in process memory.
-A provider profile's saved key is bound to its endpoint origin. For the rules on dotenv endpoints
-and the variables ignored during dotenv loading, see `openreading help keys` and `openreading.credentials`.
+A provider profile's saved key is bound to its endpoint origin. Run `openreading help keys` for
+the rules on using saved keys with dotenv endpoints. The proxy and certificate variables ignored
+during dotenv loading are listed in [`.env.example`](.env.example).
 Some provider SDKs also use ambient credentials, such as AWS profiles or Google ADC. Request bodies
 cannot supply credential values, and `backend.runtime.endpoint` cannot redirect a request carrying
 them. An allowed `credentials_ref` may select a configured environment alias. Read the

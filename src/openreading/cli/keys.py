@@ -79,8 +79,9 @@ values take precedence during normal runs.
 Then:
   openreading backends               # check the backend's readiness
 
-Exits: 0 done. 2 invalid input, conflicting values, or a keychain failure.
-3 an unreadable import file. 130 stopped with Ctrl+C.
+Exits: 0 done. 2 invalid input, conflicting values, a keychain failure,
+or keys set without a terminal and without --stdin. 3 an unreadable import
+file. 130 stopped with Ctrl+C.
 
 More: openreading help keys""",
     "keys set": """\
@@ -136,8 +137,9 @@ Examples:
   openreading keys import .env       # move declared secrets to the keychain
   openreading keys import .env openrouter-gpt   # one backend, a profile too
 
-The file stays in place. The output names copied lines and any endpoint
-setting to export before removing them. Name the profile to import its key.
+The file stays in place. The output names copied lines and any setting to
+export before removing them, such as a custom endpoint variable or
+AWS_PROFILE. Name the profile to import its key.
 
 Then:
   openreading keys list              # SOURCE reads keychain once deleted
