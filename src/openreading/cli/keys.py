@@ -18,8 +18,10 @@ The rules every verb follows
   `ANTHROPIC_MODEL` or a knob such as `OPENREADING_LEDGER` is refused with exit 2.
 - A provider profile in the project's `openreading.yaml` is a backend like any other
   (`openreading.adapters.registry.known_backends`). Its one secret is the variable its `key_env`
-  names, so `keys set openrouter-gpt` saves `OPENROUTER_API_KEY`. A profile with no `key_env`
-  has nothing to save and exits 2.
+  names, saved under an account bound to the profile's origin. `keys set openrouter-gpt` saves
+  `OPENROUTER_API_KEY@https://openrouter.ai`, which no other endpoint reads
+  (`openreading.credentials`). `keys import` moves a profile's key only when you name the
+  profile. A profile with no `key_env` has nothing to save and exits 2.
 - No acceptable keychain means exit 2 with the sentence `openreading.keychain` raises, and
   nothing is written anywhere else (law PS6).
 - A probe is a network call, so `keys set` offers one only at an interactive terminal, and only
@@ -45,7 +47,12 @@ from collections.abc import Callable
 
 from openreading import keychain
 from openreading.adapters.registry import known_backends, make_adapter
-from openreading.credentials import EnvCredentialBroker, dotenv_entries
+from openreading.credentials import (
+    EnvCredentialBroker,
+    bound_origin,
+    dotenv_entries,
+    keychain_account,
+)
 from openreading.liveness import check_liveness
 from openreading.types.descriptor import AdapterDescriptor, CredentialField
 from openreading.types.liveness import LivenessReport, LivenessStatus
@@ -118,11 +125,12 @@ More: openreading help keys""",
     "keys import": """\
 Examples:
   openreading keys import .env       # move declared secrets to the keychain
-  openreading keys import ~/old/project/.env
+  openreading keys import .env openrouter-gpt   # one backend, a profile too
 
 The file is never edited. The output names the lines to delete, because a
 .env line still beats the keychain whenever you run from that folder. Settings
-such as ANTHROPIC_MODEL stay where they are.
+such as ANTHROPIC_MODEL stay where they are. A provider profile's key moves
+only when you name the profile, which binds it to that profile's endpoint.
 
 Then:
   openreading keys list              # SOURCE reads keychain once deleted
@@ -196,6 +204,12 @@ def add_parser(sub: argparse._SubParsersAction, common: argparse.ArgumentParser)
         "then name the lines to delete from that file.",
     )
     import_p.add_argument("path", metavar="PATH", help="the .env file to read")
+    import_p.add_argument(
+        "slug",
+        nargs="?",
+        metavar="SLUG",
+        help="move only this backend's secrets. A provider profile's key moves only this way",
+    )
     import_p.set_defaults(func=cmd_keys_import)
 
 
@@ -219,8 +233,18 @@ def _secret_names(desc: AdapterDescriptor) -> list[str]:
     return [name for f in _secret_fields(desc) for name in f.env]
 
 
-def _sharers(name: str, slug: str, descs: dict[str, AdapterDescriptor]) -> list[str]:
-    return [s for s, d in descs.items() if s != slug and name in _secret_names(d)]
+def _accounts(desc: AdapterDescriptor) -> list[str]:
+    return [keychain_account(desc, name) for name in _secret_names(desc)]
+
+
+def _sharers(account: str, slug: str, descs: dict[str, AdapterDescriptor]) -> list[str]:
+    return [s for s, d in descs.items() if s != slug and account in _accounts(d)]
+
+
+def _for_origin(desc: AdapterDescriptor) -> str:
+    """` for <origin>` when `desc` is a provider profile, whose key is bound to its endpoint."""
+    origin = bound_origin(desc)
+    return f" for {origin}" if origin else ""
 
 
 def _select(
@@ -234,8 +258,8 @@ def _select(
         # itself is never printed, because a key pasted in the slug's place would be echoed.
         keyed = [s for s, d in descs.items() if _secret_fields(d)]
         print(
-            f"[keys {verb}] unknown backend: the first argument is not a backend id; "
-            f"known: {', '.join(sorted(keyed))}",
+            f"[keys {verb}] unknown backend. The first argument names no backend here "
+            f"(known: {', '.join(sorted(keyed))})",
             file=sys.stderr,
         )
         return 2
@@ -297,8 +321,8 @@ def _read_stdin_values(names: list[str]) -> list[str] | int:
     return values
 
 
-def _shadow_note(name: str) -> str | None:
-    source = EnvCredentialBroker().var_source(name)
+def _shadow_note(name: str, descriptor: AdapterDescriptor | None) -> str | None:
+    source = EnvCredentialBroker().var_source(name, descriptor)
     if source == "env":
         return f"  {name} is also exported in this shell, which takes priority over the keychain."
     if source == ".env":
@@ -306,13 +330,19 @@ def _shadow_note(name: str) -> str | None:
     return None
 
 
-def save_secret(name: str, value: str, label: str) -> list[str]:
+def save_secret(
+    name: str, value: str, label: str, descriptor: AdapterDescriptor | None = None
+) -> list[str]:
     """Save one secret and return the lines to print: the confirmation, then a note when the
-    environment or `.env` will shadow it. `openreading setup` calls this too, so both commands
-    save and report a key the same way. Raises `keychain.KeychainUnavailable`."""
-    keychain.set(name, value)
-    lines = [f"  ✓ Saved {name} to the {label}"]
-    note = _shadow_note(name)
+    environment or `.env` will shadow it. With a provider profile's `descriptor`, the key goes
+    under the account bound to the profile's origin (`credentials.keychain_account`).
+    `openreading setup` calls this too, so both commands save and report a key the same way.
+    Raises `keychain.KeychainUnavailable`."""
+    account = keychain_account(descriptor, name) if descriptor is not None else name
+    keychain.set(account, value)
+    where = _for_origin(descriptor) if descriptor is not None else ""
+    lines = [f"  ✓ Saved {name}{where} to the {label}"]
+    note = _shadow_note(name, descriptor)
     if note:
         lines.append(note)
     return lines
@@ -389,7 +419,7 @@ def cmd_keys_set(args) -> int:
             if not value:
                 print(f"  - Skipped {name} (no value given)")
                 continue
-            lines = save_secret(name, value, label)
+            lines = save_secret(name, value, label, desc)
             saved.append(name)
             print("\n".join(lines))
     except KeyboardInterrupt:
@@ -414,13 +444,28 @@ def cmd_keys_set(args) -> int:
 
 
 def cmd_keys_list(args) -> int:
-    """`keys list [--json]`: BACKEND, VAR, SOURCE for every declared secret. Never a value."""
+    """`keys list [--json]`: BACKEND, VAR, SOURCE for every declared secret. Never a value.
+
+    SOURCE `env-ignored` marks a provider profile's key that is set in the environment but not
+    read, because `OPENREADING_PROVIDER_ORIGINS` does not list the profile's origin. One line on
+    stderr per such profile names the setting, so the rows a script parses stay rows."""
     broker = EnvCredentialBroker()
-    rows = [
-        {"backend": slug, "var": var, "source": source}
-        for slug, desc in _descriptors().items()
-        for var, source in broker.secret_sources(desc)
-    ]
+    rows: list[dict[str, str]] = []
+    hints: list[str] = []
+    for slug, desc in _descriptors().items():
+        ignored = broker.ignored_env(desc)
+        for var, source in broker.secret_sources(desc):
+            if source == "missing" and var in ignored:
+                source = "env-ignored"
+            rows.append({"backend": slug, "var": var, "source": source})
+        if ignored:
+            hints.append(
+                f"{slug}: {', '.join(ignored)} is set in the environment but not sent to "
+                f"{bound_origin(desc)}. Add that origin to OPENREADING_PROVIDER_ORIGINS, or save "
+                f"the key with openreading keys set {slug}."
+            )
+    for hint in hints:
+        _err(hint)
     if args.json:
         print(json.dumps(rows, indent=2))
         return 0
@@ -449,12 +494,13 @@ def cmd_keys_unset(args) -> int:
     removed = 0
     try:
         for name in dict.fromkeys(names):
-            if not keychain.delete(name):
+            account = keychain_account(desc, name)
+            if not keychain.delete(account):
                 continue
             removed += 1
-            others = _sharers(name, desc.id, descs)
+            others = _sharers(account, desc.id, descs)
             shared = f" (also used by {', '.join(others)})" if others else ""
-            print(f"  ✓ Removed {name} from the {label}{shared}")
+            print(f"  ✓ Removed {name}{_for_origin(desc)} from the {label}{shared}")
     except keychain.KeychainUnavailable as e:
         _err(str(e))
         return 2
@@ -467,33 +513,69 @@ def cmd_keys_unset(args) -> int:
 
 
 def cmd_keys_import(args) -> int:
-    """`keys import PATH`: copy declared secrets from a dotenv file, then name lines to delete."""
+    """`keys import PATH [SLUG]`: copy declared secrets from a dotenv file, then name the lines
+    to delete.
+
+    Without SLUG, only built-in backends' secrets move, each under its plain account. A provider
+    profile's key moves only when SLUG names that profile, because its account is bound to the
+    profile's origin (`credentials.keychain_account`). Two profiles may share one variable for
+    two hosts, so the variable alone cannot say which endpoint the key belongs to."""
+    descs = _descriptors()
+    if args.slug is not None:
+        selected = _select(args.slug, [], "import")
+        if isinstance(selected, int):
+            return selected
+        scope = {args.slug: selected[0]}
+    else:
+        scope = {s: d for s, d in descs.items() if bound_origin(d) is None}
     try:
         entries = dotenv_entries(args.path)
     except OSError as e:
         # The path is not echoed: a key pasted in its place would otherwise reach the terminal.
         _err(f"cannot read the file named on the command line ({e.strerror or type(e).__name__})")
         return 3
-    declared = {name for d in _descriptors().values() for name in _secret_names(d)}
+    # name -> the account it is saved under. With SLUG this is that backend's own account.
+    accounts = {
+        name: keychain_account(d, name) for d in scope.values() for name in _secret_names(d)
+    }
+    # A profile variable met without SLUG, mapped to every profile that declares it.
+    profile_vars: dict[str, list[str]] = {}
+    if args.slug is None:
+        for s, d in descs.items():
+            if bound_origin(d) is not None:
+                for name in _secret_names(d):
+                    profile_vars.setdefault(name, []).append(s)
     first: dict[str, str] = {}
     lines: list[int] = []
     left: list[str] = []
+    held: list[str] = []
     for number, name, value in entries:
-        if name not in declared:
+        if name in accounts:
+            if value:
+                first.setdefault(name, value)
+                lines.append(number)
+        elif name in profile_vars:
+            held.append(name)
+        else:
             left.append(name)
-        elif value:
-            first.setdefault(name, value)
-            lines.append(number)
+    if held:
+        named = [f"{n} ({', '.join(profile_vars[n])})" for n in dict.fromkeys(held)]
+        example = profile_vars[held[0]][0]
+        print(
+            f"  Not moved, a provider profile's key: {', '.join(named)}. Name the profile to "
+            f"bind the key to its endpoint, such as openreading keys import PATH {example}"
+        )
     if not first:
         print(f"No declared secret found in {args.path}. Nothing was moved.")
         return 0
     label = _keychain_label()
     if isinstance(label, int):
         return label
+    where = _for_origin(next(iter(scope.values()))) if args.slug is not None else ""
     try:
         for name, value in first.items():
-            keychain.set(name, value)
-            print(f"  ✓ Saved {name} to the {label}")
+            keychain.set(accounts[name], value)
+            print(f"  ✓ Saved {name}{where} to the {label}")
     except keychain.KeychainUnavailable as e:
         _err(str(e))
         return 2

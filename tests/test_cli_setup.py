@@ -689,7 +689,10 @@ def test_provider_preset_writes_a_valid_profile_saves_its_key_and_probes(
         "key_env": "OPENROUTER_API_KEY",
     }
     assert loaded.policy == {"backends": ["openrouter", "pymupdf"]}
-    assert _saved(fake_keychain, "OPENROUTER_API_KEY") == KEY
+    # The wizard binds the key to the profile's endpoint, like `keys set`.
+    assert _saved(fake_keychain, "OPENROUTER_API_KEY@https://openrouter.ai") == KEY
+    assert _saved(fake_keychain, "OPENROUTER_API_KEY") is None
+    assert "✓ Saved OPENROUTER_API_KEY for https://openrouter.ai to the" in out
     assert models.calls.last.request.headers["authorization"] == f"Bearer {KEY}"
     assert "✓ openrouter is working" in out
     presets = next(p for p in prompter.seen if p["kind"] == "select")["choices"]

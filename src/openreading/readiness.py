@@ -18,7 +18,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
-from openreading.credentials import EnvCredentialBroker, redact, secret_values
+from openreading.credentials import EnvCredentialBroker, bound_origin, redact, secret_values
 from openreading.types.errors import AdapterError
 from openreading.types.request import OpenReadingRequest
 from openreading.types.runtime import ResolvedCredentials
@@ -48,6 +48,11 @@ class BackendReadiness:
     required_missing: list[str] = field(default_factory=list)  # required-and-unresolved → not ready
     signup_url: str | None = None
     ready: bool = False
+    # Set in the environment but not read, because the backend is a provider profile whose
+    # origin the operator has not allowed (`EnvCredentialBroker.env_allowed`). Each one is also
+    # in `creds_missing`. `key_origin` is that profile's origin, for `env_ignored_hint`.
+    env_ignored: list[str] = field(default_factory=list)
+    key_origin: str | None = None
 
 
 def missing_reason(readiness: BackendReadiness) -> list[str]:
@@ -61,6 +66,20 @@ def missing_reason(readiness: BackendReadiness) -> list[str]:
     vocabularies, and that is the defect this replaced (internal/design/ui-app/qa-ive-v2.md, H11).
     """
     return list(readiness.required_missing or readiness.creds_missing or readiness.missing_deps)
+
+
+def env_ignored_hint(readiness: BackendReadiness) -> str | None:
+    """The sentence for a provider profile whose key is in the environment but not read. Names
+    the variables, the origin and the setting, never a value. None when nothing was ignored."""
+    if not readiness.env_ignored:
+        return None
+    names = ", ".join(readiness.env_ignored)
+    return (
+        f"{readiness.slug}: {names} is set in the environment but not sent to "
+        f"{readiness.key_origin}, because OPENREADING_PROVIDER_ORIGINS does not list that origin. "
+        f"Save the key with openreading keys set {readiness.slug}, or add the origin to "
+        "OPENREADING_PROVIDER_ORIGINS."
+    )
 
 
 def missing_required(descriptor, ctx) -> list[str]:
@@ -227,4 +246,6 @@ def backend_readiness(adapter, *, broker: EnvCredentialBroker | None = None) -> 
         required_missing=required_missing,
         signup_url=desc.signup_url,
         ready=health.ready and not required_missing and not live_gate_missing,
+        env_ignored=broker.ignored_env(desc),
+        key_origin=bound_origin(desc),
     )

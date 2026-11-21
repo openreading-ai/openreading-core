@@ -84,6 +84,7 @@ from openreading.readiness import (
     auth_rejected_backends,
     auth_rejected_hint,
     backend_readiness,
+    env_ignored_hint,
     missing_reason,
 )
 from openreading.router.executor import execute_plan
@@ -685,6 +686,11 @@ def cmd_backends(args) -> int:
                 f"{r.slug:<30} {r.type:<18} {('yes' if r.ready else 'no'):<11} {source}"
                 f"{', '.join(miss) or '-'}"
             )
+        # On stderr, so the table a script parses stays the same.
+        for r in rows:
+            hint = env_ignored_hint(r)
+            if hint:
+                print(f"[backends] {hint}", file=sys.stderr)
         return 0
 
     # --check: the probe lane. Reports are printed as they complete so a slow backend never hides

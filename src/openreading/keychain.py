@@ -11,11 +11,14 @@ installs.
 The contract
 ------------
 - Every entry uses service `openreading` (`SERVICE`), with the variable name as the account. For
-  example, service `openreading`, account `ANTHROPIC_API_KEY`.
-- `KeychainMapping` is the only read path the broker uses. It answers for the names it is given,
-  which are the secret variables backends declare (`credentials.declared_secret_envs`), and for
-  nothing else. An operator knob such as `OPENREADING_LEDGER` is never looked up, so a setting
-  cannot hide in a store nobody reviews.
+  example, service `openreading`, account `ANTHROPIC_API_KEY`. A provider profile's key uses the
+  account `<VAR>@<origin>` instead, such as `OPENROUTER_API_KEY@https://openrouter.ai`, so it is
+  read only for that profile's endpoint (`credentials.keychain_account`).
+- `KeychainMapping` is the only read path the broker uses. It answers for the accounts it is
+  given, which are the secret variables backends declare under their accounts
+  (`credentials.keychain_accounts`), and for nothing else. A profile's `key_env` never joins as a
+  plain account. An operator knob such as `OPENREADING_LEDGER` or `OPENREADING_PROVIDER_ORIGINS`
+  is never looked up, so a setting cannot hide in a store nobody reviews.
 - Reading never raises and never prints. A missing `[setup]` extra, a refused backend, a locked
   or unreachable keychain, any `keyring` error and a timeout all count as "nothing saved". A CLI
   call on a server without a keychain therefore stays quiet.

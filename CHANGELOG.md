@@ -11,6 +11,11 @@
   A key no probe answered is marked `-` as "saved, not tested", and joins `policy.backends` only when you say yes to its own question.
   `setup --provider` adds an OpenAI-compatible endpoint as a `providers:` entry. Edits to `openreading.yaml` keep comments and other keys, or change nothing.
 - `keys set`, `keys list` and the keychain lookup now include provider profiles, so a profile's `key_env` can live in the keychain.
+  A profile's key is bound to its endpoint: the keychain holds it as `<VAR>@<origin>`, and a profile reads only its own origin's account.
+  A remote profile reads its key from the environment or `.env` only when `OPENREADING_PROVIDER_ORIGINS` lists its origin. Loopback profiles always do.
+  This stops a cloned `openreading.yaml` from naming `GITHUB_TOKEN`, or a key saved for another profile, and sending it to its author's host.
+  `backends`, `keys list` (SOURCE `env-ignored`) and the missing-credentials error name an ignored variable and the setting, never the value.
+  `keys import PATH SLUG` moves one backend's secrets, and a profile's key moves only this way.
 - `openreading mcp --keychain` reads saved keys, and `--config PATH` names the project file. The new read-only
   `openreading_backends` MCP tool reports readiness by variable name. No MCP tool accepts a key.
 

@@ -39,10 +39,21 @@ key. The name is a backend id, so it follows the built-in slug shape (`openroute
 and hyphenated).
 
 `openreading.yaml` is operator configuration, and it often arrives with a repository you cloned.
-So a profile can never name a variable a built-in backend declares, such as `ANTHROPIC_API_KEY`.
-A profile with `key_env` must also use `https`, unless its host is `localhost`, `127.0.0.0/8` or
-`::1`. Together they stop a committed file from sending a key you saved for one vendor, or any key
-in clear text, to a host the file's author chose.
+So a profile's key is bound to the profile's endpoint, and a file can only reach a key you gave
+that endpoint. Four rules hold it, and each stops one way a committed file could send your key to
+a host its author chose.
+
+- A profile can never name a variable a built-in backend declares, such as `ANTHROPIC_API_KEY`.
+- A profile with `key_env` must use `https`, unless its host is `localhost`, `127.0.0.0/8` or
+  `::1`, so no key travels in clear text.
+- A remote profile reads `key_env` from the environment or `.env` only when the operator lists
+  its origin in `OPENREADING_PROVIDER_ORIGINS`. Without that, a profile naming `GITHUB_TOKEN` with
+  its author's `base_url` would receive the token your shell exports.
+- A key saved in the keychain for a profile sits under the account `<VAR>@<origin>`, and a
+  profile reads only the account for its own origin. Two profiles that share `key_env` for two
+  hosts therefore never share a saved key.
+
+`openreading.credentials` enforces the last two, at the one place every key is read.
 
 A name that shadows a built-in backend id is a `ConfigError`, exit 3 on the CLI. Letting a file
 replace `pymupdf` would make one id mean two backends depending on the folder you ran from. A

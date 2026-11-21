@@ -579,7 +579,9 @@ def test_set_and_list_cover_a_profile_that_names_a_key_env(
     _stdin(monkeypatch, KEY + "\n")
     code, out, err = _run(["keys", "set", "example-llm", "--stdin"], capsys)
     assert code == 0, err
-    assert _saved(fake_keychain, "EXAMPLE_LLM_API_KEY") == KEY
+    # The key is bound to the profile's endpoint, never saved under the bare variable.
+    assert _saved(fake_keychain, "EXAMPLE_LLM_API_KEY@https://llm.example.test") == KEY
+    assert _saved(fake_keychain, "EXAMPLE_LLM_API_KEY") is None
     code, out, _ = _run(["keys", "list"], capsys)
     assert code == 0
     rows = {tuple(line.split()) for line in out.splitlines()[1:]}
@@ -608,7 +610,7 @@ def test_a_profile_key_from_the_keychain_reaches_the_adapter_and_never_os_enviro
 
     pytest.importorskip("pymupdf", reason="pymupdf (rasterizer) not installed")
     (tmp_path / "openreading.yaml").write_text(PROFILE_YAML, encoding="utf-8")
-    fake_keychain.store[("openreading", "EXAMPLE_LLM_API_KEY")] = KEY
+    fake_keychain.store[("openreading", "EXAMPLE_LLM_API_KEY@https://llm.example.test")] = KEY
     doc = tmp_path / "doc.pdf"
     doc.write_bytes(build_sample_pdf())
     reply = {

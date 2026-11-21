@@ -670,6 +670,11 @@ CONFIGURED and MISSING. It names where each backend's secrets come from:
 `env`, `.env` or `keychain`, and `-` for none. With nothing saved the table
 is unchanged, so a script reading it keeps working.
 
+A provider profile whose key is exported but not read, because
+`OPENREADING_PROVIDER_ORIGINS` does not list its origin, reads `no` with the
+variable under MISSING. One `[backends]` line on stderr names the variable,
+the origin and the setting, never the value (`keys` explains the binding).
+
 "Configured" is not "reachable" -- a `DOCLING_SERVE_URL` pointing at a dead
 port is configured. `--check` answers the other question by actually probing,
 and it is NEVER implicit: on a CLI, a flag the user typed is the consent a page
@@ -746,6 +751,15 @@ ANTHROPIC_MODEL` exits 2, because a model name is a setting that stays in the
 environment or `openreading.yaml`. A provider profile in `openreading.yaml`
 counts as a backend, and its one secret is the variable its `key_env` names.
 
+A provider profile's key is bound to that profile's endpoint, because a
+cloned repository's `openreading.yaml` could otherwise point a profile at its
+author's host. `keys set openrouter-gpt` saves `OPENROUTER_API_KEY` for
+`https://openrouter.ai` only, so another profile naming the same variable for
+another host never reads it. The environment and `.env` reach a profile only
+when its host is loopback, or when `OPENREADING_PROVIDER_ORIGINS` lists its
+origin, such as `https://openrouter.ai`. Otherwise `keys list` shows SOURCE
+`env-ignored`, and a line on stderr names the setting, never the value.
+
 A key never crosses the command line. There is no flag that takes a value,
 because argv shows up in `ps` and in shell history. A `--value` you type out
 of habit exits 2 with that reason and is never echoed. Scripts pipe the value:
@@ -760,8 +774,9 @@ network call, so `keys set` offers one only at a terminal, and only after
 asking.
 
 `keys list` prints where each declared secret resolves from. SOURCE is `env`
-(exported), `.env`, `keychain`, or `missing`, and `--json` prints the same
-rows as an array. It never prints a value, a prefix, or a length.
+(exported), `.env`, `keychain`, `env-ignored`, or `missing`, and `--json`
+prints the same rows as an array. It never prints a value, a prefix, or a
+length.
 
     BACKEND           VAR                SOURCE
     anthropic-claude  ANTHROPIC_API_KEY  keychain
@@ -771,8 +786,10 @@ rows as an array. It never prints a value, a prefix, or a length.
 `keys unset SLUG [VAR ...]` removes that backend's saved secrets. One variable
 can serve several backends: the four `llamaparse-*` slugs read one key, so
 the output names the others it affects. `keys import PATH` copies every
-declared secret in a `.env` file into the keychain. It leaves the file
-untouched and names the lines to delete, because a `.env` line still beats
+built-in backend's secret in a `.env` file into the keychain. A provider
+profile's key moves only with `keys import PATH SLUG`, because the variable
+alone cannot say which endpoint the key is for. The file stays untouched,
+and the output names the lines to delete, because a `.env` line still beats
 the keychain whenever you run from that folder.
 
 A machine with no usable keychain reads as "nothing saved", silently, so a CLI
@@ -841,7 +858,9 @@ in the `providers:` block of `openreading.yaml`. The starting points (OpenAI,
 OpenRouter, Groq, Ollama, LM Studio, other) fill in a base URL and a key
 variable for you to confirm. You type the model id. No price, model list or
 capability claim comes with a starting point. The wizard writes the entry,
-saves its key, and offers a probe. The name may not be a built-in backend id.
+saves its key bound to that endpoint, as `keys set` does, and offers a probe.
+It needs no `OPENREADING_PROVIDER_ORIGINS`. The name may not be a built-in
+backend id.
 
 Exits: 0 done, with every ✗ already reported. 2 no terminal (use `keys set
 --stdin` and `keys list` instead), no `[setup]` extra, or no usable keychain.

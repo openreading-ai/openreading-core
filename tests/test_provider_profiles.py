@@ -68,6 +68,12 @@ def _reply(content: str) -> dict:
     }
 
 
+def _allow_origin(monkeypatch) -> None:
+    """A remote profile reads its key from the environment only once the operator lists its
+    origin (`openreading.credentials`, the provider key binding)."""
+    monkeypatch.setenv("OPENREADING_PROVIDER_ORIGINS", "https://llm.example.test")
+
+
 @pytest.fixture
 def pdf(tmp_path):
     p = tmp_path / "doc.pdf"
@@ -240,6 +246,7 @@ def test_loading_a_file_with_profiles_never_imports_the_strategy_engine(yaml_fil
 @respx.mock
 def test_cli_parse_accepts_a_profile_id(yaml_file, pdf, capsys, monkeypatch):
     monkeypatch.setenv("EXAMPLE_LLM_API_KEY", "sk-cli")
+    _allow_origin(monkeypatch)
     yaml_file()
     respx.post(CHAT).mock(return_value=httpx.Response(200, json=_reply("# Hello")))
     assert main(["parse", pdf, "--backend", "example-llm"]) == 0
@@ -333,6 +340,7 @@ def test_cli_strategy_validate_knows_profile_ids(yaml_file, capsys):
 @respx.mock
 def test_a_model_that_rejects_images_falls_back_to_the_next_backend(yaml_file, pdf, monkeypatch):
     monkeypatch.setenv("EXAMPLE_LLM_API_KEY", "sk-chain")
+    _allow_origin(monkeypatch)
     yaml_file(YAML + "policy:\n  backends: [example-llm, pymupdf]\n")
     route = respx.post(CHAT).mock(
         return_value=httpx.Response(
@@ -347,6 +355,7 @@ def test_a_model_that_rejects_images_falls_back_to_the_next_backend(yaml_file, p
 @respx.mock
 def test_a_rejected_key_names_key_env_and_never_the_key(yaml_file, pdf, monkeypatch):
     monkeypatch.setenv("EXAMPLE_LLM_API_KEY", "sk-secret-value")
+    _allow_origin(monkeypatch)
     yaml_file()
     respx.post(CHAT).mock(
         return_value=httpx.Response(401, json={"error": {"message": "bad sk-secret-value"}})

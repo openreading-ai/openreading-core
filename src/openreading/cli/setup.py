@@ -81,7 +81,7 @@ from typing import Any, Protocol
 from openreading import config, keychain
 from openreading.adapters.registry import install_profiles, known_backends, make_adapter
 from openreading.cli import keys as keys_cli
-from openreading.credentials import EnvCredentialBroker
+from openreading.credentials import EnvCredentialBroker, keychain_account
 from openreading.readiness import backend_readiness, primary_secret_env
 from openreading.types.descriptor import AdapterDescriptor
 from openreading.types.liveness import LivenessStatus
@@ -512,7 +512,7 @@ class _Wizard:
         self.out.heading(slug if total == 1 else f"{slug} ({index} of {total})")
         fields = keys_cli._secret_fields(desc)
         broker = EnvCredentialBroker()
-        in_keychain = [f.env[0] for f in fields if broker.var_source(f.env[0]) == "keychain"]
+        in_keychain = [f.env[0] for f in fields if broker.var_source(f.env[0], desc) == "keychain"]
         ask_keys = True
         if in_keychain:
             action = self.ask.select(
@@ -570,7 +570,7 @@ class _Wizard:
                 self.out.note(f"- Skipped {name}, nothing saved")
                 continue
             try:
-                lines = keys_cli.save_secret(name, value, self.label)
+                lines = keys_cli.save_secret(name, value, self.label, desc)
             except keychain.KeychainUnavailable as e:
                 self.out.fail(f"Could not save {name}. {e}")
                 self.rows.append(_Row(desc.id, "not saved", FAILED))
@@ -616,7 +616,7 @@ class _Wizard:
         removed = False
         for name in dict.fromkeys(keys_cli._secret_names(desc)):
             try:
-                gone = keychain.delete(name)
+                gone = keychain.delete(keychain_account(desc, name))
             except keychain.KeychainUnavailable as e:
                 self.out.fail(f"Could not remove {name}. {e}")
                 self.rows.append(_Row(desc.id, "not removed", FAILED))

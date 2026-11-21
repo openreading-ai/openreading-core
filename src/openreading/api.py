@@ -129,7 +129,9 @@ from openreading.config import apply as apply_config
 from openreading.config import load as _read_config_file
 from openreading.credentials import (
     DEFAULT_NATIVE_BATCH_DEADLINE_MS,
+    PROVIDER_ORIGINS_ENV,
     EnvCredentialBroker,
+    bound_origin,
     build_run_context,
     keychain_environ,
     load_dotenv,
@@ -741,8 +743,19 @@ def prepare_named_backend(
             if adapter.descriptor.signup_url
             else ""
         )
+        # A provider profile's key exported in this shell but not read looks like a bug unless
+        # the message says why. It names the setting and the origin, never the value.
+        ignored = broker.ignored_env(adapter.descriptor)
+        why = (
+            f" {', '.join(ignored)} is set in the environment but not sent to "
+            f"{bound_origin(adapter.descriptor)}, because {PROVIDER_ORIGINS_ENV} does not list "
+            "that origin."
+            if ignored
+            else ""
+        )
         raise MissingCredentialsError(
-            f"missing required credentials/config: {', '.join(missing)}.{signup}", missing=missing
+            f"missing required credentials/config: {', '.join(missing)}.{why}{signup}",
+            missing=missing,
         )
     return adapter, req, ctx
 

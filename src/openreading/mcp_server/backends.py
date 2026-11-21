@@ -4,8 +4,11 @@ The `openreading_backends` tool returns one row per backend this process knows: 
 plus any provider profile the launcher's `--config` file installed. A row looks like
 `{"backend": "anthropic-claude", "ready": true, "extra_installed": true, "missing": [],
 "found": [{"var": "ANTHROPIC_API_KEY", "source": "keychain"}]}`. A source is `env` or
-`keychain`, because the launcher never loads `.env`. The report also states whether this process
-reads the keychain, and ends with the sentence `openreading.mcp_server.tools.NEXT_STEP`.
+`keychain`, because the launcher never loads `.env`. `env_ignored` names a provider profile's
+key variable that is set in the environment but not read, because `OPENREADING_PROVIDER_ORIGINS`
+does not list the profile's origin (`openreading.credentials`). It is empty for every other
+backend. The report also states whether this process reads the keychain, and ends with the
+sentence `openreading.mcp_server.tools.NEXT_STEP`.
 
 Only the engine launcher, `openreading.mcp_server.main.serve`, passes this report to
 `create_server`. The client-only wheel ships no adapter registry, so its server has no such tool.
@@ -54,6 +57,7 @@ def backends_report() -> dict[str, Any]:
                 "extra_installed": readiness.extra_installed,
                 "missing": readiness.creds_missing,
                 "found": found,
+                "env_ignored": readiness.env_ignored,
             }
         )
     return {"backends": rows, "keychain": keychain_in_use(), "next_step": NEXT_STEP}
