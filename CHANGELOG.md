@@ -5,7 +5,7 @@
 - Save backend keys once with `openreading keys set SLUG`, so every folder finds them through the OS keychain.
   `keys list`, `keys unset` and `keys import` manage them, and `openreading backends` gains a SOURCE column once a key comes from the keychain.
   The keychain is read after the environment and `.env`, never enters `os.environ`, and holds declared secrets only.
-- `openreading serve --keychain` and `openreading.run(..., keychain=True)` opt in. `OPENREADING_KEYCHAIN=off` turns it off for one process.
+- `openreading serve --keychain` and `keychain=True` on `openreading.run`, `run_batch` and `resume` opt in. `OPENREADING_KEYCHAIN=off` turns it off for one process.
 - Add the `[setup]` extra (`keyring`, `questionary`, `rich`), included in `[all]`.
 - Add `openreading setup`, a guided wizard: pick backends, paste each key into a hidden prompt, test it, and add what worked to `policy.backends`.
   `setup --provider` adds an OpenAI-compatible endpoint as a `providers:` entry. Edits to `openreading.yaml` keep comments and other keys, or change nothing.

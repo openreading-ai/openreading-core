@@ -480,3 +480,37 @@ def test_python_api_run_batch_reads_the_keychain_only_with_keychain_true(
     assert _api_key(brokers[0]) is None
     assert fake_keychain.calls == []
     assert _api_key(brokers[1]) == KEY
+
+
+def test_python_api_resume_reads_the_keychain_only_with_keychain_true(
+    monkeypatch, fake_keychain, tmp_path
+):
+    import types
+
+    import openreading.strategies as strategies
+
+    _save(fake_keychain, "ANTHROPIC_API_KEY", KEY)
+    monkeypatch.setenv("OPENREADING_LEDGER", str(tmp_path / "ledger"))
+    header = types.SimpleNamespace(strategy_name="main", pinned_eligible=["anthropic-claude"])
+    monkeypatch.setattr(api, "read_header", lambda _root, _run_id: header)
+    monkeypatch.setattr(api, "_request_from_header", lambda *_a: _req("anthropic-claude"))
+    monkeypatch.setattr(
+        strategies,
+        "compile_strategy",
+        lambda *_a, **_k: types.SimpleNamespace(
+            config_hash="h", root=None, dispatchable=frozenset(), backend_allowlist=None
+        ),
+    )
+    brokers: list[EnvCredentialBroker] = []
+
+    def capture(_run_id, _req, _registry, broker, *_a, **_k):
+        brokers.append(broker)
+        raise RuntimeError("stop")
+
+    monkeypatch.setattr(api, "_arm_ledger", capture)
+    for kw in ({}, {"keychain": True}):
+        with pytest.raises(RuntimeError):
+            api.resume_run("7dbf6b71-adb5-4e90-9188-a184fdba9d05", **kw)
+    assert _api_key(brokers[0]) is None
+    assert fake_keychain.calls == []
+    assert _api_key(brokers[1]) == KEY

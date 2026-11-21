@@ -15,10 +15,11 @@ Exports and return shapes
 An envelope is the schema-valid JSON object returned by a completed operation.
 
 - `run(source, backend=None, **options)` returns a `response.v0.3` envelope. `keychain=True`
-  (on `run` and `run_batch`) also reads keys saved with `openreading keys set`.
+  (on `run`, `run_batch` and `resume_run`) also reads keys saved with `openreading keys set`.
 - `run_batch(sources, backend=None, **options)` returns a `batch-result.v0.2` envelope.
 - `route(source, **options)` returns a `RoutePlan` without executing a backend.
-- `resume_run(run_id)` returns a response and is exported as `openreading.resume`.
+- `resume_run(run_id, keychain=False)` returns a response and is exported as
+  `openreading.resume`.
 - `build_request`, `run_request`, `prepare_named_backend`, and `materialize_document` support
   the CLI and server through the same lower-level seams.
 
@@ -84,7 +85,7 @@ A backend that fetches URLs itself resolves the hostname later, so its DNS answe
 
 `env_file` loads key-value lines without overriding existing process variables. A library call
 with no `env_file` never discovers `.env` from the working directory.
-`keychain=True` on `run` and `run_batch` also reads keys saved with `openreading keys set`.
+`keychain=True` on `run`, `run_batch` and `resume_run` also reads keys saved with `keys set`.
 The keychain sits after the environment and `.env`, and its values never enter `os.environ`.
 Without it a library call never touches the keychain, so a notebook behaves as it always did.
 Backend credentials and aliases are read indirectly through `openreading.credentials`.
@@ -1043,7 +1044,7 @@ def _request_from_header(header: RunHeader, blobs: LocalFsBlobStore) -> OpenRead
 
 
 @_scoped_profiles
-def resume_run(run_id: str) -> dict[str, Any]:
+def resume_run(run_id: str, *, keychain: bool = False) -> dict[str, Any]:
     """`openreading resume <RUN_ID>` (internal/design/ledger.md §10, plan §4.4): re-derive the run's
     identity from the LIVE openreading.yaml + registry, compare it against the header written at
     the run's first arm, and — on a match — re-drive the SAME compiled strategy against the
@@ -1064,6 +1065,9 @@ def resume_run(run_id: str) -> dict[str, Any]:
       `_arm_ledger(resume=True)` arms the resumed executor's per-step gate from THIS header rather
       than a freshly recomputed one, so a policy edit between the two halves of a run cannot let
       the resume reach a backend the original could not.
+
+    `keychain=True` reads keys saved with `openreading keys set` after the environment, as `run`
+    does. Without it the resume reads the environment alone.
 
     Raises `LookupError` when `OPENREADING_LEDGER` is unset or no header exists for `run_id`, or
     `ledger.header.HeaderMismatch` when the live config/plan/journal-version identity no longer
@@ -1087,7 +1091,7 @@ def resume_run(run_id: str) -> dict[str, Any]:
     strategy_file = build_config(loaded)
     strategy_config = strategy_file.config if strategy_file else StrategyConfig(version=1)
     registry = build_registry()
-    broker = EnvCredentialBroker()
+    broker = _keychain_broker(None, keychain) or EnvCredentialBroker()
     # §10: "no other flags" — a resume takes every option from the ledger and the live file.
     req, config = apply_config(req, loaded.policy if loaded else None, RouterConfig())
     compiled = compile_strategy(req, header.strategy_name, strategy_config, registry, config)
