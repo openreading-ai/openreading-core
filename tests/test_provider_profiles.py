@@ -272,10 +272,43 @@ def test_cli_backends_lists_profiles_with_their_key_var(yaml_file, capsys):
     assert rows["local-llm"].split()[2] == "yes"
 
 
-def test_cli_backends_without_a_readable_file_lists_built_ins_only(yaml_file, capsys):
-    yaml_file("version: [")
-    assert main(["backends"]) == 0
-    assert "example-llm" not in capsys.readouterr().out
+@pytest.mark.parametrize("argv", [["backends"], ["keys", "list"], ["help"], ["benchmark", "list"]])
+def test_a_broken_file_is_named_once_and_other_commands_go_on(yaml_file, capsys, argv):
+    """A first-time user who forgot `version: 1` learns why the profile is missing."""
+    assert main(argv) == 0
+    clean = capsys.readouterr()
+    yaml_file(YAML.replace("version: 1\n", ""))
+    assert main(argv) == 0
+    broken = capsys.readouterr()
+    assert broken.out == clean.out  # stdout byte-identical, built-ins only
+    assert "example-llm" not in broken.out
+    lines = [ln for ln in broken.err.splitlines() if ln.startswith("[config]")]
+    assert len(lines) == 1, broken.err
+    assert "openreading.yaml" in lines[0] and "version" in lines[0]
+    assert lines[0].endswith("Provider profiles from this file are not loaded.")
+
+
+def test_a_broken_file_with_a_profile_backend_exits_3_not_2(yaml_file, pdf, capsys):
+    yaml_file("version: [\n")
+    assert main(["parse", pdf, "--backend", "example-llm"]) == 3
+    err = capsys.readouterr().err
+    assert "invalid YAML" in err and "invalid choice" not in err and "usage:" not in err
+
+
+@pytest.mark.parametrize(
+    ("argv", "head"),
+    [
+        (["route", "{pdf}"], "[route] "),
+        (["parse", "{pdf}", "--backend", "pymupdf"], "[pymupdf] "),
+        (["strategy", "validate"], "ERROR "),
+        (["strategy", "list"], "[strategy list] "),
+    ],
+)
+def test_commands_that_read_the_file_keep_their_own_exit_3(yaml_file, pdf, capsys, argv, head):
+    yaml_file("version: [\n")
+    assert main([a.format(pdf=pdf) for a in argv]) == 3
+    err = capsys.readouterr().err
+    assert err.startswith(head) and "[config]" not in err
 
 
 def test_cli_pre_scan_skips_mcp_and_serve(yaml_file):

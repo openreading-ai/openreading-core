@@ -49,6 +49,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import io
 import json
 import os
 import signal
@@ -3522,21 +3523,39 @@ def _terminate_as_interrupt(*, enabled: bool = True):
             signal.signal(signal.SIGINT, signal.default_int_handler)
 
 
-def _install_file_profiles(argv: list[str]) -> None:
+# The commands that load `openreading.yaml` themselves and report a broken file with exit 3 and
+# their own message. Every other command runs on built-ins and names the file once on stderr.
+_FILE_COMMANDS = frozenset(
+    {
+        "parse",
+        "route",
+        "resume",
+        "strategy",
+        "compare",
+        "replay",
+        "calibrate",
+        "leaderboard",
+    }
+)
+
+
+def _install_file_profiles(argv: list[str]) -> ConfigError | None:
     """Install the provider profiles of the `openreading.yaml` this invocation will read.
 
     It runs before argument parsing because `--backend` checks its value against the known ids,
     and a profile id only becomes known once its file is read. It finds the file the way the
     command will: `--config PATH`, then `OPENREADING_CONFIG`, then the working directory. The
     dotenv file loads first, so an `OPENREADING_CONFIG` set there counts, and loading it again
-    in `main` changes nothing. A file that fails to load installs nothing and prints nothing
-    here. The command's own load reports it with exit 3, and `backends` lists the built-ins.
-    `serve` reads its file in `create_app`, and `mcp` never reads an ambient file, so both are
-    skipped.
+    in `main` changes nothing. `serve` reads its file in `create_app`, and `mcp` reads only its
+    own `--config`, so both are skipped.
+
+    A file that fails to load installs nothing and is returned for `main` to report. Swallowed,
+    it left `backends` and `keys list` silently short of every profile, and a user who forgot
+    `version: 1` never learned why.
     """
     command = next((a for a in argv if not a.startswith("-")), None)
     if command in (None, "serve", "mcp"):
-        return
+        return None
     flags: dict[str, str | None] = {"--config": None, "--env-file": None}
     for i, arg in enumerate(argv):
         name, eq, value = arg.partition("=")
@@ -3546,18 +3565,54 @@ def _install_file_profiles(argv: list[str]) -> None:
     explicit = flags["--config"]
     try:
         loaded = config.load(explicit)
-    except ConfigError:
-        return
+    except ConfigError as e:
+        return e
     if loaded is not None:
         install_profiles(loaded.providers)
+    return None
+
+
+def _parse_args_reporting_config(
+    argv: list[str] | None, command: str | None, broken: ConfigError | None
+) -> argparse.Namespace | int:
+    """`build_parser().parse_args`, plus what a broken file means for this command.
+
+    A command in `_FILE_COMMANDS` keeps its own exit 3 and message. Only when argument parsing
+    itself fails is the file reported here instead, because the failure is the file's: with the
+    profiles unread, `parse --backend <profile>` became an "invalid choice" usage error, exit 2.
+    Every other command prints one `[config]` line on stderr and runs on built-ins, so stdout is
+    unchanged.
+    """
+    parser = build_parser()
+    if broken is None:
+        return parser.parse_args(argv)
+    why = " ".join(str(broken).split()).rstrip(".")
+    if command not in _FILE_COMMANDS:
+        print(f"[config] {why}. Provider profiles from this file are not loaded.", file=sys.stderr)
+        return parser.parse_args(argv)
+    usage = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(usage):
+            return parser.parse_args(argv)
+    except SystemExit as exit_:
+        if exit_.code != 2:
+            sys.stderr.write(usage.getvalue())
+            raise
+    print(f"[{command}] {broken}", file=sys.stderr)
+    return 3
 
 
 def main(argv: list[str] | None = None) -> int:
     """Parse argv, load ./.env or --env-file, dispatch the handler, and return its exit code.
     SIGTERM arrives as KeyboardInterrupt for every command but `serve`, which hands its own
     signals to uvicorn."""
-    _install_file_profiles(list(sys.argv[1:] if argv is None else argv))
-    args = build_parser().parse_args(argv)
+    raw = list(sys.argv[1:] if argv is None else argv)
+    broken = _install_file_profiles(raw)
+    command = next((a for a in raw if not a.startswith("-")), None)
+    parsed = _parse_args_reporting_config(argv, command, broken)
+    if isinstance(parsed, int):
+        return parsed
+    args = parsed
     if args.func is cmd_mcp:
         return cmd_mcp(args)
     load_dotenv(getattr(args, "env_file", None))  # ./.env or --env-file; never overrides set env

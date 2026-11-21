@@ -686,8 +686,11 @@ Provider profiles follow the built-ins. A provider profile is a backend you
 name in the `providers:` block of the `openreading.yaml` this command finds
 (`--config`, then `OPENREADING_CONFIG`, then the working directory). A keyed
 profile lists its `key_env` variable as missing until you set it. A file that
-does not load lists the built-ins only. `pydoc openreading.config` prints the
-grammar.
+does not load lists the built-ins only, and one `[config]` line on stderr names
+the file and what is wrong with it, such as a missing `version: 1`. Every
+command that does not read the file itself prints that line too. `parse`,
+`route`, `strategy` and the other commands that read it still exit 3.
+`pydoc openreading.config` prints the grammar.
 
 Status ladder (`openreading.types.liveness.LivenessStatus`), seven states
 ascending in what is known: `not_supported` (no probe AND nothing declared to
