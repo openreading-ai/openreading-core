@@ -1691,7 +1691,7 @@ its own conversion or synchronous-wait limits. Check both sides on failure.
 serve
 -----
 `serve [--host H] [--port P] [--cors-origin O ...] [--keychain]` runs the
-HTTP API (`openreading.server`; needs the `[server]` extra, else exit 3).
+HTTP API (`openreading.server`). It needs the `[server]` extra, else exit 3.
 Default
 `127.0.0.1:8787`. (This package ships no web UI. `serve` exposes the JSON API
 only.) Binding any host other than `127.0.0.1` prints a warning: anyone who can
@@ -1789,7 +1789,7 @@ The launcher never reads ./.env or ./openreading.yaml from its directory.
 Without --keychain, the process reads the environment only.
 --keychain also reads keys saved with `openreading keys set`.
 Your MCP client config then carries no env block with a key in it.
-No tool runs a hosted backend; imports use the fixed local profile.
+No tool runs a hosted backend. Imports use the fixed local profile.
 
 This profile accepts one PDF, at most 25 MiB and 100 physical pages.
 It uses local PyMuPDF without OCR, passwords, routing, or hosted fallback.

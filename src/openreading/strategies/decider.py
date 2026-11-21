@@ -3,7 +3,7 @@
 This module is the normative contract for the optional LLM decider and LLM-as-judge: where they may
 act, exactly what they see, exactly what they may return, and how every failure mode degrades to
 the deterministic engine. The file grammar that declares decision points is
-`openreading.strategies.model` (+ `schemas/strategy-config.v0.5.json`); the walk that consults them
+`openreading.strategies.model` (+ `schemas/strategy-config.v0.5.json`). The walk that consults them
 is `openreading.strategies.engine` (`_resolve_decision_point`, `_decide`, `_select_best`,
 `_pairwise_judge`, `_replay_decision`). Nothing here adds a node type, a signal, or an action the
 engine does not already have. The `decider.md §n` citations in this module's and the engine's

@@ -29,7 +29,7 @@ The rules every verb follows
 `aws-textract` reads `AWS_ACCESS_KEY_ID`, then `AWS_SECRET_ACCESS_KEY`, then the optional
 `AWS_SESSION_TOKEN`. A blank or absent line skips that variable. More lines than secrets is
 refused before anything is saved, because a shifted line would save a key under the wrong name.
-Name one variable after the slug to save just that one.
+Name one variable after the slug to save only that one.
 
 Exit codes: 0 done, 2 usage (unknown slug, undeclared variable, no terminal without `--stdin`,
 no keychain), 3 an unreadable `keys import` file, 130 stopped with Ctrl+C.
@@ -103,7 +103,7 @@ More: openreading help keys""",
     "keys unset": """\
 Examples:
   openreading keys unset reducto                 # every saved reducto secret
-  openreading keys unset aws-textract AWS_SESSION_TOKEN   # just one
+  openreading keys unset aws-textract AWS_SESSION_TOKEN   # only that one
 
 A variable can be shared. The four llamaparse slugs read one key, so removing
 it for one removes it for all four, and the output names the others.

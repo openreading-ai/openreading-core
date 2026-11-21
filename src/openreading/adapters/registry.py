@@ -88,7 +88,7 @@ BUILTIN_ADAPTERS: dict[str, Callable[[], BackendAdapter]] = {
 # dict before an install keeps a consistent snapshot.
 _PROFILES: dict[str, ProviderProfile] = {}
 
-# One library call's own set. None (the default) defers to `_PROFILES`; `{}` means no profile.
+# One library call's own set. None (the default) defers to `_PROFILES`, and `{}` means no profile.
 _CALL_PROFILES: ContextVar[dict[str, ProviderProfile] | None] = ContextVar(
     "openreading_call_profiles", default=None
 )
@@ -176,7 +176,7 @@ def make_adapter(slug: str) -> BackendAdapter:
 
 def build_registry() -> Registry:
     """A Registry with every known adapter registered, built-ins then provider profiles
-    (descriptors only — nothing runs)."""
+    (descriptors only, so nothing runs)."""
     reg = Registry()
     for slug in known_backends():
         reg.register(make_adapter(slug))

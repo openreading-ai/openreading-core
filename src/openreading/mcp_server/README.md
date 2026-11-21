@@ -119,8 +119,8 @@ Before uninstalling a client, cancel unwanted jobs and wait for terminal states.
 There is no uninstall cancellation hook; removing the client can leave detached work running.
 Reconnecting with the same input and artifact roots restores job discovery and cancellation.
 The local profile requires POSIX support. Explicit root symlinks resolve once before file access begins.
-The launcher never reads `./.env` or `./openreading.yaml`; `--config PATH` names the file whose provider profiles it reports.
-Without `--keychain` the process reads the environment only; with it, keys saved by `openreading keys set` count too.
+The launcher never reads `./.env` or `./openreading.yaml`. `--config PATH` names the file whose provider profiles it reports.
+Without `--keychain` the process reads the environment only. With it, keys saved by `openreading keys set` count too.
 No tool accepts a key. Run `openreading setup` in a terminal instead, because a pasted key enters the transcript.
 
 The [artifact guide](../artifacts/README.md) explains retention, source hashing, page provenance, and quota behavior.

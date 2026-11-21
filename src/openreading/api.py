@@ -977,7 +977,7 @@ def run(
         backend = f"strategy:{strategy}"
     # The file is read on every path so a null backend can resolve its configured chain. The
     # strategy half is built only when a strategy could engage through null or `strategy:`.
-    loaded = _load_config_file(config)  # CLI/Python discover cwd; None uses built-in defaults.
+    loaded = _load_config_file(config)  # CLI/Python discover cwd, and None uses built-in defaults.
     strategy_file = None
     if backend is None or backend.startswith(_STRATEGY_PREFIX):
         from openreading.strategies.loader import build_config

@@ -137,7 +137,7 @@ who cares about compliance already knows which vendors they hold agreements with
 a statement core can honour exactly.
 
 The block is refused whole (`ConfigError`, from `openreading.config.load`) if it names a key
-outside it or gives one the wrong type. `strategy-config` v0.4 declares this sub-object
+outside it or gives one the wrong type. `strategy-config` v0.5 declares this sub-object
 `additionalProperties: false` with the key typed, which is what stands between a typo and a run
 with no restriction at all: `backend: [pymupdf]` would otherwise be dropped in silence and mean
 "every backend" rather than "only this one".
