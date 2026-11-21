@@ -20,6 +20,9 @@
 - Narrow source distributions and audit the isolated client dependency lock with a pinned runner.
   The Git-based ExtractBench extra still prevents publishing the full distribution to PyPI.
 - Isolate scratch Git fixtures from hook environment variables so verification cannot add commits to the branch being checked.
+- Upgrade locked dependencies with published advisories, including aiohttp, certifi, pyjwt, pypdf and urllib3.
+- Upgrade docling-slim to 2.142.0 and Pillow to 13.0.0 to clear their published advisories.
+  Local OCR still resolves languages only from the configured tessdata directory.
 
 ## Unreleased client-only build profile
 

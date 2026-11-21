@@ -81,7 +81,7 @@ def _descriptor():
             offline_capable=True,
             license="MIT",
             sandbox="in_process",
-            version_pin="docling-slim==2.126.0",
+            version_pin="docling-slim==2.142.0",
             system_deps=[
                 "Tesseract when OCR is enabled",
                 "LibreOffice for provider legacy Office conversion",

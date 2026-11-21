@@ -292,12 +292,14 @@ def test_cancel_dispatch_never_blocks_the_response_past_the_node_deadline():
     # after the sleep) is correctly still empty here; that's the whole point of "abandoned, not
     # retried" — only `cancel_started` (appended before the sleep) proves dispatch happened.
     assert len(loser.cancel_started) == 1
-    # Without the bound, this would take ~SLEEP_S (1.0s). With it, the response returns close to
-    # BUDGET_S (0.2s) — well under half of SLEEP_S either way, so the assertion can't pass by
-    # accident of scheduling jitter.
-    assert elapsed < SLEEP_S / 2, (
-        f"response took {elapsed:.3f}s — looks like it waited out the slow cancel "
-        f"({SLEEP_S:.2f}s) instead of respecting the node's own {BUDGET_S:.2f}s deadline"
+    # A property, not a stopwatch. `cancelled` is appended only after the cancel's SLEEP_S sleep,
+    # so an empty list at return proves the response did not wait the cancel out. A bound like
+    # `elapsed < SLEEP_S / 2` failed on contended CI runners (0.52s and 0.86s on Python 3.11)
+    # while the engine still returned long before the cancel finished.
+    assert not loser.cancelled, (
+        f"response took {elapsed:.3f}s and the slow cancel ({SLEEP_S:.2f}s) had already "
+        f"finished, so the response waited it out instead of respecting the node's own "
+        f"{BUDGET_S:.2f}s deadline"
     )
 
 
