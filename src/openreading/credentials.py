@@ -756,14 +756,11 @@ class EnvCredentialBroker:
                     if value:
                         values[field.key] = value
                         break
-        if blocked:
-            secrets = [f for f in descriptor.credentials_spec if f.secret]
-            # An optional key may be the backend's only authentication, as it is for Qwen.
-            needs_store = any(f.required and f.key not in values for f in secrets) or (
-                bool(secrets) and not any(f.key in values for f in secrets)
-            )
-            if not needs_store:
-                blocked = None
+        # Qwen can run anonymously and Textract can use the AWS SDK's credential chain.
+        if blocked and not any(
+            f.secret and f.required and f.key not in values for f in descriptor.credentials_spec
+        ):
+            blocked = None
         return ResolvedCredentials(
             values=values, source="env" if values else None, keychain_blocked_by=blocked
         )

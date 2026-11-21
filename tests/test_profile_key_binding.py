@@ -184,23 +184,15 @@ def test_saved_key_reaches_a_local_or_factory_destination(
     assert "saved-test-key" in broker.resolve(desc, _req(slug)).values.values()
 
 
-@pytest.mark.parametrize(
-    ("slug", "setting", "secret"),
-    [
-        (
-            "azure-document-intelligence",
-            "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT",
-            "AZURE_DOCUMENT_INTELLIGENCE_KEY",
-        ),
-        ("qwen-vl", "QWEN_VL_ENDPOINT", "QWEN_VL_API_KEY"),
-    ],
-)
-def test_dotenv_hold_names_the_setting_in_readiness_and_parse(
-    slug, setting, secret, fake_keychain, tmp_path, pdf, capsys, monkeypatch
+def test_required_key_dotenv_hold_names_the_setting_in_readiness_and_parse(
+    fake_keychain, tmp_path, pdf, capsys
 ):
     from openreading.credentials import load_dotenv
     from openreading.readiness import missing_reason
 
+    slug = "azure-document-intelligence"
+    setting = "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT"
+    secret = "AZURE_DOCUMENT_INTELLIGENCE_KEY"
     path = tmp_path / ".env"
     path.write_text(f"{setting}=https://custom.example.test/v1\n")
     load_dotenv(path)
@@ -213,9 +205,40 @@ def test_dotenv_hold_names_the_setting_in_readiness_and_parse(
     assert code != 0 and setting in err and "export" in err.lower()
     assert "saved-test-key" not in out + err
     assert ("get", secret) not in fake_keychain.calls
-    if slug == "qwen-vl":
-        monkeypatch.setenv("OPENREADING_KEYCHAIN", "off")
-        assert backend_readiness(make_adapter(slug), broker=broker).ready
+
+
+@pytest.mark.parametrize(
+    ("slug", "line"),
+    [
+        ("aws-textract", "AWS_PROFILE=dev"),
+        ("qwen-vl", "QWEN_VL_ENDPOINT=http://gpu-box.lan:8000/v1"),
+    ],
+)
+@pytest.mark.parametrize("named", [True, False], ids=["named", "default-chain"])
+def test_dotenv_allows_dispatch_without_optional_credentials(
+    slug, line, named, fake_keychain, tmp_path, pdf, monkeypatch
+):
+    from unittest.mock import patch
+
+    from openreading.adapters.registry import BUILTIN_ADAPTERS
+    from tests.fakes import ScriptedBackend
+
+    backend = ScriptedBackend(slug)
+    backend.descriptor = make_adapter(slug).descriptor
+    monkeypatch.setitem(BUILTIN_ADAPTERS, slug, lambda: backend)
+    path = tmp_path / ".env"
+    path.write_text(line + "\n")
+    with patch.dict("os.environ", clear=True):
+        result = api.run(
+            pdf,
+            backend=slug if named else None,
+            env_file=str(path),
+            keychain=True,
+            config={"version": 1, "policy": {"backends": [slug, "pymupdf"]}},
+        )
+    assert result["backend"]["id"] == slug
+    assert backend.contexts[0].credentials is None
+    assert not fake_keychain.calls
 
 
 def _stdin(monkeypatch, text: str) -> None:
