@@ -5,11 +5,14 @@ surface (CLI, server, Python API, evals, chain executor, strategy engine) runs t
 
 Posture — pure BYO-key pass-through
 -----------------------------------
-You bring the provider's own credential; it is read per request, held in memory only for that
-call, and the charge lands on your own account. This package never logs or echoes the key, and
-never sends it anywhere but the provider. OpenReading writes a key in exactly one case: you ran
-`openreading keys set`, `openreading keys import` or `openreading setup`, and it writes to your
-OS keychain (`openreading.keychain`). It never writes a key to a file.
+You bring the provider's own credential; it is read per request, and the charge lands on your own
+account. A key from the environment or `.env` is read where it already lives. A key from the OS
+keychain is cached in this process's memory for up to 60 seconds
+(`openreading.keychain.CACHE_TTL_S`), so one run asks the keychain once per variable. That cache
+never enters `os.environ`, so a subprocess never inherits it. This package never logs or echoes the
+key, and never sends it anywhere but the provider. OpenReading writes a key in exactly one case:
+you ran `openreading keys set`, `openreading keys import` or `openreading setup`, and it writes to
+your OS keychain (`openreading.keychain`). It never writes a key to a file.
 The broker never branches on backend type — it is driven entirely by the descriptor's spec. Each
 run gets a fresh adapter instance (D-v2-6 / D-v2-8.1), so a credential-bound client is never
 shared across requests. Keys never travel in a request body — only `credentials_ref` handles do —

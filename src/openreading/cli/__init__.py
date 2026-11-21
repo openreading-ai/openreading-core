@@ -736,8 +736,8 @@ The keychain is read last. An exported variable beats the same line in
 loses to a value saved weeks ago. A blank `ANTHROPIC_API_KEY=` line counts as
 unset and does not hide the saved key. A saved key is never copied into the
 process environment, so a worker process such as `tesseract` never inherits
-it. Every verb reads the keychain except `serve`, which waits for its own
-`--keychain` flag, and `mcp`, which never reads it.
+it. Every verb reads the keychain except `serve` and `mcp`, which each read it
+only when started with their own `--keychain` flag.
 
 Only secrets reach the keychain. `keys set` takes a backend slug, never a free
 variable name. Naming one variable after the slug saves only that one, and it
@@ -1740,7 +1740,9 @@ fire after that clean shutdown.
 
 mcp --profile local-document-proof-v1
 ------------------------------------
-Serve ten document tools over stdio with openreading[agent,pymupdf].
+Serve nine document tools over stdio with openreading[agent,pymupdf], plus
+the openreading_backends readiness tool. The client-only wheel and a launch
+with an ImportExecution omit the readiness tool.
 You grant an absolute --input-root and a separate absolute --artifact-root.
 For example, use /absolute/documents and /absolute/evidence respectively.
 The server retains source bytes and page evidence until you remove the store.

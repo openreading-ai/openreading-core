@@ -24,7 +24,8 @@ Search remains optional. The openreading_select_document tool accepts only an em
 Without an explicitly supplied provider, it returns selection_unavailable and opens no UI.
 Every successful call returns one JSON TextContent payload without
 structuredContent duplication. Domain failures set isError; malformed arguments receive
-sanitized protocol errors. The server never loads ambient routing files or credentials.
+sanitized protocol errors. The server never loads ambient routing files, and it reads no saved
+keychain credentials unless started with --keychain.
 
 The read-only openreading_backends tool reports each backend's readiness by variable name.
 For example, a row says ANTHROPIC_API_KEY was found in the keychain, and never shows its value.
