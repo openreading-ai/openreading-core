@@ -49,6 +49,7 @@ async def test_stdio_import_search_read_and_sanitized_invalid_arguments(tmp_path
             "openreading_get_import",
             "openreading_cancel_import",
             "openreading_list_imports",
+            "openreading_backends",
         }
         unavailable = await session.call_tool("openreading_select_document", {})
         assert unavailable.isError

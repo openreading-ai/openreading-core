@@ -11,9 +11,9 @@ and prints the one response schema.
 Credentials never travel on the CLI: they are read from the environment by the broker
 (OPENREADING_<SLUG>_<KEY> or the service-native var, e.g. REDUCTO_API_KEY). A `.env` in the
 working directory is loaded automatically (never overriding an already-set var). Every verb but
-`serve` and `mcp` then reads the OS keychain last (`credentials.use_keychain`); `serve` reads it
-only with `--keychain`. The `keys` verbs live in `openreading.cli.keys`, and the `setup` wizard
-in `openreading.cli.setup`.
+`serve` and `mcp` then reads the OS keychain last (`credentials.use_keychain`); those two read
+it only with `--keychain`. The `keys` verbs live in `openreading.cli.keys`, and the `setup`
+wizard in `openreading.cli.setup`.
 
 The user-facing reference (every subcommand, flags, exit codes 0-6, 130 and 143) is the
 `openreading.cli` package docstring; this module holds the `cmd_*` handlers, `build_parser`, and
@@ -1976,11 +1976,13 @@ def cmd_compare(args) -> int:
 EPILOGS = {
     "mcp": r"""Examples:
   openreading mcp --profile local-document-proof-v1 \
-    --input-root /absolute/documents --artifact-root /absolute/evidence
+    --input-root /absolute/documents --artifact-root /absolute/evidence \
+    --keychain    # also read keys saved with keys set
 
 Then:
   Connect your MCP client and call openreading_import with a relative path.
   Search the returned artifact, then read evidence and cite its physical page.
+  Call openreading_backends to see which backends are configured.
 
 Exits: 0 transport closed. 2 configuration or dependencies. 130 interrupted.
 
@@ -2593,7 +2595,7 @@ def _attach_epilogs(parser: argparse.ArgumentParser, path: str = "") -> None:
 
 
 def cmd_mcp(args: argparse.Namespace) -> int:
-    """Launch the fixed local profile without loading ambient credentials."""
+    """Launch the fixed local profile. It loads no `.env`, and the keychain only with `--keychain`."""
     from openreading.mcp_server.main import launch
 
     return launch(args)
@@ -3560,8 +3562,9 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_mcp(args)
     load_dotenv(getattr(args, "env_file", None))  # ./.env or --env-file; never overrides set env
     # Every verb reads the keychain after the environment and .env, except `serve`, which waits
-    # for `--keychain` (`mcp` returned above and never reads it). The opt-in ends with the
-    # command, so a caller that runs `main` twice in one process starts clean each time.
+    # for `--keychain`. `mcp` returned above, because its launcher reads its own `--keychain`.
+    # The opt-in ends with the command, so a caller that runs `main` twice in one process starts
+    # clean each time.
     previous = use_keychain(args.func is not cmd_serve or bool(getattr(args, "keychain", False)))
     try:
         with _terminate_as_interrupt(enabled=args.func is not cmd_serve):

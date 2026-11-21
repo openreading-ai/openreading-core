@@ -10,6 +10,8 @@
 - Add `openreading setup`, a guided wizard: pick backends, paste each key into a hidden prompt, test it, and add what worked to `policy.backends`.
   `setup --provider` adds an OpenAI-compatible endpoint as a `providers:` entry. Edits to `openreading.yaml` keep comments and other keys, or change nothing.
 - `keys set`, `keys list` and the keychain lookup now include provider profiles, so a profile's `key_env` can live in the keychain.
+- `openreading mcp --keychain` reads saved keys, and `--config PATH` names the project file. The new read-only
+  `openreading_backends` MCP tool reports readiness by variable name. No MCP tool accepts a key.
 
 ## Unreleased provider profiles
 

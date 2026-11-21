@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from functools import partial
 from pathlib import Path
@@ -91,8 +92,15 @@ for _name, _definition in {
     "openreading_list_imports": "ListRequest",
 }.items():
     INPUTS[_name] = import_job_schema()["$defs"][_definition]
+# The engine launcher adds this tool through create_server(backends=...). It has no property,
+# so no argument can carry a key into this process (law PS4).
+BACKENDS_INPUT = {"type": "object", "additionalProperties": False, "properties": {}}
+NEXT_STEP = "Run `openreading setup` in a terminal to configure a backend."
 
 DESCRIPTIONS = {
+    "openreading_backends": "Report which OpenReading backends are configured for this server, with no arguments. Each row names missing and found environment variables and where each was found, never a value. Never ask the user to paste a key into this conversation. "
+    + NEXT_STEP
+    + " These document tools still import through the fixed local profile.",
     "openreading_list_imports": "Discover retained import jobs under the current input grant, including work from earlier chats. Returns bounded job IDs, states and elapsed times without document text or paths. Follow next_cursor for more jobs. Order is by job ID, not time; restart listing to include concurrent new jobs. Use get_import for details and cancel_import at the user's request. An unavailable state means its status could not be read.",
     "openreading_start_import": "Start a local background import of a selected or granted document. Supported formats follow the configured adapter. Returns a persistent job ID promptly, never document text. Call openreading_get_import for actual progress and the completed artifact receipt. The job continues if this chat disconnects. Do not repeatedly start the same import. No hosted fallback.",
     "openreading_get_import": "Check a background import by its returned job_id. Reports observed stage and elapsed time, plus page_progress when measured. pages_assembled counts successful page assembly, not whole-import completion. No estimated percent complete. Optional wait_seconds (up to 20) waits for completion. If still running, continue checking when waiting for the requested result. Only succeeded carries an artifact receipt; then use retrieval tools. Host Stop does not cancel this job.",
@@ -136,6 +144,15 @@ async def _import(service: ArtifactService, path: str, progress=None):
     return result
 
 
+def _text(payload: dict, *, failed: bool) -> types.ServerResult:
+    return types.ServerResult(
+        types.CallToolResult(
+            content=[types.TextContent(type="text", text=json_bytes(payload).decode())],
+            isError=failed,
+        )
+    )
+
+
 def create_server(
     service: ArtifactService,
     *,
@@ -144,6 +161,7 @@ def create_server(
     document_response_bytes: int = 1_000_000,
     document_export_root: Path | None = None,
     execution: ImportExecution | None = None,
+    backends: Callable[[], dict] | None = None,
 ) -> Server:
     from openreading.mcp_server.delivery import validate_delivery_config
 
@@ -161,6 +179,11 @@ def create_server(
     server = Server("openreading", version=__version__, instructions=instructions)
 
     descriptions = dict(DESCRIPTIONS)
+    # The readiness reporter needs the adapter registry, which the client-only wheel omits, so
+    # only a launcher that ships the engine supplies one. Without it the tool does not exist.
+    inputs = dict(INPUTS)
+    if backends is not None:
+        inputs["openreading_backends"] = BACKENDS_INPUT
     if service.config.docling is not None:
         limits = service.config.limits
         configured = [
@@ -247,15 +270,15 @@ def create_server(
                     and name in {"openreading_import", "openreading_start_import"},
                 ),
             )
-            for name, schema in INPUTS.items()
+            for name, schema in inputs.items()
         ]
 
     async def call_tool(request: types.CallToolRequest) -> types.ServerResult:
         name, arguments = request.params.name, request.params.arguments or {}
-        if name not in INPUTS:
+        if name not in inputs:
             raise McpError(types.ErrorData(code=-32601, message="Unknown document tool."))
         try:
-            jsonschema.Draft202012Validator(INPUTS[name]).validate(arguments)
+            jsonschema.Draft202012Validator(inputs[name]).validate(arguments)
         except jsonschema.ValidationError:
             raise McpError(
                 types.ErrorData(
@@ -279,6 +302,9 @@ def create_server(
                     "openreading_list_imports": jobs.list,
                 }[name]
                 result = await run_sync(partial(operation, **arguments))
+            elif name == "openreading_backends":
+                assert backends is not None
+                return _text(await run_sync(backends), failed=False)
             elif name == "openreading_select_document":
                 result = await selection.select(**arguments)
             elif (
@@ -364,12 +390,7 @@ def create_server(
             payload, failed = error.envelope().wire(), True
         except Exception:
             payload, failed = ArtifactError("parse_failed").envelope().wire(), True
-        return types.ServerResult(
-            types.CallToolResult(
-                content=[types.TextContent(type="text", text=json_bytes(payload).decode())],
-                isError=failed,
-            )
-        )
+        return _text(payload, failed=failed)
 
     server.request_handlers[types.CallToolRequest] = call_tool
     return server
