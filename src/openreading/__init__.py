@@ -70,9 +70,10 @@ actually hold:
 
     echo 'REDUCTO_API_KEY=sk_...' >> .env
 
-Keys are read from the environment per call, held only in memory, never stored. Credentials
-never travel on the command line: no verb takes a key flag, environment / `.env` only, so a key
-can never land in shell history or a process listing. The CLI auto-loads `./.env` (`--env-file`
+Keys are read per call and held only in memory. Credentials never travel on the command line.
+No verb takes a key flag, so a key can never land in shell history or a process listing. The
+one place OpenReading saves a key is your OS keychain, when you run `openreading keys set SLUG`,
+and the CLI then finds it from every directory. The CLI auto-loads `./.env` (`--env-file`
 to point elsewhere); the Python API loads a file ONLY when you pass `env_file=` to `run()` /
 `run_batch()`. With it unset nothing is read, exported variables alone apply. A loaded file never
 overrides an already-exported variable (`openreading.credentials.load_dotenv`). A venv synced
@@ -100,6 +101,7 @@ Parse one document. `source` is a path, an http(s) URL, or raw bytes (NOT a requ
     resp = openreading.run("scan.png", backend="tesseract",
                            pages={"ranges": [{"start": 1, "end": 2}]})
     # CLI: openreading parse doc.pdf --backend pymupdf     (URL sources work; --pages 1 2)
+    resp = openreading.run("doc.pdf", backend="reducto", keychain=True)  # key from keychain
 
 Extract typed fields (schema-driven). A directly-named backend that cannot do it (pymupdf,
 tesseract, docling) RAISES `UnsupportedFeatureError` (CLI exit 3, HTTP 422) rather than silently

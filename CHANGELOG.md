@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased keys in the OS keychain
+
+- Save backend keys once with `openreading keys set SLUG`, so every folder finds them through the OS keychain.
+  `keys list`, `keys unset` and `keys import` manage them, and `openreading backends` gains a SOURCE column once a key comes from the keychain.
+  The keychain is read after the environment and `.env`, never enters `os.environ`, and holds declared secrets only.
+- `openreading serve --keychain` and `openreading.run(..., keychain=True)` opt in. `OPENREADING_KEYCHAIN=off` turns it off for one process.
+- Add the `[setup]` extra (`keyring`, `questionary`, `rich`), included in `[all]`.
+
 ## Unreleased security hardening
 
 - Validate Azure model identifiers before constructing authenticated vendor requests, preserving valid custom model identifiers.

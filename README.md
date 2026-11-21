@@ -405,6 +405,14 @@ To fix it, append the one key you hold to a fresh file with `echo 'REDUCTO_API_K
 `uv run openreading backends` then shows `reducto … yes`. From then on every Reducto call is
 billed to your account.
 
+To use the key from every folder instead, save it once in your OS keychain with hidden input.
+This needs the `[setup]` extra, which `make sync` installs. `uv run openreading help keys` covers
+the order: your shell and `.env` still win over a saved key.
+
+```bash
+uv run openreading keys set reducto
+```
+
 Never run `cp .env.example .env`. That file ships `DOCLING_SERVE_URL` and `QWEN_VL_ENDPOINT` with
 values rather than blanks. A copy therefore marks `docling` and `qwen-vl` configured on a machine
 where neither is running. What it costs you is a different data path rather than extra

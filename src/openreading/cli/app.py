@@ -10,10 +10,13 @@ and prints the one response schema.
 
 Credentials never travel on the CLI: they are read from the environment by the broker
 (OPENREADING_<SLUG>_<KEY> or the service-native var, e.g. REDUCTO_API_KEY). A `.env` in the
-working directory is loaded automatically (never overriding an already-set var).
+working directory is loaded automatically (never overriding an already-set var). Every verb but
+`serve` and `mcp` then reads the OS keychain last (`credentials.use_keychain`); `serve` reads it
+only with `--keychain`. The `keys` verbs live in `openreading.cli.keys`.
 
-The user-facing reference (every subcommand, flags, exit codes 0-6 and 143) is the `openreading.cli`
-package docstring; this module holds the `cmd_*` handlers, `build_parser`, and `main`.
+The user-facing reference (every subcommand, flags, exit codes 0-6, 130 and 143) is the
+`openreading.cli` package docstring; this module holds the `cmd_*` handlers, `build_parser`, and
+`main`.
 
 Environment this module reads itself
 ------------------------------------
@@ -64,8 +67,9 @@ from openreading.batch.sources import (
     is_url,
     looks_batch,
 )
+from openreading.cli import keys as keys_cli
 from openreading.cli.help import cmd_help
-from openreading.credentials import EnvCredentialBroker, load_dotenv
+from openreading.credentials import EnvCredentialBroker, load_dotenv, use_keychain
 from openreading.ledger.header import HeaderMismatch
 from openreading.liveness import check_liveness, probe_kind
 from openreading.readiness import (
@@ -659,11 +663,18 @@ def cmd_backends(args) -> int:
         return 3
 
     if not requested:
-        print(f"{'BACKEND':<30} {'TYPE':<18} {'CONFIGURED':<11} MISSING")
+        # SOURCE appears only once a key resolves from the keychain. With nothing saved, the
+        # table stays byte-identical to what scripts already parse (law PS1 in
+        # `openreading.credentials`), and the column sits before MISSING so `$3` stays CONFIGURED.
+        sources = {s: _row_sources(broker, adapters[s].descriptor) for s in slugs}
+        show_source = any("keychain" in v for v in sources.values())
+        source_head = f"{'SOURCE':<10} " if show_source else ""
+        print(f"{'BACKEND':<30} {'TYPE':<18} {'CONFIGURED':<11} {source_head}MISSING")
         for r in rows:
             miss = missing_reason(r)
+            source = f"{','.join(sources[r.slug]) or '-':<10} " if show_source else ""
             print(
-                f"{r.slug:<30} {r.type:<18} {('yes' if r.ready else 'no'):<11} "
+                f"{r.slug:<30} {r.type:<18} {('yes' if r.ready else 'no'):<11} {source}"
                 f"{', '.join(miss) or '-'}"
             )
         return 0
@@ -681,6 +692,13 @@ def cmd_backends(args) -> int:
             f"{('yes' if report.measured else 'no'):<9} {latency:<9} {report.detail}"
         )
     return 0
+
+
+def _row_sources(broker: EnvCredentialBroker, descriptor) -> list[str]:
+    """Where a backend's resolved secrets come from (`env`, `.env`, `keychain`), deduplicated in
+    descriptor order. Empty when no secret resolves."""
+    found = [src for _, src in broker.secret_sources(descriptor) if src != "missing"]
+    return list(dict.fromkeys(found))
 
 
 def _check_targets(raw: str | None, adapters: dict) -> list[str] | None:
@@ -2054,6 +2072,7 @@ Examples:
   openreading serve --port 0         # the kernel picks, the line names it
   openreading serve --host 0.0.0.0   # reachable by others, so read below
   openreading serve --cors-origin http://localhost:3000  # one browser origin
+  openreading serve --keychain       # also read keys saved with keys set
 
 Authentication is OFF by default. With no OPENREADING_API_KEYS set, anyone who
 reaches this socket spends your vendor credits, which is why the default bind
@@ -2484,6 +2503,8 @@ More: openreading help leaderboard, openreading help datasets""",
 # argparse renders the description before the subcommand list and the epilog after it. The
 # quickstart goes in the description on purpose: a first-time reader must reach something they
 # can paste inside the first screen, and a thirteen-verb listing pushes an epilog past the fold.
+EPILOGS.update(keys_cli.EPILOGS)
+
 TOP_DESCRIPTION = """\
 One JSON shape from every document parser, so switching or comparing parsers
 never changes your code.
@@ -2500,6 +2521,7 @@ QUICKSTART. No key or account. Install dependencies first (see the README).
 TOP_EPILOG = """\
 I WANT TO ...                          RUN
   see what works here, with no keys    openreading backends
+  save a key once, for every folder    openreading keys set SLUG
   read one document                    openreading parse FILE --backend SLUG
   understand the response JSON         openreading help response
   read a folder, a glob, or a list     openreading parse DIR/ --backend SLUG
@@ -2824,7 +2846,15 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument(
         "--cors-origin", action="append", default=None, help="allowed CORS origin (repeatable)"
     )
+    serve.add_argument(
+        "--keychain",
+        action="store_true",
+        help="also read backend keys saved with `openreading keys set`. Off by default, "
+        "because a server has no keychain and waiting for one can hang its startup",
+    )
     serve.set_defaults(func=cmd_serve)
+
+    keys_cli.add_parser(sub, common)
 
     # `openreading strategy <show|list|normalize|validate|plan>` inspects the openreading.yaml
     # orchestration config. The verbs that work on a run instead sit at the top level: `explain`
@@ -3488,5 +3518,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.func is cmd_mcp:
         return cmd_mcp(args)
     load_dotenv(getattr(args, "env_file", None))  # ./.env or --env-file; never overrides set env
-    with _terminate_as_interrupt(enabled=args.func is not cmd_serve):
-        return args.func(args)
+    # Every verb reads the keychain after the environment and .env, except `serve`, which waits
+    # for `--keychain` (`mcp` returned above and never reads it). The opt-in ends with the
+    # command, so a caller that runs `main` twice in one process starts clean each time.
+    previous = use_keychain(args.func is not cmd_serve or bool(getattr(args, "keychain", False)))
+    try:
+        with _terminate_as_interrupt(enabled=args.func is not cmd_serve):
+            return args.func(args)
+    finally:
+        use_keychain(previous)
