@@ -6,7 +6,7 @@ one document. Neither covers the cell this module fills
 
 `run_leaderboard` runs the SAME dataset (the evals.dataset case.json shape) across N named,
 registered backends through the UNCHANGED `evals.runner.run_dataset`/`run_case` path — same
-per-case execution path, same five-dimension scorer, and no second scoring path (AC-1)
+per-case execution path, same six-dimension scorer, and no second scoring path (AC-1)
 — and ranks backends by measured mean score on that one dataset. Everything below is aggregation
 over `DatasetReport`s `run_dataset` already produces; nothing here re-implements execution or scoring.
 

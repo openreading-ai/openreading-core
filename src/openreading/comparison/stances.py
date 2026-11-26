@@ -127,7 +127,7 @@ def baseline_section(subjects: list[Subject], baseline_label: str) -> dict[str, 
 def truth_section(subjects: list[Subject], truth: dict[str, Any]) -> dict[str, Any]:
     """Per-subject evals score against the `expected` dict — precision/recall/F1, text similarity,
     table grid — laid out side by side (L5: the evals scorer verbatim, no second system). When
-    `truth` names none of the scorer's five dimensions (most simply `{}`), `score()` returns an
+    `truth` names none of the scorer's six dimensions (most simply `{}`), `score()` returns an
     honest `overall: None` for every subject rather than a false-perfect `1.0` — surfaced here
     unchanged, since this section is a pass-through of the scorer's own dict (BL-79)."""
     return {

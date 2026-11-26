@@ -442,6 +442,8 @@ is required (else exit 2).
     openreading parse https://example.com/loan.pdf --backend reducto
     openreading parse invoice.pdf --backend anthropic-claude \
       --extract "totals and dates"
+    openreading parse statement.pdf --backend google-gemini \
+      --schema bank_statement.json
     openreading parse loan.pdf --strategy cheap_first
 
 Single-document flags:
@@ -467,6 +469,15 @@ Single-document flags:
                       backends. `--pages` and `--extract` take a variable
                       number of values, so name FILE before them or close the
                       flag list with `--`.
+  --schema FILE       a JSON Schema file naming the fields to extract; it fills
+                      `extraction_schema.json_schema`, and the values return
+                      under `typed_fields`. `--extract TEXT` adds instructions
+                      beside it. A batch sends the same schema with every
+                      document. A file that cannot be read, is not JSON, is not
+                      an object, or is not a valid JSON Schema exits 2 before
+                      any document is opened, so a typo never costs a hosted
+                      call. A backend that cannot extract refuses as
+                      `--extract` does (exit 3).
   --keep-candidates   retain completed parallel alternatives under
                       `orchestration.candidates[]` (what `compare --from`
                       reads). Off by default (payload bloat); no effect on a

@@ -182,6 +182,28 @@ def _read_json_or_fail(path: str) -> Any:
         ) from e
 
 
+def _read_extraction_schema(path: str) -> dict[str, Any]:
+    """Read the `--schema` file: a JSON object that is itself a valid JSON Schema.
+
+    The schema is checked here, before any document is opened, because a malformed one would
+    otherwise surface as a backend's own 400 after a billable upload. A schema that is valid but
+    uses keywords a backend does not support is still that backend's to refuse.
+    """
+    from jsonschema import exceptions, validators
+
+    schema = _read_json_or_fail(path)
+    if not isinstance(schema, dict):
+        raise _InputFileError(
+            f"{path} must hold a JSON object (a JSON Schema), not a {type(schema).__name__}"
+        )
+    try:
+        validators.validator_for(schema).check_schema(schema)
+    except exceptions.SchemaError as e:
+        reason = " ".join(e.message.split())
+        raise _InputFileError(f"{path} is not a valid JSON Schema: {reason}") from e
+    return schema
+
+
 def cmd_parse(args) -> int:
     """`openreading parse`: one document, or a batch when the sources look like one
     (`looks_batch`). Exit codes are in the `openreading.cli` docstring."""
@@ -206,10 +228,17 @@ def cmd_parse(args) -> int:
     overrides: dict[str, Any] = {}
     if args.pages:
         overrides["pages"] = {"ranges": [{"start": p, "end": p} for p in args.pages]}
+    extraction: dict[str, Any] = {}
+    if args.schema is not None:
+        try:
+            extraction["json_schema"] = _read_extraction_schema(args.schema)
+        except _InputFileError as e:
+            print(f"[parse] {e}", file=sys.stderr)
+            return 2
     if args.extract is not None:
-        overrides["extraction_schema"] = {
-            "instructions": args.extract or "extract key/value fields"
-        }
+        extraction["instructions"] = args.extract or "extract key/value fields"
+    if extraction:
+        overrides["extraction_schema"] = extraction
 
     run_kwargs: dict[str, Any] = {"operation": args.operation, "config": args.config, **overrides}
     if getattr(args, "keep_candidates", False):
@@ -2000,7 +2029,7 @@ Examples:
   openreading parse examples/ --backend pymupdf --jobs 4 --save-dir out/
   openreading parse 'scans/**/*.png' --backend tesseract     # a glob, quoted
   openreading parse examples/john_smith_1000_2026_01.pdf --backend pymupdf
-  openreading parse examples/ --no-strategy         # let the router choose
+  openreading parse doc.pdf --backend google-gemini --schema fields.json
   openreading parse doc.pdf --strategy fast > run.json   # follow a plan
 
 One file or URL prints one response. A folder, a glob, or two or more
@@ -2731,6 +2760,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="request schema-driven field extraction. A named backend that cannot do it "
         "refuses the run and exits 3 (unsupported_feature, nothing on stdout) rather than "
         "silently dropping the ask. Takes an optional value, so name FILE before it",
+    )
+    ask.add_argument(
+        "--schema",
+        default=None,
+        metavar="SCHEMA.json",
+        help="extract the fields this JSON Schema file describes. The response carries them "
+        "under typed_fields. Combine with --extract to add instructions. A file that is not a "
+        "valid JSON Schema exits 2 before any backend is called",
     )
     # The group title names the input FORM that switches modes, because a reader with one file
     # needs to know at a glance that this whole block is not about their run.

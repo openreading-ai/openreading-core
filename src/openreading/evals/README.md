@@ -31,12 +31,12 @@ response is the one JSON envelope every backend returns.
 Labeled datasets never land in this repo. The repo ships one synthetic case so the labeled path
 proves itself offline, and both walkthroughs below run with no key and no bill.
 
-One limit belongs up here rather than in a footnote, along with how to close it. Four of the five
-scorers in this repo ask whether the content you expected is present. They do not ask whether the
+One limit belongs up here rather than in a footnote, along with how to close it. Most scorers in
+this repo ask whether the content you expected is present. They do not ask whether the
 backend added anything you did not expect, so a response with an invented total scores 1.0 on
 them. That matters because four backends in the catalog write text rather than read it.
 
-The fifth closes it on your own documents. Add a `rules` key to a case and the publisher's own
+The rules scorer closes it on your own documents. Add a `rules` key to a case and the publisher's own
 rule engine scores it, including assertions like `absent` that fail on invented content. See
 [Assert what must NOT be there](#assert-what-must-not-be-there).
 
@@ -256,7 +256,7 @@ mean over zero scored cases prints as an em dash rather than a number. So a back
 never looks like a backend that ran and scored zero. Naming one backend alone is exit 2.
 
 **What a 1.000 does and does not tell you.** It says pymupdf produced everything this case asked
-for. It does not say pymupdf produced only that. Two of the five expected dimensions count how much
+for. It does not say pymupdf produced only that. Two of the six expected dimensions count how much
 of what you wrote down came back, and nothing else:
 
 | You write in `expected` | Scored as | Sees content the document does not contain? |
@@ -266,6 +266,7 @@ of what you wrote down came back, and nothing else:
 | `text` | `difflib` ratio against your full expected text | yes, extra text lowers it |
 | `markdown` | `difflib` ratio against your full expected markdown | yes |
 | `typed_fields` | precision, recall and F1, headline F1 | yes, an extra field lowers precision |
+| `typed_rows` | precision, recall and F1 over the rows of a repeated field, headline F1 | yes, an invented row lowers precision |
 
 Source: `src/openreading/evals/scorers.py` (`score`). Prove the gap on the shipped case. Doctor a
 good response by adding a total nobody wrote, a table row nobody typed, and four hundred junk
@@ -331,7 +332,8 @@ Source: `src/openreading/evals/sample/loan_page1/case.json`, whitespace compacte
 
 `builtin_sample` resolves to the generated sample PDF, so the committed case needs no binary. Your
 cases use `"input": {"path": "input.pdf"}` next to the file. `expected` may name `text`,
-`text_contains`, `markdown`, `typed_fields`, and `tables`, and only what it names is scored.
+`text_contains`, `markdown`, `typed_fields`, `typed_rows`, and `tables`, and only what it names
+is scored.
 
 #### 3. Write your own dataset
 
@@ -670,7 +672,7 @@ print(run_dataset(make_adapter("tesseract"), "mydata").summary())   # backend=te
 
 - `uv run python -m pydoc openreading.evals.dataset` documents the `case.json` shape and the four
   input forms.
-- `uv run python -m pydoc openreading.evals.scorers` describes the three scorers and the five
+- `uv run python -m pydoc openreading.evals.scorers` describes the scorers and the six
   dimensions.
 - `uv run python -m pydoc openreading.evals.leaderboard` states what the leaderboard never does.
 - `uv run openreading benchmark run --help` for every flag that changes a public run, and

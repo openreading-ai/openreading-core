@@ -74,6 +74,92 @@ def test_parse_extract_on_structural_backend_reports_unsupported(sample_pdf, cap
     assert "unsupported feature" in err and "custom_schema_extraction" in err
 
 
+_SCHEMA = {
+    "type": "object",
+    "properties": {"total": {"type": "number"}, "lines": {"type": "array"}},
+    "required": ["total"],
+}
+
+
+def _capture_run(monkeypatch, name: str = "run") -> dict:
+    """Replace api.run (or run_batch) with a spy that records its kwargs and stops the run."""
+    from openreading.cli import app as cli_app
+
+    seen: dict = {}
+
+    def spy(*args, **kwargs):
+        seen.update(kwargs)
+        raise RuntimeError("stopped by test")
+
+    monkeypatch.setattr(cli_app.api, name, spy)
+    return seen
+
+
+def test_parse_schema_file_reaches_the_request(sample_pdf, tmp_path, monkeypatch):
+    path = tmp_path / "schema.json"
+    path.write_text(json.dumps(_SCHEMA))
+    seen = _capture_run(monkeypatch)
+    main(["parse", sample_pdf, "--backend", "google-gemini", "--schema", str(path)])
+    assert seen["extraction_schema"] == {"json_schema": _SCHEMA}
+
+
+def test_parse_schema_combines_with_extract_instructions(sample_pdf, tmp_path, monkeypatch):
+    path = tmp_path / "schema.json"
+    path.write_text(json.dumps(_SCHEMA))
+    seen = _capture_run(monkeypatch)
+    main(
+        [
+            "parse",
+            sample_pdf,
+            "--backend",
+            "google-gemini",
+            "--schema",
+            str(path),
+            "--extract",
+            "dates are ISO 8601",
+        ]
+    )
+    assert seen["extraction_schema"] == {
+        "json_schema": _SCHEMA,
+        "instructions": "dates are ISO 8601",
+    }
+
+
+def test_parse_schema_applies_to_every_batch_item(sample_pdf, tmp_path, monkeypatch):
+    path = tmp_path / "schema.json"
+    path.write_text(json.dumps(_SCHEMA))
+    seen = _capture_run(monkeypatch, "run_batch")
+    main(["parse", sample_pdf, sample_pdf, "--backend", "google-gemini", "--schema", str(path)])
+    assert seen["extraction_schema"] == {"json_schema": _SCHEMA}
+
+
+def test_parse_schema_on_structural_backend_reports_unsupported(sample_pdf, tmp_path, capsys):
+    path = tmp_path / "schema.json"
+    path.write_text(json.dumps(_SCHEMA))
+    rc = main(["parse", sample_pdf, "--backend", "pymupdf", "--schema", str(path)])
+    assert rc == 3
+    assert "custom_schema_extraction" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("content", "needle"),
+    [
+        (None, "cannot read"),
+        ("{not json", "is not valid JSON"),
+        ("[1, 2]", "must hold a JSON object"),
+        (json.dumps({"type": "nonsense"}), "not a valid JSON Schema"),
+    ],
+)
+def test_parse_bad_schema_file_is_a_usage_error(sample_pdf, tmp_path, capsys, content, needle):
+    path = tmp_path / "schema.json"
+    if content is not None:
+        path.write_text(content)
+    rc = main(["parse", sample_pdf, "--backend", "google-gemini", "--schema", str(path)])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert needle in err and err.count("\n") == 1
+
+
 def _write_policy(directory, policy: dict, name: str = "openreading.yaml") -> str:
     """The one file a person writes, holding nothing but a policy block."""
     body = ", ".join(f"{k}: {json.dumps(v)}" for k, v in policy.items())
