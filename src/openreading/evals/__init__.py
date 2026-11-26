@@ -7,9 +7,9 @@ envelope.
 
 A dataset is a directory of ``<case>/case.json`` files, and ``openreading.evals.dataset``
 defines that layout. ``run_dataset`` drives one adapter over the directory. ``score`` measures
-the five dimensions a case may declare: text similarity, text-contains fraction, markdown
-similarity, typed-field precision, recall and F1, and table-cell accuracy
-(``openreading.evals.scorers``). ``run_leaderboard`` ranks several named backends on one
+the six dimensions a case may declare: text similarity, text-contains fraction, markdown
+similarity, typed-field precision, recall and F1, the same over the rows of repeated fields
+(``expected.typed_rows``), and table-cell accuracy (``openreading.evals.scorers``). ``run_leaderboard`` ranks several named backends on one
 dataset (``openreading.evals.leaderboard``). ``openreading.evals.benchmarks`` provides
 offline discovery and terms lanes for public corpora. ``openreading.evals.official``
 registers targets inside ParseBench and ExtractBench. Those publishers retain ownership
@@ -54,7 +54,7 @@ from openreading.evals.benchmarks import (
 from openreading.evals.dataset import EvalCase, load_dataset
 from openreading.evals.leaderboard import run_leaderboard
 from openreading.evals.runner import CaseResult, DatasetReport, run_case, run_dataset
-from openreading.evals.scorers import field_prf, score, table_grid, text_similarity
+from openreading.evals.scorers import field_prf, row_prf, score, table_grid, text_similarity
 from openreading.evals.targets import (
     BenchmarkTarget,
     execute_target,
@@ -67,6 +67,7 @@ __all__ = [
     "score",
     "text_similarity",
     "field_prf",
+    "row_prf",
     "table_grid",
     "EvalCase",
     "load_dataset",

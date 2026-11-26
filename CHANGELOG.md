@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased domain extraction
+
+- Add `parse --schema FILE`, which sends a JSON Schema file as `extraction_schema.json_schema`.
+  The CLI could previously send extraction instructions only. A malformed schema exits 2 before any backend runs.
+- Add the `row_prf` eval dimension for `expected.typed_rows`, scoring the rows of repeated typed fields.
+  Rows match regardless of order, and numbers compare as numbers. A field scored as rows no longer also counts against `field_prf`.
+- Compare object and list values structurally in `field_prf`, so key order no longer fails a correct object.
+  Scalar fields keep their existing string comparison.
+
 ## Unreleased keys in the OS keychain
 
 - Save backend keys once with `openreading keys set SLUG`, so every folder finds them through the OS keychain.
