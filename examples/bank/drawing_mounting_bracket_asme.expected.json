@@ -1,0 +1,26 @@
+{
+  "drawing_number": "49051-069",
+  "revision": "B",
+  "title": "MOUNTING BRACKET",
+  "material": "Ti-6Al-4V Grade 5",
+  "finish": "As Machined",
+  "general_tolerances": {
+    "linear": [
+      "X.X = ±0.03",
+      "X.XX = ±0.010",
+      "X.XXX = ±0.005"
+    ],
+    "angular": "±0.5°"
+  },
+  "units": "inch",
+  "projection": "third_angle",
+  "standard": "ASME Y14.5-2018",
+  "scale": "2:1",
+  "sheet_count": 1,
+  "notes": [
+    "1. FINISH: AS MACHINED.",
+    "2. BREAK ALL SHARP EDGES 0.010-0.020 X 45 DEG.",
+    "3. PART MARK WITH P/N AND REV PER MIL-STD-130.",
+    "4. REMOVE ALL BURRS."
+  ]
+}

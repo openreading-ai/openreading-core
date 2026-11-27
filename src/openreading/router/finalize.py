@@ -35,6 +35,7 @@ themselves and the conformance kit.
 
 from __future__ import annotations
 
+from openreading import schema_bank
 from openreading.derive.fields import (
     CHECK_WARNING_CODES,
     check_typed_fields,
@@ -94,6 +95,8 @@ def apply_schema_check(resp: NormalizedResponse, req: OpenReadingRequest) -> Nor
         return resp
     fill_field_types(schema, resp.typed_fields)
     check = check_typed_fields(schema, resp.typed_fields)
+    # A hash match is a fact core can verify. A request field naming the entry would be a claim.
+    check.schema_ref = schema_bank.ref_for_hash(check.schema_hash)
     resp.schema_check = check
     for code, message, field in check_warnings(schema, check):
         resp.add_warning(code, message, field)

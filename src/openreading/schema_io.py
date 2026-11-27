@@ -1,11 +1,20 @@
-"""Read an extraction schema file and check it before any document is opened.
+"""Read an extraction schema from a file or from the schema bank, and check it before any
+document is opened.
 
-`load_schema(path)` is the one reader behind `openreading parse --schema` and
+`load_schema(value)` is the one reader behind `openreading parse --schema` and
 `openreading.load_schema`. It returns the plain dict you pass as
-`extraction_schema={"json_schema": ...}`. Every failure raises `SchemaFileError`, a `ValueError`
-whose message names the file, so the CLI prints it and exits 2.
+`extraction_schema={"json_schema": ...}`. Every failure raises a `ValueError`, so the CLI prints
+it and exits 2. A bad file raises `SchemaFileError`, whose message names the file. An unknown
+bank name raises `openreading.schema_bank.UnknownSchemaError`, which lists the bank's names.
 
-The contract, in the order the checks run:
+The path rule (law SX7). A value is a file when it contains a path separator or ends in `.json`,
+`.yaml` or `.yml`, or when it is a `os.PathLike`. Anything else is a bank name, with an optional
+`@vN` pin, resolved by `openreading.schema_bank.resolve`. No filesystem lookup decides between
+the two, so `--schema rfq` returns the bank's `rfq` even where a local file named `rfq` exists,
+and `./rfq` reads that file. A bank entry keeps its `x-read-criticality` labels in the returned
+dict, because the request model and the check read them.
+
+The file contract, in the order the checks run:
 
 1. The parser follows the extension. `.yaml` and `.yml` use `yaml.safe_load`. Any other name,
    including none, is JSON.
@@ -23,8 +32,8 @@ keywords a backend does not support stays that backend's to refuse.
 Design decision: YAML is a file format only. Both formats feed one grammar and one hash, so the
 same schema in either file gives the same request and the same `schema_check.schema_hash`.
 
-Sibling modules: `openreading.derive.fields` owns the criticality codes and the hash, and
-`openreading.cli.app` maps `SchemaFileError` to exit 2.
+Sibling modules: `openreading.derive.fields` owns the criticality codes and the hash,
+`openreading.schema_bank` owns the names, and `openreading.cli.app` maps both errors to exit 2.
 """
 
 from __future__ import annotations
@@ -35,13 +44,37 @@ from pathlib import Path
 from typing import Any
 
 _YAML_SUFFIXES = {".yaml", ".yml"}
+_FILE_SUFFIXES = _YAML_SUFFIXES | {".json"}
 
 
 class SchemaFileError(ValueError):
     """A schema file that cannot be read, parsed or accepted as a JSON Schema."""
 
 
-def load_schema(path: str | os.PathLike[str]) -> dict[str, Any]:
+def load_schema(value: str | os.PathLike[str]) -> dict[str, Any]:
+    """Return the schema `value` names: a file by the path rule, else a bank entry.
+
+    Raises `SchemaFileError` for a bad file and `UnknownSchemaError` for an unknown bank name.
+    Both are `ValueError`."""
+    from openreading import schema_bank
+
+    if not isinstance(value, str) or _is_path(value):
+        return load_schema_file(value)
+    try:
+        return schema_bank.resolve(value).schema
+    except schema_bank.UnknownSchemaError as e:
+        hint = ""
+        if Path(value).suffix == "":
+            hint = f"; to read a file named {value}, write ./{value}"
+        raise schema_bank.UnknownSchemaError(value, e.known, hint) from e
+
+
+def _is_path(value: str) -> bool:
+    separators = {os.sep, os.altsep, "/"} - {None}
+    return any(s in value for s in separators) or Path(value).suffix.lower() in _FILE_SUFFIXES
+
+
+def load_schema_file(path: str | os.PathLike[str]) -> dict[str, Any]:
     """Return the parsed, checked JSON Schema held in the file at `path`.
 
     Raises `SchemaFileError` when the file cannot be read, is not valid JSON or YAML, is not an

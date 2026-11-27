@@ -457,7 +457,7 @@ is required (else exit 2).
     openreading parse invoice.pdf --backend anthropic-claude \
       --extract "totals and dates"
     openreading parse statement.pdf --backend google-gemini \
-      --schema bank_statement.json
+      --schema bank_statement
     openreading parse loan.pdf --strategy cheap_first
 
 Single-document flags:
@@ -483,20 +483,27 @@ Single-document flags:
                       backends. `--pages` and `--extract` take a variable
                       number of values, so name FILE before them or close the
                       flag list with `--`.
-  --schema FILE       a JSON Schema file naming the fields to extract; it fills
-                      `extraction_schema.json_schema`, and the values return
-                      under `typed_fields`. A `.yaml` or `.yml` file is read as
-                      YAML, any other name as JSON. `--extract TEXT` adds
-                      instructions beside it. A batch sends the same schema
-                      with every document. A file that cannot be read, does
-                      not parse, is not an object, is not a valid JSON Schema,
-                      holds an unquoted YAML date, or carries an unknown
-                      `x-read-criticality` label exits 2 before any document
-                      is opened, so a typo never costs a hosted call. Quote a
-                      date such as `default: "2024-01-01"`. A backend that
-                      cannot extract refuses as `--extract` does (exit 3). The
-                      response carries `schema_check` (read `help response`),
-                      and no backend receives an `x-read-*` keyword.
+  --schema NAME|FILE  the schema to extract, which fills
+                      `extraction_schema.json_schema`. The values return under
+                      `typed_fields`. NAME is a bank schema such as
+                      `bank_statement`, and `bank_statement@v1` pins a
+                      version (`openreading help schema`). FILE is a JSON
+                      Schema as JSON or YAML. A value with a path separator,
+                      or ending in `.json`, `.yaml` or `.yml`, is a file, so
+                      write `./myschema` for one with no extension. No lookup
+                      on disk decides, so a local file named `rfq` never hides
+                      the bank's `rfq`. `--extract TEXT` adds instructions
+                      beside it. A batch sends the same schema with every
+                      document. An unknown name, a file that cannot be read,
+                      does not parse, is not an object, is not a valid JSON
+                      Schema, holds an unquoted YAML date, or carries an
+                      unknown `x-read-criticality` label exits 2 before any
+                      document is opened, so a typo never costs a hosted call.
+                      Quote a date such as `default: "2024-01-01"`. A backend
+                      that cannot extract refuses as `--extract` does (exit
+                      3). The response carries `schema_check` (read `help
+                      response`), and no backend receives an `x-read-*`
+                      keyword.
   --keep-candidates   retain completed parallel alternatives under
                       `orchestration.candidates[]` (what `compare --from`
                       reads). Off by default (payload bloat); no effect on a
@@ -605,6 +612,78 @@ isolation is the point of a batch: one item's failure never stops the rest, so
 a missing credential becomes a failed item per document rather than a refusal
 of the run. The envelope names the cause on every item; the exit code only says
 how much survived.
+
+schema <list|show>
+------------------
+Start an extraction from a name instead of a blank file. The schema bank is
+the small set of extraction schemas that ship inside OpenReading. `schema
+list` prints each entry's name, its version, how many fields carry each
+criticality code, and what it is for. `schema show NAME` prints one as JSON,
+labels included, so you can send it as `json_schema` over HTTP or copy it into
+a file you edit.
+
+    openreading schema list
+    openreading schema show bank_statement > my_statement.json
+    openreading parse statement.pdf --backend anthropic-claude \
+      --schema bank_statement
+
+NAME means the latest version, and NAME@v1 pins version 1. A shipped version
+never changes, so a pinned name keeps meaning the same fields. `generic` has
+no labels, and every other entry labels the fields its reader would act on and
+gives a reason beside each label.
+
+`--schema` reads a value with a path separator, or ending in .json, .yaml or
+.yml, as a file. It reads anything else as a bank name. No lookup on disk
+decides, so `--schema rfq` is the bank's rfq even where a file named rfq sits
+in the folder. Write `./rfq` for that file. An unknown name exits 2 and lists
+the names. In Python, `openreading.load_schema` follows the same rule.
+
+To write your own schema, start from `schema show` or from a JSON Schema you
+already have. A schema is a JSON Schema object, written as JSON or YAML. The
+response returns each property you declare under `typed_fields`, and
+`schema_check` reports how the values match your schema. Add the keyword
+`x-read-criticality` to a property to say how much a wrong or missing value
+matters to you. Core reads the label and never sends it to a backend. The
+check reports and never acts: the status, the values and the backend chain
+stay as they were.
+
+    critical   A wrong or missing value breaks what you do next. A missing or
+               invalid one sets `critical_ok` to false and adds a warning.
+    expected   The default for a property with no label. It shows in
+               `schema_check.fields` and raises no warning.
+    optional   A missing value is normal, such as a field many documents
+               omit. It raises no warning.
+    ignore     No reading of it is right or wrong. An error under an ignored
+               column stays in `errors` and leaves its parent present.
+
+An annotated schema, saved as invoice.yaml. Quote a date such as
+`default: "2024-01-01"`, because YAML turns a bare one into a date object.
+
+    type: object
+    required: [invoice_number, total]
+    properties:
+      invoice_number:
+        type: string
+        x-read-criticality: critical  # critical: a wrong number pays a bill
+      total:
+        type: number
+        x-read-criticality: critical  # critical: a wrong total misstates debt
+      po_number:
+        type: string
+        x-read-criticality: optional  # optional: many invoices carry none
+      notes:
+        type: string
+        x-read-criticality: ignore    # ignore: free text, no right answer
+
+    openreading parse invoice.pdf --backend google-gemini \\
+      --schema ./invoice.yaml > out.json
+    jq -c '.schema_check | {schema_ref, valid, critical_ok}' out.json
+
+`schema_ref` is `bank:rfq@v1` when the schema you sent is exactly a bank entry
+and null for your own. `schema list --json` prints the entries as data
+without their schemas.
+
+Exits: 0 done. 2 an unknown name or version.
 
 resume RUN_ID
 -------------

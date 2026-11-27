@@ -1,0 +1,173 @@
+# clinical_trial_agreement.v1: Clinical trial agreement: parties, protocol, effective date, payment terms and tracked clauses with section numbers.
+$schema: https://json-schema.org/draft/2020-12/schema
+title: clinical_trial_agreement
+type: object
+required:
+- agreement_type
+- parties
+- protocol_number
+- effective_date
+- clauses
+properties:
+  agreement_type:
+    type: string
+    enum:
+    - CTA
+    - CDA
+    - BAA
+    - DUA
+    - MCTA
+    - work_order
+    - amendment
+    - other
+    x-read-criticality: critical  # critical: a wrong type files the agreement under the wrong review path
+  agreement_title:
+    type: string
+    x-read-criticality: expected  # expected: a wrong title is caught by the agreement type and the protocol number
+  parties:
+    type: array
+    x-read-criticality: critical  # critical: wrong parties or roles misstate who is bound
+    items:
+      type: object
+      required:
+      - name
+      - role
+      properties:
+        name:
+          type: string
+        role:
+          type: string
+          enum:
+          - sponsor
+          - cro
+          - institution
+          - investigator
+          - other
+  principal_investigator:
+    type: string
+    x-read-criticality: critical  # critical: a wrong investigator misattributes the study
+  protocol_number:
+    type: string
+    x-read-criticality: critical  # critical: a wrong protocol number links the agreement to the wrong study
+  protocol_title:
+    type: string
+    x-read-criticality: expected  # expected: the protocol number identifies the study, so a wrong title only misleads a reader
+  effective_date:
+    type: string
+    format: date
+    x-read-criticality: critical  # critical: a wrong effective date shifts every term and deadline
+  expiration_or_term:
+    type: string
+    description: Fixed end date or term rule as written
+    x-read-criticality: expected  # expected: reviewers check the term against the clauses, and a miss shows there
+  parent_agreement:
+    type: string
+    description: 'For amendments and work orders: the agreement this modifies'
+    x-read-criticality: critical  # critical: a missed parent leaves an amendment unlinked to the agreement it modifies
+  governing_law:
+    type: string
+    x-read-criticality: expected  # expected: reviewers read the clause itself before relying on the extracted value
+  enrollment_target:
+    type: integer
+    x-read-criticality: optional  # optional: many agreements state no enrollment target
+  payment_terms:
+    type: object
+    x-read-criticality: critical  # critical: wrong payment terms misstate what the site is owed and when
+    properties:
+      currency:
+        type: string
+      invoice_due_days:
+        type: integer
+        description: e.g. 30 for Net 30
+      payment_frequency:
+        type: string
+        description: e.g. quarterly, upon CRF completion
+      holdback_percent:
+        type: number
+      holdback_release:
+        type: string
+      startup_fee:
+        type: number
+      overhead_percent:
+        type: number
+        description: Indirect cost rate, if stated
+  budget_lines:
+    type: array
+    x-read-criticality: expected  # expected: reviewers reconcile the budget against the payment terms in full
+    items:
+      type: object
+      required:
+      - item
+      - amount
+      properties:
+        item:
+          type: string
+        visit:
+          type: string
+        amount:
+          type: number
+        basis:
+          type: string
+          description: per subject, per visit, one-time, invoiceable
+  clauses:
+    type: array
+    x-read-criticality: critical  # critical: a missed clause or section number hides what the agreement commits to
+    items:
+      type: object
+      required:
+      - type
+      - section
+      - text
+      properties:
+        type:
+          type: string
+          enum:
+          - indemnification
+          - subject_injury
+          - limitation_of_liability
+          - insurance
+          - confidentiality
+          - publication
+          - intellectual_property
+          - data_ownership
+          - data_protection_hipaa_gdpr
+          - termination
+          - termination_payment
+          - governing_law
+          - dispute_resolution
+          - assignment
+          - audit_and_inspection
+          - record_retention
+          - debarment
+          - anti_bribery
+          - survival
+          - other
+        section:
+          type: string
+          description: Section number as printed, e.g. 9.2
+        text:
+          type: string
+          description: Verbatim clause text. No paraphrase.
+        key_terms:
+          type: object
+          description: Clause-specific values, e.g. publication review_days, record_retention years, termination
+            notice_days
+  signatures:
+    type: array
+    x-read-criticality: expected  # expected: signature blocks are checked by sight, since a page image proves more than a name
+    items:
+      type: object
+      properties:
+        party:
+          type: string
+        signer_name:
+          type: string
+        signer_title:
+          type: string
+        date:
+          type:
+          - string
+          - 'null'
+          format: date
+        signed:
+          type: boolean

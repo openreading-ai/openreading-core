@@ -147,6 +147,7 @@ The table below tells you which guide answers which need and how long each takes
 | call it from Python: `run()`, `route()`, `compare()`, `run_batch()`, and one exception type per condition | reference only: `uv run python -m pydoc openreading.api` | look up as needed |
 | look up the pydantic models that mirror the schemas | reference only: `uv run python -m pydoc openreading.types` | look up as needed |
 | look up configuration discovery, `policy.backends`, and the `providers:` grammar | reference only: `uv run python -m pydoc openreading.config` | look up as needed |
+| start an extraction from a named schema, or look up what the bank ships | reference only: `uv run python -m pydoc openreading.schema_bank`, or `openreading help schema` | look up as needed |
 | gate your own adapter against the conformance kit | reference only: `uv run python -m pydoc openreading.testing` | look up as needed |
 
 ### Every guide, by file

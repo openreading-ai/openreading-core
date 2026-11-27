@@ -9,7 +9,7 @@
 - Responses move to `response.v0.4`, which adds an optional top-level `schema_check` beside `typed_fields`.
   It reports, field by field, how the returned values measure up against `extraction_schema.json_schema`, for every backend.
   Each field has a `path`, an `x-read-criticality` label (`critical`, `expected`, `optional` or `ignore`) and a status of `present`, `missing` or `invalid`.
-  `critical_ok`, `valid`, `extra`, up to 50 `errors`, `schema_hash` and `formats_unchecked` sit beside them. `schema_ref` is always null for now.
+  `critical_ok`, `valid`, `extra`, up to 50 `errors`, `schema_hash` and `formats_unchecked` sit beside them. `schema_ref` names the bank entry when the schema is exactly one, else null.
 - Add the warning codes `critical_field_missing` and `critical_field_invalid`, which name the path in `field`, and `intent_all_critical`.
   The check changes no status, no route and no value. Only `TypedField.type` is filled from the schema where the backend left it unset.
 - No backend receives an `x-read-*` keyword. Core strips them before `submit`, and the result cache keys on the stripped schema.
@@ -18,8 +18,19 @@
 - Core asserts the formats `date` and `date-time` itself, with the standard library. Any other `format` is listed in `formats_unchecked`.
 - `validate_response` and the client package read `response.v0.3` and `response.v0.4` by each response's own `schema_version`.
   An artifact retained under v0.3 stays readable, and an unknown version is refused. Upgrade a client before the server it reads from.
+- The schema bank, `openreading.schema_bank`: five named, versioned YAML schemas (`generic`, `bank_statement`, `rfq`, `drawing_title_block`, `clinical_trial_agreement`).
+  `--schema bank_statement` and `openreading.load_schema("bank_statement")` send one, and `bank_statement@v1` pins a version.
+  `resolve(name)` reads only package data, so an agent or request body can never make it open a file.
+  Each domain schema gives a reason beside every `x-read-criticality` label, and `generic` has none.
+- `openreading schema list`, `schema list --json` and `schema show NAME`, with a new `openreading help schema` chapter on writing a schema.
+- `schema_check.schema_ref` reads `bank:NAME@vN` when the schema sent is an exact copy of a bank entry.
+- The `nuextract` backend translates a JSON Schema into its own template and passes a native template through unchanged.
+- Three synthetic example documents in `examples/bank/`, one for each domain schema, with their expected records.
 
 ### Changed
+
+- An extensionless `--schema` value, such as `myschema`, is now a bank name and no longer a file. Write `./myschema` to read a file.
+  A value with a path separator or ending in `.json`, `.yaml` or `.yml` still reads a file. An unknown name exits 2 and lists the bank's names.
 
 - `openai_compatible` keeps a reply that parses as a JSON object but misses the schema. It returns the fields with status `succeeded`,
   and `schema_check` reports the mismatch. Before, it returned `partial` with `backend_validation` and dropped every field.

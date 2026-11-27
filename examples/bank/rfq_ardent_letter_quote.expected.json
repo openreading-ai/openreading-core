@@ -1,0 +1,55 @@
+{
+  "rfq_number": "RFQ-62288",
+  "rfq_revision": "1",
+  "issue_date": "2025-05-23",
+  "response_due": "2025-06-11T12:00:00Z",
+  "buyer_organization": "Ardent Medical Devices Corp",
+  "buyer_contact": {
+    "name": "Marcus Hale",
+    "email": "marcus.hale@example.com",
+    "phone": "555-761-7972"
+  },
+  "currency": "USD",
+  "incoterms": "FCA Seller's Facility",
+  "delivery_location": "Ardent Medical Devices Corp, Boise, ID 83702",
+  "payment_terms": "2% 10, Net 30",
+  "quote_validity_days": 30,
+  "required_certifications": [
+    "AS9100 Rev D",
+    "PPAP Level 3"
+  ],
+  "line_items": [
+    {
+      "line": "1",
+      "part_number": "55335-053",
+      "revision": "C",
+      "description": "Actuator Lever",
+      "material": "17-4 PH Stainless, H900",
+      "finish": "Electropolish per ASTM B912",
+      "quantities": [
+        5,
+        250,
+        1000,
+        2500
+      ],
+      "unit_of_measure": "PC",
+      "need_date": "2025-08-03"
+    },
+    {
+      "line": "2",
+      "part_number": "69669-025",
+      "revision": "-",
+      "description": "Drive Shaft",
+      "material": "6061-T6 Aluminum",
+      "finish": "Bead Blast + Clear Anodize",
+      "quantities": [
+        1,
+        100,
+        500
+      ],
+      "unit_of_measure": "EA",
+      "need_date": "2025-08-21"
+    }
+  ],
+  "special_instructions": "Supplier to note any exceptions to drawing tolerances in the quote."
+}

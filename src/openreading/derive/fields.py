@@ -38,7 +38,8 @@ network request is made.
   removes them.
 - ``schema_hash`` is ``sha256:`` plus the digest of the canonical JSON of the ORIGINAL schema,
   annotations included, so changing a label changes the hash.
-- ``schema_ref`` names a bank entry the schema is. It is always ``null`` today.
+- ``schema_ref`` names a bank entry the schema is. This module leaves it ``null``, and
+  ``openreading.router.finalize`` fills it by matching ``schema_hash`` against the bank.
 - ``formats_unchecked`` lists the ``format`` names in the schema that core does not assert.
 
 Format assertion

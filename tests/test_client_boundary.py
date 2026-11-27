@@ -14,6 +14,7 @@ class NoEngine(importlib.abc.MetaPathFinder):
             "openreading.adapters", "openreading.api", "openreading.router",
             "openreading.server", "openreading.strategies", "openreading.derive",
             "openreading.artifacts.worker", "openreading.artifacts.service",
+            "openreading.schema_bank",
             "pypdf", "puremagic", "yaml",
         )
         if any(fullname == name or fullname.startswith(name + ".") for name in forbidden):

@@ -1,0 +1,51 @@
+# generic.v1: General-purpose schema: the document's own header facts, parties, one total and its printed key/value pairs.
+$schema: https://json-schema.org/draft/2020-12/schema
+title: generic
+type: object
+properties:
+  document_type:
+    type: string
+    description: The model's own reading of what the document is, in a few words. It is not a classification from a fixed list.
+  title:
+    type: string
+    description: The title or heading printed on the document.
+  document_date:
+    type: string
+    format: date
+    description: The main date the document carries, as an ISO 8601 date.
+  issuer:
+    type: string
+    description: The person or organization that issued or sent the document.
+  recipient:
+    type: string
+    description: The person or organization the document is addressed to.
+  parties:
+    type: array
+    description: Every person or organization the document names, with the role it gives them.
+    items:
+      type: object
+      properties:
+        name:
+          type: string
+          description: The party's name as printed.
+        role:
+          type: string
+          description: The role the document gives the party, in the document's own words.
+  total_amount:
+    type: number
+    description: The single headline amount, such as a total due or an ending balance. Omit when none stands out.
+  currency:
+    type: string
+    description: ISO 4217 code of the amount, when the document states or clearly implies one.
+  key_values:
+    type: array
+    description: Other labeled facts printed on the document, as label and value pairs.
+    items:
+      type: object
+      properties:
+        key:
+          type: string
+          description: The label as printed.
+        value:
+          type: string
+          description: The value as printed.

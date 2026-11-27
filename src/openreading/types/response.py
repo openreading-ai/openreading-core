@@ -153,7 +153,7 @@ class SchemaCheck(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_hash: str
-    # Null for a schema you supplied. A later release names a shipped schema here.
+    # `bank:NAME@vN` when the schema is exactly a bank entry, else null for a schema you supplied.
     schema_ref: str | None = None
     valid: bool
     critical_ok: bool

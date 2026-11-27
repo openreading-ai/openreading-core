@@ -117,6 +117,8 @@ Only an optional-but-unavailable channel is a returned envelope + `warnings[]` e
     resp = openreading.run("invoice.pdf", backend="google-gemini",
                            extraction_schema={"json_schema": schema})
     # CLI: openreading parse invoice.pdf --backend google-gemini --schema fields.yaml
+    # A bank name loads a schema that ships with core (`openreading schema list`):
+    schema = openreading.load_schema("bank_statement")   # UnknownSchemaError on an unknown name
 
 Batch a folder -> one JSON. Batch is decided by input FORM: a directory / glob / >=2 args is a
 batch, a single file is single-doc. A file the backend cannot take is a `failed` item carrying that

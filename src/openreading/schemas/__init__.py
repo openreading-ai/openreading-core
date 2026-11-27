@@ -174,7 +174,8 @@ readers the field paths, optional-value rules, and distinctions between outer re
   string preserved as-is), ``citations[]`` (``page`` + ``bbox`` + ``text``).
 - ``schema_check`` (v0.4): how ``typed_fields`` measure up against the request's
   ``extraction_schema.json_schema``, present whenever the request carried one and a response
-  came back. It holds ``schema_hash``, ``schema_ref`` (null for a schema you supplied),
+  came back. It holds ``schema_hash``, ``schema_ref`` (a bank name such as
+  ``bank:rfq@v1`` when the schema is exactly a bank entry, else null),
   ``valid``, ``critical_ok``, ``fields[]`` (``path``, ``criticality``, ``status``), ``extra``,
   up to 50 ``errors[]`` and ``formats_unchecked``. ``openreading.derive.fields`` defines every
   rule, and ``openreading.router.finalize`` attaches it. The check reports and never acts.
@@ -501,7 +502,8 @@ Schema version history (oldest first)
   as refusing a name that shadows a built-in backend id.
 - Schema check: response v0.4 (additive over v0.3). It adds the optional top-level
   ``schema_check`` object and the three schema-check warning codes. ``schema_check.schema_ref``
-  is a nullable string from the first cut, so naming a shipped schema later needs no bump.
+  is a nullable string from the first cut, so naming a shipped schema needed no
+  bump. Core fills it from a hash match against ``openreading.schema_bank``.
   ``validate_response`` and the client package read v0.3 and v0.4 by the instance's own
   ``schema_version`` (``RESPONSE_SCHEMA_FILES``), so a saved v0.3 response stays valid.
 """

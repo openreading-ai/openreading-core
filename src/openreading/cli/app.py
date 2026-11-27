@@ -75,6 +75,7 @@ from openreading.batch.sources import (
     looks_batch,
 )
 from openreading.cli import keys as keys_cli
+from openreading.cli import schema as schema_cli
 from openreading.cli import setup as setup_cli
 from openreading.cli.help import cmd_help
 from openreading.credentials import EnvCredentialBroker, load_dotenv, use_keychain
@@ -183,16 +184,17 @@ def _read_json_or_fail(path: str) -> Any:
 
 
 def _read_extraction_schema(path: str) -> dict[str, Any]:
-    """Read the `--schema` file through `openreading.schema_io.load_schema`.
+    """Read `--schema` (a file or a bank name) through `openreading.schema_io.load_schema`.
 
-    A bad schema exits 2 before any document is opened, because a malformed one would otherwise
+    A bad schema or an unknown bank name exits 2 before any document is opened, because a malformed one would otherwise
     surface as a backend's own 400 after a billable upload.
     """
+    from openreading.schema_bank import UnknownSchemaError
     from openreading.schema_io import SchemaFileError, load_schema
 
     try:
         return load_schema(path)
-    except SchemaFileError as e:
+    except (SchemaFileError, UnknownSchemaError) as e:
         raise _InputFileError(str(e)) from e
 
 
@@ -2541,6 +2543,7 @@ More: openreading help leaderboard, openreading help datasets""",
 # quickstart goes in the description on purpose: a first-time reader must reach something they
 # can paste inside the first screen, and a thirteen-verb listing pushes an epilog past the fold.
 EPILOGS.update(keys_cli.EPILOGS)
+EPILOGS.update(schema_cli.EPILOGS)
 EPILOGS["setup"] = setup_cli.EPILOG
 
 TOP_DESCRIPTION = """\
@@ -2756,12 +2759,15 @@ def build_parser() -> argparse.ArgumentParser:
     ask.add_argument(
         "--schema",
         default=None,
-        metavar="SCHEMA.json|.yaml",
-        help="extract the fields this JSON Schema file describes, written as JSON or as YAML "
-        "(.yaml or .yml). The response carries them under typed_fields, and schema_check reports "
-        "how they match the schema. Combine with --extract to add instructions. A file that is "
-        "not a valid JSON Schema, holds an unquoted YAML date, or carries an unknown "
-        "x-read-criticality label exits 2 before any backend is called",
+        metavar="NAME|FILE",
+        help="extract the fields a schema describes. NAME is a bank schema such as "
+        "bank_statement, or bank_statement@v1 to pin a version (`openreading schema list`). "
+        "FILE is a JSON Schema in JSON or YAML, and a value with a path separator or ending in "
+        ".json, .yaml or .yml is a file, so write ./myschema for one with no extension. The "
+        "response carries the values under typed_fields, and schema_check reports how they match "
+        "the schema. Combine with --extract to add instructions. An unknown name, a file that is "
+        "not a valid JSON Schema, an unquoted YAML date, or an unknown x-read-criticality label "
+        "exits 2 before any backend is called",
     )
     # The group title names the input FORM that switches modes, because a reader with one file
     # needs to know at a glance that this whole block is not about their run.
@@ -2903,6 +2909,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.set_defaults(func=cmd_serve)
 
     keys_cli.add_parser(sub, common)
+    schema_cli.add_parser(sub, common)
     setup_cli.add_parser(sub, common)
 
     # `openreading strategy <show|list|normalize|validate|plan>` inspects the openreading.yaml

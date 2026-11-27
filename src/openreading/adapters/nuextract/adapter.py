@@ -11,9 +11,30 @@ markdown (`result` string). markdown is native; `text` is a fence-safe plain pro
 are bbox-less, so they live in one synthetic Page(1) with a `page_attribution_unavailable`
 warning (§4.3 container rule) and per-block geometry/confidence stay X (never fabricated).
 
-The template in `extraction_schema.json_schema` is passed VERBATIM as the NuExtract typed
-template — {"field": "verbatim-string"|"string"|"integer"|"number"|"date-time"|[enum...]|
-[[multi-enum...]]}, nestable — it is NuExtract's OWN format, not JSON Schema. Temperature is
+The template NuExtract reads is its OWN format, not JSON Schema: {"field": "verbatim-string"|
+"string"|"integer"|"number"|"date-time"|[enum...]|[[multi-enum...]]}, nestable, where a list of one
+template is an array of it. `extraction_schema.json_schema` may carry either one, and
+`is_json_schema` tells them apart: a value with top-level `type: object` and `properties` is JSON
+Schema, and anything else is a native template that passes through unchanged. Without the
+translation, a bank schema or the generic one would reach the platform as a malformed template.
+`json_schema_to_template` translates a JSON Schema with these rules:
+  - `object` with `properties` becomes a nested template, in property order. An object with no
+    properties becomes "string".
+  - `string` becomes "string", `number` "number" and `integer` "integer". `format: date-time`
+    becomes "date-time". `format: date` becomes "string", because the grammar has no date-only
+    type and a date-time value would fail the date check.
+  - `boolean` becomes the enum ["true", "false"], because the grammar has no boolean. The reply
+    is text, and the shared check reports it as invalid against a boolean schema.
+  - A string `enum` becomes the enum list. An array of a string `enum` becomes the multi-enum
+    [[...]]. An array of objects becomes a list of the object template, and an array of a scalar
+    becomes a list of it. An array with no `items` becomes ["string"].
+  - A type list such as ["string", "null"] uses its first non-null type. `$ref`, `anyOf`, `oneOf`
+    and `allOf` become "string", because the translation does not resolve them. Keywords the
+    grammar cannot carry (`required`, `description`, `x-read-*`) are dropped, and the shared check
+    still reads the original schema, so a field the platform ignores reports as missing.
+A native template reports `fields: []` from the shared check, because the check reads `json_schema`
+as JSON Schema.
+Temperature is
 pinned to 0 (the platform's project default 0.6 degrades extraction; NuMind recommends ~0).
 Token usage (inputTokens/outputTokens/totalTokens) is reported per job and forwarded verbatim.
 No rate is applied to it: core carries no prices at all.
@@ -111,6 +132,56 @@ _MIME_BY_EXT = {
 
 def _part_mime(filename: str) -> str:
     return _MIME_BY_EXT.get(filename.rsplit(".", 1)[-1].lower(), "application/octet-stream")
+
+
+def is_json_schema(value: Any) -> bool:
+    """True for a JSON Schema object (`type: object` plus `properties`), else a native template."""
+    return (
+        isinstance(value, dict)
+        and value.get("type") == "object"
+        and isinstance(value.get("properties"), dict)
+    )
+
+
+def _scalar_type(node: dict[str, Any]) -> str:
+    kind = node.get("type")
+    if isinstance(kind, list):
+        kind = next((k for k in kind if k != "null"), None)
+    if kind == "integer":
+        return "integer"
+    if kind == "number":
+        return "number"
+    if kind == "string" and node.get("format") == "date-time":
+        return "date-time"
+    return "string"
+
+
+def _template_for(node: Any) -> Any:
+    if not isinstance(node, dict) or any(k in node for k in ("$ref", "anyOf", "oneOf", "allOf")):
+        return "string"
+    kind = node.get("type")
+    if isinstance(kind, list):
+        kind = next((k for k in kind if k != "null"), None)
+    enum = node.get("enum")
+    if isinstance(enum, list) and enum and all(isinstance(v, str) for v in enum):
+        return list(enum)
+    if kind == "boolean":
+        return ["true", "false"]
+    if kind == "object":
+        props = node.get("properties")
+        if isinstance(props, dict) and props:
+            return {name: _template_for(sub) for name, sub in props.items()}
+        return "string"
+    if kind == "array":
+        items = node.get("items")
+        # An array of a string enum comes out as [[...]], NuExtract's multi-enum.
+        return [_template_for(items) if isinstance(items, dict) else "string"]
+    return _scalar_type(node)
+
+
+def json_schema_to_template(schema: dict[str, Any]) -> dict[str, Any]:
+    """Translate a JSON Schema object into a NuExtract template (rules in the module docstring)."""
+    return {name: _template_for(sub) for name, sub in schema["properties"].items()}
 
 
 class _HttpxNuExtractClient:  # pragma: no cover - real network path
@@ -332,6 +403,8 @@ class NuExtractAdapter(BackendAdapter):
         try:
             if op == "extract":
                 template = req.extraction_schema.json_schema if req.extraction_schema else None
+                if template is not None and is_json_schema(template):
+                    template = json_schema_to_template(template)
                 if not template:
                     raise TerminalError(
                         "NuExtract extract needs extraction_schema.json_schema "
