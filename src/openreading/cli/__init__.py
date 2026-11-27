@@ -485,16 +485,18 @@ Single-document flags:
                       flag list with `--`.
   --schema FILE       a JSON Schema file naming the fields to extract; it fills
                       `extraction_schema.json_schema`, and the values return
-                      under `typed_fields`. `--extract TEXT` adds instructions
-                      beside it. A batch sends the same schema with every
-                      document. A file that cannot be read, is not JSON, is not
-                      an object, is not a valid JSON Schema, or carries an
-                      unknown `x-read-criticality` label exits 2 before any
-                      document is opened, so a typo never costs a hosted
-                      call. A backend that cannot extract refuses as
-                      `--extract` does (exit 3). The response carries
-                      `schema_check` (read `help response`), and no backend
-                      receives an `x-read-*` keyword.
+                      under `typed_fields`. A `.yaml` or `.yml` file is read as
+                      YAML, any other name as JSON. `--extract TEXT` adds
+                      instructions beside it. A batch sends the same schema
+                      with every document. A file that cannot be read, does
+                      not parse, is not an object, is not a valid JSON Schema,
+                      holds an unquoted YAML date, or carries an unknown
+                      `x-read-criticality` label exits 2 before any document
+                      is opened, so a typo never costs a hosted call. Quote a
+                      date such as `default: "2024-01-01"`. A backend that
+                      cannot extract refuses as `--extract` does (exit 3). The
+                      response carries `schema_check` (read `help response`),
+                      and no backend receives an `x-read-*` keyword.
   --keep-candidates   retain completed parallel alternatives under
                       `orchestration.candidates[]` (what `compare --from`
                       reads). Off by default (payload bloat); no effect on a

@@ -22,6 +22,9 @@ An envelope is the schema-valid JSON object returned by a completed operation.
 - `route(source, **options)` returns a `RoutePlan` without executing a backend.
 - `resume_run(run_id, keychain=False)` returns a response and is exported as
   `openreading.resume`.
+- `load_schema(path)` is defined in `openreading.schema_io` and exported as
+  `openreading.load_schema`. It reads a JSON or YAML schema file and returns the checked dict
+  for `extraction_schema={"json_schema": ...}`. It raises `SchemaFileError`, a `ValueError`.
 - `build_request`, `run_request`, `prepare_named_backend`, and `materialize_document` support
   the CLI and server through the same lower-level seams.
 

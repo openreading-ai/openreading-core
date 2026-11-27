@@ -4,6 +4,8 @@
 
 ### Added
 
+- `parse --schema` accepts a `.yaml` or `.yml` file, and `openreading.load_schema(path)` returns the checked schema dict for Python.
+  A value JSON cannot carry, such as an unquoted date, exits 2 with its dotted path. The same schema in either format gives the same `schema_hash`.
 - Responses move to `response.v0.4`, which adds an optional top-level `schema_check` beside `typed_fields`.
   It reports, field by field, how the returned values measure up against `extraction_schema.json_schema`, for every backend.
   Each field has a `path`, an `x-read-criticality` label (`critical`, `expected`, `optional` or `ignore`) and a status of `present`, `missing` or `invalid`.

@@ -112,6 +112,12 @@ Only an optional-but-unavailable channel is a returned envelope + `warnings[]` e
     fields = resp.get("typed_fields")   # {name: {value, type?, confidence?, citations?}}
     # CLI: openreading parse invoice.pdf --backend reducto --extract "total, invoice date, vendor"
 
+    # A schema kept in a file, JSON or YAML, loads checked and ready for the same field:
+    schema = openreading.load_schema("fields.yaml")   # -> dict; ValueError on a bad file
+    resp = openreading.run("invoice.pdf", backend="google-gemini",
+                           extraction_schema={"json_schema": schema})
+    # CLI: openreading parse invoice.pdf --backend google-gemini --schema fields.yaml
+
 Batch a folder -> one JSON. Batch is decided by input FORM: a directory / glob / >=2 args is a
 batch, a single file is single-doc. A file the backend cannot take is a `failed` item carrying that
 backend's own reason, never a crash; a per-item failure never aborts the batch:
@@ -591,6 +597,7 @@ SCHEMA_VERSION = "0.1"
 
 __all__ = [
     "compare",
+    "load_schema",
     "resume",
     "route",
     "run",
@@ -614,6 +621,7 @@ _EXPORTS = {
     "run": ("openreading.api", "run"),
     "run_batch": ("openreading.api", "run_batch"),
     "compare": ("openreading.comparison", "compare"),
+    "load_schema": ("openreading.schema_io", "load_schema"),
     "MissingCredentialsError": ("openreading.types.errors", "MissingCredentialsError"),
     "PlanExhaustedError": ("openreading.types.errors", "PlanExhaustedError"),
     "RetryableError": ("openreading.types.errors", "RetryableError"),

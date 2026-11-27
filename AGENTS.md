@@ -180,6 +180,7 @@ src/openreading/
   mcp_server/  nine stdio tools for the fixed local document profile, plus a readiness tool
   server/      `openreading serve`                             (docstring: endpoints, status codes)
   api.py          `run` / `route` / `compare` / `resume`       (docstring: exports and return shapes)
+  schema_io.py    `load_schema`: JSON or YAML schema files      (docstring: checks, quoting rule)
   config.py       the one reader of `openreading.yaml`         (docstring: discovery, policy.backends,
                                                                 provider profiles, strategies)
   credentials.py  BYO-key broker                               (docstring: precedence, per-backend vars)

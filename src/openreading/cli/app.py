@@ -183,35 +183,17 @@ def _read_json_or_fail(path: str) -> Any:
 
 
 def _read_extraction_schema(path: str) -> dict[str, Any]:
-    """Read the `--schema` file: a JSON object that is itself a valid JSON Schema.
+    """Read the `--schema` file through `openreading.schema_io.load_schema`.
 
-    The schema is checked here, before any document is opened, because a malformed one would
-    otherwise surface as a backend's own 400 after a billable upload. A schema that is valid but
-    uses keywords a backend does not support is still that backend's to refuse.
+    A bad schema exits 2 before any document is opened, because a malformed one would otherwise
+    surface as a backend's own 400 after a billable upload.
     """
-    from jsonschema import exceptions, validators
+    from openreading.schema_io import SchemaFileError, load_schema
 
-    from openreading.derive.fields import CRITICALITY_CODES, unknown_criticality
-
-    schema = _read_json_or_fail(path)
-    if not isinstance(schema, dict):
-        raise _InputFileError(
-            f"{path} must hold a JSON object (a JSON Schema), not a {type(schema).__name__}"
-        )
     try:
-        validators.validator_for(schema).check_schema(schema)
-    except exceptions.SchemaError as e:
-        reason = " ".join(e.message.split())
-        raise _InputFileError(f"{path} is not a valid JSON Schema: {reason}") from e
-    # The request model refuses an unknown criticality label too. Checking here names the file
-    # and exits 2 before any document is opened.
-    bad = unknown_criticality(schema)
-    if bad:
-        raise _InputFileError(
-            f"{path} has unknown x-read-criticality {', '.join(bad)}; "
-            f"use one of {', '.join(CRITICALITY_CODES)}"
-        )
-    return schema
+        return load_schema(path)
+    except SchemaFileError as e:
+        raise _InputFileError(str(e)) from e
 
 
 def cmd_parse(args) -> int:
@@ -2774,11 +2756,12 @@ def build_parser() -> argparse.ArgumentParser:
     ask.add_argument(
         "--schema",
         default=None,
-        metavar="SCHEMA.json",
-        help="extract the fields this JSON Schema file describes. The response carries them "
-        "under typed_fields, and schema_check reports how they match the schema. Combine with "
-        "--extract to add instructions. A file that is not a valid JSON Schema, or that carries "
-        "an unknown x-read-criticality label, exits 2 before any backend is called",
+        metavar="SCHEMA.json|.yaml",
+        help="extract the fields this JSON Schema file describes, written as JSON or as YAML "
+        "(.yaml or .yml). The response carries them under typed_fields, and schema_check reports "
+        "how they match the schema. Combine with --extract to add instructions. A file that is "
+        "not a valid JSON Schema, holds an unquoted YAML date, or carries an unknown "
+        "x-read-criticality label exits 2 before any backend is called",
     )
     # The group title names the input FORM that switches modes, because a reader with one file
     # needs to know at a glance that this whole block is not about their run.
