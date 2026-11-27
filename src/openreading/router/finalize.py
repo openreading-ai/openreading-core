@@ -93,6 +93,12 @@ def apply_schema_check(resp: NormalizedResponse, req: OpenReadingRequest) -> Nor
     schema = es.json_schema if es is not None else None
     if schema is None:
         return resp
+    # A request that asked for fields and got none returns an empty map, never an absent one.
+    # The empty map is the honest answer, and the check below reports every field missing.
+    # Without it, a reply with no fields and no text breaks the response contract, which
+    # requires one channel, and the CLI and server refuse to emit it.
+    if resp.typed_fields is None:
+        resp.typed_fields = {}
     fill_field_types(schema, resp.typed_fields)
     check = check_typed_fields(schema, resp.typed_fields)
     # A hash match is a fact core can verify. A request field naming the entry would be a claim.

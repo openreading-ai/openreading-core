@@ -39,9 +39,9 @@ carries generated text and nothing else, so this adapter fills only that.
 Extraction keeps any reply that parses as a JSON object, with status SUCCEEDED, even when it
 misses the requested schema. The router's shared check (`openreading.router.finalize`) then
 reports each mismatch in `schema_check`, the same way for every backend. A reply that is not a
-JSON object returns PARTIAL without typed fields and sets `status.error.code` to
-`backend_validation`, because there are no fields to return. An explicit model refusal becomes a `TerminalError`
-with code `model_refused`. A 401 or 403 maps to `auth_rejected`, and `openreading.readiness`
+JSON object returns PARTIAL and sets `status.error.code` to `backend_validation`, because there
+are no fields to return. The shared check then gives it an empty `typed_fields` with every
+field missing. An explicit model refusal becomes a `TerminalError` with code `model_refused`. A 401 or 403 maps to `auth_rejected`, and `openreading.readiness`
 names the profile's `key_env` in the hint.
 
 Descriptor

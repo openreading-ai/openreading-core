@@ -366,6 +366,28 @@ def test_extract_reply_that_is_not_json_is_partial():
     assert resp.typed_fields is None
 
 
+@respx.mock
+@pytest.mark.parametrize(("reply", "state"), [("{}", "succeeded"), ("sorry, no", "partial")])
+def test_a_reply_with_no_fields_still_yields_a_valid_checked_response(reply, state):
+    # A response must carry at least one channel. With no fields and no text, the check's
+    # empty typed_fields is the channel, and it reports every field missing.
+    from openreading import schemas
+    from openreading.router import finalize
+
+    respx.post(CHAT).mock(return_value=httpx.Response(200, json=_reply(reply)))
+    schema = {"type": "object", "properties": {"total": {"type": "number"}}}
+    req = _req(extraction_schema={"json_schema": schema})
+    adapter, ctx = OpenAICompatibleAdapter(KEYED), _ctx()
+    resp = finalize.finalize_response(adapter, finalize.submit(adapter, req, ctx), ctx, req)
+    out = resp.to_schema_dict()
+    schemas.validate_response(out)
+    assert out["status"]["state"] == state
+    assert out["typed_fields"] == {}
+    assert [(f["path"], f["status"]) for f in out["schema_check"]["fields"]] == [
+        ("total", "missing")
+    ]
+
+
 @pytest.mark.parametrize(
     ("schema", "reply", "valid"),
     [
@@ -400,7 +422,7 @@ def test_extraction_keeps_a_json_object_and_the_shared_check_reports_it(schema, 
     if reply:
         assert response.typed_fields["total"].value == reply["total"]
     else:
-        assert response.typed_fields is None
+        assert response.typed_fields == {}  # asked for fields, got none: an empty map
 
 
 # --- failures ---------------------------------------------------------------------------------

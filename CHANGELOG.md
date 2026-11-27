@@ -59,6 +59,8 @@
   and `schema_check` reports the mismatch. Before, it returned `partial` with `backend_validation` and dropped every field.
   A reply that is not a JSON object stays `partial` with `backend_validation`.
 - The evals runner and `calibrate` now fill `usage` the way every other path does, because they finalize through the same helper.
+- A response to a request with a schema always carries `typed_fields`, empty when the backend returned no fields.
+  Before, a model reply of `{}` or non-JSON produced a response with no channel at all, which broke the response contract and made `parse` exit 1 with a traceback.
 
 ## Unreleased domain extraction
 
