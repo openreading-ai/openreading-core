@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased criticality scoring
+
+### Added
+
+- `score(resp, expected, schema=...)` adds a top-level `criticality` block when the schema carries `x-read-criticality` labels.
+  It holds `weighted_prf`, `critical_pass`, `n_critical` and `weights_version`. `overall` and `dimensions` do not change.
+  The weights are `CRITICALITY_WEIGHTS_V1`: critical 1.0, expected 0.3, optional 0.1, ignore 0.0, echoed as `"v1"`.
+- The evals runner scores each case against its own `extraction_schema.json_schema`, and `CaseResult.criticality` carries the block.
+- `leaderboard --format json` emits `leaderboard-report.v0.2`. Each backend row gains the optional `weighted_f1`, `critical_pass_rate`,
+  `n_critical_scored` and `weights_version`. The table appends `weighted_f1=` and `critical_pass_rate=` after the dimensions, and `mean` stays unweighted.
+- `compare --truth` and `calibrate` pass no schema and report exactly what they did before.
+
 ## Unreleased schema check
 
 ### Added

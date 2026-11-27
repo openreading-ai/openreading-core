@@ -1226,6 +1226,11 @@ def _render_leaderboard_table(report: Any) -> str:
     ]
     for b in report.backends:
         dims = " ".join(f"{k}={v:.2f}" for k, v in b.dimensions.items())
+        # After the dimensions and outside `mean`, which stays the unweighted headline (SX5).
+        for key in ("weighted_f1", "critical_pass_rate"):
+            value = getattr(b, key)
+            if value is not None:
+                dims = f"{dims} {key}={value:.2f}".strip()
         nd = "  [non-deterministic: single sample]" if b.non_deterministic else ""
         # `scored` is the denominator `mean` rests on, and the schema marks n_scored required for
         # reading mean_score at all. Without it a backend that never scored a case and one that
@@ -1245,7 +1250,7 @@ def _render_leaderboard_table(report: Any) -> str:
         scores = ", ".join(
             f"{bid}={s:.2f}" if s is not None else f"{bid}=—" for bid, s in c.scores.items()
         )
-        # The report's `winner` breaks a tie alphabetically (leaderboard-report.v0.1.json), which
+        # The report's `winner` breaks a tie alphabetically (leaderboard-report.v0.2.json), which
         # is the right rule for a byte-stable JSON field and the wrong thing to print to a human:
         # naming one backend on a tie, or on a case every backend scored 0.00, invites a per-case
         # win tally that reads as a sweep when nothing was won. The JSON field is unchanged; the

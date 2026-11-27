@@ -159,6 +159,9 @@ _UNRELEASED = {
     "strategy-config.v0.5.json",
     # Leaderboard (BL-160) — brand-new family this milestone (not yet byte-frozen):
     "leaderboard-report.v0.1.json",
+    # Criticality scoring: per-backend weighted_f1, critical_pass_rate, n_critical_scored and
+    # weights_version (not yet byte-frozen):
+    "leaderboard-report.v0.2.json",
     # The removal set — batch intake dispatches every source, so `skip_reason`, the `skipped`
     # item state and `summary.skipped` all leave:
     "batch-result.v0.2.json",
@@ -220,6 +223,48 @@ def test_response_additivity_a_pre_v0_3_response_still_validates():
     for forbidden in ("confidence", "doc_type"):
         assert forbidden not in pre_v03["document"]
     assert "channel_provenance" not in pre_v03 and "schema_url" not in pre_v03
+
+
+# --------------------------------------------------------------- leaderboard-report v0.1 -> v0.2
+_LEADERBOARD_V01 = {
+    "schema_version": "0.1",
+    "dataset": {"path": "ds", "case_count": 1, "case_names": ["a"]},
+    "backends": [
+        {
+            "backend_id": "pymupdf",
+            "rank": 1,
+            "mean_score": 1.0,
+            "n_cases": 1,
+            "n_scored": 1,
+            "errors": 0,
+            "non_deterministic": False,
+            "dimensions": {"text_contains": 1.0},
+        }
+    ],
+    "cases": [{"name": "a", "winner": "pymupdf", "scores": {"pymupdf": 1.0}}],
+}
+
+
+def _leaderboard_schema(version: str) -> dict:
+    return json.loads((SCHEMA_DIR / f"leaderboard-report.{version}.json").read_text())
+
+
+def test_leaderboard_v0_1_still_validates_its_old_fixture():
+    _validate(_leaderboard_schema("v0.1"), _LEADERBOARD_V01)
+
+
+def test_leaderboard_v0_1_report_validates_against_v0_2_under_substitution():
+    """Additive: a v0.1 report carries no criticality field, and every field v0.2 adds is
+    optional."""
+    _validate(_leaderboard_schema("v0.2"), {**_LEADERBOARD_V01, "schema_version": "0.2"})
+
+
+def test_leaderboard_v0_1_refuses_the_v0_2_fields():
+    import jsonschema
+
+    row = {**_LEADERBOARD_V01["backends"][0], "weighted_f1": 0.5}
+    with pytest.raises(jsonschema.ValidationError):
+        _validate(_leaderboard_schema("v0.1"), {**_LEADERBOARD_V01, "backends": [row]})
 
 
 # --------------------------------------------------------------- request nested-strictness parity (M12)

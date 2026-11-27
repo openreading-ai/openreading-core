@@ -267,6 +267,7 @@ of what you wrote down came back, and nothing else:
 | `markdown` | `difflib` ratio against your full expected markdown | yes |
 | `typed_fields` | precision, recall and F1, headline F1 | yes, an extra field lowers precision |
 | `typed_rows` | precision, recall and F1 over the rows of a repeated field, headline F1 | yes, an invented row lowers precision |
+| `x-read-criticality` labels in `extraction_schema.json_schema` | a separate `criticality` block: `weighted_prf` (critical 1.0, expected 0.3, optional 0.1, ignore 0.0) and `critical_pass`. It stays outside `overall` | yes, an invented field or row lowers weighted precision |
 
 Source: `src/openreading/evals/scorers.py` (`score`). Prove the gap on the shipped case. Doctor a
 good response by adding a total nobody wrote, a table row nobody typed, and four hundred junk
@@ -310,10 +311,14 @@ a backend can produce them, because that dimension carries a real precision term
 top-ranked backends through `compare --format diffs` on the same documents. That view names the
 lines one side has and the other does not ([Compare](../comparison/README.md)).
 
-`--format json` prints the schema-valid `leaderboard-report.v0.1`. It carries a `schema_version` of
-`"0.1"` plus three parts: `dataset {path, case_count, case_names}`, `backends[] {backend_id, rank,
-mean_score, n_cases, n_scored, errors, non_deterministic, dimensions}`, and `cases[]
-{name, winner, scores}`. The JSON `winner` field is byte-stable and blunt. It names one backend on a
+`--format json` prints the schema-valid `leaderboard-report.v0.2`. It carries a `schema_version` of
+`"0.2"` plus three parts: `dataset {path, case_count, case_names}`, `backends[] {backend_id, rank,
+mean_score, n_cases, n_scored, errors, non_deterministic, dimensions, n_critical_scored}`, and
+`cases[] {name, winner, scores}`. When any case's schema carries `x-read-criticality` labels, a
+backend row also carries `weighted_f1`, `critical_pass_rate` and `weights_version`. The table
+prints the first two after the dimensions, and `mean` stays unweighted. `n_critical_scored`
+counts the cases that had a critical field in their gold record, which is the denominator of
+`critical_pass_rate`. The JSON `winner` field is byte-stable and blunt. It names one backend on a
 tie, breaking the tie alphabetically, and it names one on a case every backend scored zero. The
 human `per-case result` block distinguishes those, so tally wins from it and never from
 `cases[].winner`.
@@ -637,6 +642,10 @@ print(run_dataset(make_adapter("tesseract"), "mydata").summary())   # backend=te
 - Unscored is not zero. A case naming no recognized dimension scores `None` and leaves the mean, so
   a precise-looking number never reports a measurement that did not happen. See `scorers.score`
   and `DatasetReport.mean_overall`.
+- Weighted beside unweighted, always. The `criticality` block never enters `overall` or a
+  dimension mean, and with every weight at 1.0 it reproduces the unweighted metric bit for bit.
+  The failure it avoids is a weighted headline hiding an unweighted regression. See
+  `openreading.evals.scorers`.
 - A mean is reported, and a sample size is not judged. The harness accepts one case as readily as
   five hundred, warns at neither, and reports no spread or interval. Deciding that a gap is real
   rather than one document's opinion is your job, and step 4 is the order to do it in.
@@ -681,7 +690,7 @@ print(run_dataset(make_adapter("tesseract"), "mydata").summary())   # backend=te
 - `uv run python -m pydoc openreading.evals.subset` for how a corpus is cut down,
   `uv run python -m pydoc openreading.evals.preflight` for call-count estimates, and
   `uv run python -m pydoc openreading.evals.report` for how a finished run is read back.
-- `src/openreading/schemas/leaderboard-report.v0.1.json` is described in
+- `src/openreading/schemas/leaderboard-report.v0.2.json` is described in
   [JSON Schemas](../schemas/README.md), and `scripts/leaderboard_smoke.py` is the `make verify`
   smoke.
 

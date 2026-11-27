@@ -431,6 +431,7 @@ The labels below are milestone names, not released package versions: ``pyproject
 - Security review (M12): request v0.2.
 - Provider profiles: strategy-config v0.5.
 - Schema check: response v0.4.
+- Criticality scoring: leaderboard-report v0.2.
 
 Schema version history (oldest first)
 -------------------------------------
@@ -506,6 +507,10 @@ Schema version history (oldest first)
   bump. Core fills it from a hash match against ``openreading.schema_bank``.
   ``validate_response`` and the client package read v0.3 and v0.4 by the instance's own
   ``schema_version`` (``RESPONSE_SCHEMA_FILES``), so a saved v0.3 response stays valid.
+- Criticality scoring: leaderboard-report v0.2 (additive over v0.1). Each backend row gains the
+  optional ``weighted_f1``, ``critical_pass_rate``, ``n_critical_scored`` and
+  ``weights_version``. They come from the ``criticality`` block ``openreading.evals.scorers``
+  reports, and they never enter ``mean_score`` or ``dimensions``.
 """
 
 from __future__ import annotations
@@ -606,7 +611,9 @@ BATCH_RESULT_SCHEMA_FILE = "batch-result.v0.2.json"
 CORPUS_REPORT_SCHEMA_FILE = "corpus-report.v0.1.json"
 # BL-160 (Leaderboard): N registered backends ranked on ONE evals.dataset case.json corpus, via the
 # unchanged evals.runner.run_case path — a new family, not an edit to any existing schema.
-LEADERBOARD_REPORT_SCHEMA_FILE = "leaderboard-report.v0.1.json"
+# v0.2 (Criticality scoring): optional per-backend weighted_f1, critical_pass_rate,
+# n_critical_scored and weights_version. Additive, so every v0.1 report shape still validates.
+LEADERBOARD_REPORT_SCHEMA_FILE = "leaderboard-report.v0.2.json"
 # Pulse (internal/design/liveness.md): one backend's liveness answer, distinguishing an INFERRED
 # status (read from local config) from a MEASURED one (we contacted the backend). Also a new
 # family.

@@ -1118,8 +1118,13 @@ runtime settings.
 `--format table` (default) prints the dataset's own identity (path, case count,
 case names) above the ranking so a screenshot is never read as a universal
 verdict rather than "on these N documents"; `--format json` is the schema-valid
-`BenchmarkReport` (`leaderboard-report.v0.1.json` in `openreading.schemas`) a
+`BenchmarkReport` (`leaderboard-report.v0.2.json` in `openreading.schemas`) a
 script or CI job consumes.
+
+When a case's `extraction_schema.json_schema` carries `x-read-criticality`
+labels, a row also ends with `weighted_f1=` and `critical_pass_rate=`, after
+the dimensions. Both sit outside `mean`, which stays the unweighted headline.
+`openreading.evals.scorers` defines the weights and the pass rule.
 
 The table carries `scored` (`n_scored/n_cases`) beside `mean`, and prints
 `mean` as an em dash when `n_scored` is 0, because a mean over no scored case

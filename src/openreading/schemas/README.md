@@ -293,7 +293,7 @@ consumer gets. The adapter-descriptor family validates a descriptor.
 | comparison-report | `comparison-report.v0.2.json` | `COMPARISON_REPORT_SCHEMA_FILE` | `validate_comparison_report` | required `schema_version` const `"0.2"` |
 | batch-result | `batch-result.v0.2.json` | `BATCH_RESULT_SCHEMA_FILE` | `validate_batch_result` | required `schema_version` const `"0.2"` |
 | corpus-report | `corpus-report.v0.1.json` | `CORPUS_REPORT_SCHEMA_FILE` | `validate_corpus_report` | required `schema_version` const `"0.1"` |
-| leaderboard-report | `leaderboard-report.v0.1.json` | `LEADERBOARD_REPORT_SCHEMA_FILE` | `validate_leaderboard_report` | required `schema_version` const `"0.1"` |
+| leaderboard-report | `leaderboard-report.v0.2.json` | `LEADERBOARD_REPORT_SCHEMA_FILE` | `validate_leaderboard_report` | required `schema_version` const `"0.2"` |
 | liveness-report | `liveness-report.v0.1.json` | `LIVENESS_REPORT_SCHEMA_FILE` | `validate_liveness_report` | required `schema_version` const `"0.1"` |
 | step | `step.v0.1.json` | `STEP_SCHEMA_FILE` | `validate_step` | none |
 | journal | `journal.v0.1.json` | `JOURNAL_SCHEMA_FILE` | `validate_journal_record` | none |
