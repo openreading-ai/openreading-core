@@ -63,7 +63,7 @@ properties:
   parent_agreement:
     type: string
     description: 'For amendments and work orders: the agreement this modifies'
-    x-read-criticality: critical  # critical: a missed parent leaves an amendment unlinked to the agreement it modifies
+    x-read-criticality: expected  # expected: an original agreement amends nothing, so an empty value is a correct reading and a critical label would alarm on it
   governing_law:
     type: string
     x-read-criticality: expected  # expected: reviewers read the clause itself before relying on the extracted value

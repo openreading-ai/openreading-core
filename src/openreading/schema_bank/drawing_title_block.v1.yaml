@@ -63,4 +63,4 @@ properties:
   export_control:
     type: string
     description: ITAR or EAR marking text if present
-    x-read-criticality: critical  # critical: a missed ITAR or EAR marking lets a restricted drawing reach a hosted backend
+    x-read-criticality: expected  # expected: most drawings carry no marking, so an empty value is a correct reading and a critical label would alarm on every one

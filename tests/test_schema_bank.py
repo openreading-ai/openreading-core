@@ -25,15 +25,9 @@ DOMAIN = [n for n in NAMES if n != "generic"]
 COUNTS = {
     "bank_statement": (7, 5, 2, 1),
     "rfq": (5, 6, 3, 0),
-    "drawing_title_block": (7, 4, 2, 0),
-    "clinical_trial_agreement": (8, 6, 1, 0),
+    "drawing_title_block": (6, 5, 2, 0),
+    "clinical_trial_agreement": (7, 7, 1, 0),
     "generic": (0, 0, 0, 0),
-}
-# Critical fields the proof document honestly does not carry, so a correct reading leaves them
-# missing. The record asserts the absence by omitting the key.
-ABSENT_ON_PURPOSE = {
-    "drawing_title_block": {"export_control"},  # the sheet prints no ITAR or EAR marking
-    "clinical_trial_agreement": {"parent_agreement"},  # an original agreement amends nothing
 }
 # The expected records that prove each entry, as (entry, record file in examples/bank).
 RECORDS = [
@@ -116,8 +110,12 @@ def test_each_entry_accepts_its_expected_record(name, record):
     check = check_typed_fields(schema, {k: TypedField(value=v) for k, v in data.items()})
     assert check.errors == []
     assert check.valid and check.extra == []
-    absent = {f.path for f in check.fields if f.criticality == "critical" and f.status != "present"}
-    assert absent == ABSENT_ON_PURPOSE.get(name, set())
+    # A correct reading of the proof document must pass every critical field. A critical label
+    # on a field most documents leave empty would alarm on a correct reading.
+    assert [
+        f.path for f in check.fields if f.criticality == "critical" and f.status != "present"
+    ] == []
+    assert check.critical_ok
     for required in schema.get("required", []):
         assert required in data
 
