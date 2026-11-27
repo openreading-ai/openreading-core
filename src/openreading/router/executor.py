@@ -15,6 +15,8 @@ Invariants:
   reaching here means the driver already exhausted same-backend backoff.)
 - The successful response is metered: `report_cost()` fills the `usage` counters the adapter left
   unset. A meter that raises degrades to a warning, never a failed run.
+- The successful response is finalized by `openreading.router.finalize`, which also measures its
+  typed fields against the request's schema. A failed check never moves the chain on.
 - The successful response records the attempt trail in `warnings[]` (`fallback_used`).
 - Chain exhausted → PlanExhaustedError carrying the full trail.
 - Idempotency cache (bounded LRU + TTL) is consulted before submit and populated after success; a
@@ -35,11 +37,10 @@ from openreading.credentials import (
     redact,
     secret_values,
 )
-from openreading.ledger.header import slim_request
 from openreading.readiness import attach_auth_hint, missing_required
+from openreading.router import finalize
 from openreading.router.cache import content_key, document_identity
 from openreading.router.clock import Clock, RealClock
-from openreading.router.cost import apply_cost_report
 from openreading.router.driver import run_to_completion
 from openreading.router.router import RoutePlan
 from openreading.types.errors import (
@@ -119,7 +120,10 @@ def _cache_key(req: OpenReadingRequest, adapter) -> str | None:
     if identity is None:
         return None
     version = adapter.descriptor.runtime.version_pin or "" if adapter.descriptor.runtime else ""
-    return content_key(identity, adapter.descriptor.id, version, req.to_schema_dict())
+    # Keyed on what the backend sees: the stripped schema. Changing only an `x-read-*` label
+    # therefore reuses the paid backend result, and the hit recomputes the check.
+    body = finalize.strip_request(req).to_schema_dict()
+    return content_key(identity, adapter.descriptor.id, version, body)
 
 
 def _record_trail(resp: NormalizedResponse, trail: list[Attempt], chosen: str) -> None:
@@ -180,6 +184,9 @@ def execute_plan(
             hit = cache.get(key, clock.now_ms())
             if hit is not None:
                 resp = hit.model_copy(deep=True)
+                # The check is pure, so a hit recomputes it against THIS request. The key holds
+                # the stripped schema, so a hit can carry a check made under other labels.
+                finalize.apply_schema_check(resp, req)
                 resp.add_warning(
                     "idempotent_replay", f"replayed cached result for {desc.id}", desc.id
                 )
@@ -194,13 +201,11 @@ def execute_plan(
                 if ctx.deadline_ms is not None
                 else DEFAULT_DEADLINE_MS
             )
-            job = adapter.submit(req, ctx)
+            job = finalize.submit(adapter, req, ctx)
             job = run_to_completion(
                 adapter, job, ctx=ctx, deadline_ms=clock.now_ms() + budget, clock=clock
             )
-            resp = apply_cost_report(
-                adapter, job, adapter.normalize(job, ctx, slim_request(req)), ctx.credentials
-            )
+            resp = finalize.finalize_response(adapter, job, ctx, req)
         except _TAXONOMY as e:
             attach_auth_hint(e, desc)  # a rejected key names its env var in the recorded detail
             # Belt-and-suspenders beyond auth_rejected: any OTHER secret the broker resolved for

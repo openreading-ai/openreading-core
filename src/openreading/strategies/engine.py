@@ -477,14 +477,13 @@ from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
 from openreading.credentials import DEFAULT_DEADLINE_MS, EnvCredentialBroker, build_run_context
-from openreading.ledger.header import slim_request
 from openreading.ledger.inline import InlineExecutor, NullJournal
 from openreading.ledger.ports import Executor
 from openreading.ledger.step import ExecResult, StepRequest
 from openreading.readiness import auth_hinted, missing_required
+from openreading.router import finalize
 from openreading.router.cache import content_key, document_digest
 from openreading.router.clock import Clock, FakeClock
-from openreading.router.cost import apply_cost_report
 from openreading.router.driver import run_to_completion
 from openreading.router.registry import Registry
 from openreading.strategies.decider import (
@@ -1887,6 +1886,8 @@ def _merge_fields(
     base.typed_fields = merged or base.typed_fields
     if provenance:
         ctx.trace.merge.extend(provenance)
+    # A merge can change which fields are present, so the base's own check no longer holds.
+    finalize.apply_schema_check(base, ctx.req)
 
 
 def _vote_field(entries: list[tuple[int, str, Any]], ctx: _WalkCtx) -> tuple[int, str, Any]:
@@ -2398,15 +2399,13 @@ def _execute_leaf_sync(
         req, adapter.descriptor, broker=broker, deadline_ms=max(0, int(budget_ms))
     )
     with auth_hinted(adapter.descriptor, rc.credentials):
-        job = adapter.submit(req, rc)
+        job = finalize.submit(adapter, req, rc)
         if on_submit is not None:
             on_submit(job)
         job = run_to_completion(
             adapter, job, ctx=rc, deadline_ms=clock.now_ms() + max(1, budget_ms), clock=clock
         )
-        return apply_cost_report(
-            adapter, job, adapter.normalize(job, rc, slim_request(req)), rc.credentials
-        )
+        return finalize.finalize_response(adapter, job, rc, req)
 
 
 # --------------------------------------------------------------------------- gates + budget

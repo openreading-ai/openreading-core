@@ -14,8 +14,10 @@ Exports and return shapes
 -------------------------
 An envelope is the schema-valid JSON object returned by a completed operation.
 
-- `run(source, backend=None, **options)` returns a `response.v0.3` envelope. `keychain=True`
+- `run(source, backend=None, **options)` returns a `response.v0.4` envelope. `keychain=True`
   (on `run`, `run_batch` and `resume_run`) also reads keys saved with `openreading keys set`.
+  A request whose `extraction_schema` carries `json_schema` gets a `schema_check` in that
+  envelope. An unknown `x-read-criticality` label raises `pydantic.ValidationError` first.
 - `run_batch(sources, backend=None, **options)` returns a `batch-result.v0.2` envelope.
 - `route(source, **options)` returns a `RoutePlan` without executing a backend.
 - `resume_run(run_id, keychain=False)` returns a response and is exported as
@@ -149,7 +151,6 @@ from openreading.ledger.header import (
     compare_header,
     read_header,
     registry_fingerprint,
-    slim_request,
     slim_request_dict,
     write_header,
 )
@@ -162,8 +163,8 @@ from openreading.ledger.localfs import LocalFsBlobStore
 from openreading.ledger.ports import Executor, LedgerArmingError
 from openreading.ledger.sanitizer import Sanitizer
 from openreading.readiness import auth_hinted, keychain_blocked_hint, missing_required
+from openreading.router import finalize
 from openreading.router.clock import RealClock
-from openreading.router.cost import apply_cost_report
 from openreading.router.driver import run_to_completion
 from openreading.router.executor import BoundedResultCache, execute_plan
 from openreading.router.router import RoutePlan, Router, RouterConfig
@@ -903,7 +904,7 @@ def run_request(
     clock = RealClock()
     try:
         with auth_hinted(adapter.descriptor, ctx.credentials):
-            job = adapter.submit(req, ctx)
+            job = finalize.submit(adapter, req, ctx)
             job = run_to_completion(
                 adapter,
                 job,
@@ -919,11 +920,7 @@ def run_request(
                 deadline_ms=clock.now_ms() + ctx.deadline_ms,
                 clock=clock,
             )
-            slim_req = slim_request(req)
-            resp = apply_cost_report(
-                adapter, job, adapter.normalize(job, ctx, slim_req), ctx.credentials
-            )
-            return resp.to_schema_dict()
+            return finalize.finalize_response(adapter, job, ctx, req).to_schema_dict()
     except AdapterError:
         raise  # the five _ADAPTER_ERRORS taxonomy types keep their own specific handling downstream
     except Exception as e:
@@ -967,7 +964,7 @@ def run(
     **request_overrides: Any,
 ) -> dict[str, Any]:
     """Run one document through a named backend, the resolved chain (`backend=None`), or a
-    strategy, and return a `response.v0.3` envelope. `strategy="<name>"` is sugar for
+    strategy, and return a `response.v0.4` envelope. `strategy="<name>"` is sugar for
     `backend="strategy:<name>"`. `source` is a path, an http(s) URL, or raw bytes. `config` points
     at an openreading.yaml, and without it `./openreading.yaml` is discovered. It also accepts a
     `LoadedFile` already read by `openreading.config.load`, which is how `run_batch` gives every
@@ -1372,7 +1369,7 @@ def _run_native(
     clock = RealClock()
     try:
         with auth_hinted(adapter.descriptor, ctx.credentials):
-            job = adapter.submit_many(reqs, ctx)
+            job = finalize.submit_many(adapter, reqs, ctx)
             job = run_to_completion(
                 adapter,
                 job,
@@ -1387,7 +1384,9 @@ def _run_native(
             )
             # BL-108: forwarded so a report_cost() failure inside normalize_many's own
             # apply_cost_report call gets the same redaction every other call site's warning does.
-            results = adapter.normalize_many(job, reqs, credentials=ctx.credentials)
+            results = adapter.normalize_many(
+                job, [finalize.strip_request(r) for r in reqs], credentials=ctx.credentials
+            )
     except AdapterError:
         raise  # the five _ADAPTER_ERRORS taxonomy types keep their own specific handling downstream
     except Exception as e:
@@ -1410,6 +1409,9 @@ def _run_native(
         if isinstance(res, BatchItemError):
             items.append(BatchItem(source=src.ref, state="failed", error=res, transport="native"))
         else:
+            # normalize_many meters each item itself. The check runs here, per item, against
+            # that item's labelled request.
+            finalize.apply_schema_check(res, reqs[li])
             items.append(
                 BatchItem(
                     source=src.ref,

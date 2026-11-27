@@ -674,7 +674,6 @@ class AnthropicClaudeAdapter(BackendAdapter):
         content = raw.get("content", [])
         model = raw.get("model")
 
-        field_types = self._schema_field_types(slim_req)
         typed_fields: dict[str, TypedField] = {}
         text_parts: list[str] = []
         for cblock in content:
@@ -685,7 +684,7 @@ class AnthropicClaudeAdapter(BackendAdapter):
                 # P2: preserve Claude page_location citations (when present) on the derived fields.
                 cits = self._block_citations(cblock)
                 for k, v in (cblock.get("input") or {}).items():
-                    typed_fields[k] = TypedField(value=v, type=field_types.get(k), citations=cits)
+                    typed_fields[k] = TypedField(value=v, citations=cits)
         markdown = "".join(text_parts).strip()
         # C1/C2: document.text is a PLAIN projection of the model's markdown (md_to_text) — never
         # the markdown verbatim. The markdown channel keeps the native markdown.
@@ -768,20 +767,6 @@ class AnthropicClaudeAdapter(BackendAdapter):
                 payload=raw,
             )
         return resp
-
-    def _schema_field_types(self, req: OpenReadingRequest) -> dict[str, str]:
-        """Declared JSON-Schema `type` per field, for TypedField.type (P2). Only string types are
-        carried (a JSON `type` array like ["string","null"] has no single scalar form)."""
-        schema = req.extraction_schema.json_schema if req.extraction_schema else None
-        props = schema.get("properties") if isinstance(schema, dict) else None
-        if not isinstance(props, dict):
-            return {}
-        out: dict[str, str] = {}
-        for name, spec in props.items():
-            t = spec.get("type") if isinstance(spec, dict) else None
-            if isinstance(t, str):
-                out[name] = t
-        return out
 
     def _block_citations(self, cblock: dict) -> list[Citation] | None:
         """Claude page_location citations on a content block → Citation objects (P2). Page numbers

@@ -35,7 +35,8 @@ which costs one round trip.
 
 Sibling modules: `driver` runs the one poll-and-backoff loop every wait mode shares, `cost`
 turns an adapter's `CostReport` into `response.usage` by filling only the slots the adapter
-left unset, `cache` derives the document identity and the idempotency key, `clock` keeps
+left unset, `finalize` is the one path from a finished job to a response (it strips `x-read-*`
+before `submit`, then normalizes, meters and attaches `schema_check`), `cache` derives the document identity and the idempotency key, `clock` keeps
 monotonic time apart from wall time, and `registry` maps a descriptor id to its adapter.
 `openreading.strategies` calls `Router.route` once per compile, for the chain it reports rather
 than for a chain it dispatches from: every strategy leaf names its own backend. Server API-key

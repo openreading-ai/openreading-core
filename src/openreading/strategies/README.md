@@ -738,7 +738,7 @@ The category column in `explain` is the closed vocabulary `CATEGORIES` in
   laws, including the score behind `pick: best`). The other two are `decider` (decision points,
   downgrades) and `calibrate` (the sweep report and `quality_bar`).
 - The schema is `src/openreading/schemas/strategy-config.v0.5.json`. The trace rides on
-  `response.v0.3.json`.
+  `response.v0.4.json`.
 - `uv run openreading strategy --help`, `explain --help`, `replay --help`, and `calibrate --help`
   document the flags. The exit codes are in `uv run python -m pydoc openreading.cli`, section
   "strategy <verb> / explain / replay / calibrate".

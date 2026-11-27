@@ -27,9 +27,10 @@ from openreading.types import NormalizedResponse
 SCHEMA_DIR = Path(schemas.__file__).parent
 GOLDEN_DIR = Path(__file__).parent / "golden" / "response"
 
-# Released response versions, oldest first. v0.3 is the in-progress (unreleased) cut and is NOT
-# frozen: §6 permits editing an unreleased file during the milestone it ships in.
-RELEASED_RESPONSE = ["v0.1", "v0.2", "v0.3"]
+# Response versions with a golden fixture, oldest first. v0.3 and v0.4 are in-progress
+# (unreleased) cuts and are NOT frozen: §6 permits editing an unreleased file during the
+# milestone it ships in.
+RELEASED_RESPONSE = ["v0.1", "v0.2", "v0.3", "v0.4"]
 
 
 def _response_schema(version: str) -> dict:
@@ -142,6 +143,8 @@ _UNRELEASED = {
     "passage.v0.4.json",
     "agent-document-tool.v0.5.json",
     "response.v0.3.json",
+    # Schema check: the optional top-level `schema_check` object (not yet byte-frozen):
+    "response.v0.4.json",
     "adapter-descriptor.v0.3.json",
     "comparison-report.v0.2.json",
     # Manifest v0.6 — new/in-progress this milestone (not yet byte-frozen):

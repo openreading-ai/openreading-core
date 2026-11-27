@@ -20,7 +20,7 @@ Verdict = Literal["equivalent", "divergent", "mixed", "unpaired"]
 
 
 def is_batch_envelope(obj: Any) -> bool:
-    """A batch-result envelope (vs a single response.v0.3): it carries an `items` list and a
+    """A batch-result envelope (vs a single response.v0.4): it carries an `items` list and a
     `summary` object."""
     return (
         isinstance(obj, dict)

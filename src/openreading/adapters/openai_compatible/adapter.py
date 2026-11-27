@@ -36,9 +36,11 @@ carries generated text and nothing else, so this adapter fills only that.
   measured one downstream. A requested X channel gets a `channel_unavailable` warning.
 - `finish_reason: length` marks the response PARTIAL with an `output_truncated` warning.
 
-Extraction validates the returned object locally with JSON Schema Draft 2020-12 and no network
-retrieval. A validation failure returns PARTIAL without typed fields and sets
-`status.error.code` to `backend_validation`. An explicit model refusal becomes a `TerminalError`
+Extraction keeps any reply that parses as a JSON object, with status SUCCEEDED, even when it
+misses the requested schema. The router's shared check (`openreading.router.finalize`) then
+reports each mismatch in `schema_check`, the same way for every backend. A reply that is not a
+JSON object returns PARTIAL without typed fields and sets `status.error.code` to
+`backend_validation`, because there are no fields to return. An explicit model refusal becomes a `TerminalError`
 with code `model_refused`. A 401 or 403 maps to `auth_rejected`, and `openreading.readiness`
 names the profile's `key_env` in the hint.
 
@@ -585,13 +587,15 @@ class OpenAICompatibleAdapter(BackendAdapter):
         if mode == "extract":
             content = calls[0]["content"] if calls else ""
             parsed = _parse_json_object(content)
-            schema = slim_req.extraction_schema.json_schema if slim_req.extraction_schema else None
-            if parsed is None or (schema is not None and not _matches_schema(parsed, schema)):
+            # A JSON object is kept even when it misses the schema: the router's shared check
+            # (openreading.router.finalize) reports the mismatch in `schema_check`. Only a reply
+            # with no object at all is PARTIAL, because there are no fields to return.
+            if parsed is None:
                 status = Status(
                     state=ResponseState.PARTIAL,
                     error=ResponseError(
                         code="backend_validation",
-                        message="The reply must be a JSON object that satisfies the requested extraction schema.",
+                        message="The reply must be a JSON object.",
                     ),
                 )
             else:
@@ -706,20 +710,6 @@ def _token_counts(usage: Any) -> dict[str, int]:
     if "prompt_tokens" in counts and "completion_tokens" in counts:
         counts.setdefault("total_tokens", counts["prompt_tokens"] + counts["completion_tokens"])
     return counts
-
-
-def _matches_schema(value: dict, schema: dict) -> bool:
-    from jsonschema import Draft202012Validator
-    from jsonschema.exceptions import SchemaError
-    from referencing import Registry
-    from referencing.exceptions import Unresolvable
-
-    try:
-        Draft202012Validator.check_schema(schema)
-        # An empty registry resolves local references and makes no network requests.
-        return Draft202012Validator(schema, registry=Registry()).is_valid(value)
-    except (SchemaError, Unresolvable, RecursionError):
-        return False
 
 
 def _data_url(data: bytes, mime: str) -> str:

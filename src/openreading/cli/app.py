@@ -191,6 +191,8 @@ def _read_extraction_schema(path: str) -> dict[str, Any]:
     """
     from jsonschema import exceptions, validators
 
+    from openreading.derive.fields import CRITICALITY_CODES, unknown_criticality
+
     schema = _read_json_or_fail(path)
     if not isinstance(schema, dict):
         raise _InputFileError(
@@ -201,6 +203,14 @@ def _read_extraction_schema(path: str) -> dict[str, Any]:
     except exceptions.SchemaError as e:
         reason = " ".join(e.message.split())
         raise _InputFileError(f"{path} is not a valid JSON Schema: {reason}") from e
+    # The request model refuses an unknown criticality label too. Checking here names the file
+    # and exits 2 before any document is opened.
+    bad = unknown_criticality(schema)
+    if bad:
+        raise _InputFileError(
+            f"{path} has unknown x-read-criticality {', '.join(bad)}; "
+            f"use one of {', '.join(CRITICALITY_CODES)}"
+        )
     return schema
 
 
@@ -2766,8 +2776,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="SCHEMA.json",
         help="extract the fields this JSON Schema file describes. The response carries them "
-        "under typed_fields. Combine with --extract to add instructions. A file that is not a "
-        "valid JSON Schema exits 2 before any backend is called",
+        "under typed_fields, and schema_check reports how they match the schema. Combine with "
+        "--extract to add instructions. A file that is not a valid JSON Schema, or that carries "
+        "an unknown x-read-criticality label, exits 2 before any backend is called",
     )
     # The group title names the input FORM that switches modes, because a reader with one file
     # needs to know at a glance that this whole block is not about their run.

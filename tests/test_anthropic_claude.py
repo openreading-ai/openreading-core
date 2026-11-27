@@ -13,6 +13,7 @@ import pytest
 
 from openreading.adapters.anthropic_claude import AnthropicClaudeAdapter
 from openreading.ledger.header import slim_request
+from openreading.router import finalize
 from openreading.testing import ConformanceCase, check_adapter_conformance
 from openreading.types import BlockType
 from openreading.types.enums import ResponseState
@@ -249,8 +250,9 @@ def test_typed_field_type_set_from_extraction_schema():
         }
     )
     ctx = RunContext()
-    resp = adapter.normalize(adapter.submit(req, ctx), ctx, req)
-    # P2: TypedField.type comes from the extraction schema's declared type where available
+    job = finalize.submit(adapter, req, ctx)
+    resp = finalize.finalize_response(adapter, job, ctx, req)
+    # P2 and D7: the router fills TypedField.type from the schema's declared type, not the adapter
     assert resp.typed_fields["gross_pay"].type == "string"
     assert resp.typed_fields["pay_period_end"].type == "string"
     # a field the schema doesn't declare gets no fabricated type

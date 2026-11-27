@@ -123,7 +123,7 @@ jq -c '{state: .status.state, backend: .backend.id, pages: .document.page_count,
 **You should see** `ready: true` for `pymupdf`, the missing variables named for `reducto`, and the
 envelope the CLI prints. `ready` means the backend is configured, not that it was reached. To send
 the file inline in JSON, put it in `document.bytes_base64`. The upload example below sends raw file bytes. Check:
-`jq .schema_version server-pymupdf.json` is `"0.3"`.
+`jq .schema_version server-pymupdf.json` is `"0.4"`.
 
 ### 1a. Upload a file from the client machine
 

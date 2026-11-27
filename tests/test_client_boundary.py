@@ -24,9 +24,9 @@ from openreading.artifacts.retention import retain_response
 from openreading.artifacts.jobs import ImportExecution
 from openreading.mcp_server.session import serve
 from openreading.mcp_server.tools import create_server
-from openreading.types.response import NormalizedResponse
+from openreading.types.response import NormalizedResponse, SchemaCheck
 assert RetainedService and retain_response and ImportExecution and serve and create_server
-assert NormalizedResponse
+assert NormalizedResponse and SchemaCheck
 """
     result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
@@ -62,8 +62,11 @@ from openreading.artifacts.retention import retain_response
 from openreading.artifacts.jobs import ImportExecution
 from openreading.mcp_server.session import serve
 from openreading.mcp_server.tools import create_server
-from openreading.schemas import response_schema
-assert response_schema()["properties"]["schema_version"]["const"] == "0.3"
+from openreading.schemas import response_schema, response_schema_for
+assert response_schema()["properties"]["schema_version"]["const"] == "0.4"
+assert response_schema_for("0.3")["properties"]["schema_version"]["const"] == "0.3"
+from openreading.types.response import SchemaCheck
+assert "schema_ref" in SchemaCheck.model_fields
 assert not any(n.startswith("openreading.adapters") for n in sys.modules)
 from pathlib import Path
 from openreading.artifacts.jobs import run, main

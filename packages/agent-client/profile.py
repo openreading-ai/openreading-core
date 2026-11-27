@@ -39,6 +39,7 @@ MODULES = (
 )
 SCHEMAS = (
     "response.v0.3.json",
+    "response.v0.4.json",
     "local-document.v0.5.json",
     "passage.v0.4.json",
     "selection-tool.v0.2.json",

@@ -11,6 +11,7 @@ import pytest
 
 from openreading.adapters.google_gemini import GoogleGeminiAdapter
 from openreading.ledger.header import slim_request
+from openreading.router import finalize
 from openreading.testing import ConformanceCase, check_adapter_conformance
 from openreading.types import BlockType
 from openreading.types.request import OpenReadingRequest
@@ -144,6 +145,9 @@ def test_extract_uses_json_schema_and_preserves_json_value_types():
     client = FakeGeminiClient()
     req = _extract_req()
     resp = _run(GoogleGeminiAdapter(client=client), req)
+    # D7: the router's check fills TypedField.type from the schema, so the adapter leaves it None.
+    assert resp.typed_fields["gross_pay"].type is None
+    finalize.apply_schema_check(resp, req)
 
     assert client.last_call is not None
     assert client.last_call["response_format"] == {

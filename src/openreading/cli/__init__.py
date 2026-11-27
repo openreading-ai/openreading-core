@@ -84,7 +84,7 @@ For example, this prints page numbers beside each available text block:
       .blocks[]? | [$p, .type, (.text // "")] | @tsv' response-mu.json
 
 Four top-level keys are required: `schema_version`, `status`, `backend`, and
-`document`. Version `0.3` identifies the JSON contract, not the package.
+`document`. Version `0.4` identifies the JSON contract, not the package.
 At least one of `document.text`, `document.markdown`, `document.pages`, or
 top-level `typed_fields` is present. Presence does not imply nonempty content.
 A field extractor can return `document: {}` with `typed_fields` instead.
@@ -118,6 +118,20 @@ in Python and `.warnings[]?` in jq. Missing confidence is not confidence zero.
 In Python, use `is not None` when zero is a valid measured value.
 The value of an extracted field can contain false, zero, or nested nulls.
 Covered positions in a table's `rows` grid can also contain null.
+
+A run with `--schema` adds `schema_check`, which measures `typed_fields`
+against the JSON Schema you sent, field by field. A criticality label is the
+`x-read-criticality` keyword on a schema property. Its value is `critical`,
+`expected` (the default), `optional` or `ignore`. Each `fields[]` entry names
+a `path`, its criticality and a status of `present`, `missing` or `invalid`.
+`critical_ok` is false when a critical field is missing or invalid, and a
+`critical_field_missing` or `critical_field_invalid` warning names it:
+
+    jq -c '.schema_check | {valid, critical_ok}' extract.json
+    jq -r '.schema_check.fields[]? | [.path, .status] | @tsv' extract.json
+
+The check reports and never acts. It changes no status and no value, and a
+key the schema does not declare stays in `typed_fields`, listed in `extra`.
 
 Bounding boxes use `x`, `y`, `w`, `h` in [0,1], with a top-left origin.
 `page` is one-based in the source document. Multiply by the page dimensions
@@ -474,10 +488,13 @@ Single-document flags:
                       under `typed_fields`. `--extract TEXT` adds instructions
                       beside it. A batch sends the same schema with every
                       document. A file that cannot be read, is not JSON, is not
-                      an object, or is not a valid JSON Schema exits 2 before
-                      any document is opened, so a typo never costs a hosted
+                      an object, is not a valid JSON Schema, or carries an
+                      unknown `x-read-criticality` label exits 2 before any
+                      document is opened, so a typo never costs a hosted
                       call. A backend that cannot extract refuses as
-                      `--extract` does (exit 3).
+                      `--extract` does (exit 3). The response carries
+                      `schema_check` (read `help response`), and no backend
+                      receives an `x-read-*` keyword.
   --keep-candidates   retain completed parallel alternatives under
                       `orchestration.candidates[]` (what `compare --from`
                       reads). Off by default (payload bloat); no effect on a

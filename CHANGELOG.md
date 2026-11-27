@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased schema check
+
+### Added
+
+- Responses move to `response.v0.4`, which adds an optional top-level `schema_check` beside `typed_fields`.
+  It reports, field by field, how the returned values measure up against `extraction_schema.json_schema`, for every backend.
+  Each field has a `path`, an `x-read-criticality` label (`critical`, `expected`, `optional` or `ignore`) and a status of `present`, `missing` or `invalid`.
+  `critical_ok`, `valid`, `extra`, up to 50 `errors`, `schema_hash` and `formats_unchecked` sit beside them. `schema_ref` is always null for now.
+- Add the warning codes `critical_field_missing` and `critical_field_invalid`, which name the path in `field`, and `intent_all_critical`.
+  The check changes no status, no route and no value. Only `TypedField.type` is filled from the schema where the backend left it unset.
+- No backend receives an `x-read-*` keyword. Core strips them before `submit`, and the result cache keys on the stripped schema.
+  Changing only a label therefore reuses a cached result and recomputes the check.
+- An unknown `x-read-criticality` label exits 2 on the CLI, returns HTTP 400, and raises `pydantic.ValidationError` in Python, before any backend call.
+- Core asserts the formats `date` and `date-time` itself, with the standard library. Any other `format` is listed in `formats_unchecked`.
+- `validate_response` and the client package read `response.v0.3` and `response.v0.4` by each response's own `schema_version`.
+  An artifact retained under v0.3 stays readable, and an unknown version is refused. Upgrade a client before the server it reads from.
+
+### Changed
+
+- `openai_compatible` keeps a reply that parses as a JSON object but misses the schema. It returns the fields with status `succeeded`,
+  and `schema_check` reports the mismatch. Before, it returned `partial` with `backend_validation` and dropped every field.
+  A reply that is not a JSON object stays `partial` with `backend_validation`.
+- The evals runner and `calibrate` now fill `usage` the way every other path does, because they finalize through the same helper.
+
 ## Unreleased domain extraction
 
 - Add `parse --schema FILE`, which sends a JSON Schema file as `extraction_schema.json_schema`.

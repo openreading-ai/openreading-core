@@ -90,6 +90,23 @@ class ExtractionSchema(BaseModel):
     instructions: str | None = None
     citations: bool = False
 
+    @model_validator(mode="after")
+    def _known_criticality(self) -> ExtractionSchema:
+        # A typo in a criticality label must not fall back to `expected` silently, and it must
+        # fail before any backend call. This only rejects and never rewrites, so reloading a
+        # stored request through `model_validate` cannot change it.
+        if self.json_schema is None:
+            return self
+        from openreading.derive.fields import CRITICALITY_CODES, unknown_criticality
+
+        bad = unknown_criticality(self.json_schema)
+        if bad:
+            raise ValueError(
+                f"unknown x-read-criticality {', '.join(bad)}; "
+                f"use one of {', '.join(CRITICALITY_CODES)}"
+            )
+        return self
+
 
 class Features(BaseModel):
     model_config = ConfigDict(extra="forbid")

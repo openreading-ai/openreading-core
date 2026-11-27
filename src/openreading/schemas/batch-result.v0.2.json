@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://openreading.ai/schemas/batch-result.v0.2.json",
   "title": "OpenReading Batch Result v0.2",
-  "description": "The output of a batch run (Manifest v0.6): one envelope covering many documents. Composes the single-document contract \u2014 each succeeded item's `response` is a full response.v0.3 envelope (validated independently, M9) \u2014 without changing it. Items appear in input order; skips/failures are recorded honestly per item, never silently dropped (deliver-or-warn, M6). schema_version is a per-version const (Canon \u00a78 response-family rule).",
+  "description": "The output of a batch run (Manifest v0.6): one envelope covering many documents. Composes the single-document contract \u2014 each succeeded item's `response` is a full response envelope (response.v0.4, or v0.3 from an earlier run) (validated independently, M9) \u2014 without changing it. Items appear in input order; skips/failures are recorded honestly per item, never silently dropped (deliver-or-warn, M6). schema_version is a per-version const (Canon \u00a78 response-family rule).",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -99,7 +99,7 @@
             "object",
             "null"
           ],
-          "description": "A full response.v0.3 envelope when state=succeeded (validated independently per M9); null otherwise. Opaque here to keep the batch schema self-contained (no cross-file $ref)."
+          "description": "A full response envelope (response.v0.4, or v0.3 from an earlier run) when state=succeeded (validated independently per M9); null otherwise. Opaque here to keep the batch schema self-contained (no cross-file $ref)."
         },
         "error": {
           "type": [

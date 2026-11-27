@@ -63,7 +63,7 @@ This excerpt is valid JSON and validates against the response schema, but it is 
 <!-- response-example: bank -->
 ```json
 {
-  "schema_version": "0.3",
+  "schema_version": "0.4",
   "status": {"state": "succeeded"},
   "backend": {"id": "pymupdf", "type": "oss_library", "output_paradigm": ["block_tree"]},
   "document": {
@@ -229,8 +229,8 @@ Use the actual content paths when your application requires text, geometry, tabl
 
 | Operation | Outer JSON | Where the document response lives |
 |---|---|---|
-| Single-document CLI `parse`, Python `run`, HTTP `POST /v1/parse` | `response.v0.3` | The JSON object itself |
-| Strategy-driven parse | `response.v0.3` with `orchestration` | The same object, plus decisions and quality outcome |
+| Single-document CLI `parse`, Python `run`, HTTP `POST /v1/parse` | `response.v0.4` | The JSON object itself |
+| Strategy-driven parse | `response.v0.4` with `orchestration` | The same object, plus decisions and quality outcome |
 | Folder or multiple inputs | `batch-result` | `items[].response` when available. Failed items can carry an error instead. |
 | `compare` | `comparison-report` | This is a comparison, with `headline` and findings, not document content. |
 | HTTP `POST /v1/jobs` and subsequent job reads | Async job handle | Its `response` when available. The handle has its own state and error. |
@@ -260,7 +260,7 @@ uv run python -m openreading.schemas validate
 ```
 
 ```text
-schemas: request.v0.3.json OK, response.v0.3.json OK, adapter-descriptor.v0.8.json OK, … journal.v0.1.json OK
+schemas: request.v0.3.json OK, response.v0.4.json OK, adapter-descriptor.v0.8.json OK, … journal.v0.1.json OK
 fixtures: 0 checked, 0 invalid
 ```
 
@@ -287,7 +287,7 @@ consumer gets. The adapter-descriptor family validates a descriptor.
 | family | current file | constant | validator | in-band version |
 |---|---|---|---|---|
 | request | `request.v0.3.json` | `REQUEST_SCHEMA_FILE` | `validate_request` | optional `schema_version` const `"0.3"` |
-| response | `response.v0.3.json` | `RESPONSE_SCHEMA_FILE` | `validate_response` | required `schema_version` const `"0.3"` |
+| response | `response.v0.4.json` | `RESPONSE_SCHEMA_FILE` | `validate_response` | required `schema_version` const `"0.4"` |
 | adapter-descriptor | `adapter-descriptor.v0.8.json` | `DESCRIPTOR_SCHEMA_FILE` | `validate_descriptor` | none, filename and `$id` only |
 | strategy-config | `strategy-config.v0.5.json` | `STRATEGY_CONFIG_SCHEMA_FILE` | `validate_strategy_config` | required integer `version` const `1` |
 | comparison-report | `comparison-report.v0.2.json` | `COMPARISON_REPORT_SCHEMA_FILE` | `validate_comparison_report` | required `schema_version` const `"0.2"` |
@@ -301,13 +301,19 @@ consumer gets. The adapter-descriptor family validates a descriptor.
 Each file's `$id` is the URL inside it that names it, and it is that filename under
 `https://openreading.ai/schemas/`. Two shapes coexist and both are permanent. The request,
 response and strategy-config families put a slash before the version, as in
-`https://openreading.ai/schemas/response/v0.3.json`. Every other current file keeps the dot, as in
+`https://openreading.ai/schemas/response/v0.4.json`. Every other current file keeps the dot, as in
 `https://openreading.ai/schemas/journal.v0.1.json`. Code that matches on `$id` must accept both.
 The `$id` is an identifier and not a download location. The files ship in this directory, and
 `openreading.schemas` loads them from the installed package rather than over the network.
 
 Older versions stay in this directory unchanged. `tests/test_schema_evolution.py` pins them byte for
 byte.
+
+A response from the previous version stays readable. `validate_response` picks the file named by
+the instance's own `schema_version` among `RESPONSE_SCHEMA_FILES`, which holds `"0.3"` and
+`"0.4"`. A saved v0.3 response therefore still validates as a `compare` input, and the client
+package reads an artifact it retained under v0.3. Any other version validates against the newest
+file and fails its const.
 
 ## What a response guarantees
 
@@ -335,7 +341,7 @@ Optional fields are described in the Response section of
 `uv run python -m pydoc openreading.schemas`, one entry each with the condition under which it
 appears.
 
-Source: `response.v0.3.json` (the top-level `required` and `additionalProperties` keys, the
+Source: `response.v0.4.json` (the top-level `required` and `additionalProperties` keys, the
 `$defs.BBox` and `$defs.Block` definitions, and the top-level `anyOf`). Live truth: `uv run
 python -c "import json, openreading.schemas as s; print(json.dumps(s.response_schema(),
 indent=1))"`. If the table and that output disagree, the output is right and the table needs
@@ -344,18 +350,18 @@ fixing. In the required column, n/a marks a row that names a whole object rather
 | path | required | value rule | may gain values | lines |
 |---|---|---|---|---|
 | top level | n/a | `additionalProperties: false`, and only here. Required keys: `schema_version`, `status`, `backend`, `document` | n/a | 6–12 |
-| `schema_version` | yes | const `"0.3"`. Changing it is itself the version bump | n/a | 241–244 |
-| `status` | yes | object, requires `state` | n/a | 245–275 |
-| `status.state` | yes | one of `succeeded`, `partial`, `failed`, `processing` | closed, `MAJOR` only | 252–257 |
-| `status.error` | no | object with optional `code`, `message` and `backend_code`, every one a plain string with no enum. Read [Reading an error](#reading-an-error) before branching on `code` | open and undocumented | 259–273 |
-| `backend` | yes | object, requires `id` (string) and `type` | n/a | 276–316 |
-| `backend.type` | yes | one of `hosted_api`, `oss_library`, `framework_loader`, `self_hosted_model` | closed, `MAJOR` only | 287–292 |
-| `backend.output_paradigm[]` | no | items one of `markdown`, `typed_fields`, `element_list`, `block_tree`, `block_graph`, `token_stream` | closed, `MAJOR` only | 304–311 |
-| `backend.version` | no | the backend, model or library version that ran. See [Lineage](#lineage) for who populates it | n/a | 297–300 |
-| `document` | yes | object. At least one of `document.markdown`, `document.text`, `document.pages` is present, or top-level `typed_fields` | n/a | 317–433, 649–682 |
-| `document.pages[]` | see `anyOf` | each item requires `page_number`, an integer ≥ 1 counted in the source document | n/a | 357–368 |
-| `document.pages[].unit` | no | one of `pdf_point`, `pixel`, `inch` | closed, `MAJOR` only | 377–381 |
-| `document.pages[].blocks[]` | no | array of `Block`. Each `Block` requires `type` | n/a | 398–404, 94–99 |
+| `schema_version` | yes | const `"0.4"`. Changing it is itself the version bump | n/a | 350–353 |
+| `status` | yes | object, requires `state` | n/a | 354–384 |
+| `status.state` | yes | one of `succeeded`, `partial`, `failed`, `processing` | closed, `MAJOR` only | 361–366 |
+| `status.error` | no | object with optional `code`, `message` and `backend_code`, every one a plain string with no enum. Read [Reading an error](#reading-an-error) before branching on `code` | open and undocumented | 368–382 |
+| `backend` | yes | object, requires `id` (string) and `type` | n/a | 385–425 |
+| `backend.type` | yes | one of `hosted_api`, `oss_library`, `framework_loader`, `self_hosted_model` | closed, `MAJOR` only | 396–401 |
+| `backend.output_paradigm[]` | no | items one of `markdown`, `typed_fields`, `element_list`, `block_tree`, `block_graph`, `token_stream` | closed, `MAJOR` only | 413–420 |
+| `backend.version` | no | the backend, model or library version that ran. See [Lineage](#lineage) for who populates it | n/a | 406–409 |
+| `document` | yes | object. At least one of `document.markdown`, `document.text`, `document.pages` is present, or top-level `typed_fields` | n/a | 426–542, 761–794 |
+| `document.pages[]` | see `anyOf` | each item requires `page_number`, an integer ≥ 1 counted in the source document | n/a | 466–477 |
+| `document.pages[].unit` | no | one of `pdf_point`, `pixel`, `inch` | closed, `MAJOR` only | 486–490 |
+| `document.pages[].blocks[]` | no | array of `Block`. Each `Block` requires `type` | n/a | 507–513, 94–99 |
 | `Block.type` | yes | one of `title`, `section_header`, `header`, `footer`, `page_number`, `text`, `list`, `list_item`, `table`, `table_cell`, `figure`, `image`, `caption`, `formula`, `code`, `key_value`, `form_field`, `signature`, `selection_mark`, `barcode`, `table_of_contents`, `other`. An unmapped native label becomes `other` and `native_type` keeps the original | closed, `MAJOR` only | 105–129 |
 | `Block.bbox` | no | a `BBox`. Absent when the backend has no real geometry, never invented | n/a | 147–149 |
 | `Block.text_type` | no | one of `printed`, `handwriting`, `unknown` | closed, `MAJOR` only | 230–234 |
@@ -365,10 +371,11 @@ fixing. In the required column, n/a marks a row that names a whole object rather
 | `BBox.bbox_native` | no | the raw source geometry, untouched | n/a | 62–91 |
 | `BBox.bbox_native.origin` | no | one of `top_left`, `bottom_left` | closed, `MAJOR` only | 73–76 |
 | `BBox.bbox_native.unit` | no | one of `normalized`, `pdf_point`, `pixel`, `inch` | closed, `MAJOR` only | 79–84 |
-| `usage.pages_processed` `credits` `input_tokens` `output_tokens` `duration_ms` | no | numbers, each in the unit the backend meters in, absent when the backend reported none. No dollar field: `cost_usd` and `cost_basis` were removed with the per-vendor price tables that filled them | n/a | 522–540 |
-| `warnings[]` | no | items may carry `code`, `message`, and `field`, each a string. Accept an absent key or an empty array. | `code` is open, `MINOR` | 580–597 |
-| `orchestration` | no | object, present only for a run a strategy or a fallback chain drove. It is declared `additionalProperties: true` with no properties of its own, so the schema names nothing inside it and a validator checks nothing you read there. Every closed set within it is a promise made by code instead, listed field by field in the docs home's [open and closed register](../README.md#what-is-closed-and-what-only-looks-closed) | nothing inside it is closed at the schema level | 627–631 |
-| `channel_provenance` | no | map of channel name to `native` or `derived`. A channel is one kind of output inside the envelope, such as text, markdown or blocks. Marked `x-stability: experimental` | experimental, so outside the guarantees entirely | 632–642 |
+| `usage.pages_processed` `credits` `input_tokens` `output_tokens` `duration_ms` | no | numbers, each in the unit the backend meters in, absent when the backend reported none. No dollar field: `cost_usd` and `cost_basis` were removed with the per-vendor price tables that filled them | n/a | 634–652 |
+| `warnings[]` | no | items may carry `code`, `message`, and `field`, each a string. Accept an absent key or an empty array. | `code` is open, `MINOR` | 692–709 |
+| `orchestration` | no | object, present only for a run a strategy or a fallback chain drove. It is declared `additionalProperties: true` with no properties of its own, so the schema names nothing inside it and a validator checks nothing you read there. Every closed set within it is a promise made by code instead, listed field by field in the docs home's [open and closed register](../README.md#what-is-closed-and-what-only-looks-closed) | nothing inside it is closed at the schema level | 739–743 |
+| `channel_provenance` | no | map of channel name to `native` or `derived`. A channel is one kind of output inside the envelope, such as text, markdown or blocks. Marked `x-stability: experimental` | experimental, so outside the guarantees entirely | 744–754 |
+| `schema_check` | no | a `SchemaCheck`, present when the request carried `extraction_schema.json_schema`. It requires `schema_hash`, `schema_ref` (a string or null), `valid`, `critical_ok`, `fields`, `extra`, `errors` and `formats_unchecked`. Each `fields[]` item requires `path`, `criticality` (one of `critical`, `expected`, `optional`, `ignore`) and `status` (one of `present`, `missing`, `invalid`). `errors[]` holds at most 50 items | closed, `MAJOR` only, for both enums | 236–344, 593–595 |
 
 `warnings[].code` is an open set, so switch on the codes you know and send the rest to a default
 branch. The known codes, each with the condition it reports, are the `warnings[]` entry of the
@@ -400,9 +407,11 @@ produced any.
 ### Reading an error
 
 There is no exhaustive error vocabulary for a response, so always keep an unknown-code branch.
-`status.error.code` is an unconstrained string with no enum. Three shipped adapters populate it.
+`status.error.code` is an unconstrained string with no enum. Four shipped adapters populate it.
 `nuextract` sets `backend_validation` when the model answers and the
-answer fails its own template validation. `google-gemini` sets `malformed_response` when its
+answer fails its own template validation. An `openai-compatible` profile sets `backend_validation`
+when an extraction reply is not a JSON object. A reply that is an object but misses the schema
+keeps its fields, and `schema_check` reports the gap. `google-gemini` sets `malformed_response` when its
 structured output is not a JSON object, and `interaction_incomplete` when the vendor reports that
 the interaction did not finish. `mistral-ocr` sets `malformed_response` for the same reason as
 Gemini. Neither local backend ever sets it.
@@ -530,8 +539,8 @@ run.
 ## Versions
 
 A request and a response carry different version numbers, so never copy one into the other. A
-request carries `schema_version: "0.2"` and a response carries `"0.3"`. They are different
-families with different numbers. Sending `"0.3"` in a request to `openreading serve` returns
+request carries `schema_version: "0.3"` and a response carries `"0.4"`. They are different
+families with different numbers. Sending `"0.4"` in a request to `openreading serve` returns
 HTTP 400.
 
 Which versions shipped when is the response *history*, and it is in
@@ -615,7 +624,7 @@ The v0.3 retained artifact reader remains supported without rewriting stored fil
 ## Not built yet
 
 - `openreading.SCHEMA_VERSION` prints `0.1`, a number that matches no current family, because the
-  request family is at `0.2` and the response family at `0.3`. Nothing says which family it means.
+  request family is at `0.3` and the response family at `0.4`. Nothing says which family it means.
   Reproduce it with `uv run python -c "import openreading; print(openreading.SCHEMA_VERSION)"`.
 - `validate` reports `fixtures: 0 checked` because its fixture glob names a directory that does not
   exist. Reproduce it with `uv run python -m openreading.schemas validate`.

@@ -119,9 +119,9 @@ where nesting began. Optional blocks: ``schema_version`` (const ``"0.3"``), ``ou
   safety matters. This gap is open, tracked in internal/eng-council/FOUNDER-INBOX.md. Whether a key
   reaches the vendor at all is the descriptor's ``idempotency_supported`` (below).
 
-Response (``response.v0.3.json``)
+Response (``response.v0.4.json``)
 ---------------------------------
-Required: ``schema_version`` (const ``"0.3"``), ``status``, ``backend``, ``document``. The honest
+Required: ``schema_version`` (const ``"0.4"``), ``status``, ``backend``, ``document``. The honest
 common denominator is the schema's ``anyOf``: at least one of ``document.markdown``,
 ``document.text``, ``document.pages`` or top-level ``typed_fields`` is always present. What a
 backend cannot produce stays absent rather than fabricated. Warnings explain some limitations,
@@ -172,6 +172,12 @@ readers the field paths, optional-value rules, and distinctions between outer re
   repeated names collect into a list, nested provider structures stay nested), declared
   ``type``, ``normalized_value``, ``confidence`` (numeric [0,1], or the vendor's qualitative
   string preserved as-is), ``citations[]`` (``page`` + ``bbox`` + ``text``).
+- ``schema_check`` (v0.4): how ``typed_fields`` measure up against the request's
+  ``extraction_schema.json_schema``, present whenever the request carried one and a response
+  came back. It holds ``schema_hash``, ``schema_ref`` (null for a schema you supplied),
+  ``valid``, ``critical_ok``, ``fields[]`` (``path``, ``criticality``, ``status``), ``extra``,
+  up to 50 ``errors[]`` and ``formats_unchecked``. ``openreading.derive.fields`` defines every
+  rule, and ``openreading.router.finalize`` attaches it. The check reports and never acts.
 - ``chunks[]``: ``id``, ``text``/``markdown``, ``block_ids`` (each chunk traces to spine blocks),
   ``page_span``, optional ``embedding``.
 - ``usage``: ``pages_processed``, native ``credits``, ``input_tokens``/``output_tokens``,
@@ -211,6 +217,10 @@ readers the field paths, optional-value rules, and distinctions between outer re
     an exhausted budget. An agent triage playbook branches on them to separate "escalate"
     from "consume".
   - the vendor said so: ``backend_warning`` (the vendor's own warning text, passed through).
+  - the schema check found a gap: ``critical_field_missing`` and ``critical_field_invalid`` (a
+    field labelled ``x-read-criticality: critical`` is absent or fails the schema, and the path
+    is in ``field``), and ``intent_all_critical`` (two or more fields are labelled and every
+    label is ``critical``, so the labels rank nothing).
 
   ``unsupported_feature`` is NOT a warning code. It is an ``on_error`` map key, an exception
   category and an HTTP ``error.category``, each documented elsewhere in this file. Unknown warning
@@ -419,6 +429,7 @@ The labels below are milestone names, not released package versions: ``pyproject
 - Ledger: adapter-descriptor v0.6 and v0.7, step v0.1, journal v0.1, leaderboard-report v0.1.
 - Security review (M12): request v0.2.
 - Provider profiles: strategy-config v0.5.
+- Schema check: response v0.4.
 
 Schema version history (oldest first)
 -------------------------------------
@@ -488,6 +499,11 @@ Schema version history (oldest first)
   ``openai-compatible`` profile with ``kind``, ``base_url``, ``model`` and an optional
   ``key_env`` variable NAME. ``openreading.config`` adds the checks a schema cannot express, such
   as refusing a name that shadows a built-in backend id.
+- Schema check: response v0.4 (additive over v0.3). It adds the optional top-level
+  ``schema_check`` object and the three schema-check warning codes. ``schema_check.schema_ref``
+  is a nullable string from the first cut, so naming a shipped schema later needs no bump.
+  ``validate_response`` and the client package read v0.3 and v0.4 by the instance's own
+  ``schema_version`` (``RESPONSE_SCHEMA_FILES``), so a saved v0.3 response stays valid.
 """
 
 from __future__ import annotations
@@ -518,6 +534,9 @@ from openreading.schemas.client import (
     RESPONSE_SCHEMA_FILE as RESPONSE_SCHEMA_FILE,
 )
 from openreading.schemas.client import (
+    RESPONSE_SCHEMA_FILES as RESPONSE_SCHEMA_FILES,
+)
+from openreading.schemas.client import (
     SELECTION_TOOL_SCHEMA_FILE as SELECTION_TOOL_SCHEMA_FILE,
 )
 from openreading.schemas.client import (
@@ -537,6 +556,9 @@ from openreading.schemas.client import (
 )
 from openreading.schemas.client import (
     response_schema as response_schema,
+)
+from openreading.schemas.client import (
+    response_schema_for as response_schema_for,
 )
 from openreading.schemas.client import (
     selection_tool_schema as selection_tool_schema,

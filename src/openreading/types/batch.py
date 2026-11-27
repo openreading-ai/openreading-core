@@ -56,7 +56,7 @@ class BatchItem(BaseModel):
 
     source: SourceRef
     state: Literal["succeeded", "failed"]
-    response: dict[str, Any] | None = None  # a full response.v0.3 envelope (validated separately)
+    response: dict[str, Any] | None = None  # a full response.v0.4 envelope (validated separately)
     error: BatchItemError | None = None
     transport: Literal["platform", "native"] | None = None
 

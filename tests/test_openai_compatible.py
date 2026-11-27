@@ -16,6 +16,7 @@ import respx
 
 from openreading.adapters.openai_compatible import OpenAICompatibleAdapter, ProviderProfile
 from openreading.liveness import check_liveness
+from openreading.router import finalize
 from openreading.testing import ConformanceCase, check_adapter_conformance
 from openreading.testing.sample_pdf import build_sample_pdf
 from openreading.types import ResponseState
@@ -384,16 +385,21 @@ def test_extract_reply_that_is_not_json_is_partial():
     ],
 )
 @respx.mock
-def test_extraction_checks_the_callers_schema_offline(schema, reply, valid):
+def test_extraction_keeps_a_json_object_and_the_shared_check_reports_it(schema, reply, valid):
+    """D5: a non-conforming JSON object is SUCCEEDED with its fields, and the router's shared
+    check reports the mismatch offline (no network for a remote `$ref`)."""
     respx.post(CHAT).mock(return_value=httpx.Response(200, json=_reply(json.dumps(reply))))
-    response = _run(OpenAICompatibleAdapter(KEYED), _req(extraction_schema={"json_schema": schema}))
-    if valid:
-        assert response.status.state is ResponseState.SUCCEEDED
-        assert response.typed_fields["total"].value == 42
+    adapter = OpenAICompatibleAdapter(KEYED)
+    req = _req(extraction_schema={"json_schema": schema})
+    ctx = _ctx()
+    response = finalize.finalize_response(adapter, finalize.submit(adapter, req, ctx), ctx, req)
+    assert response.status.state is ResponseState.SUCCEEDED
+    assert response.status.error is None
+    assert response.schema_check is not None
+    assert response.schema_check.valid is valid
+    if reply:
+        assert response.typed_fields["total"].value == reply["total"]
     else:
-        assert response.status.state is ResponseState.PARTIAL
-        assert response.status.error.code == "backend_validation"
-        assert "private text" not in response.status.error.message
         assert response.typed_fields is None
 
 

@@ -2,7 +2,8 @@
 
 Adapters meter (`report_cost` projects the counters out of `job.raw`); the router accounts. Every
 path that turns a finished Job into a response calls `apply_cost_report` right after
-`normalize()`.
+`normalize()`, through `openreading.router.finalize.finalize_response`. A native batch adapter
+calls it per item inside its own `normalize_many`.
 
 There is no pricing model here any more. This module used to fill `usage.cost_usd` and
 `usage.cost_basis` from a per-vendor price table each hosted adapter carried, which core could

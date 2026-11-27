@@ -12,8 +12,8 @@ from openreading.config import apply as apply_policy
 from openreading.credentials import build_run_context
 from openreading.evals import scorers
 from openreading.evals.dataset import EvalCase, load_dataset
-from openreading.ledger.header import slim_request
 from openreading.readiness import auth_hinted
+from openreading.router import finalize
 from openreading.router.clock import RealClock
 from openreading.router.compliance import RouterConfig
 from openreading.router.driver import run_to_completion
@@ -92,11 +92,11 @@ def run_case(
         run_ctx = ctx or build_run_context(req, adapter.descriptor)
         clock = RealClock()
         with auth_hinted(adapter.descriptor, run_ctx.credentials):
-            job = adapter.submit(req, run_ctx)
+            job = finalize.submit(adapter, req, run_ctx)
             job = run_to_completion(
                 adapter, job, ctx=run_ctx, deadline_ms=clock.now_ms() + deadline_ms, clock=clock
             )
-            resp = adapter.normalize(job, run_ctx, slim_request(req))
+            resp = finalize.finalize_response(adapter, job, run_ctx, req)
         s = scorers.score(resp.to_schema_dict(), case.expected)
         return CaseResult(name=case.name, overall=s["overall"], dimensions=s["dimensions"])
     except Exception as e:  # noqa: BLE001 - a failing case is a scored outcome, not a crash

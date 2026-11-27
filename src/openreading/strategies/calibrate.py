@@ -215,8 +215,8 @@ def calibrate_strategy(
     from openreading.credentials import build_run_context
     from openreading.evals import scorers
     from openreading.evals.dataset import load_dataset
-    from openreading.ledger.header import slim_request
     from openreading.readiness import auth_hinted
+    from openreading.router import finalize
     from openreading.router.clock import RealClock
     from openreading.router.driver import run_to_completion
     from openreading.router.router import Router, RouterConfig
@@ -284,9 +284,13 @@ def calibrate_strategy(
             rc = build_run_context(req, a1.descriptor)
             with auth_hinted(a1.descriptor, rc.credentials):
                 job = run_to_completion(
-                    a1, a1.submit(req, rc), ctx=rc, deadline_ms=clock.now_ms() + 60_000, clock=clock
+                    a1,
+                    finalize.submit(a1, req, rc),
+                    ctx=rc,
+                    deadline_ms=clock.now_ms() + 60_000,
+                    clock=clock,
                 )
-                resp = a1.normalize(job, rc, slim_request(req))
+                resp = finalize.finalize_response(a1, job, rc, req)
         except AdapterError as e:
             e.message = (
                 f"case {case.name!r} ({i + 1}/{len(cases)}) failed after {len(observations)} "
