@@ -29,6 +29,17 @@
 
 ### Changed
 
+- `parse --extract` without `--schema` now extracts the bank's `generic` schema on every schema-capable backend, and the response reports `schema_ref: "bank:generic@v1"`.
+  A Python or HTTP request whose `extraction_schema` holds only `instructions` gets the same, and so does each `/v1/batch` item.
+  A stored request is never rewritten: a journal, an evals case or a calibrate case with instructions only runs as written, and `outputs.typed_fields` alone adds no schema.
+  Per backend:
+  - `anthropic_claude` and `google_gemini` send `generic` where they sent an empty open schema, and `openai_compatible` moves from `json_object` mode to `json_schema` mode.
+  - `mistral_ocr` changes from plain OCR to document annotation with `generic` and your instructions as the prompt. The vendor bills annotation at a separate per-page price.
+  - `pulse` gains `structured_output` with `generic`, and the instructions become `schemaPrompt`.
+  - `chunkr` and `qwen_vl` send `generic` where they sent `{}`, and `reducto` does so only with `backend.operation: extract`.
+  - `nuextract` receives `generic` translated into its template, where it used to refuse with `no_template`.
+  - `aws_textract`, `azure_document_intelligence` and `google_document_ai` make the same call and return a `schema_check` in which every `generic` field is `missing`.
+
 - An extensionless `--schema` value, such as `myschema`, is now a bank name and no longer a file. Write `./myschema` to read a file.
   A value with a path separator or ending in `.json`, `.yaml` or `.yml` still reads a file. An unknown name exits 2 and lists the bank's names.
 

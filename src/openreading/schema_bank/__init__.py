@@ -48,6 +48,40 @@ with any other schema. A schema you supply gets `null`, unless it is an exact co
 The journaled request carries the resolved `json_schema`, so a replay stays exact after a bank
 file changes.
 
+The generic default
+-------------------
+`openreading parse --extract` without `--schema` sends `generic`, and so does a Python or HTTP
+request whose `extraction_schema` holds only `instructions`. Without it, each backend invented
+its own keys on every run, which nothing could check or compare. `apply_default(req)` returns a
+copy with `extraction_schema.json_schema` set to the `generic` entry. It acts only when
+`extraction_schema` is present and `json_schema` is absent, leaves the instructions as sent, and
+never mutates `req`. A request with no `extraction_schema`, including one that sets only
+`outputs.typed_fields`, gets nothing (law SX1). The response then reports
+`schema_ref: "bank:generic@v1"` through the hash match above.
+
+Only caller-facing ingress points call it: `openreading.api.build_request` and the server's
+`_parse_request`, `/v1/parse`, and each `/v1/batch` item. A reload never calls it, and no model
+validator does. A journal, an evals case or a calibrate case holding instructions only is taken
+literally, so a journal written before the default existed replays unchanged with no
+`schema_check`. A validator would also rewrite every stored request on load.
+
+Core does not classify the document. Naming a domain schema stays your choice, because a guessed
+`bank_statement` on an invoice would apply criticality labels you never chose.
+
+One default applies on every backend whose descriptor claims `custom_schema_extraction`, and
+there is no per-vendor exception:
+
+- `mistral_ocr` changes from plain OCR to document annotation with `generic`. The vendor bills
+  annotation at a separate per-page price, and core carries no price.
+- `pulse` gains `structured_output` with `generic`, and the instructions become `schemaPrompt`.
+- `nuextract` receives `generic` translated into its template, where it used to refuse with
+  `no_template`.
+- `anthropic_claude`, `google_gemini`, `chunkr`, `qwen_vl` and `openai_compatible` (now in
+  `json_schema` mode) send `generic` where they sent an empty open schema or none. `reducto`
+  does so only with `backend.operation: extract`.
+- `aws_textract`, `azure_document_intelligence` and `google_document_ai` make the same call and
+  now return a `schema_check` in which every `generic` field is `missing`.
+
 Exports
 -------
 - `BankEntry`: `name`, `version`, `ref`, `purpose`, `schema_hash`, `label_counts` (one count per
@@ -58,8 +92,11 @@ Exports
 - `ref_for_hash(schema_hash)`: the `ref` of the entry with that hash, else `None`.
 - `UnknownSchemaError`.
 
-Known gaps: `--extract` without `--schema` does not yet apply `generic`, and a request field that
-names an entry by name is not built. The design records are `design/` in the company repo.
+- `apply_default(req)`: the request with `generic` filled in when it asks for extraction and names
+  no schema. See the next section.
+
+Known gaps: a request field that names an entry by name is not built. The design records are
+`design/` in the company repo.
 
 Sibling modules: `openreading.derive.fields` owns the criticality codes and the hash,
 `openreading.schema_io` owns the path rule, and `openreading.cli.app` maps the error to exit 2.
@@ -73,7 +110,7 @@ import re
 from dataclasses import dataclass
 from functools import cache
 from importlib import resources
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from openreading.derive.fields import (
     CRITICALITY_CODES,
@@ -82,7 +119,17 @@ from openreading.derive.fields import (
     schema_hash,
 )
 
-__all__ = ["BankEntry", "UnknownSchemaError", "entries", "ref_for_hash", "resolve"]
+if TYPE_CHECKING:
+    from openreading.types.request import OpenReadingRequest
+
+__all__ = [
+    "BankEntry",
+    "UnknownSchemaError",
+    "apply_default",
+    "entries",
+    "ref_for_hash",
+    "resolve",
+]
 
 # The only shape `resolve` accepts. It excludes every separator, dot and extension on purpose.
 _NAME = re.compile(r"^[a-z][a-z0-9_]*(@v[0-9]+)?$")
@@ -201,3 +248,15 @@ def ref_for_hash(hash_: str) -> str | None:
         if entry.schema_hash == hash_:
             return entry.ref
     return None
+
+
+def apply_default(req: OpenReadingRequest) -> OpenReadingRequest:
+    """`req` with the `generic` schema filled in when it asks for extraction and names none.
+
+    Returns a copy and never mutates `req`. A request without `extraction_schema`, or with its own
+    `json_schema`, comes back unchanged. Pure: no backend is called."""
+    ext = req.extraction_schema
+    if ext is None or ext.json_schema is not None:
+        return req
+    filled = ext.model_copy(update={"json_schema": resolve("generic").schema})
+    return req.model_copy(update={"extraction_schema": filled})

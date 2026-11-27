@@ -353,9 +353,10 @@ def test_sx1_no_extraction_schema_means_no_check(spy):
     assert all(r.extraction_schema is None for r in spy.seen())
 
 
-def test_instructions_only_gets_no_check(spy):
+def test_instructions_only_gets_the_generic_check(spy):
+    # D12: instructions without a schema is generic-schema extraction at the ingress.
     resp = api.run(PDF, backend="spy-extract", extraction_schema={"instructions": "fields"})
-    assert "schema_check" not in resp
+    assert resp["schema_check"]["schema_ref"] == "bank:generic@v1"
 
 
 def test_a_schema_without_labels_is_critical_ok(spy):

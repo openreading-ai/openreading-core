@@ -18,6 +18,9 @@ An envelope is the schema-valid JSON object returned by a completed operation.
   (on `run`, `run_batch` and `resume_run`) also reads keys saved with `openreading keys set`.
   A request whose `extraction_schema` carries `json_schema` gets a `schema_check` in that
   envelope. An unknown `x-read-criticality` label raises `pydantic.ValidationError` first.
+  A request whose `extraction_schema` holds only `instructions` gets the bank's `generic` schema
+  first (`openreading.schema_bank.apply_default`, called by `build_request`), so its envelope
+  carries `schema_ref: "bank:generic@v1"`. A request with no `extraction_schema` gets none.
 - `run_batch(sources, backend=None, **options)` returns a `batch-result.v0.2` envelope.
 - `route(source, **options)` returns a `RoutePlan` without executing a backend.
 - `resume_run(run_id, keychain=False)` returns a response and is exported as
@@ -288,7 +291,8 @@ def build_request(
     through `**overrides` raises `ValueError` (BL-105). A named backend's `type` is filled in from
     its descriptor, and a `strategy:<name>` id is never looked up in the registry (T1). The
     `openreading.yaml` `policy:` block is not read here: `openreading.config.apply` folds it into
-    the request this returns, once, in whichever call is about to dispatch.
+    the request this returns, once, in whichever call is about to dispatch. An `extraction_schema`
+    with no `json_schema` gets the bank's `generic` schema (`openreading.schema_bank.apply_default`).
     """
     # The failure this refuses: an overrides bag carrying `document=` or `backend=` won over the
     # request's real document with no error of any kind, the Python-API twin of the /v1/batch
@@ -312,7 +316,11 @@ def build_request(
     for k, v in overrides.items():
         if v is not None:
             body[k] = v
-    return OpenReadingRequest.model_validate(body)
+    # D12: an `extraction_schema` with instructions only becomes generic-schema extraction here,
+    # at the caller-facing ingress, so a reloaded request is never rewritten.
+    from openreading.schema_bank import apply_default
+
+    return apply_default(OpenReadingRequest.model_validate(body))
 
 
 def _http_url_parts(url: str) -> tuple[ParseResult, str, int | None]:

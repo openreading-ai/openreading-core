@@ -476,7 +476,11 @@ Single-document flags:
                       `prebuilt-invoice`).
   --pages N [N ...]   1-based page numbers.
   --extract [TEXT]    schema-driven field extraction (default instructions when
-                      TEXT is omitted). A directly-named backend that cannot do
+                      TEXT is omitted). Without `--schema` it extracts the
+                      bank's `generic` schema, and the response reports
+                      `schema_ref: "bank:generic@v1"`. Mistral then bills
+                      annotation, a separate per-page price. A directly-named
+                      backend that cannot do
                       it raises `unsupported_feature` (exit 3) instead of
                       silently returning geometry-only output, which would deny
                       the ask (DECISIONS D13); the router pre-filters such

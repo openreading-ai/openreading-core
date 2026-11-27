@@ -147,6 +147,7 @@ from openreading.router.clock import RealClock
 from openreading.router.driver import _DriveSliceExpired, run_to_completion
 from openreading.router.executor import BoundedResultCache
 from openreading.router.router import Router, RouterConfig
+from openreading.schema_bank import apply_default
 from openreading.server.uploads import UploadError, decode_request, request_body_schema
 from openreading.strategies.loader import strip_strategy_prefix
 from openreading.types.enums import WaitMode
@@ -1060,7 +1061,7 @@ def create_app(*, cors_origins: list[str] | None = None):
     async def _parse_request(request: Request) -> OpenReadingRequest:
         body = await decode_request(request)  # raises on invalid JSON → caught by caller
         schemas.validate_request(body)  # vendored request schema (raises → 400)
-        req = OpenReadingRequest.model_validate(body)
+        req = apply_default(OpenReadingRequest.model_validate(body))
         # Shared by /v1/route and /v1/jobs — a ValueError here lands in each caller's own
         # existing except→400, so this one gate covers both ingress points. The request it
         # RETURNS is the gated one: a rooted document.path has already been read into bytes by
@@ -1154,7 +1155,7 @@ def create_app(*, cors_origins: list[str] | None = None):
         keep = bool(body.pop("keep_candidates", False)) if isinstance(body, dict) else False
         try:
             schemas.validate_request(body)
-            req = OpenReadingRequest.model_validate(body)
+            req = apply_default(OpenReadingRequest.model_validate(body))
         except Exception as e:  # noqa: BLE001 — any validation failure is a 400
             return _bad_request(_validation_message(e))
         refusal, req = _gate_document_path(req)
@@ -1435,8 +1436,10 @@ def create_app(*, cors_origins: list[str] | None = None):
         if scope is not None and (backend is None or strip_strategy_prefix(str(backend)) == "none"):
             for doc in docs_by_relpath.values():
                 try:
-                    item_req = OpenReadingRequest.model_validate(
-                        {"document": doc, "backend": {"id": backend}, **shared}
+                    item_req = apply_default(
+                        OpenReadingRequest.model_validate(
+                            {"document": doc, "backend": {"id": backend}, **shared}
+                        )
                     )
                     refusal, item_req = _gate_document_path(item_req)
                     if refusal is not None:
@@ -1459,12 +1462,14 @@ def create_app(*, cors_origins: list[str] | None = None):
             # as the old per-item loop did.
             relpath = src.ref.relpath
             assert relpath is not None  # every source built above sets relpath=str(i)
-            req = OpenReadingRequest.model_validate(
-                {
-                    "document": docs_by_relpath[relpath],
-                    "backend": {"id": backend},
-                    **shared,
-                }
+            req = apply_default(
+                OpenReadingRequest.model_validate(
+                    {
+                        "document": docs_by_relpath[relpath],
+                        "backend": {"id": backend},
+                        **shared,
+                    }
+                )
             )
             # M6: raising here (rather than checking earlier) lets _run_item's own per-item
             # isolation turn a refused document.path into a `failed` item, never aborting the

@@ -2752,7 +2752,8 @@ def build_parser() -> argparse.ArgumentParser:
         const="",
         default=None,
         metavar="INSTRUCTIONS",
-        help="request schema-driven field extraction. A named backend that cannot do it "
+        help="request schema-driven field extraction. Without --schema it extracts the bank's "
+        "generic schema (`openreading schema show generic`). A named backend that cannot do it "
         "refuses the run and exits 3 (unsupported_feature, nothing on stdout) rather than "
         "silently dropping the ask. Takes an optional value, so name FILE before it",
     )
