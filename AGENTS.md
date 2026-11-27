@@ -239,11 +239,27 @@ These belong here too, once they are built:
 - the intent schema and its routing mechanics
 - the translation stage and its profile grammar
 - every new backend, signal, verdict, or channel
+- the schema bank: a small set of default extraction schemas you pick by name, plus one generic
+  schema used when you ask for extraction without a schema
+
+The schema bank is the one curated catalog core ships. It earns the exception because a first
+extraction should not start with writing a JSON Schema. It stays small, and each entry carries
+its own proof:
+
+- a synthetic example document in `examples/` and an offline test that the schema accepts the
+  expected record for it
+- one keyed run against every schema-capable backend in the live lane (`make verify-live`)
+  before the entry is released, because a strict structured-output mode can reject a schema
+  that validates offline
+- a YAML comment on every `x-read-criticality` label saying why the field has that level
+- no labels on the generic schema, because core never claims which field matters in a document
+  type it has not been told
 
 Not here, ever: a web UI, labeled datasets (`tests/test_evals_benchmark_only.py` fails if one
 lands in `evals/`), tuned prompts or calibration derived from private corpora, curated intent or
-profile catalogs, anything hosted, multi-tenant, billed, or behind an account. A PR that adds one
-of those is closed, not reviewed.
+profile catalogs other than the schema bank, anything hosted, multi-tenant, billed, or behind an
+account. A PR that adds one of those is closed, not reviewed. Gold sets that score a bank schema
+stay outside this repo, like every labeled dataset.
 
 ## Things not to do
 
