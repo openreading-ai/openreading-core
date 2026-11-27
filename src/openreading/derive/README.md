@@ -12,7 +12,7 @@ whether the parser or the document is at fault. A backend is one parser, such as
 library or a hosted API. A channel is one kind of output inside the response, such as `text`,
 `blocks`, `table_cells`, or per-block confidence.
 
-This page gives you the rule set, C1 to C11, that every backend's output is checked against. It also
+This page gives you the rule set, C1 to C11 plus C13, that every backend's output is checked against. It also
 describes the one package, `openreading.derive`, that computes the channels a backend does not emit
 itself. In practice you get plain text with no markup in it, and tables whose rows also appear in
 the text. A `channel_provenance` map says which channels this package derived and which the backend
@@ -223,10 +223,20 @@ uv run python -c "from openreading.derive import pdf_page_count; print(pdf_page_
 Backends report byte offsets, but Python slices by code point. After the first `é` the two drift
 apart by one.
 
+**Check typed fields against a schema.**
+```bash
+uv run python -c "from openreading.derive.fields import check_typed_fields; from openreading.types import TypedField; s = {'properties': {'total': {'type': 'number', 'x-read-criticality': 'critical'}, 'payee': {'type': 'string'}}}; c = check_typed_fields(s, {'total': TypedField(value='ten'), 'payee': TypedField(value='')}); print(c.critical_ok, [(f.path, f.status) for f in c.fields])"
+# False [('total', 'invalid'), ('payee', 'missing')]
+```
+A criticality label is the `x-read-criticality` keyword on a schema property. Here `total` is
+labelled `critical`, and a string where the schema wants a number makes it `invalid`. A blank
+string counts as `missing`. The router attaches this same report to a response as
+`schema_check`, and the values stay exactly as the backend returned them.
+
 ## How it decides
 
 Each rule names the failure it prevents, so you can tell which rule a warning is enforcing. The
-authoritative text of C1 to C12 is the section headed `The channel contract` in
+authoritative text of C1 to C13 is the section headed `The channel contract` in
 `uv run python -m pydoc openreading.derive`. C12 sits beside the others there. It is a rule about
 schema files rather than a channel check, so this page leaves it out. Four of the channel rules,
 with an example each:
@@ -241,6 +251,11 @@ with an example each:
 
 C7 adds that every confidence is a float in `[0, 1]`. Word confidences roll up to a block by
 minimum, because a mean hides one garbage word.
+
+C13 checks typed fields against the schema you sent, once, in `openreading.derive.fields`. The
+router attaches the result as `schema_check` for every backend, so a reply missing a critical
+field reports `critical_ok: false` whichever backend produced it. Without this rule one adapter
+checked its replies and every other adapter copied fields through unchecked.
 
 A backend may lower a channel's grade at any time, because a downgrade only makes today's claims
 true. It may raise a grade only in the change that ships the implementation, because raising it
@@ -271,13 +286,12 @@ applies one vendor's cut to another vendor's scale ([Strategies](../strategies/R
   `Function contracts`, and `Enforcement and rollout`.
 - `uv run python -m pydoc openreading.testing.conformance` describes the kit and its strict
   defaults.
-- `src/openreading/schemas/response.v0.3.json` defines `channel_provenance` and `warnings`.
+- `uv run python -m pydoc openreading.derive.fields` defines the typed-fields check (C13), its
+  statuses, the criticality codes and the two formats it asserts.
+- `src/openreading/schemas/response.v0.4.json` defines `channel_provenance` and `warnings`.
 
 ## Not built yet
 
-- `TypedField.type` is filled only by `anthropic-claude`, `google-gemini`, `google-document-ai`
-  and `azure-document-intelligence` (`openreading.derive` docstring, the `typed_fields`
-  paragraph).
 - C11 (text and blocks agree) is permanently advisory (same docstring, C11).
 - No per-case suppression for the C1 false positive on a real ASCII pipe table (same docstring).
 - `channel_provenance` is experimental and may change shape (`openreading.schemas` docstring).

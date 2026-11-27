@@ -1,7 +1,7 @@
 """Phase B (Manifest v0.6) — the `parse` CLI batch surface, OFFLINE (pymupdf, plus a keyless hosted
 backend that never gets past the credential check).
 
-M2 envelope selection (single file → response.v0.3, byte-identical to v0.5; directory / glob / >=2
+M2 envelope selection (single file → response.v0.4, byte-identical to v0.5; directory / glob / >=2
 args → batch-result), exit code 4 for a partial batch, --save-dir per-item output, the flags the
 batch dispatch must not drop, and the stderr channel: per-item errors and the cost preflight."""
 
@@ -26,7 +26,7 @@ def test_single_file_stays_a_response_envelope(tmp_path, capsys):
     rc = main(["parse", str(f), "--backend", "pymupdf"])
     d = json.loads(capsys.readouterr().out)
     assert rc == 0
-    assert d["schema_version"] == "0.3" and "items" not in d  # a response, not a batch envelope
+    assert d["schema_version"] == "0.4" and "items" not in d  # a response, not a batch envelope
     assert d["backend"]["id"] == "pymupdf"
 
 

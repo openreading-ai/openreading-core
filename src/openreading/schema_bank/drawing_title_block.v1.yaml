@@ -1,0 +1,66 @@
+# drawing_title_block.v1: Engineering drawing title block: part identity, revision, material, finish, tolerances, units and export control.
+$schema: https://json-schema.org/draft/2020-12/schema
+title: drawing_title_block
+type: object
+required:
+- drawing_number
+- revision
+properties:
+  drawing_number:
+    type: string
+    x-read-criticality: critical  # critical: a wrong number matches the drawing to the wrong part
+  revision:
+    type: string
+    x-read-criticality: critical  # critical: a wrong revision quotes against an out-of-date drawing
+  title:
+    type: string
+    x-read-criticality: expected  # expected: a wrong title is caught by the drawing number, which identifies the part
+  material:
+    type: string
+    x-read-criticality: critical  # critical: a wrong material changes the cost and the supplier
+  finish:
+    type: string
+    x-read-criticality: critical  # critical: a wrong finish changes the process and the cost
+  general_tolerances:
+    type: object
+    x-read-criticality: critical  # critical: wrong tolerances change machining cost and acceptance
+    description: The title-block tolerance table, e.g. X.X = ±0.1, X.XX = ±0.01, angles ±0.5°
+    properties:
+      linear:
+        type: array
+        items:
+          type: string
+      angular:
+        type: string
+  units:
+    type: string
+    enum:
+    - mm
+    - inch
+    x-read-criticality: critical  # critical: a wrong unit reads every dimension and tolerance wrongly
+  projection:
+    type: string
+    enum:
+    - first_angle
+    - third_angle
+    x-read-criticality: optional  # optional: many drawings omit the projection symbol, and the views still read correctly
+  standard:
+    type: string
+    description: e.g. ASME Y14.5-2018, ISO 2768-m
+    x-read-criticality: expected  # expected: a wrong standard changes how tolerances read, but the printed tolerances still apply
+  scale:
+    type: string
+    x-read-criticality: optional  # optional: the scale is advisory, because dimensions govern over a measured size
+  sheet_count:
+    type: integer
+    x-read-criticality: expected  # expected: a wrong count hides missing sheets
+  notes:
+    type: array
+    items:
+      type: string
+    description: Numbered drawing notes, verbatim
+    x-read-criticality: expected  # expected: the notes carry process requirements that the estimator reads in full on the drawing
+  export_control:
+    type: string
+    description: ITAR or EAR marking text if present
+    x-read-criticality: expected  # expected: most drawings carry no marking, so an empty value is a correct reading and a critical label would alarm on every one

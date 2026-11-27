@@ -112,7 +112,7 @@ run](#sizing-a-large-run) has the shard recipe that does protect a long run.
   "request": { "backend": "pymupdf", "jobs": 1, "source_args": ["corpus/"] },
   "items": [
     { "source": { "filename": "a.pdf", "format": "pdf", "path": "corpus/a.pdf", "relpath": "a.pdf", "size_bytes": 8688, "sha256": "…" },
-      "state": "succeeded", "response": { "schema_version": "0.3", "…": "…" }, "transport": "platform" },
+      "state": "succeeded", "response": { "schema_version": "0.4", "…": "…" }, "transport": "platform" },
     { "source": { "relpath": "b.pdf", "…": "…" }, "state": "succeeded", "response": "…", "transport": "platform" },
     { "source": { "filename": "c.txt", "format": "txt", "path": "corpus/c.txt", "relpath": "c.txt", "size_bytes": 1, "sha256": "…" },
       "state": "failed", "error": { "code": "unsupported_format", "message": "pymupdf cannot read c.txt. It reads pdf, xps, epub, mobi, cbz, svg, and this file is not one of them." } } ],
@@ -139,7 +139,7 @@ uv run openreading parse corpus/ --backend pymupdf --max-items 1; echo "exit=$?"
 uv run openreading parse corpus/ --strategy offline_first | jq -c '.request, [.items[] | select(.state=="succeeded") | .response.orchestration.outcome]'
 ```
 ```text
-{"schema_version":"0.3","state":"succeeded"}
+{"schema_version":"0.4","state":"succeeded"}
 {"jobs":4,"total":2}
 {"total":2,"succeeded":2}
 [batch] batch expansion is 3 files, over the max-items limit (1); raise it with --max-items / max_items= if this is intended

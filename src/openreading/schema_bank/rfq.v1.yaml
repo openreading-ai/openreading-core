@@ -1,0 +1,103 @@
+# rfq.v1: Manufacturing request for quotation: buyer, due date, certifications and line items with quantity breaks, enough to quote from.
+$schema: https://json-schema.org/draft/2020-12/schema
+title: rfq
+type: object
+required:
+- rfq_number
+- buyer_organization
+- response_due
+- line_items
+properties:
+  rfq_number:
+    type: string
+    x-read-criticality: critical  # critical: a wrong number files the quote against the wrong request
+  rfq_revision:
+    type: string
+    x-read-criticality: expected  # expected: a wrong revision confuses which version of the request is open, but the number still identifies it
+  issue_date:
+    type: string
+    format: date
+    x-read-criticality: expected  # expected: the issue date orders requests, but the due date decides the work
+  response_due:
+    type: string
+    format: date-time
+    x-read-criticality: critical  # critical: a wrong due date means a missed or wasted quote
+  buyer_organization:
+    type: string
+    x-read-criticality: critical  # critical: a wrong buyer sends the quote to the wrong customer
+  buyer_contact:
+    type: object
+    x-read-criticality: optional  # optional: the contact is nice to have, and the buyer organization already identifies the customer
+    properties:
+      name:
+        type: string
+      email:
+        type: string
+      phone:
+        type: string
+  currency:
+    type: string
+    x-read-criticality: expected  # expected: the estimator corrects a wrong currency from the surrounding terms before pricing
+  incoterms:
+    type: string
+    description: e.g. FCA, DAP, EXW, with named place
+    x-read-criticality: expected  # expected: wrong delivery terms shift freight cost, and the estimator confirms them before quoting
+  delivery_location:
+    type: string
+    x-read-criticality: expected  # expected: a wrong ship-to changes freight cost, and the estimator confirms it before quoting
+  payment_terms:
+    type: string
+    description: e.g. Net 30
+    x-read-criticality: expected  # expected: wrong payment terms affect the offer, and the estimator confirms them before quoting
+  quote_validity_days:
+    type: integer
+    x-read-criticality: optional  # optional: many requests leave the validity period to the supplier
+  required_certifications:
+    type: array
+    items:
+      type: string
+    description: Quality and compliance requirements, e.g. ISO 9001, AS9100, ITAR, RoHS, REACH, first
+      article inspection (FAI), PPAP level, certificate of conformance.
+    x-read-criticality: critical  # critical: a missed certification makes the quote non-compliant
+  line_items:
+    type: array
+    x-read-criticality: critical  # critical: a wrong part number, revision or quantity break misprices the quote
+    items:
+      type: object
+      required:
+      - line
+      - part_number
+      - quantities
+      properties:
+        line:
+          type: string
+          description: Line or CLIN number as printed
+        part_number:
+          type: string
+        revision:
+          type: string
+        description:
+          type: string
+        material:
+          type: string
+          description: As stated on the RFQ, e.g. 6061-T6 aluminium
+        finish:
+          type: string
+          description: e.g. Type II anodize black, zinc plate
+        quantities:
+          type: array
+          items:
+            type: integer
+          description: Every quantity break, ascending
+        unit_of_measure:
+          type: string
+          description: EA, LB, FT, ...
+        need_date:
+          type: string
+          format: date
+        drawing_ref:
+          type: string
+          description: Drawing number the line points to, if different from part_number
+  special_instructions:
+    type: string
+    x-read-criticality: optional  # optional: free text that most requests do not carry

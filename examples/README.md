@@ -125,6 +125,37 @@ The scan therefore exercises OCR against handwriting-era print without carrying 
 It is also the slowest document here, so a command that OCRs it takes seconds rather than
 milliseconds.
 
+## The schema bank examples
+
+The `bank/` folder holds one synthetic document for each schema in the schema bank, and the record
+a correct reading of that document produces. An expected record is the answer key a test checks
+the schema against. `tests/test_schema_bank.py` validates each record against its bank schema
+offline, so a schema that rejects its own proof document fails `make verify`. The keyed
+`tests/test_schema_bank_live.py` sends each document to every backend that claims schema
+extraction. Run `openreading schema list` to see the bank.
+
+| File | Pages | What it is | Proves |
+|---|---|---|---|
+| `bank/rfq_ardent_letter_quote.pdf` | 1 | a manufacturing request for quotation with line items and quantity breaks | `rfq` |
+| `bank/drawing_mounting_bracket_asme.pdf` | 1 | an engineering drawing with an ASME-style title block | `drawing_title_block` |
+| `bank/cta_pellucid_short.pdf` | 1 | a short clinical trial agreement with numbered clauses | `clinical_trial_agreement` |
+| `john_smith_1000_2026_01.pdf` | 1 | the January statement above, read with a hand-written record for each schema | `bank_statement`, `generic` |
+
+All four are synthetic, and every name, number and amount in them is invented. The first three
+come from the OpenReading lab's document generator, version 0.2.0, with seed 20261116 and the
+cases `rfq_letter_0000`, `dwg_asme_0000` and `cta_short_0000`. The generator's own truth record
+for each case is the expected record, so it is exact by construction. The records sit beside the
+files as `bank/<name>.expected.json`.
+
+The January statement did not come from that generator, so its two records are written by hand:
+`bank/john_smith_1000_2026_01.bank_statement.expected.json` and
+`bank/john_smith_1000_2026_01.generic.expected.json`. The first confirms the statement carries
+every property the `bank_statement` schema requires.
+
+The RFQ record's `response_due` ends in `Z`, which the PDF does not print. The `date-time` format
+that the schema asserts requires a time zone, so the record carries one and a reader of the
+document infers it.
+
 ## Running them
 
 Parse one document with one backend:

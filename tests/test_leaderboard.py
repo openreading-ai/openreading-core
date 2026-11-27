@@ -168,3 +168,80 @@ def test_ac8_backend_flagged_non_deterministic_is_labeled_not_hidden(tmp_path):
 
 # --- AC-9: shipping/exercising the leaderboard changes NOTHING about Router._score, -----------
 # --- _QUALITY_BY_PRIORITY, or any shipped adapter's integration_priority -----------------------
+
+
+# --- criticality: weighted_f1, critical_pass_rate and n_critical_scored (leaderboard v0.2) ------
+
+
+def _crit(f1, passed, n_critical=1):
+    return {
+        "weighted_prf": None if f1 is None else {"precision": f1, "recall": f1, "f1": f1},
+        "critical_pass": passed,
+        "n_critical": n_critical,
+        "weights_version": "v1",
+    }
+
+
+def _scripted_reports(monkeypatch, by_backend):
+    from openreading.evals import leaderboard as lb
+    from openreading.evals.runner import CaseResult, DatasetReport
+
+    def fake_run_dataset(adapter, dataset_dir, **_):
+        rows = by_backend[adapter.descriptor.id]
+        return DatasetReport(
+            backend_id=adapter.descriptor.id,
+            results=[
+                CaseResult(name=f"c{i}", overall=0.5, dimensions={"field_prf": {"f1": 0.5}}, **r)
+                for i, r in enumerate(rows)
+            ],
+        )
+
+    monkeypatch.setattr(lb, "run_dataset", fake_run_dataset)
+
+
+def test_criticality_means_ride_beside_the_unweighted_mean(monkeypatch):
+    _scripted_reports(
+        monkeypatch,
+        {
+            "a": [
+                {"criticality": _crit(1.0, 1.0)},
+                {"criticality": _crit(0.5, 0.0)},
+                # No critical field in this case's gold, so it leaves the rate and the count.
+                {"criticality": _crit(0.25, None, n_critical=0)},
+            ],
+            "b": [{}, {}, {}],
+        },
+    )
+    reg = _registry(ScriptedBackend("a", local=True), ScriptedBackend("b", local=True))
+    report = run_leaderboard("ds", ["a", "b"], reg)
+    row_a = next(b for b in report.backends if b.backend_id == "a")
+    row_b = next(b for b in report.backends if b.backend_id == "b")
+    assert row_a.mean_score == row_b.mean_score == 0.5
+    assert row_a.dimensions == row_b.dimensions == {"field_prf": 0.5}
+    assert row_a.weighted_f1 == pytest.approx((1.0 + 0.5 + 0.25) / 3)
+    assert row_a.critical_pass_rate == 0.5
+    assert row_a.n_critical_scored == 2
+    assert row_a.weights_version == "v1"
+    assert row_b.weighted_f1 is None and row_b.critical_pass_rate is None
+    assert row_b.n_critical_scored == 0 and row_b.weights_version is None
+    dumped = report.to_schema_dict()
+    assert dumped["schema_version"] == "0.2"
+    schemas.validate_leaderboard_report(dumped)
+
+
+def test_errored_case_carries_no_criticality_into_the_means(monkeypatch):
+    _scripted_reports(
+        monkeypatch,
+        {
+            "a": [
+                {"criticality": _crit(1.0, 1.0)},
+                {"error": "boom", "criticality": _crit(0.0, 0.0)},
+            ],
+            "b": [{}, {}],
+        },
+    )
+    reg = _registry(ScriptedBackend("a", local=True), ScriptedBackend("b", local=True))
+    row = next(b for b in run_leaderboard("ds", ["a", "b"], reg).backends if b.backend_id == "a")
+    assert row.weighted_f1 == 1.0
+    assert row.critical_pass_rate == 1.0
+    assert row.n_critical_scored == 1

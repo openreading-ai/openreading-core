@@ -13,6 +13,9 @@ blocks lookup of a required saved credential, its row names that setting in ``ke
 ``POST /v1/route`` returns a router plan without executing it. ``POST /v1/compare`` compares
 existing responses. ``POST /v1/batch`` accepts explicit document objects plus four shared request
 fields: outputs, extraction schema, features, and pages. Batch items fail independently.
+``/v1/parse``, ``/v1/route``, ``/v1/jobs`` and each batch item fill the bank's ``generic`` schema
+into an ``extraction_schema`` that holds only ``instructions``. A request with no
+``extraction_schema`` gets none.
 
 ``POST /v1/jobs`` starts an in-memory job. ``GET /v1/jobs/{job_id}`` advances or reads it, while
 ``DELETE /v1/jobs/{job_id}`` drops its local record. A configured API key can read or delete only

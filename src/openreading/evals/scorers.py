@@ -25,13 +25,55 @@ a deliberate answer to a question the design record left open, and the honest re
 rule pass rate is a fraction of assertions satisfied, on the same [0,1] scale as the others, so a
 case that declares both kinds of expectation gets one mean over both. It is a reading aid, not a
 number to defend on its own, which is why every dimension is also reported separately.
+
+Criticality
+-----------
+A criticality label is the `x-read-criticality` keyword on a property of the case's extraction
+schema: `critical`, `expected` (the default), `optional` or `ignore` (`openreading.derive.fields`
+reads it). `score(resp, expected, schema=...)` adds a top-level `criticality` block when the
+schema carries at least one label:
+`{weighted_prf: {precision, recall, f1}, critical_pass, n_critical, weights_version}`.
+The evals runner passes the case's `extraction_schema.json_schema`. `compare --truth` and
+`calibrate` pass no schema, so they report no block.
+
+The block sits beside `dimensions`, never inside them, so `overall` and every leaderboard mean
+stay unweighted (law SX5). A weighted headline alone could hide an unweighted regression. With a
+weight table of all 1.0, `weighted_prf` equals `field_prf` on scalar fields and `row_prf` on
+rows, bit for bit, and a test holds it there.
+
+- `CRITICALITY_WEIGHTS_V1` gives critical 1.0, expected 0.3, optional 0.1 and ignore 0.0.
+  `weights_version` echoes `"v1"`, so two reports scored under different tables cannot be read
+  as one series.
+- `weighted_prf` is count-based, not a mean of per-field F1. Each item carries its field's weight.
+  Precision is the weighted correct sum over the weighted sum of returned items, and recall the
+  same over expected items. A scalar field is one item, as in `field_prf`. A field with labelled
+  descendants splits into one item per leaf path, such as `statement_period.start` and
+  `statement_period.end`, and an unlabelled leaf takes its parent's code. Each row of a
+  `typed_rows` field is one item, matched as `row_prf` matches it, so an invented row lowers
+  precision. A returned field the schema does not declare weighs as `expected`, because invented
+  keys must cost something. `None` when the case declares neither `typed_fields` nor
+  `typed_rows`.
+- An `ignore` label below a field, such as a `category` column inside `items`, removes that key
+  from the gold value. The comparisons read gold keys only, so the column goes unscored.
+- `critical_pass` is 1.0 when every critical field the gold record names is right, else 0.0. A
+  scalar is right under `_field_equal`. A row field is right when its own exact rows equal both
+  its expected and its returned row counts. The matcher runs once per field, because `row_prf`
+  pools its counts and a wrong optional list would blur a right critical one. A gold `null`
+  asserts the field is absent, so any non-null reply fails it. A critical field the gold record
+  omits is skipped. A critical column inside `items` is checked through the list holding it,
+  because a value is right only in its own row. With no critical field checked, `critical_pass`
+  is `None` and `n_critical` is 0, which leaves the case out of a pass rate.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from difflib import SequenceMatcher
+from types import MappingProxyType
 from typing import Any
+
+from openreading.derive.fields import CRITICALITY_KEY, DEFAULT_CRITICALITY, field_criticality
 
 
 def _norm(s: Any) -> str:
@@ -143,6 +185,29 @@ def _row_cells(got: Any, expected: Any) -> tuple[int, int]:
     return int(_cell_equal(got, expected)), 1
 
 
+def _match_rows(got_rows: list[Any], exp_rows: list[Any]) -> tuple[int, int, int]:
+    """(exact rows, matching cells, labelled cells) for one field, matched as `row_prf` says."""
+    width = [_row_cells(None, e)[1] for e in exp_rows]
+    pairs = []
+    for i, e in enumerate(exp_rows):
+        for j, g in enumerate(got_rows):
+            ok, _ = _row_cells(g, e)
+            if ok:
+                pairs.append((-ok / width[i], i, j, ok))
+    pairs.sort()
+    used_e: set[int] = set()
+    used_g: set[int] = set()
+    exact = cells_ok = 0
+    for _, i, j, ok in pairs:
+        if i in used_e or j in used_g:
+            continue
+        used_e.add(i)
+        used_g.add(j)
+        cells_ok += ok
+        exact += ok == width[i]
+    return exact, cells_ok, sum(width)
+
+
 def row_prf(got: dict[str, Any], expected: dict[str, list[Any]]) -> dict[str, float]:
     """Precision, recall and F1 over the rows of repeated fields, pooled across every field named.
 
@@ -167,24 +232,10 @@ def row_prf(got: dict[str, Any], expected: dict[str, list[Any]]) -> dict[str, fl
         got_rows = got_rows if isinstance(got_rows, list) else []
         n_exp += len(exp_rows)
         n_got += len(got_rows)
-        width = [_row_cells(None, e)[1] for e in exp_rows]
-        cells_total += sum(width)
-        pairs = []
-        for i, e in enumerate(exp_rows):
-            for j, g in enumerate(got_rows):
-                ok, _ = _row_cells(g, e)
-                if ok:
-                    pairs.append((-ok / width[i], i, j, ok))
-        pairs.sort()
-        used_e: set[int] = set()
-        used_g: set[int] = set()
-        for _, i, j, ok in pairs:
-            if i in used_e or j in used_g:
-                continue
-            used_e.add(i)
-            used_g.add(j)
-            cells_ok += ok
-            exact += ok == width[i]
+        field_exact, field_ok, field_total = _match_rows(got_rows, exp_rows)
+        exact += field_exact
+        cells_ok += field_ok
+        cells_total += field_total
     precision = exact / n_got if n_got else (1.0 if not n_exp else 0.0)
     recall = exact / n_exp if n_exp else 1.0
     f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
@@ -276,7 +327,234 @@ def response_tables(resp: dict) -> list[list[list[Any]]]:
     return tables
 
 
-def score(resp: dict, expected: dict) -> dict[str, Any]:
+# --- criticality weighting ----------------------------------------------------------------
+
+CRITICALITY_WEIGHTS_V1: Mapping[str, float] = MappingProxyType(
+    {"critical": 1.0, "expected": 0.3, "optional": 0.1, "ignore": 0.0}
+)
+CRITICALITY_WEIGHTS_VERSION = "v1"
+
+_ABSENT = object()
+
+
+def _at(value: Any, path: tuple[str, ...]) -> Any:
+    """The value at `path` through nested objects, or `_ABSENT` when any step is missing."""
+    for key in path:
+        if not isinstance(value, Mapping) or key not in value:
+            return _ABSENT
+        value = value[key]
+    return value
+
+
+def _label(node: Any) -> str | None:
+    if isinstance(node, Mapping) and isinstance(node.get(CRITICALITY_KEY), str):
+        return node[CRITICALITY_KEY]
+    return None
+
+
+def _labelled_below(node: Any) -> bool:
+    """True when an object property below `node` carries a label. Arrays are not entered,
+    because a path through a list names a column of every row, not one value."""
+    props = node.get("properties") if isinstance(node, Mapping) else None
+    if not isinstance(props, Mapping):
+        return False
+    return any(_label(sub) is not None or _labelled_below(sub) for sub in props.values())
+
+
+def _leaf_items(name: str, node: Any, code: str, gold: Any) -> list[tuple[tuple[str, ...], str]]:
+    """The scored items of one field as (path, code). A field with labelled descendants splits
+    into its leaf paths, and an unlabelled child takes its parent's code. A gold key the schema
+    does not declare stays an item, so no gold value drops out of recall."""
+    out: list[tuple[tuple[str, ...], str]] = []
+
+    def expand(path: tuple[str, ...], sub: Any, inherited: str, gold_here: Any) -> None:
+        if not _labelled_below(sub):
+            out.append((path, inherited))
+            return
+        props = sub["properties"]
+        names = list(props)
+        if isinstance(gold_here, Mapping):
+            names += [k for k in gold_here if k not in props]
+        for child in names:
+            child_node = props.get(child)
+            child_gold = gold_here.get(child, _ABSENT) if isinstance(gold_here, Mapping) else None
+            expand((*path, child), child_node, _label(child_node) or inherited, child_gold)
+
+    expand((name,), node, code, gold)
+    return out
+
+
+def _array_prefix(schema: Any, path: tuple[str, ...]) -> int | None:
+    """When `path` steps into an array's `items`, the length of the prefix naming that array."""
+    node = schema
+    for i, key in enumerate(path):
+        props = node.get("properties") if isinstance(node, Mapping) else None
+        if isinstance(props, Mapping) and key in props:
+            node = props[key]
+            continue
+        items = node.get("items") if isinstance(node, Mapping) else None
+        if (
+            isinstance(items, Mapping)
+            and isinstance(items.get("properties"), Mapping)
+            and key in items["properties"]
+        ):
+            return i
+        return None
+    return None
+
+
+def _without(value: Any, path: tuple[str, ...]) -> Any:
+    """A copy of `value` without the key at `path`, applied to every row of a list on the way."""
+    if not path:
+        return value
+    if isinstance(value, list):
+        return [_without(v, path) for v in value]
+    if not isinstance(value, Mapping) or path[0] not in value:
+        return value
+    if len(path) == 1:
+        return {k: v for k, v in value.items() if k != path[0]}
+    return {**value, path[0]: _without(value[path[0]], path[1:])}
+
+
+def _gold_without_ignored(gold: Mapping[str, Any], ignored: list[tuple[str, ...]]) -> dict:
+    out = dict(gold)
+    for path in ignored:
+        if path[0] in out:
+            out[path[0]] = _without(out[path[0]], path[1:])
+    return out
+
+
+def _prf(correct: float, got: float, exp: float) -> dict[str, float]:
+    # The same expressions and empty-input guards as field_prf and row_prf, so a table of all
+    # 1.0 reproduces them bit for bit (law SX5).
+    precision = correct / got if got else (1.0 if not exp else 0.0)
+    recall = correct / exp if exp else 1.0
+    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+    return {"precision": precision, "recall": recall, "f1": f1}
+
+
+def _prepared(
+    resp: dict, expected: dict, schema: Any
+) -> tuple[Mapping[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """(top-level schema properties, every returned value, gold fields, gold rows). Every
+    `ignore` path below a field is removed from the gold values. The comparisons only look at
+    gold keys, so the column then goes unscored on both sides."""
+    props = schema.get("properties") if isinstance(schema, Mapping) else None
+    props = props if isinstance(props, Mapping) else {}
+    ignored = [p for p, code, _ in field_criticality(schema) if code == "ignore" and len(p) > 1]
+    gold_fields = _gold_without_ignored(expected.get("typed_fields") or {}, ignored)
+    gold_rows = _gold_without_ignored(expected.get("typed_rows") or {}, ignored)
+    return props, response_typed_fields(resp), gold_fields, gold_rows
+
+
+def weighted_prf(
+    resp: dict,
+    expected: dict,
+    schema: Any,
+    *,
+    weights: Mapping[str, float] = CRITICALITY_WEIGHTS_V1,
+) -> dict[str, float] | None:
+    """Count-based precision, recall and F1, with each scored item carrying its field's weight.
+
+    Items come from the dimensions the case declares. `expected.typed_fields` gives one item per
+    scalar field, or one per leaf path when the field has labelled descendants. Each row of an
+    `expected.typed_rows` field is one item, matched as `row_prf` matches it. The result is
+    `None` when the case declares neither, because there is nothing to weigh."""
+    if "typed_fields" not in expected and "typed_rows" not in expected:
+        return None
+    props, got_all, gold_fields, gold_rows = _prepared(resp, expected, schema)
+    default = weights[DEFAULT_CRITICALITY]
+    correct = got_w = exp_w = 0.0
+    if "typed_fields" in expected:
+        got = {k: v for k, v in got_all.items() if k not in gold_rows}
+        for name in list(gold_fields) + [k for k in got if k not in gold_fields]:
+            node = props.get(name)
+            code = _label(node) or DEFAULT_CRITICALITY
+            for path, item_code in _leaf_items(name, node, code, gold_fields.get(name, _ABSENT)):
+                w = weights.get(item_code, default)
+                g, r = _at(gold_fields, path), _at(got, path)
+                if g is not _ABSENT:
+                    exp_w += w
+                if r is not _ABSENT:
+                    got_w += w
+                if g is not _ABSENT and r is not _ABSENT and _field_equal(r, g):
+                    correct += w
+    for name, exp_rows in gold_rows.items():
+        w = weights.get(_label(props.get(name)) or DEFAULT_CRITICALITY, default)
+        exp_list = exp_rows if isinstance(exp_rows, list) else []
+        got_rows = got_all.get(name)
+        got_list = got_rows if isinstance(got_rows, list) else []
+        exact, _, _ = _match_rows(got_list, exp_list)
+        correct += w * exact
+        got_w += w * len(got_list)
+        exp_w += w * len(exp_list)
+    return _prf(correct, got_w, exp_w)
+
+
+def _field_equal_present(got: Any, gold: Any) -> bool:
+    return got is not _ABSENT and _field_equal(got, gold)
+
+
+def _critical_targets(schema: Any) -> list[tuple[str, ...]]:
+    """The paths `critical_pass` checks. A critical column inside `items` is checked through the
+    list that holds it, because a value is right only in the row it belongs to."""
+    targets: list[tuple[str, ...]] = []
+    for path, code, _ in field_criticality(schema):
+        if code != "critical":
+            continue
+        cut = _array_prefix(schema, path)
+        target = path[:cut] if cut else path
+        if target not in targets:
+            targets.append(target)
+    return targets
+
+
+def critical_pass(resp: dict, expected: dict, schema: Any) -> tuple[float | None, int]:
+    """(1.0 when every critical field the gold record names is right, else 0.0; fields checked).
+
+    The first value is `None` when the gold record names no critical field."""
+    _, got_all, gold_fields, gold_rows = _prepared(resp, expected, schema)
+    checked = 0
+    passed = True
+    for target in _critical_targets(schema):
+        if len(target) == 1 and target[0] in gold_rows:
+            exp_rows = gold_rows[target[0]]
+            got_rows = got_all.get(target[0])
+            if exp_rows is None:
+                ok = got_rows is None
+            else:
+                # Per field, because row_prf pools its counts and another field's rows would
+                # blur this one's.
+                got_list = got_rows if isinstance(got_rows, list) else []
+                exact, _, _ = _match_rows(got_list, exp_rows)
+                ok = exact == len(exp_rows) == len(got_list)
+        else:
+            g = _at(gold_fields, target)
+            if g is _ABSENT:
+                continue
+            r = _at(got_all, target)
+            # A gold null asserts absence, so any non-null reply fails it.
+            ok = (r is _ABSENT or r is None) if g is None else _field_equal_present(r, g)
+        checked += 1
+        passed = passed and ok
+    if not checked:
+        return None, 0
+    return (1.0 if passed else 0.0), checked
+
+
+def _criticality_block(resp: dict, expected: dict, schema: Any) -> dict[str, Any] | None:
+    if not any(labelled for _, _, labelled in field_criticality(schema)):
+        return None
+    passed, n_critical = critical_pass(resp, expected, schema)
+    return {
+        "weighted_prf": weighted_prf(resp, expected, schema),
+        "critical_pass": passed,
+        "n_critical": n_critical,
+        "weights_version": CRITICALITY_WEIGHTS_VERSION,
+    }
+
+
+def score(resp: dict, expected: dict, *, schema: Any = None) -> dict[str, Any]:
     """Score a normalized response dict against an expected dict. Only the dimensions present in
     `expected` are scored; `overall` is the mean of the per-dimension headline scores, or `None`
     when `expected` names none of the six recognized dimensions (an ordinary "not labeled yet"
@@ -331,4 +609,10 @@ def score(resp: dict, expected: dict) -> dict[str, Any]:
 
     headline = [v["f1"] if isinstance(v, dict) else v for v in dims.values()]
     overall = sum(headline) / len(headline) if headline else None
-    return {"overall": overall, "dimensions": dims}
+    out: dict[str, Any] = {"overall": overall, "dimensions": dims}
+    # Beside the dimensions, never inside them: `overall` and the leaderboard means average every
+    # dimension, so a weighted metric there would move the unweighted headline (law SX5).
+    block = _criticality_block(resp, expected, schema) if schema is not None else None
+    if block is not None:
+        out["criticality"] = block
+    return out

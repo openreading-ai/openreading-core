@@ -1,4 +1,4 @@
-"""NormalizedResponse — the pydantic mirror of response.v0.3.json.
+"""NormalizedResponse: the pydantic mirror of response.v0.4.json.
 
 `to_schema_dict()` produces a dict that validates against the vendored response schema
 (enforced by tests). Enums serialize to their string values; None fields are dropped so
@@ -12,11 +12,16 @@ Use `dict.get` for optional fields, preserving an absent value separately from a
 Missing confidence or usage does not mean zero, and a successful parse can still carry warnings.
 Raw payloads remain backend-specific, while `channel_provenance` remains an experimental field.
 `openreading help response` teaches these distinctions with runnable queries and source pointers.
+
+`SchemaCheck` is the wire model of the top-level `schema_check` object (response v0.4). A client
+carries a check and never computes one: `openreading.derive.fields.check_typed_fields` computes
+it in the engine. This module imports only pydantic and its sibling `types` modules, because the
+client wheel ships it without the engine.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -125,6 +130,39 @@ class BackendRaw(BaseModel):
     truncated: bool | None = None
 
 
+class FieldCheck(BaseModel):
+    """One field the check reports: its dotted path, its criticality code and its status."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    criticality: Literal["critical", "expected", "optional", "ignore"]
+    status: Literal["present", "missing", "invalid"]
+
+
+class SchemaCheckError(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    message: str
+
+
+class SchemaCheck(BaseModel):
+    """How the returned typed fields measure up against the request's extraction schema."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_hash: str
+    # `bank:NAME@vN` when the schema is exactly a bank entry, else null for a schema you supplied.
+    schema_ref: str | None = None
+    valid: bool
+    critical_ok: bool
+    fields: list[FieldCheck]
+    extra: list[str]
+    errors: list[SchemaCheckError]
+    formats_unchecked: list[str]
+
+
 class NormalizedResponse(BaseModel):
     """Pydantic mirror of OpenReadingResponse. Build it in adapters, then `to_schema_dict()`."""
 
@@ -136,7 +174,7 @@ class NormalizedResponse(BaseModel):
     # structural payload still raise.
     model_config = ConfigDict(extra="ignore")
 
-    schema_version: str = "0.3"
+    schema_version: str = "0.4"
     status: Status
     backend: BackendInfo
     document: Document
@@ -149,11 +187,16 @@ class NormalizedResponse(BaseModel):
     orchestration: dict[str, Any] | None = None  # v0.2 — strategy execution trace (strategy runs)
     channel_provenance: dict[str, str] | None = None  # v0.3 — per-response native/derived (§3.3)
     schema_url: str | None = None  # v0.3 — $id of the declared schema version (OTel pattern)
+    schema_check: SchemaCheck | None = None  # v0.4: typed fields measured against the schema
 
     def to_schema_dict(self) -> dict[str, Any]:
         """Schema-valid JSON dict: enums→values, None dropped, empty containers kept only
         where they carry meaning (e.g. an explicitly-empty page.blocks list)."""
-        return self.model_dump(mode="json", exclude_none=True)
+        out = self.model_dump(mode="json", exclude_none=True)
+        if self.schema_check is not None:
+            # `schema_ref` is a required nullable key, so its null survives `exclude_none`.
+            out["schema_check"]["schema_ref"] = self.schema_check.schema_ref
+        return out
 
     def add_warning(self, code: str, message: str, field: str | None = None) -> None:
         w = Warning(code=code, message=message, field=field)

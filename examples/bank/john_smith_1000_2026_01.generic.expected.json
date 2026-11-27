@@ -1,0 +1,22 @@
+{
+  "document_type": "bank statement",
+  "title": "ACCOUNT STATEMENT",
+  "document_date": "2026-01-31",
+  "issuer": "First National Bank",
+  "recipient": "John Smith",
+  "parties": [
+    {"name": "First National Bank", "role": "bank"},
+    {"name": "John Smith", "role": "account holder"}
+  ],
+  "total_amount": 21145.21,
+  "currency": "USD",
+  "key_values": [
+    {"key": "Account Number", "value": "*1000"},
+    {"key": "Account Type", "value": "Business Checking"},
+    {"key": "Statement Period", "value": "01/01/2026 - 01/31/2026"},
+    {"key": "Beginning Balance", "value": "$10,596.78"},
+    {"key": "Total Deposits", "value": "$11,063.10"},
+    {"key": "Total Withdrawals", "value": "$514.67"},
+    {"key": "Ending Balance", "value": "$21,145.21"}
+  ]
+}

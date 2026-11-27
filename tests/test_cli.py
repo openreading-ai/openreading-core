@@ -1005,3 +1005,88 @@ def test_backends_check_reports_the_measured_flag_and_latency(capsys, monkeypatc
     assert "configured_unverified" in row
     assert " no " in row  # measured=no
     assert " - " in row  # no latency is claimed for an inference
+
+
+_YAML_SCHEMA = """\
+type: object
+properties:
+  total:
+    type: number
+    x-read-criticality: critical
+  opened:
+    type: string
+    format: date
+"""
+
+
+def _write_both(tmp_path, yaml_text=_YAML_SCHEMA):
+    import yaml
+
+    y = tmp_path / "schema.yaml"
+    y.write_text(yaml_text)
+    j = tmp_path / "schema.json"
+    j.write_text(json.dumps(yaml.safe_load(yaml_text)))
+    return y, j
+
+
+def test_yaml_and_json_schema_give_the_same_request_and_hash(sample_pdf, tmp_path, monkeypatch):
+    from openreading import load_schema
+    from openreading.derive.fields import schema_hash
+
+    y, j = _write_both(tmp_path)
+    requests = []
+    for path in (y, j):
+        seen = _capture_run(monkeypatch)
+        main(["parse", sample_pdf, "--backend", "google-gemini", "--schema", str(path)])
+        requests.append(seen["extraction_schema"])
+    assert requests[0] == requests[1]
+    assert load_schema(y) == load_schema(j) == requests[0]["json_schema"]
+    assert schema_hash(load_schema(y)) == schema_hash(load_schema(j))
+
+
+def test_yml_extension_is_yaml(tmp_path):
+    from openreading import load_schema
+
+    p = tmp_path / "s.yml"
+    p.write_text(_YAML_SCHEMA)
+    assert load_schema(p)["properties"]["total"]["type"] == "number"
+
+
+def test_unquoted_yaml_date_exits_2_and_names_its_path(sample_pdf, tmp_path, capsys):
+    p = tmp_path / "schema.yaml"
+    p.write_text(
+        "type: object\nproperties:\n  opened:\n    type: string\n    default: 2024-01-01\n"
+    )
+    rc = main(["parse", sample_pdf, "--backend", "google-gemini", "--schema", str(p)])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "properties.opened.default" in err and "quotes" in err
+
+
+def test_unknown_criticality_in_yaml_exits_2(sample_pdf, tmp_path, capsys):
+    p = tmp_path / "schema.yaml"
+    p.write_text(
+        "type: object\nproperties:\n  a:\n    type: string\n    x-read-criticality: vital\n"
+    )
+    rc = main(["parse", sample_pdf, "--backend", "google-gemini", "--schema", str(p)])
+    assert rc == 2
+    assert "vital" in capsys.readouterr().err
+
+
+def test_malformed_yaml_and_non_object_yaml_are_errors(tmp_path):
+    from openreading import load_schema
+
+    bad = tmp_path / "a.yaml"
+    bad.write_text("a: [unclosed\n")
+    with pytest.raises(ValueError, match="not valid YAML"):
+        load_schema(bad)
+    lst = tmp_path / "b.yaml"
+    lst.write_text("- 1\n")
+    with pytest.raises(ValueError, match="must hold a YAML object"):
+        load_schema(lst)
+    with pytest.raises(ValueError, match="cannot read"):
+        load_schema(tmp_path / "missing.yaml")
+    nested = tmp_path / "c.yaml"
+    nested.write_text("type: object\nenum: [2024-01-01]\n")
+    with pytest.raises(ValueError, match=r"enum\[0\]"):
+        load_schema(nested)

@@ -1,0 +1,241 @@
+{
+  "agreement_type": "CTA",
+  "agreement_title": "Clinical Trial Agreement",
+  "parties": [
+    {
+      "name": "Pellucid Pharma AG",
+      "role": "sponsor"
+    },
+    {
+      "name": "St. Aldric Health System",
+      "role": "institution"
+    }
+  ],
+  "principal_investigator": "Dr. Leah Abramowitz",
+  "protocol_number": "PP-497-203",
+  "protocol_title": "A Phase 2, Randomized, Double-Blind, Placebo-Controlled Study of PP-5094 in Adults with Non-small Cell Lung Cancer",
+  "effective_date": "2024-03-02",
+  "expiration_or_term": "until completion of the Study unless terminated earlier",
+  "governing_law": "the State of California",
+  "enrollment_target": 33,
+  "payment_terms": {
+    "currency": "USD",
+    "invoice_due_days": 60,
+    "payment_frequency": "quarterly",
+    "holdback_percent": 5,
+    "holdback_release": "upon database lock and resolution of all queries",
+    "startup_fee": 10000.0,
+    "overhead_percent": 30.0
+  },
+  "budget_lines": [
+    {
+      "item": "Screening Visit",
+      "visit": "Screening Visit",
+      "amount": 2210.0,
+      "basis": "per subject, per visit"
+    },
+    {
+      "item": "Baseline / Randomization",
+      "visit": "Baseline / Randomization",
+      "amount": 970.0,
+      "basis": "per subject, per visit"
+    },
+    {
+      "item": "Week 2 Visit",
+      "visit": "Week 2 Visit",
+      "amount": 2180.0,
+      "basis": "per subject, per visit"
+    },
+    {
+      "item": "Week 4 Visit",
+      "visit": "Week 4 Visit",
+      "amount": 1460.0,
+      "basis": "per subject, per visit"
+    },
+    {
+      "item": "Week 8 Visit",
+      "visit": "Week 8 Visit",
+      "amount": 790.0,
+      "basis": "per subject, per visit"
+    },
+    {
+      "item": "Week 12 Visit",
+      "visit": "Week 12 Visit",
+      "amount": 810.0,
+      "basis": "per subject, per visit"
+    },
+    {
+      "item": "Week 24 Visit",
+      "visit": "Week 24 Visit",
+      "amount": 2180.0,
+      "basis": "per subject, per visit"
+    },
+    {
+      "item": "End of Treatment",
+      "visit": "End of Treatment",
+      "amount": 2730.0,
+      "basis": "per subject, per visit"
+    },
+    {
+      "item": "Protocol amendment review",
+      "amount": 850.0,
+      "basis": "invoiceable"
+    },
+    {
+      "item": "Screen failure (per subject)",
+      "amount": 500.0,
+      "basis": "invoiceable"
+    }
+  ],
+  "clauses": [
+    {
+      "type": "audit_and_inspection",
+      "section": "5",
+      "text": "Institution shall permit Sponsor's monitors and regulatory authorities to inspect Study records and facilities during normal business hours upon 14 days' notice.",
+      "key_terms": {
+        "audit_notice_days": 14
+      }
+    },
+    {
+      "type": "insurance",
+      "section": "6",
+      "text": "Sponsor shall maintain clinical trial liability insurance with limits of not less than $5,000,000 per occurrence during the Study and for 5 years after its completion, and shall provide a certificate of insurance upon request.",
+      "key_terms": {
+        "ins_limit": "$5,000,000",
+        "ins_years": 5
+      }
+    },
+    {
+      "type": "termination_payment",
+      "section": "7",
+      "text": "Upon termination, Sponsor shall pay Institution for all work performed and for all non-cancellable obligations properly incurred through the effective date of termination."
+    },
+    {
+      "type": "other",
+      "section": "8",
+      "text": "Neither party shall be liable for delay caused by events beyond its reasonable control, provided it gives prompt notice and resumes performance promptly."
+    },
+    {
+      "type": "publication",
+      "section": "9",
+      "text": "Sponsor acknowledges the right of Investigator to publish Study results. Any manuscript or abstract shall be provided to Sponsor for review 60 days prior to submission, and Sponsor may require deletion of its Confidential Information.",
+      "key_terms": {
+        "review_days": 60
+      }
+    },
+    {
+      "type": "other",
+      "section": "10",
+      "text": "The parties are independent contractors, and nothing in this Agreement creates a partnership, agency or employment relationship."
+    },
+    {
+      "type": "anti_bribery",
+      "section": "11",
+      "text": "Each party shall comply with all applicable anti-bribery laws and shall not offer or pay anything of value to improperly influence any government official."
+    },
+    {
+      "type": "record_retention",
+      "section": "12",
+      "text": "Institution shall retain all Study records for 25 years after the last marketing approval of the Study Drug or discontinuation of its development, whichever is later.",
+      "key_terms": {
+        "retention_years": 25
+      }
+    },
+    {
+      "type": "assignment",
+      "section": "13",
+      "text": "Neither party may assign this Agreement without the prior written consent of the other party, except that Sponsor may assign it to an affiliate or a successor to the Study Drug."
+    },
+    {
+      "type": "limitation_of_liability",
+      "section": "14",
+      "text": "Except in the case of gross negligence or willful misconduct, neither party shall be liable to the other for any indirect, incidental, special or consequential damages, and each party's aggregate liability shall not exceed the total amounts paid under this Agreement.",
+      "key_terms": {
+        "liability_cap": "the total amounts paid under this Agreement"
+      }
+    },
+    {
+      "type": "subject_injury",
+      "section": "15",
+      "text": "Sponsor shall reimburse Institution for the reasonable and necessary costs of diagnosis and treatment of any injury to a Study Subject resulting from the Study Drug or from procedures required by the Protocol that would not have been performed as part of the subject's routine care, provided that the injury was not caused by the negligence of Institution."
+    },
+    {
+      "type": "intellectual_property",
+      "section": "16",
+      "text": "All inventions conceived or reduced to practice in the performance of the Protocol shall be the property of Sponsor. Institution retains ownership of its pre-existing intellectual property and shall promptly disclose any Study invention to Sponsor."
+    },
+    {
+      "type": "data_ownership",
+      "section": "17",
+      "text": "All case report forms and Study data shall be owned by Sponsor. Institution shall retain the right to use Study data for internal research, teaching and patient care."
+    },
+    {
+      "type": "indemnification",
+      "section": "18",
+      "text": "Sponsor shall defend, indemnify and hold harmless Institution, Investigator and their trustees, officers, employees and agents from any loss, claim or liability arising from the Study Drug or the Protocol, except to the extent caused by the negligence or willful misconduct of the indemnified party or its failure to follow the Protocol."
+    },
+    {
+      "type": "termination",
+      "section": "19",
+      "text": "Either party may terminate this Agreement upon 30 days' prior written notice. Sponsor may terminate immediately if required for the safety of Study Subjects.",
+      "key_terms": {
+        "notice_days": 30
+      }
+    },
+    {
+      "type": "dispute_resolution",
+      "section": "20",
+      "text": "The parties shall attempt in good faith to resolve any dispute through negotiation between senior executives for a period of 45 days before commencing any legal proceeding.",
+      "key_terms": {
+        "dispute_days": 45
+      }
+    },
+    {
+      "type": "debarment",
+      "section": "21",
+      "text": "Institution certifies that neither it nor Investigator has been debarred under 21 U.S.C. 335a and shall notify Sponsor immediately if any such debarment occurs."
+    },
+    {
+      "type": "confidentiality",
+      "section": "22",
+      "text": "Institution and Investigator shall hold all Confidential Information in confidence and shall not disclose it to any third party for 10 years after termination of this Agreement, except as required by law or as permitted under this Agreement.",
+      "key_terms": {
+        "conf_years": 10
+      }
+    },
+    {
+      "type": "data_protection_hipaa_gdpr",
+      "section": "23",
+      "text": "Each party shall comply with applicable data protection law, including HIPAA and, where applicable, the GDPR. Sponsor shall receive only coded Study data and shall not attempt to re-identify any Study Subject."
+    },
+    {
+      "type": "governing_law",
+      "section": "24",
+      "text": "This Agreement shall be governed by and construed in accordance with the laws of the State of California, without regard to its conflict of laws principles.",
+      "key_terms": {
+        "governing_law": "the State of California"
+      }
+    },
+    {
+      "type": "survival",
+      "section": "25",
+      "text": "The provisions of this Agreement relating to publication, record retention, subject injury, indemnification and confidentiality shall survive its expiration or termination."
+    }
+  ],
+  "signatures": [
+    {
+      "party": "Pellucid Pharma AG",
+      "signer_name": "Naomi Strand",
+      "signer_title": "Vice President, Clinical Operations",
+      "date": "2024-02-20",
+      "signed": true
+    },
+    {
+      "party": "St. Aldric Health System",
+      "signer_name": "Omar Haddad",
+      "signer_title": "Associate Vice President for Research",
+      "date": "2024-02-26",
+      "signed": true
+    }
+  ]
+}

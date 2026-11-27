@@ -1,4 +1,4 @@
-"""Pydantic mirror of leaderboard-report.v0.1.json (BL-160) — the ranked, cross-backend benchmark
+"""Pydantic mirror of leaderboard-report.v0.2.json (BL-160) — the ranked, cross-backend benchmark
 envelope `openreading.evals.leaderboard.run_leaderboard` produces. Modeled directly on
 `types.batch.CorpusReport`: extra="ignore" on the envelope (forward-tolerant of a newer producer's
 additive top-level fields), extra="forbid" on nested payload models (construction typos still
@@ -38,6 +38,12 @@ class LeaderboardBackend(BaseModel):
     errors: int = Field(ge=0)
     non_deterministic: bool = False
     dimensions: dict[str, float] = Field(default_factory=dict)
+    # v0.2: criticality means beside the unweighted ones. None drops out of to_schema_dict(), so
+    # a dataset whose schemas carry no label reports none of them.
+    weighted_f1: float | None = Field(default=None, ge=0.0, le=1.0)
+    critical_pass_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    n_critical_scored: int = Field(default=0, ge=0)
+    weights_version: str | None = None
 
 
 class LeaderboardCase(BaseModel):
@@ -54,7 +60,7 @@ class BenchmarkReport(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    schema_version: str = "0.1"
+    schema_version: str = "0.2"
     dataset: LeaderboardDataset
     backends: list[LeaderboardBackend] = Field(default_factory=list)
     cases: list[LeaderboardCase] = Field(default_factory=list)

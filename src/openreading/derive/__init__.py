@@ -1,13 +1,15 @@
 r"""Shared, deterministic derivation layer — where a ``D`` (derivable) channel grade is made true.
 
 One unit-tested package holds every GFM, HTML, table and geometry transform an adapter needs,
-so no adapter carries its own copy. Every function is pure, deterministic, and stdlib-only
-(``pdf_page_count`` may use an in-tree optional dep). Adapters import ONLY from
-``openreading.derive``. Outside ``adapters/`` the only importer today is
-``openreading.comparison`` (the GFM cell escape
-``openreading.derive.tables._esc_pipe`` for report rendering); ``evals`` imports nothing from here,
-and the kit's C11 check (below) uses ``openreading.comparison.align.token_similarity`` over raw
-block texts, not these projections. When a ``D`` grade says "the platform derives this channel,"
+so no adapter carries its own copy. Every function is pure and deterministic. They use the
+standard library only, except ``pdf_page_count`` (an in-tree optional dep) and the typed-fields
+check in ``openreading.derive.fields`` (``jsonschema``). Adapters import ONLY from
+``openreading.derive``. Outside ``adapters/``, ``openreading.comparison`` imports the GFM cell
+escape ``openreading.derive.tables._esc_pipe`` for report rendering. The router's
+``openreading.router.finalize``, the request model and the CLI import
+``openreading.derive.fields``. ``evals`` imports nothing from here, and the kit's C11 check
+(below) uses ``openreading.comparison.align.token_similarity`` over raw block texts, not these
+projections. When a ``D`` grade says "the platform derives this channel,"
 this is where that derivation lives — once. It is a package rather than an
 ``adapters/_derive.py`` module because it carries property tests and has importers outside
 ``adapters/``.
@@ -103,6 +105,16 @@ leak once slipped past a block-path fix; the kit walks all four).
   only). Older files' consts are not asserted, which exempts ``response.v0.2.json``'s known-bad
   ``"0.1"`` const (released, immutable) — the drift class the test exists to stop recurring.
 
+- **C13 ``typed-fields.checked``**: when the request carries ``extraction_schema.json_schema``,
+  the response carries ``schema_check``, computed once by ``check_typed_fields`` in
+  ``openreading.derive.fields`` and attached by ``openreading.router.finalize``. Every backend
+  gets the same check, so the router gains no branch per backend type. The check reports and
+  never acts: it changes no status, no route and no value, and only ``TypedField.type`` metadata
+  is filled. Backends never see an ``x-read-*`` keyword, because ``strip_annotations`` removes
+  them before ``submit``. Failure it avoids: one adapter validating its replies and dropping
+  every field on a mismatch while the others copied fields through unchecked, so the same
+  document read as complete on one backend and empty on another.
+
 Also contract, per channel: ``blocks`` granularity stays adapter-native and is declared via the
 descriptor hint ``output.block_granularity`` (word|line|paragraph|section|element); reading order
 follows document order (``order_by_position``) when the provider array groups by class.
@@ -110,9 +122,10 @@ follows document order (``order_by_position``) when the provider array groups by
 list (never last-writer-wins), nested provider structures map to nested values (no dotted-key
 flattening), and when the provider returns per-field geometry or page anchors
 ``TypedField.citations[]`` is populated. Citations are part of the N and D obligation. The spec
-also asks that the extraction schema's declared type fill ``TypedField.type``. As shipped,
-``anthropic_claude``, ``azure_document_intelligence``, ``google_document_ai`` and
-``google_gemini`` populate it, and every other adapter leaves ``type`` at ``None``.
+also asks that the extraction schema's declared type fill ``TypedField.type``. An adapter may set
+it from its own payload, as ``azure_document_intelligence`` and ``google_document_ai`` do. Where
+an adapter leaves it ``None``, the router fills it from the schema's single declared ``type``
+(C13), so no adapter carries its own copy of that lookup.
 ``table_cells``: one ``Table`` model is the only structured representation (HTML/pipe are
 projections of it); grid coordinates are true positions under merged cells, spans recorded as
 ``row_span``/``col_span``, ``Table.rows`` holds the value at the span origin and ``None`` at
@@ -165,6 +178,10 @@ Function contracts (each: what it guarantees / the defect class it retires)
   character when sliced by code points (ASCII fixtures hid it).
 - ``aggregate_confidence(word_confs) -> float | None`` — ``min()`` of members; ``None`` with no
   members (the C7 aggregation rule).
+- ``check_typed_fields(schema, typed_fields) -> SchemaCheck`` (``openreading.derive.fields``):
+  the C13 report, pure and deterministic. ``strip_annotations(schema)`` returns a copy without
+  any ``x-read-*`` keyword, and ``unknown_criticality(schema)`` lists labels outside the four
+  codes. Retires the per-adapter ``_matches_schema`` copy and the two per-adapter type lookups.
 - ``pdf_page_count(data) -> int | None`` — exact page count from PDF bytes via an in-tree PDF
   library, ``None`` when unavailable/unparseable (replaces cited-pages page_count heuristics).
 

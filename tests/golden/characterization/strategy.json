@@ -294,7 +294,7 @@
     "outcome": "ok",
     "strategy": "local_only"
   },
-  "schema_version": "0.3",
+  "schema_version": "0.4",
   "status": {
     "state": "succeeded"
   },

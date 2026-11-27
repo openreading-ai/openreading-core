@@ -53,19 +53,23 @@ from openreading.artifacts.passages import iter_passages
 from openreading.artifacts.retained import RetainedService as ArtifactService
 from openreading.artifacts.retained import _display_name
 from openreading.artifacts.store import file_record
-from openreading.schemas import validate_response
+from openreading.schemas._validation import _validator
+from openreading.schemas.client import response_schema_for
 from openreading.types.response import NormalizedResponse
 
 
 def validate_external_response(response: dict) -> NormalizedResponse:
-    """Validate known channels while preserving additive envelope fields for delivery."""
+    """Validate known channels while preserving additive envelope fields for delivery.
+
+    The response's own `schema_version` picks the schema file, among the versions this client
+    ships. An unknown version is refused, because no file here can certify its shape."""
     if not isinstance(response, dict):
         raise ValueError("External response must be an object")
+    schema = response_schema_for(response.get("schema_version"))
     # The producer schema is closed. Consumers tolerate additive envelope channels,
     # as NormalizedResponse does, without dropping those values from retained JSON.
-    validate_response(
-        {key: value for key, value in response.items() if key in NormalizedResponse.model_fields}
-    )
+    known = schema["properties"]
+    _validator(schema).validate({key: value for key, value in response.items() if key in known})
     parsed = NormalizedResponse.model_validate(response)
     unpaginated = any(w.code == "page_attribution_unavailable" for w in parsed.warnings or [])
     if not unpaginated:

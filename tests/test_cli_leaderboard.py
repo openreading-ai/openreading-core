@@ -235,3 +235,27 @@ def test_per_case_block_names_no_winner_on_a_tie_or_a_mutual_failure():
     # and the tally, so the block cannot be read as a 4-0 sweep
     tally = next(ln for ln in out.splitlines() if "tally" in ln)
     assert "1 win" in tally and "1 tie" in tally
+
+
+def test_table_appends_weighted_f1_and_critical_pass_rate_after_the_dimensions():
+    from openreading.cli.app import _render_leaderboard_table
+
+    weighted = {
+        **_backend("labelled", 1, 0.5, 2, 2, dims={"field_prf": 0.5}),
+        "weighted_f1": 0.8,
+        "critical_pass_rate": 0.5,
+        "n_critical_scored": 2,
+        "weights_version": "v1",
+    }
+    out = _render_leaderboard_table(
+        _report(
+            [weighted, _backend("plain", 2, 0.4, 2, 2, dims={"field_prf": 0.4})],
+            [{"name": "a", "winner": "labelled", "scores": {"labelled": 0.5, "plain": 0.4}}],
+        )
+    )
+    row = next(ln for ln in out.splitlines() if "labelled" in ln and "rank" not in ln)
+    assert row.split()[2] == "0.500"  # the unweighted mean is unchanged
+    assert row.index("field_prf=0.50") < row.index("weighted_f1=0.80")
+    assert row.index("weighted_f1=0.80") < row.index("critical_pass_rate=0.50")
+    plain = next(ln for ln in out.splitlines() if " plain " in ln)
+    assert "weighted_f1" not in plain and "critical_pass_rate" not in plain

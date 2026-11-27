@@ -1,5 +1,67 @@
 # Changelog
 
+## Unreleased criticality scoring
+
+### Added
+
+- `score(resp, expected, schema=...)` adds a top-level `criticality` block when the schema carries `x-read-criticality` labels.
+  It holds `weighted_prf`, `critical_pass`, `n_critical` and `weights_version`. `overall` and `dimensions` do not change.
+  The weights are `CRITICALITY_WEIGHTS_V1`: critical 1.0, expected 0.3, optional 0.1, ignore 0.0, echoed as `"v1"`.
+- The evals runner scores each case against its own `extraction_schema.json_schema`, and `CaseResult.criticality` carries the block.
+- `leaderboard --format json` emits `leaderboard-report.v0.2`. Each backend row gains the optional `weighted_f1`, `critical_pass_rate`,
+  `n_critical_scored` and `weights_version`. The table appends `weighted_f1=` and `critical_pass_rate=` after the dimensions, and `mean` stays unweighted.
+- `compare --truth` and `calibrate` pass no schema and report exactly what they did before.
+
+## Unreleased schema check
+
+### Added
+
+- `parse --schema` accepts a `.yaml` or `.yml` file, and `openreading.load_schema(path)` returns the checked schema dict for Python.
+  A value JSON cannot carry, such as an unquoted date, exits 2 with its dotted path. The same schema in either format gives the same `schema_hash`.
+- Responses move to `response.v0.4`, which adds an optional top-level `schema_check` beside `typed_fields`.
+  It reports, field by field, how the returned values measure up against `extraction_schema.json_schema`, for every backend.
+  Each field has a `path`, an `x-read-criticality` label (`critical`, `expected`, `optional` or `ignore`) and a status of `present`, `missing` or `invalid`.
+  `critical_ok`, `valid`, `extra`, up to 50 `errors`, `schema_hash` and `formats_unchecked` sit beside them. `schema_ref` names the bank entry when the schema is exactly one, else null.
+- Add the warning codes `critical_field_missing` and `critical_field_invalid`, which name the path in `field`, and `intent_all_critical`.
+  The check changes no status, no route and no value. Only `TypedField.type` is filled from the schema where the backend left it unset.
+- No backend receives an `x-read-*` keyword. Core strips them before `submit`, and the result cache keys on the stripped schema.
+  Changing only a label therefore reuses a cached result and recomputes the check.
+- An unknown `x-read-criticality` label exits 2 on the CLI, returns HTTP 400, and raises `pydantic.ValidationError` in Python, before any backend call.
+- Core asserts the formats `date` and `date-time` itself, with the standard library. Any other `format` is listed in `formats_unchecked`.
+- `validate_response` and the client package read `response.v0.3` and `response.v0.4` by each response's own `schema_version`.
+  An artifact retained under v0.3 stays readable, and an unknown version is refused. Upgrade a client before the server it reads from.
+- The schema bank, `openreading.schema_bank`: five named, versioned YAML schemas (`generic`, `bank_statement`, `rfq`, `drawing_title_block`, `clinical_trial_agreement`).
+  `--schema bank_statement` and `openreading.load_schema("bank_statement")` send one, and `bank_statement@v1` pins a version.
+  `resolve(name)` reads only package data, so an agent or request body can never make it open a file.
+  Each domain schema gives a reason beside every `x-read-criticality` label, and `generic` has none.
+- `openreading schema list`, `schema list --json` and `schema show NAME`, with a new `openreading help schema` chapter on writing a schema.
+- `schema_check.schema_ref` reads `bank:NAME@vN` when the schema sent is an exact copy of a bank entry.
+- The `nuextract` backend translates a JSON Schema into its own template and passes a native template through unchanged.
+- Three synthetic example documents in `examples/bank/`, one for each domain schema, with their expected records.
+
+### Changed
+
+- `parse --extract` without `--schema` now extracts the bank's `generic` schema on every schema-capable backend, and the response reports `schema_ref: "bank:generic@v1"`.
+  A Python or HTTP request whose `extraction_schema` holds only `instructions` gets the same, and so does each `/v1/batch` item.
+  A stored request is never rewritten: a journal, an evals case or a calibrate case with instructions only runs as written, and `outputs.typed_fields` alone adds no schema.
+  Per backend:
+  - `anthropic_claude` and `google_gemini` send `generic` where they sent an empty open schema, and `openai_compatible` moves from `json_object` mode to `json_schema` mode.
+  - `mistral_ocr` changes from plain OCR to document annotation with `generic` and your instructions as the prompt. The vendor bills annotation at a separate per-page price.
+  - `pulse` gains `structured_output` with `generic`, and the instructions become `schemaPrompt`.
+  - `chunkr` and `qwen_vl` send `generic` where they sent `{}`, and `reducto` does so only with `backend.operation: extract`.
+  - `nuextract` receives `generic` translated into its template, where it used to refuse with `no_template`.
+  - `aws_textract`, `azure_document_intelligence` and `google_document_ai` make the same call and return a `schema_check` in which every `generic` field is `missing`.
+
+- An extensionless `--schema` value, such as `myschema`, is now a bank name and no longer a file. Write `./myschema` to read a file.
+  A value with a path separator or ending in `.json`, `.yaml` or `.yml` still reads a file. An unknown name exits 2 and lists the bank's names.
+
+- `openai_compatible` keeps a reply that parses as a JSON object but misses the schema. It returns the fields with status `succeeded`,
+  and `schema_check` reports the mismatch. Before, it returned `partial` with `backend_validation` and dropped every field.
+  A reply that is not a JSON object stays `partial` with `backend_validation`.
+- The evals runner and `calibrate` now fill `usage` the way every other path does, because they finalize through the same helper.
+- A response to a request with a schema always carries `typed_fields`, empty when the backend returned no fields.
+  Before, a model reply of `{}` or non-JSON produced a response with no channel at all, which broke the response contract and made `parse` exit 1 with a traceback.
+
 ## Unreleased domain extraction
 
 - Add `parse --schema FILE`, which sends a JSON Schema file as `extraction_schema.json_schema`.

@@ -435,18 +435,6 @@ class GoogleGeminiAdapter(BackendAdapter):
             return "".join(parts).strip()
         return ""
 
-    @staticmethod
-    def _schema_types(req: OpenReadingRequest) -> dict[str, str]:
-        schema = req.extraction_schema.json_schema if req.extraction_schema else None
-        properties = schema.get("properties") if isinstance(schema, dict) else None
-        if not isinstance(properties, dict):
-            return {}
-        return {
-            name: field["type"]
-            for name, field in properties.items()
-            if isinstance(field, dict) and isinstance(field.get("type"), str)
-        }
-
     def normalize(
         self, job: Job, ctx: RunContext, slim_req: OpenReadingRequest
     ) -> NormalizedResponse:
@@ -478,10 +466,8 @@ class GoogleGeminiAdapter(BackendAdapter):
                     backend_code="malformed_response",
                 )
             else:
-                field_types = self._schema_types(slim_req)
                 typed_fields = {
-                    name: TypedField(value=value, type=field_types.get(name))
-                    for name, value in values.items()
+                    name: TypedField(value=value) for name, value in values.items()
                 } or None
         else:
             markdown = output_text or None

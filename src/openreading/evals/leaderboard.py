@@ -54,6 +54,24 @@ def _dimension_means(report: DatasetReport) -> dict[str, float]:
     return {key: sum(values) / len(values) for key, values in buckets.items()}
 
 
+def _criticality_means(report: DatasetReport) -> dict[str, Any]:
+    """The v0.2 per-backend criticality fields, over the cases without error that carry a block.
+
+    `weighted_f1` averages every non-null weighted F1. `critical_pass_rate` averages
+    `critical_pass` over the cases that had a critical field, and `n_critical_scored` counts
+    them. A case with no critical field reports `critical_pass: null`, so it leaves the rate
+    rather than counting as a pass."""
+    blocks = [r.criticality for r in report.results if r.error is None and r.criticality]
+    f1s = [b["weighted_prf"]["f1"] for b in blocks if b.get("weighted_prf") is not None]
+    passes = [b["critical_pass"] for b in blocks if b.get("critical_pass") is not None]
+    return {
+        "weighted_f1": sum(f1s) / len(f1s) if f1s else None,
+        "critical_pass_rate": sum(passes) / len(passes) if passes else None,
+        "n_critical_scored": len(passes),
+        "weights_version": blocks[0]["weights_version"] if blocks else None,
+    }
+
+
 def _n_scored(report: DatasetReport) -> int:
     return sum(1 for r in report.results if r.error is None and r.overall is not None)
 
@@ -138,6 +156,7 @@ def run_leaderboard(
             errors=reports[bid].errors,
             non_deterministic=bid in _NON_DETERMINISTIC,
             dimensions=_dimension_means(reports[bid]),
+            **_criticality_means(reports[bid]),
         )
         for rank, bid in enumerate(ranked_ids, start=1)
     ]

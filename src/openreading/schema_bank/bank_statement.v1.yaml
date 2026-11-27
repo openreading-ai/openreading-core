@@ -1,0 +1,91 @@
+# bank_statement.v1: Bank statement: account identity, period, balances and every transaction row, so the statement can be reconciled.
+$schema: https://json-schema.org/draft/2020-12/schema
+title: bank_statement
+type: object
+required:
+- institution_name
+- account_number_last4
+- statement_period
+- opening_balance
+- closing_balance
+- transactions
+properties:
+  institution_name:
+    type: string
+    x-read-criticality: expected  # expected: the statement is still usable when the bank name is misread, but a reader looks for it
+  account_holder_name:
+    type: string
+    x-read-criticality: critical  # critical: a wrong holder name attaches the statement to the wrong person
+  account_holder_address:
+    type: string
+    x-read-criticality: optional  # optional: the mailing address rarely changes how the statement is used
+  account_number_last4:
+    type: string
+    description: Last four digits only. Never return the full number.
+    x-read-criticality: critical  # critical: a wrong last4 attaches the statement to the wrong account
+  account_type:
+    type: string
+    enum:
+    - checking
+    - savings
+    - money_market
+    - other
+    x-read-criticality: expected  # expected: a wrong account type misleads a reader but does not break reconciliation
+  currency:
+    type: string
+    description: ISO 4217 code
+    x-read-criticality: expected  # expected: a wrong currency mislabels every amount, yet the printed figures stay intact
+  statement_period:
+    type: object
+    required:
+    - start
+    - end
+    properties:
+      start:
+        type: string
+        format: date
+        x-read-criticality: critical  # critical: a wrong start date shifts which transactions belong to the period
+      end:
+        type: string
+        format: date
+        x-read-criticality: critical  # critical: a wrong end date shifts which transactions belong to the period
+  opening_balance:
+    type: number
+    x-read-criticality: critical  # critical: a wrong opening_balance breaks reconciliation
+  closing_balance:
+    type: number
+    x-read-criticality: critical  # critical: a wrong closing_balance breaks reconciliation
+  total_deposits:
+    type: number
+    x-read-criticality: expected  # expected: a cross-check against the sum of the rows, so an error shows without gating
+  total_withdrawals:
+    type: number
+    x-read-criticality: expected  # expected: a cross-check against the sum of the rows, so an error shows without gating
+  fees_total:
+    type: number
+    x-read-criticality: optional  # optional: many statements print no fee total, and the rows already carry each fee
+  transactions:
+    type: array
+    x-read-criticality: critical  # critical: a missed or altered row breaks the opening plus rows equals closing check
+    items:
+      type: object
+      required:
+      - date
+      - description
+      - amount
+      properties:
+        date:
+          type: string
+          format: date
+        description:
+          type: string
+        amount:
+          type: number
+          description: Signed. Deposits positive, withdrawals negative.
+        running_balance:
+          type: number
+        check_number:
+          type: string
+        category:
+          type: string
+          x-read-criticality: ignore  # ignore: categories are the reader's own labels, so no reading of them is right or wrong

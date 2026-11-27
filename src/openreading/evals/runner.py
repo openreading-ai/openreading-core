@@ -12,8 +12,8 @@ from openreading.config import apply as apply_policy
 from openreading.credentials import build_run_context
 from openreading.evals import scorers
 from openreading.evals.dataset import EvalCase, load_dataset
-from openreading.ledger.header import slim_request
 from openreading.readiness import auth_hinted
+from openreading.router import finalize
 from openreading.router.clock import RealClock
 from openreading.router.compliance import RouterConfig
 from openreading.router.driver import run_to_completion
@@ -25,12 +25,14 @@ from openreading.types.runtime import RunContext
 class CaseResult:
     """One scored case. `error` set means the backend failed and `overall` is a placeholder 0.0.
     `overall` is None when the case's `expected` named no recognized dimension, which reads as
-    unscored and never as zero."""
+    unscored and never as zero. `criticality` is the `score` block of the same name, present
+    only when the case's `extraction_schema.json_schema` carries an `x-read-criticality` label."""
 
     name: str
     overall: float | None  # None = unscored: case.expected named no recognized dimension (BL-86)
     dimensions: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+    criticality: dict[str, Any] | None = None
 
 
 @dataclass
@@ -92,13 +94,21 @@ def run_case(
         run_ctx = ctx or build_run_context(req, adapter.descriptor)
         clock = RealClock()
         with auth_hinted(adapter.descriptor, run_ctx.credentials):
-            job = adapter.submit(req, run_ctx)
+            job = finalize.submit(adapter, req, run_ctx)
             job = run_to_completion(
                 adapter, job, ctx=run_ctx, deadline_ms=clock.now_ms() + deadline_ms, clock=clock
             )
-            resp = adapter.normalize(job, run_ctx, slim_request(req))
-        s = scorers.score(resp.to_schema_dict(), case.expected)
-        return CaseResult(name=case.name, overall=s["overall"], dimensions=s["dimensions"])
+            resp = finalize.finalize_response(adapter, job, run_ctx, req)
+        # The annotated schema the case wrote, not the stripped copy the backend received, since
+        # the labels are what weigh the score.
+        schema = (case.request_body.get("extraction_schema") or {}).get("json_schema")
+        s = scorers.score(resp.to_schema_dict(), case.expected, schema=schema)
+        return CaseResult(
+            name=case.name,
+            overall=s["overall"],
+            dimensions=s["dimensions"],
+            criticality=s.get("criticality"),
+        )
     except Exception as e:  # noqa: BLE001 - a failing case is a scored outcome, not a crash
         return CaseResult(name=case.name, overall=0.0, error=f"{type(e).__name__}: {e}")
 

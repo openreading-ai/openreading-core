@@ -44,6 +44,7 @@ from typing import Any
 
 from openreading import schemas
 from openreading.ledger.header import slim_request
+from openreading.router import finalize
 from openreading.router.clock import FakeClock
 from openreading.router.driver import run_to_completion
 from openreading.types.descriptor import AdapterDescriptor, ConfigField, CredentialField
@@ -609,7 +610,7 @@ def check_adapter_conformance(
 
     for case in cases:
         label = case.label or "case"
-        job = adapter.submit(case.request, case.ctx)
+        job = finalize.submit(adapter, case.request, case.ctx)
         _check_job_backend_id(job, desc, rec, label)
         _check_wait_mode(job, desc, rec, label)
 
@@ -628,7 +629,7 @@ def check_adapter_conformance(
         if adapter_factory is not None:
             _check_json_serializable(job, rec, label, stage="post-drive")
 
-        slim_req = slim_request(case.request)
+        slim_req = slim_request(finalize.strip_request(case.request))
         resp = adapter.normalize(job, case.ctx, slim_req)
         d = resp.to_schema_dict()
         try:
@@ -649,7 +650,7 @@ def check_adapter_conformance(
         _check_cost(adapter, job, rec, label)
 
         if case.deterministic:
-            job2 = adapter.submit(case.request, case.ctx)
+            job2 = finalize.submit(adapter, case.request, case.ctx)
             job2 = run_to_completion(
                 adapter, job2, ctx=case.ctx, deadline_ms=clock.now_ms() + 60_000, clock=clock
             )

@@ -1,5 +1,5 @@
 """The platform runner (Manifest v0.6, invariants M6–M9). Pure orchestration over a
-`run_one(source, idempotency_key) -> response.v0.3 dict` seam — production wires it to api.run
+`run_one(source, idempotency_key) -> response.v0.4 dict` seam — production wires it to api.run
 (route → materialize → submit → run_to_completion → normalize → validate, unchanged); the runner
 adds only the batch layer: per-item isolation, bounded concurrency, honest aggregation, progress,
 and the skip warning. It never touches the single-document contract."""

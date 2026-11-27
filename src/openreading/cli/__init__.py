@@ -84,7 +84,7 @@ For example, this prints page numbers beside each available text block:
       .blocks[]? | [$p, .type, (.text // "")] | @tsv' response-mu.json
 
 Four top-level keys are required: `schema_version`, `status`, `backend`, and
-`document`. Version `0.3` identifies the JSON contract, not the package.
+`document`. Version `0.4` identifies the JSON contract, not the package.
 At least one of `document.text`, `document.markdown`, `document.pages`, or
 top-level `typed_fields` is present. Presence does not imply nonempty content.
 A field extractor can return `document: {}` with `typed_fields` instead.
@@ -118,6 +118,20 @@ in Python and `.warnings[]?` in jq. Missing confidence is not confidence zero.
 In Python, use `is not None` when zero is a valid measured value.
 The value of an extracted field can contain false, zero, or nested nulls.
 Covered positions in a table's `rows` grid can also contain null.
+
+A run with `--schema` adds `schema_check`, which measures `typed_fields`
+against the JSON Schema you sent, field by field. A criticality label is the
+`x-read-criticality` keyword on a schema property. Its value is `critical`,
+`expected` (the default), `optional` or `ignore`. Each `fields[]` entry names
+a `path`, its criticality and a status of `present`, `missing` or `invalid`.
+`critical_ok` is false when a critical field is missing or invalid, and a
+`critical_field_missing` or `critical_field_invalid` warning names it:
+
+    jq -c '.schema_check | {valid, critical_ok}' extract.json
+    jq -r '.schema_check.fields[]? | [.path, .status] | @tsv' extract.json
+
+The check reports and never acts. It changes no status and no value, and a
+key the schema does not declare stays in `typed_fields`, listed in `extra`.
 
 Bounding boxes use `x`, `y`, `w`, `h` in [0,1], with a top-left origin.
 `page` is one-based in the source document. Multiply by the page dimensions
@@ -443,7 +457,7 @@ is required (else exit 2).
     openreading parse invoice.pdf --backend anthropic-claude \
       --extract "totals and dates"
     openreading parse statement.pdf --backend google-gemini \
-      --schema bank_statement.json
+      --schema bank_statement
     openreading parse loan.pdf --strategy cheap_first
 
 Single-document flags:
@@ -462,22 +476,38 @@ Single-document flags:
                       `prebuilt-invoice`).
   --pages N [N ...]   1-based page numbers.
   --extract [TEXT]    schema-driven field extraction (default instructions when
-                      TEXT is omitted). A directly-named backend that cannot do
+                      TEXT is omitted). Without `--schema` it extracts the
+                      bank's `generic` schema, and the response reports
+                      `schema_ref: "bank:generic@v1"`. Mistral then bills
+                      annotation, a separate per-page price. A directly-named
+                      backend that cannot do
                       it raises `unsupported_feature` (exit 3) instead of
                       silently returning geometry-only output, which would deny
                       the ask (DECISIONS D13); the router pre-filters such
                       backends. `--pages` and `--extract` take a variable
                       number of values, so name FILE before them or close the
                       flag list with `--`.
-  --schema FILE       a JSON Schema file naming the fields to extract; it fills
-                      `extraction_schema.json_schema`, and the values return
-                      under `typed_fields`. `--extract TEXT` adds instructions
+  --schema NAME|FILE  the schema to extract, which fills
+                      `extraction_schema.json_schema`. The values return under
+                      `typed_fields`. NAME is a bank schema such as
+                      `bank_statement`, and `bank_statement@v1` pins a
+                      version (`openreading help schema`). FILE is a JSON
+                      Schema as JSON or YAML. A value with a path separator,
+                      or ending in `.json`, `.yaml` or `.yml`, is a file, so
+                      write `./myschema` for one with no extension. No lookup
+                      on disk decides, so a local file named `rfq` never hides
+                      the bank's `rfq`. `--extract TEXT` adds instructions
                       beside it. A batch sends the same schema with every
-                      document. A file that cannot be read, is not JSON, is not
-                      an object, or is not a valid JSON Schema exits 2 before
-                      any document is opened, so a typo never costs a hosted
-                      call. A backend that cannot extract refuses as
-                      `--extract` does (exit 3).
+                      document. An unknown name, a file that cannot be read,
+                      does not parse, is not an object, is not a valid JSON
+                      Schema, holds an unquoted YAML date, or carries an
+                      unknown `x-read-criticality` label exits 2 before any
+                      document is opened, so a typo never costs a hosted call.
+                      Quote a date such as `default: "2024-01-01"`. A backend
+                      that cannot extract refuses as `--extract` does (exit
+                      3). The response carries `schema_check` (read `help
+                      response`), and no backend receives an `x-read-*`
+                      keyword.
   --keep-candidates   retain completed parallel alternatives under
                       `orchestration.candidates[]` (what `compare --from`
                       reads). Off by default (payload bloat); no effect on a
@@ -586,6 +616,78 @@ isolation is the point of a batch: one item's failure never stops the rest, so
 a missing credential becomes a failed item per document rather than a refusal
 of the run. The envelope names the cause on every item; the exit code only says
 how much survived.
+
+schema <list|show>
+------------------
+Start an extraction from a name instead of a blank file. The schema bank is
+the small set of extraction schemas that ship inside OpenReading. `schema
+list` prints each entry's name, its version, how many fields carry each
+criticality code, and what it is for. `schema show NAME` prints one as JSON,
+labels included, so you can send it as `json_schema` over HTTP or copy it into
+a file you edit.
+
+    openreading schema list
+    openreading schema show bank_statement > my_statement.json
+    openreading parse statement.pdf --backend anthropic-claude \
+      --schema bank_statement
+
+NAME means the latest version, and NAME@v1 pins version 1. A shipped version
+never changes, so a pinned name keeps meaning the same fields. `generic` has
+no labels, and every other entry labels the fields its reader would act on and
+gives a reason beside each label.
+
+`--schema` reads a value with a path separator, or ending in .json, .yaml or
+.yml, as a file. It reads anything else as a bank name. No lookup on disk
+decides, so `--schema rfq` is the bank's rfq even where a file named rfq sits
+in the folder. Write `./rfq` for that file. An unknown name exits 2 and lists
+the names. In Python, `openreading.load_schema` follows the same rule.
+
+To write your own schema, start from `schema show` or from a JSON Schema you
+already have. A schema is a JSON Schema object, written as JSON or YAML. The
+response returns each property you declare under `typed_fields`, and
+`schema_check` reports how the values match your schema. Add the keyword
+`x-read-criticality` to a property to say how much a wrong or missing value
+matters to you. Core reads the label and never sends it to a backend. The
+check reports and never acts: the status, the values and the backend chain
+stay as they were.
+
+    critical   A wrong or missing value breaks what you do next. A missing or
+               invalid one sets `critical_ok` to false and adds a warning.
+    expected   The default for a property with no label. It shows in
+               `schema_check.fields` and raises no warning.
+    optional   A missing value is normal, such as a field many documents
+               omit. It raises no warning.
+    ignore     No reading of it is right or wrong. An error under an ignored
+               column stays in `errors` and leaves its parent present.
+
+An annotated schema, saved as invoice.yaml. Quote a date such as
+`default: "2024-01-01"`, because YAML turns a bare one into a date object.
+
+    type: object
+    required: [invoice_number, total]
+    properties:
+      invoice_number:
+        type: string
+        x-read-criticality: critical  # critical: a wrong number pays a bill
+      total:
+        type: number
+        x-read-criticality: critical  # critical: a wrong total misstates debt
+      po_number:
+        type: string
+        x-read-criticality: optional  # optional: many invoices carry none
+      notes:
+        type: string
+        x-read-criticality: ignore    # ignore: free text, no right answer
+
+    openreading parse invoice.pdf --backend google-gemini \\
+      --schema ./invoice.yaml > out.json
+    jq -c '.schema_check | {schema_ref, valid, critical_ok}' out.json
+
+`schema_ref` is `bank:rfq@v1` when the schema you sent is exactly a bank entry
+and null for your own. `schema list --json` prints the entries as data
+without their schemas.
+
+Exits: 0 done. 2 an unknown name or version.
 
 resume RUN_ID
 -------------
@@ -1016,8 +1118,13 @@ runtime settings.
 `--format table` (default) prints the dataset's own identity (path, case count,
 case names) above the ranking so a screenshot is never read as a universal
 verdict rather than "on these N documents"; `--format json` is the schema-valid
-`BenchmarkReport` (`leaderboard-report.v0.1.json` in `openreading.schemas`) a
+`BenchmarkReport` (`leaderboard-report.v0.2.json` in `openreading.schemas`) a
 script or CI job consumes.
+
+When a case's `extraction_schema.json_schema` carries `x-read-criticality`
+labels, a row also ends with `weighted_f1=` and `critical_pass_rate=`, after
+the dimensions. Both sit outside `mean`, which stays the unweighted headline.
+`openreading.evals.scorers` defines the weights and the pass rule.
 
 The table carries `scored` (`n_scored/n_cases`) beside `mean`, and prints
 `mean` as an em dash when `n_scored` is 0, because a mean over no scored case

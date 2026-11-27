@@ -75,6 +75,7 @@ from openreading.batch.sources import (
     looks_batch,
 )
 from openreading.cli import keys as keys_cli
+from openreading.cli import schema as schema_cli
 from openreading.cli import setup as setup_cli
 from openreading.cli.help import cmd_help
 from openreading.credentials import EnvCredentialBroker, load_dotenv, use_keychain
@@ -183,25 +184,18 @@ def _read_json_or_fail(path: str) -> Any:
 
 
 def _read_extraction_schema(path: str) -> dict[str, Any]:
-    """Read the `--schema` file: a JSON object that is itself a valid JSON Schema.
+    """Read `--schema` (a file or a bank name) through `openreading.schema_io.load_schema`.
 
-    The schema is checked here, before any document is opened, because a malformed one would
-    otherwise surface as a backend's own 400 after a billable upload. A schema that is valid but
-    uses keywords a backend does not support is still that backend's to refuse.
+    A bad schema or an unknown bank name exits 2 before any document is opened, because a malformed one would otherwise
+    surface as a backend's own 400 after a billable upload.
     """
-    from jsonschema import exceptions, validators
+    from openreading.schema_bank import UnknownSchemaError
+    from openreading.schema_io import SchemaFileError, load_schema
 
-    schema = _read_json_or_fail(path)
-    if not isinstance(schema, dict):
-        raise _InputFileError(
-            f"{path} must hold a JSON object (a JSON Schema), not a {type(schema).__name__}"
-        )
     try:
-        validators.validator_for(schema).check_schema(schema)
-    except exceptions.SchemaError as e:
-        reason = " ".join(e.message.split())
-        raise _InputFileError(f"{path} is not a valid JSON Schema: {reason}") from e
-    return schema
+        return load_schema(path)
+    except (SchemaFileError, UnknownSchemaError) as e:
+        raise _InputFileError(str(e)) from e
 
 
 def cmd_parse(args) -> int:
@@ -1232,6 +1226,11 @@ def _render_leaderboard_table(report: Any) -> str:
     ]
     for b in report.backends:
         dims = " ".join(f"{k}={v:.2f}" for k, v in b.dimensions.items())
+        # After the dimensions and outside `mean`, which stays the unweighted headline (SX5).
+        for key in ("weighted_f1", "critical_pass_rate"):
+            value = getattr(b, key)
+            if value is not None:
+                dims = f"{dims} {key}={value:.2f}".strip()
         nd = "  [non-deterministic: single sample]" if b.non_deterministic else ""
         # `scored` is the denominator `mean` rests on, and the schema marks n_scored required for
         # reading mean_score at all. Without it a backend that never scored a case and one that
@@ -1251,7 +1250,7 @@ def _render_leaderboard_table(report: Any) -> str:
         scores = ", ".join(
             f"{bid}={s:.2f}" if s is not None else f"{bid}=—" for bid, s in c.scores.items()
         )
-        # The report's `winner` breaks a tie alphabetically (leaderboard-report.v0.1.json), which
+        # The report's `winner` breaks a tie alphabetically (leaderboard-report.v0.2.json), which
         # is the right rule for a byte-stable JSON field and the wrong thing to print to a human:
         # naming one backend on a tie, or on a case every backend scored 0.00, invites a per-case
         # win tally that reads as a sweep when nothing was won. The JSON field is unchanged; the
@@ -2549,6 +2548,7 @@ More: openreading help leaderboard, openreading help datasets""",
 # quickstart goes in the description on purpose: a first-time reader must reach something they
 # can paste inside the first screen, and a thirteen-verb listing pushes an epilog past the fold.
 EPILOGS.update(keys_cli.EPILOGS)
+EPILOGS.update(schema_cli.EPILOGS)
 EPILOGS["setup"] = setup_cli.EPILOG
 
 TOP_DESCRIPTION = """\
@@ -2757,17 +2757,23 @@ def build_parser() -> argparse.ArgumentParser:
         const="",
         default=None,
         metavar="INSTRUCTIONS",
-        help="request schema-driven field extraction. A named backend that cannot do it "
+        help="request schema-driven field extraction. Without --schema it extracts the bank's "
+        "generic schema (`openreading schema show generic`). A named backend that cannot do it "
         "refuses the run and exits 3 (unsupported_feature, nothing on stdout) rather than "
         "silently dropping the ask. Takes an optional value, so name FILE before it",
     )
     ask.add_argument(
         "--schema",
         default=None,
-        metavar="SCHEMA.json",
-        help="extract the fields this JSON Schema file describes. The response carries them "
-        "under typed_fields. Combine with --extract to add instructions. A file that is not a "
-        "valid JSON Schema exits 2 before any backend is called",
+        metavar="NAME|FILE",
+        help="extract the fields a schema describes. NAME is a bank schema such as "
+        "bank_statement, or bank_statement@v1 to pin a version (`openreading schema list`). "
+        "FILE is a JSON Schema in JSON or YAML, and a value with a path separator or ending in "
+        ".json, .yaml or .yml is a file, so write ./myschema for one with no extension. The "
+        "response carries the values under typed_fields, and schema_check reports how they match "
+        "the schema. Combine with --extract to add instructions. An unknown name, a file that is "
+        "not a valid JSON Schema, an unquoted YAML date, or an unknown x-read-criticality label "
+        "exits 2 before any backend is called",
     )
     # The group title names the input FORM that switches modes, because a reader with one file
     # needs to know at a glance that this whole block is not about their run.
@@ -2909,6 +2915,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.set_defaults(func=cmd_serve)
 
     keys_cli.add_parser(sub, common)
+    schema_cli.add_parser(sub, common)
     setup_cli.add_parser(sub, common)
 
     # `openreading strategy <show|list|normalize|validate|plan>` inspects the openreading.yaml

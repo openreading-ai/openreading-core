@@ -12,8 +12,8 @@ platform should own: bounded concurrency, per-item failure isolation, honest ski
 cost roll-up, and a comparable artifact at the end. The batch layer composes the existing
 single-document pipeline without touching it. Three load-bearing choices:
 
-1. The single-document contract is untouched. `request.v0.3` / `response.v0.3` do not change; a
-   batch is a separate envelope whose items CONTAIN ordinary `response.v0.3` envelopes. Failure
+1. The single-document contract is untouched. `request.v0.3` / `response.v0.4` do not change; a
+   batch is a separate envelope whose items CONTAIN ordinary `response.v0.4` envelopes. Failure
    avoided: churning the one contract every consumer, test and adapter depends on. (A
    `documents[]` field on the request was rejected for exactly that reason -- it also forces
    every adapter to reason about multiplicity, and the oneOf backward-compat story is ugly.)
@@ -46,7 +46,7 @@ intake (only computed if the item is materialized).
   hidden one -- is always included: naming it is a deliberate choice.
 - M2 envelope decided by input FORM, not count (`looks_batch`): a directory, a glob pattern, or
   >=2 source arguments => batch envelope even if expansion yields one file; a single explicit
-  file/URL => the single `response.v0.3` behaviour, byte-for-byte backward compatible. Failure
+  file/URL => the single `response.v0.4` behaviour, byte-for-byte backward compatible. Failure
   avoided: an envelope type that flips depending on how many files happen to be in a folder.
 - M3 every named source is dispatched: `format` is the lowercased extension and it is recorded,
   not acted on. Intake used to sort files against a backend's `input_formats` and skip the
@@ -75,7 +75,7 @@ intake (only computed if the item is materialized).
 Execution (`runner.run_batch`, platform fan-out -- the default for every backend)
 ----------------------------------------------------------------------------------
 Each item runs the existing single-document path through a `run_one(source,
-idempotency_key) -> response.v0.3 dict` seam (production wires it to `api.run`: route ->
+idempotency_key) -> response.v0.4 dict` seam (production wires it to `api.run`: route ->
 materialize -> submit -> run_to_completion -> normalize -> validate). No new adapter surface,
 so every adapter batches correctly on day one.
 
@@ -94,7 +94,7 @@ so every adapter batches correctly on day one.
   summed out of derived guesses is fake precision, and the caller's own invoice is where the
   real number lives.
 - M9 items are full envelopes: a succeeded item's `response` is a complete, schema-valid
-  `response.v0.3` document -- anything compare/evals can already consume.
+  `response.v0.4` document -- anything compare/evals can already consume.
 - Concurrency: default `jobs=1`, which is serial, deterministic and rate-limit-safe. A default
   of 4 was rejected because hosted rate limits argue for opt-in concurrency until evidence
   says otherwise. `jobs>1` uses a bounded thread

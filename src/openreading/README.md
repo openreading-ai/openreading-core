@@ -49,7 +49,7 @@ Source: `src/openreading/__init__.py` (The 3x3). Live truth: `uv run python -m p
 
 Each mechanism below holds on every surface, and each links to the guide that demonstrates it.
 
-- **One envelope over every backend.** `response.v0.3` is the contract. Every surface validates
+- **One envelope over every backend.** `response.v0.4` is the contract. Every surface validates
   against it before a result leaves the process. [JSON Schemas](schemas/README.md), [The channel
   contract](derive/README.md).
 - **Typed compare verdicts.** `compare` reads saved envelopes and returns a `headline.verdict` plus
@@ -94,7 +94,7 @@ flowchart TD
   R1 --> R2["ordered dispatch<br>apply server caller scope"]:::work
   R2 --> AD["adapter<br>submit, poll, normalize"]:::work
   AD --> DV["derive<br>text, tables, geometry"]:::work
-  DV --> EN(["envelope<br>response.v0.3"]):::hero
+  DV --> EN(["envelope<br>response.v0.4"]):::hero
   EN --> CP["compare<br>typed verdict"]:::out
   EN --> ST{{"strategy gates<br>accept or escalate"}}:::gate
   ST -- "next rung" --> R2
@@ -147,6 +147,7 @@ The table below tells you which guide answers which need and how long each takes
 | call it from Python: `run()`, `route()`, `compare()`, `run_batch()`, and one exception type per condition | reference only: `uv run python -m pydoc openreading.api` | look up as needed |
 | look up the pydantic models that mirror the schemas | reference only: `uv run python -m pydoc openreading.types` | look up as needed |
 | look up configuration discovery, `policy.backends`, and the `providers:` grammar | reference only: `uv run python -m pydoc openreading.config` | look up as needed |
+| start an extraction from a named schema, or look up what the bank ships | reference only: `uv run python -m pydoc openreading.schema_bank`, or `openreading help schema` | look up as needed |
 | gate your own adapter against the conformance kit | reference only: `uv run python -m pydoc openreading.testing` | look up as needed |
 
 ### Every guide, by file
@@ -241,7 +242,7 @@ uv run openreading route sample.pdf --run
   "dropped": {},
                "…": "6 more" },
   "terminal_reason": null,
-  "result": { "schema_version": "0.3", "status": { "state": "succeeded" }, "backend": { "id": "pymupdf", … } } }
+  "result": { "schema_version": "0.4", "status": { "state": "succeeded" }, "backend": { "id": "pymupdf", … } } }
 ```
 
 From Python, `run()` returns the envelope as a dict. `POST /v1/parse` returns the same envelope
@@ -313,7 +314,7 @@ identically forever, and the transient fault does not.
 
 An open set means new values will appear, so match the ones you know and tolerate the rest. A
 closed set means you can switch on it exhaustively today. Nothing inside `orchestration` is closed
-at the schema level. In `response.v0.3.json` the block is `additionalProperties: true` with zero
+at the schema level. In `response.v0.4.json` the block is `additionalProperties: true` with zero
 declared properties. Every closure below is a guarantee made by code, not one a validator will
 enforce for you.
 
@@ -321,12 +322,12 @@ enforce for you.
 |---|---|---|
 | `attempts[].category` | closed, 13 values | `openreading.strategies.trace.CATEGORIES`, a real `frozenset` |
 | `headline.verdict`, finding codes | closed | `comparison-report.v0.2.json`, with live-truth commands in [Compare](comparison/README.md) |
-| `document.pages[].blocks[].type` | closed, 22 values | `response.v0.3.json` |
+| `document.pages[].blocks[].type` | closed, 22 values | `response.v0.4.json` |
 | `orchestration.outcome` | closed in code, `ok` / `degraded` | a comment in `strategies/trace.py`. No schema enumerates it |
 | `decisions[].downgraded` | closed in code, 9 values | `openreading.strategies.decider.DOWNGRADE_REASONS` |
 | `decisions[].point` | **open** | four values ship (`decide`, `gate_band`, `judge`, `route`). A code comment names only the first three |
 | `warnings[].code` | **open** | known codes listed in the `openreading.schemas` docstring (`warnings[]`) |
-| `status.error.code` | **open**, populated by some adapters, not an exhaustive vocabulary | `response.v0.3.json` types it as a bare string |
+| `status.error.code` | **open**, populated by some adapters, not an exhaustive vocabulary | `response.v0.4.json` types it as a bare string |
 | batch `items[].error.code` | **open** | the adapter's `backend_code`, else the Python exception class name |
 | HTTP `error.category` | closed in code | the status ladder in the `openreading.server` docstring |
 

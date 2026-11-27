@@ -112,6 +112,14 @@ Only an optional-but-unavailable channel is a returned envelope + `warnings[]` e
     fields = resp.get("typed_fields")   # {name: {value, type?, confidence?, citations?}}
     # CLI: openreading parse invoice.pdf --backend reducto --extract "total, invoice date, vendor"
 
+    # A schema kept in a file, JSON or YAML, loads checked and ready for the same field:
+    schema = openreading.load_schema("fields.yaml")   # -> dict; ValueError on a bad file
+    resp = openreading.run("invoice.pdf", backend="google-gemini",
+                           extraction_schema={"json_schema": schema})
+    # CLI: openreading parse invoice.pdf --backend google-gemini --schema fields.yaml
+    # A bank name loads a schema that ships with core (`openreading schema list`):
+    schema = openreading.load_schema("bank_statement")   # UnknownSchemaError on an unknown name
+
 Batch a folder -> one JSON. Batch is decided by input FORM: a directory / glob / >=2 args is a
 batch, a single file is single-doc. A file the backend cannot take is a `failed` item carrying that
 backend's own reason, never a crash; a per-item failure never aborts the batch:
@@ -198,14 +206,14 @@ never its cwd. HTTP statuses: 400 invalid body · 401 unauthorized · 403 ScopeR
 scope_denied · 404 unknown backend · 413 doc too large · 422 unsupported feature · 424 missing
 credentials · 502 plan exhausted / terminal · 504 deadline. Interactive docs at `/docs`.
 
-The response envelope (`response.v0.3`)
+The response envelope (`response.v0.4`)
 =======================================
 Top level: `schema_version`, `status`, `backend`, `document` (required) + optional
-`typed_fields`, `chunks`, `usage`, `warnings`, `channel_provenance`, `backend_raw`,
-`orchestration`, `job`.
+`typed_fields`, `schema_check` (when the request sent a JSON Schema), `chunks`, `usage`,
+`warnings`, `channel_provenance`, `backend_raw`, `orchestration`, `job`.
 
     {
-      "schema_version": "0.3",
+      "schema_version": "0.4",
       "status": {"state": "succeeded"},        // succeeded | partial | failed | processing
       "backend": {"id": "pymupdf", "type": "oss_library", "operation": "..",
                   "output_paradigm": [".."]},
@@ -294,7 +302,7 @@ Batch & corpus shapes
 =====================
 `batch-result.v0.2`: `{schema_version, status{state: succeeded|partial|failed}, items[],
 summary, warnings?}`. `items[i]` = `{source{relpath, filename, format, sha256, ..}, state:
-succeeded|failed|skipped, response? (a full response.v0.3), error?{code, message},
+succeeded|failed|skipped, response? (a full response.v0.4), error?{code, message},
 transport: platform|native|null. That is null
 on a `skipped` item, which never ran}`. `summary` =
 `{total, succeeded, failed, duration_ms, pages_processed, backends{id: count}}`. Batch status: `succeeded` (>=1 ok, 0 failed) / `partial` (some of each) /
@@ -428,7 +436,7 @@ switch on exhaustively: `succeeded`, `skipped(missing_credentials)`, `skipped(ci
 rung. (`skipped(circuit_open)` is reserved vocabulary the engine never emits:
 `defaults.advanced.circuit_breaker` is not implemented, and `strategy validate` refuses a config
 that declares it.) That closure is a CODE-level guarantee, not a schema-level one: in
-`response.v0.3.json` the whole `orchestration` block is `additionalProperties: true` with zero
+`response.v0.4.json` the whole `orchestration` block is `additionalProperties: true` with zero
 declared properties, so nothing validates its inner shape. Treat every other field in it as open
 unless this briefing names the constant it lives in. `orchestration.outcome` is `ok | degraded`,
 fixed in code and enumerated in no schema; `decisions[].downgraded` comes from
@@ -591,6 +599,7 @@ SCHEMA_VERSION = "0.1"
 
 __all__ = [
     "compare",
+    "load_schema",
     "resume",
     "route",
     "run",
@@ -614,6 +623,7 @@ _EXPORTS = {
     "run": ("openreading.api", "run"),
     "run_batch": ("openreading.api", "run_batch"),
     "compare": ("openreading.comparison", "compare"),
+    "load_schema": ("openreading.schema_io", "load_schema"),
     "MissingCredentialsError": ("openreading.types.errors", "MissingCredentialsError"),
     "PlanExhaustedError": ("openreading.types.errors", "PlanExhaustedError"),
     "RetryableError": ("openreading.types.errors", "RetryableError"),

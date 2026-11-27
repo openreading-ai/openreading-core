@@ -273,7 +273,7 @@
     ],
     "text": "<str:4204>"
   },
-  "schema_version": "0.3",
+  "schema_version": "0.4",
   "status": {
     "state": "succeeded"
   },

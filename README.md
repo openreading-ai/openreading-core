@@ -186,7 +186,7 @@ better page layout analysis. It is not an error, and it does not reach your JSON
 `pymupdf.json`, trimmed to the keys you read first (numbers rounded):
 
 ```json
-{ "schema_version": "0.3", "status": { "state": "succeeded" },
+{ "schema_version": "0.4", "status": { "state": "succeeded" },
   "backend": { "id": "pymupdf", "type": "oss_library", "output_paradigm": ["block_tree"] },
   "document": { "page_count": 1,
     "text": "First National Bank\n1000 Junction Highway, Kerrville, TX 78028\nACCOUNT STATEMENT\nAccount Holder:\nJohn Smith\n…",

@@ -120,6 +120,7 @@ error messages.
 | a CLI verb, flag, output or example document that the hosted tutorial shows | update `tutorial/README.md` in `openreading-web`; re-run its commands from a fresh core clone | the web repository's tutorial validation; core never reads that checkout |
 | a "Not built yet" line becomes true | delete the line in the guide AND the docstring's "designed, not built" marker, in the same PR | reviewer |
 | a new law / invariant in a package docstring (L*, M*, C*) | one line under that guide's "How it decides" naming the failure it avoids; never the full text | reviewer |
+| bank schema (`src/openreading/schema_bank/NAME.vN.yaml`) | the YAML file with a reason comment on every `x-read-criticality` label and a `# NAME.vN: purpose` first line; a synthetic example document and its expected record in `examples/bank/`, with a row in `examples/README.md`; a new version is a new file, never an edit; the keyed live test covers it automatically | `tests/test_schema_bank.py` (reasons, no labels on `generic`, expected records validate, counts), `tests/test_schema_bank_live.py` (keyed lane) |
 | a new package under `src/openreading/` | a docs-home map row (need → guide, or "reference only: pydoc") and a Layout line in this file | ruff `D104` (package docstring) |
 
 A fact is documented where it is read: the flag next to its argparse definition, the var next to its
@@ -180,16 +181,20 @@ src/openreading/
   mcp_server/  nine stdio tools for the fixed local document profile, plus a readiness tool
   server/      `openreading serve`                             (docstring: endpoints, status codes)
   api.py          `run` / `route` / `compare` / `resume`       (docstring: exports and return shapes)
+  schema_io.py    `load_schema`: JSON or YAML schema files      (docstring: checks, quoting rule)
   config.py       the one reader of `openreading.yaml`         (docstring: discovery, policy.backends,
                                                                 provider profiles, strategies)
   credentials.py  BYO-key broker                               (docstring: precedence, per-backend vars)
+  schema_bank/    named, versioned extraction schemas (YAML)     (docstring: names, versions, resolve)
+  schema_io.py    `load_schema`: the path rule over files and bank names
   keychain.py     OS storage for secret variables saved through `keys` and `setup`
   readiness.py    is a backend runnable here, and which vars are missing
   liveness.py     is a backend answering right now
 tests/         offline suite + keyed live lane                 (conftest.py docstring: the runbook)
 packages/agent-client/  isolated client-only wheel profile over canonical shared modules
 scripts/       smoke runners, extras-parity, adapter scaffold
-examples/      two synthetic bank statements the READMEs parse (README.md: what they are)
+examples/      synthetic documents the READMEs parse, and bank/ with one per bank schema
+               plus expected records (README.md: what they are)
 ```
 
 To read a package's documentation, run `uv run python -m pydoc openreading.cli`, or open the file.
@@ -239,11 +244,27 @@ These belong here too, once they are built:
 - the intent schema and its routing mechanics
 - the translation stage and its profile grammar
 - every new backend, signal, verdict, or channel
+- the schema bank: a small set of default extraction schemas you pick by name, plus one generic
+  schema used when you ask for extraction without a schema
+
+The schema bank is the one curated catalog core ships. It earns the exception because a first
+extraction should not start with writing a JSON Schema. It stays small, and each entry carries
+its own proof:
+
+- a synthetic example document in `examples/` and an offline test that the schema accepts the
+  expected record for it
+- one keyed run against every schema-capable backend in the live lane (`make verify-live`)
+  before the entry is released, because a strict structured-output mode can reject a schema
+  that validates offline
+- a YAML comment on every `x-read-criticality` label saying why the field has that level
+- no labels on the generic schema, because core never claims which field matters in a document
+  type it has not been told
 
 Not here, ever: a web UI, labeled datasets (`tests/test_evals_benchmark_only.py` fails if one
 lands in `evals/`), tuned prompts or calibration derived from private corpora, curated intent or
-profile catalogs, anything hosted, multi-tenant, billed, or behind an account. A PR that adds one
-of those is closed, not reviewed.
+profile catalogs other than the schema bank, anything hosted, multi-tenant, billed, or behind an
+account. A PR that adds one of those is closed, not reviewed. Gold sets that score a bank schema
+stay outside this repo, like every labeled dataset.
 
 ## Things not to do
 

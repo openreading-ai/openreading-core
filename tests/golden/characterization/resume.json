@@ -311,7 +311,7 @@
     "outcome": "ok",
     "strategy": "offline_first"
   },
-  "schema_version": "0.3",
+  "schema_version": "0.4",
   "status": {
     "state": "succeeded"
   },

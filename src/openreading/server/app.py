@@ -142,11 +142,12 @@ from openreading.readiness import (
     auth_hinted,
     backend_readiness,
 )
+from openreading.router import finalize
 from openreading.router.clock import RealClock
-from openreading.router.cost import apply_cost_report
 from openreading.router.driver import _DriveSliceExpired, run_to_completion
 from openreading.router.executor import BoundedResultCache
 from openreading.router.router import Router, RouterConfig
+from openreading.schema_bank import apply_default
 from openreading.server.uploads import UploadError, decode_request, request_body_schema
 from openreading.strategies.loader import strip_strategy_prefix
 from openreading.types.enums import WaitMode
@@ -161,7 +162,7 @@ from openreading.types.errors import (
 )
 from openreading.types.job import Job, JobState
 from openreading.types.request import OpenReadingRequest
-from openreading.types.runtime import ResolvedCredentials, RunContext
+from openreading.types.runtime import RunContext
 
 _ADAPTER_ERRORS = (
     PlanExhaustedError,
@@ -1060,7 +1061,7 @@ def create_app(*, cors_origins: list[str] | None = None):
     async def _parse_request(request: Request) -> OpenReadingRequest:
         body = await decode_request(request)  # raises on invalid JSON → caught by caller
         schemas.validate_request(body)  # vendored request schema (raises → 400)
-        req = OpenReadingRequest.model_validate(body)
+        req = apply_default(OpenReadingRequest.model_validate(body))
         # Shared by /v1/route and /v1/jobs — a ValueError here lands in each caller's own
         # existing except→400, so this one gate covers both ingress points. The request it
         # RETURNS is the gated one: a rooted document.path has already been read into bytes by
@@ -1154,7 +1155,7 @@ def create_app(*, cors_origins: list[str] | None = None):
         keep = bool(body.pop("keep_candidates", False)) if isinstance(body, dict) else False
         try:
             schemas.validate_request(body)
-            req = OpenReadingRequest.model_validate(body)
+            req = apply_default(OpenReadingRequest.model_validate(body))
         except Exception as e:  # noqa: BLE001 — any validation failure is a 400
             return _bad_request(_validation_message(e))
         refusal, req = _gate_document_path(req)
@@ -1435,8 +1436,10 @@ def create_app(*, cors_origins: list[str] | None = None):
         if scope is not None and (backend is None or strip_strategy_prefix(str(backend)) == "none"):
             for doc in docs_by_relpath.values():
                 try:
-                    item_req = OpenReadingRequest.model_validate(
-                        {"document": doc, "backend": {"id": backend}, **shared}
+                    item_req = apply_default(
+                        OpenReadingRequest.model_validate(
+                            {"document": doc, "backend": {"id": backend}, **shared}
+                        )
                     )
                     refusal, item_req = _gate_document_path(item_req)
                     if refusal is not None:
@@ -1459,12 +1462,14 @@ def create_app(*, cors_origins: list[str] | None = None):
             # as the old per-item loop did.
             relpath = src.ref.relpath
             assert relpath is not None  # every source built above sets relpath=str(i)
-            req = OpenReadingRequest.model_validate(
-                {
-                    "document": docs_by_relpath[relpath],
-                    "backend": {"id": backend},
-                    **shared,
-                }
+            req = apply_default(
+                OpenReadingRequest.model_validate(
+                    {
+                        "document": docs_by_relpath[relpath],
+                        "backend": {"id": backend},
+                        **shared,
+                    }
+                )
             )
             # M6: raising here (rather than checking earlier) lets _run_item's own per-item
             # isolation turn a refused document.path into a `failed` item, never aborting the
@@ -1604,7 +1609,7 @@ def create_app(*, cors_origins: list[str] | None = None):
             req = _with_callback_token(req, callback_token)
         try:
             with auth_hinted(adapter.descriptor, ctx.credentials):
-                job = await run_in_threadpool(adapter.submit, req, ctx)
+                job = await run_in_threadpool(finalize.submit, adapter, req, ctx)
         except _ADAPTER_ERRORS as e:
             return _error_response(e)
         rec = JobRecord(
@@ -1628,7 +1633,7 @@ def create_app(*, cors_origins: list[str] | None = None):
                 # attach_auth_hint + secret redaction the identical failure gets from submit()
                 # itself three lines up, instead of reaching rec.error carrying a raw secret value.
                 with auth_hinted(adapter.descriptor, ctx.credentials):
-                    rec.response = _metered(adapter, job, req, ctx, ctx.credentials)
+                    rec.response = _metered(adapter, job, req, ctx)
             except Exception as e:  # noqa: BLE001 - BL-85: a non-adapter exception out of
                 # normalize() becomes a failed job, not a crash — the same guard the webhook leg
                 # already has, applied here so the documented cross-leg error-shape contract
@@ -1687,10 +1692,10 @@ def create_app(*, cors_origins: list[str] | None = None):
                     # field comment for why threading the stored anchor in here was the bug.
                     rec.job = await run_in_threadpool(_drive_job, rec.adapter, rec.job, ctx, None)
                     if rec.job.is_terminal():
-                        # BL-93: also thread creds through for apply_cost_report's OWN redaction
-                        # (a report_cost() failure never raises, so it is never caught — let alone
-                        # redacted — by this enclosing auth_hinted(...) block on its own).
-                        rec.response = _metered(rec.adapter, rec.job, rec.req, ctx, ctx.credentials)
+                        # BL-93: _metered forwards ctx.credentials for apply_cost_report's OWN
+                        # redaction (a report_cost() failure never raises, so this enclosing
+                        # auth_hinted(...) block never catches or redacts it on its own).
+                        rec.response = _metered(rec.adapter, rec.job, rec.req, ctx)
             except _ADAPTER_ERRORS as e:
                 # BL-77/BL-88: a _DriveSliceExpired — raised ONLY by driver.py's own per-call
                 # deadline check, never by an adapter — means THIS call's own drive-deadline slice
@@ -1849,7 +1854,7 @@ def create_app(*, cors_origins: list[str] | None = None):
                 # right after resolve_webhook, so this leg's _metered() call previously ran
                 # unguarded, the webhook-side twin of Leg 1's identical gap.
                 with auth_hinted(adapter.descriptor, ctx.credentials):
-                    rec.response = _metered(adapter, rec.job, rec.req, ctx, ctx.credentials)
+                    rec.response = _metered(adapter, rec.job, rec.req, ctx)
             except Exception as e:  # noqa: BLE001 - a bad payload becomes a failed job, not a crash
                 _, rec.error = _error_envelope(e)
         return _job_dict(rec)
@@ -1857,25 +1862,16 @@ def create_app(*, cors_origins: list[str] | None = None):
     return app
 
 
-def _metered(
-    adapter, job: Job, req, ctx: RunContext, credentials: ResolvedCredentials | None = None
-) -> dict:
-    """Normalize + meter a finished async job — the /v1/jobs and /v1/webhooks surfaces return the
-    same response envelope as /v1/parse, so `usage` is filled the same way.
+def _metered(adapter, job: Job, req, ctx: RunContext) -> dict:
+    """Finalize a finished async job. The /v1/jobs and /v1/webhooks surfaces return the same
+    response envelope as /v1/parse, so `usage` and `schema_check` are filled the same way.
 
-    `credentials` (BL-93): forwarded to `apply_cost_report` so a `report_cost()` failure's warning
-    is redacted the same way a `normalize()` failure's message is by the caller's own
-    `auth_hinted(...)` wrap — `_metered()` itself raises nothing new, it only threads the value
-    through to the one boundary (`apply_cost_report`) that swallows its own exception and can never
-    be protected by a `with auth_hinted(...):` block around this call.
-
-    `ctx` (Ledger T4b): every caller already has one in scope (it built/reused it to drive the job
-    this same call is normalizing) — threaded through to `normalize`'s new `(job, ctx, slim_req)`
-    signature; `slim_request(req)` is computed here, once, rather than at each of the three
-    call sites."""
-    return apply_cost_report(
-        adapter, job, adapter.normalize(job, ctx, slim_request(req)), credentials
-    ).to_schema_dict()
+    `req` is the job's stored slim request, which keeps its `x-read-*` labels, so the check reads
+    them. `openreading.router.finalize.finalize_response` strips them before `normalize` runs,
+    and it forwards `ctx.credentials` to `apply_cost_report` (BL-93). That keeps a `report_cost()`
+    failure's warning redacted, because `apply_cost_report` swallows its own exception and no
+    `with auth_hinted(...):` block around this call can reach it."""
+    return finalize.finalize_response(adapter, job, ctx, req).to_schema_dict()
 
 
 def _drive_job(adapter, job: Job, ctx: RunContext, deadline_ms: float | None = None) -> Job:
